@@ -1,0 +1,58 @@
+[build-system]
+requires = [
+  "scikit-build-core",
+  "pybind11==3.0.1",
+  "numpy==1.26.4",
+  "scipy==1.13.1",
+  "decorator==5.1.1",
+  "psutil==6.1.0",
+  "PyYAML==6.0.2",
+  "attrs==24.2.0",
+  "torch-npu==2.8.0.post2",
+]
+build-backend = "scikit_build_core.build"
+
+[tool.scikit-build.cmake.define]
+PIP_INSTALL="ON"
+SOC_VERSION = {env="SOC_VERSION", default="Ascend910B4"}
+ASCEND_CANN_PACKAGE_PATH = {env="ASCEND_CANN_PACKAGE_PATH", default="/usr/local/Ascend/cann"}
+
+
+[project]
+name = "pto-kernels"
+version = "0.1.0"
+description="PTO kernels"
+readme = "README.md"
+authors = [
+    {name = "HUAWEI Computing Systems Lab"}
+]
+maintainers = [
+    {name = "Anastasios Zouzias"},
+    {name = "Gioele Gottardo"},
+    {name = "Aleksandros Sobczyk"},
+    {name = "Jiawei Zhuang"}
+]
+requires-python = ">=3.10"
+classifiers = [
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+]
+dependencies = [
+  "pybind11==3.0.1",
+  "numpy==1.26.4",
+  "scipy==1.13.1",
+  "decorator==5.1.1",
+  "psutil==6.1.0",
+  "PyYAML==6.0.2",
+  "attrs==24.2.0",
+
+]
+
+[project.optional-dependencies]
+torch = [
+  "torch-npu==2.8.0.post2",
+]
+
+[tool.scikit-build]
+build-dir = "build/{wheel_tag}"
+wheel.packages = ["python/pto_kernels"]
