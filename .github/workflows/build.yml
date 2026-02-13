@@ -52,9 +52,9 @@ jobs:
       - uses: actions/checkout@v4
       - run: gitleaks detect -v --source .
 
-  build_docker:
+  cmake_build_docker:
     name: Cmake Build in quay.io/ascend/cann
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     container:
       image: quay.io/ascend/cann:8.5.0-910b-ubuntu22.04-py3.11
     steps:
@@ -75,74 +75,30 @@ jobs:
           pip3 install torch-npu==2.8.0.post2 --extra-index-url https://download.pytorch.org/whl/cpu # https://github.com/sgl-project/sgl-kernel-npu/pull/326
           make clean build_cmake
 
-
-  pypackaging:
-    name: Packaging (${{ matrix.PYTHON_VERSION }})
-    if: github.event_name == 'workflow_dispatch'
+cmake_build_docker:
+    name: Build wheel in quay.io/ascend/cann
     runs-on: ubuntu-latest
     container:
-      image: quay.io/ascend/manylinux:8.5.0-910b-manylinux_2_28-${{ matrix.PYTHON_VERSION }}
-    strategy:
-      matrix:
-        include:
-          - ARCH: x86_64
-            PYTHON_VERSION: py3.10
-            PY_VER: 310
-          - ARCH: x86_64
-            PYTHON_VERSION: py3.11
-            PY_VER: 311
-
-    continue-on-error: true
-
+      image: quay.io/ascend/cann:8.5.0-910b-ubuntu22.04-py3.11
     steps:
-      - uses: actions/checkout@v4
-
       - name: Show OS
         run: cat /etc/os-release
 
-      - name: Setup Ascend env
-        run: . /usr/local/Ascend/ascend-toolkit/set_env.sh
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Install deps
+      - name: Install Python dev headers
         run: |
+          sudo apt-get update
+          sudo apt-get install -yq python3-dev cmake build-essential
+
+      - name: Run bash commands
+        shell: bash
+        run: |
+          source /usr/local/Ascend/ascend-toolkit/set_env.sh
+          source /usr/local/Ascend/nnal/atb/set_env.sh
+          export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/Ascend/ascend-toolkit/latest/`uname -i`-linux/devlib
           pip3 install pyyaml setuptools pytest packaging
           pip3 install -r requirements.txt
-          pip3 install torch-npu==2.8.0.post2 \
-            --extra-index-url https://download.pytorch.org/whl/cpu
-
-      - name: Build wheel
-        run: make build_wheel
-
-      - name: Install wheel
-        run: pip install pto_kernels-*.whl
-
-      - name: Inspect site-packages
-        run: |
-          SITE_PACKAGES=$(python3 -c "import site; print(site.getsitepackages()[0])")
-          echo $SITE_PACKAGES
-          yum install -y -q tree
-          tree ${SITE_PACKAGES}/pto_kernels
-
-      - name: Auditwheel show
-        run: auditwheel show pto_kernels*.whl
-
-      - name: Repair wheel
-        run: |
-          SITE_PACKAGES=$(python3 -c "import site; print(site.getsitepackages()[0])")
-          export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:${SITE_PACKAGES}/pto_kernels/:${SITE_PACKAGES}/pto_kernels/lib:${SITE_PACKAGES}/pto_kernels/lib64
-          auditwheel repair \
-            --plat manylinux_2_27_${{ matrix.ARCH }} \
-            --exclude libtorch.so \
-            --exclude libtorch_cpu.so \
-            --exclude libc10.so \
-            --exclude libhccl.so \
-            --exclude libprofapi.so \
-            --exclude libtorch_npu.so \
-            pto_kernels*.whl -w wheelhouse/
-
-      - name: Upload repaired wheel
-        uses: actions/upload-artifact@v4
-        with:
-          name: repaired-wheel-${{ matrix.PYTHON_VERSION }}
-          path: '**/wheelhouse/pto_kernels*manylinux*.whl'
-          retention-days: 2
+          pip3 install torch-npu==2.8.0.post2 --extra-index-url https://download.pytorch.org/whl/cpu # https://github.com/sgl-project/sgl-kernel-npu/pull/326
+          make clean build_wheel
