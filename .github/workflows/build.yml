@@ -64,14 +64,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Python dev headers
-        run: |
-          apt-get update
-          apt-get install -yq python3.11 python3.11-dev cmake
-
       - name: Run bash commands
         shell: bash   # <-- explicitly use Bash
         run: |
+          apt-get update
+          apt-get install -yq python-is-python3 python3.11 python3.11-dev cmake
           source /usr/local/Ascend/ascend-toolkit/set_env.sh
           source /usr/local/Ascend/nnal/atb/set_env.sh
           export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/Ascend/ascend-toolkit/latest/`uname -i`-linux/devlib
