@@ -1,8 +1,8 @@
+pto_kernels_*.so
 *.whl
 __pycache__/
 extra-info/
 lib*.so
-PTO_ISA_ROOT/
 dist/
 build
 *.egg-info/

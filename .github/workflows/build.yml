@@ -53,7 +53,7 @@ jobs:
       - run: gitleaks detect -v --source .
 
   build_docker:
-    name: Build in Ascend Docker
+    name: Cmake Build in quay.io/ascend/cann
     runs-on: ubuntu-22.04
     container:
       image: quay.io/ascend/cann:8.5.0-910b-ubuntu22.04-py3.11
@@ -72,7 +72,7 @@ jobs:
           export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/Ascend/ascend-toolkit/latest/`uname -i`-linux/devlib
           pip3 install pyyaml setuptools pytest packaging
           pip3 install -r requirements.txt
-          make clean build_wheel
+          make clean build_cmake
 
 
   pypackaging:
