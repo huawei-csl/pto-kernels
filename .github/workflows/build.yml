@@ -64,6 +64,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Install Python dev headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -yq python3-dev cmake build-essential
+
       - name: Run bash commands
         shell: bash   # <-- explicitly use Bash
         run: |
@@ -75,7 +80,7 @@ jobs:
           pip3 install torch-npu==2.8.0.post2 --extra-index-url https://download.pytorch.org/whl/cpu # https://github.com/sgl-project/sgl-kernel-npu/pull/326
           make clean build_cmake
 
-cmake_build_docker:
+  build_wheel_docker:
     name: Build wheel in quay.io/ascend/cann
     runs-on: ubuntu-latest
     container:
