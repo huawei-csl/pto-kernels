@@ -60,7 +60,7 @@ jobs:
     steps:
       - name: Show OS
         run: cat /etc/os-release
-q
+
       - name: Checkout code
         uses: actions/checkout@v4
 
