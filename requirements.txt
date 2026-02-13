@@ -18,3 +18,4 @@ psutil==6.1.0
 pybind11==3.0.1
 PyYAML==6.0.2
 attrs==24.2.0
+pybind11==3.0.1

@@ -79,31 +79,3 @@ jobs:
           pip3 install -r requirements.txt
           pip3 install torch-npu==2.8.0.post2 --extra-index-url https://download.pytorch.org/whl/cpu # https://github.com/sgl-project/sgl-kernel-npu/pull/326
           make clean build_cmake
-
-  build_wheel_docker:
-    name: Build wheel in quay.io/ascend/cann
-    runs-on: ubuntu-latest
-    container:
-      image: quay.io/ascend/cann:8.5.0-910b-ubuntu22.04-py3.11
-    steps:
-      - name: Show OS
-        run: cat /etc/os-release
-
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Python dev headers
-        run: |
-          apt-get update
-          apt-get install -yq python3-dev cmake build-essential
-
-      - name: Run bash commands
-        shell: bash
-        run: |
-          source /usr/local/Ascend/ascend-toolkit/set_env.sh
-          source /usr/local/Ascend/nnal/atb/set_env.sh
-          export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/Ascend/ascend-toolkit/latest/`uname -i`-linux/devlib
-          pip3 install pyyaml setuptools pytest packaging
-          pip3 install -r requirements.txt
-          pip3 install torch-npu==2.8.0.post2 --extra-index-url https://download.pytorch.org/whl/cpu # https://github.com/sgl-project/sgl-kernel-npu/pull/326
-          make clean build_wheel
