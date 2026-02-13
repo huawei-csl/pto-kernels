@@ -53,7 +53,7 @@ echo "CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}"
 set -e
 rm -rf build
 mkdir -p build
-cmake -S ${PARENT_DIR} \
+cmake -S "${PARENT_DIR}" \
       -B build \
       -DSOC_VERSION="${SOC_VERSION}" \
       -DASCEND_CANN_PACKAGE_PATH="${_ASCEND_INSTALL_PATH}"
