@@ -1,0 +1,147 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+
+jobs:
+
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    container:
+      image: koalaman/shellcheck-alpine:stable
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show version
+        run: shellcheck --version
+      - name: Run shellcheck
+        run: |
+          find scripts/ -type f -name '*.sh' -print0 | \
+          xargs -0 shellcheck -x
+
+  black:
+    name: Black
+    runs-on: ubuntu-latest
+    container:
+      image: python:3.10
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install -U pip
+      - run: pip install black==25.12.0
+      - run: black --check .
+
+  prospector:
+    name: Prospector
+    runs-on: ubuntu-latest
+    container:
+      image: python:3.10
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install prospector==1.14.0
+      - run: prospector
+
+  secret_detection:
+    name: Gitleaks
+    runs-on: ubuntu-latest
+    container:
+      image: zricethezav/gitleaks:v8.18.2
+      options: --entrypoint ""
+    steps:
+      - uses: actions/checkout@v4
+      - run: gitleaks detect -v --source .
+
+  build_docker:
+    name: Build in Ascend Docker
+    runs-on: ubuntu-latest
+    container:
+      image: quay.io/ascend/cann:8.5.0-910b-ubuntu22.04-py3.11
+    steps:
+      - name: Show OS
+        run: cat /etc/os-release
+q
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run bash commands
+        shell: bash   # <-- explicitly use Bash
+        run: |
+          source /usr/local/Ascend/ascend-toolkit/set_env.sh
+          source /usr/local/Ascend/nnal/atb/set_env.sh
+          export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/Ascend/ascend-toolkit/latest/`uname -i`-linux/devlib
+          pip3 install pyyaml setuptools pytest packaging
+          pip3 install -r requirements.txt
+          make build_wheel
+
+
+  pypackaging:
+    name: Packaging (${{ matrix.PYTHON_VERSION }})
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    container:
+      image: quay.io/ascend/manylinux:8.5.0-910b-manylinux_2_28-${{ matrix.PYTHON_VERSION }}
+    strategy:
+      matrix:
+        include:
+          - ARCH: x86_64
+            PYTHON_VERSION: py3.10
+            PY_VER: 310
+          - ARCH: x86_64
+            PYTHON_VERSION: py3.11
+            PY_VER: 311
+
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show OS
+        run: cat /etc/os-release
+
+      - name: Setup Ascend env
+        run: . /usr/local/Ascend/ascend-toolkit/set_env.sh
+
+      - name: Install deps
+        run: |
+          pip3 install pyyaml setuptools pytest packaging
+          pip3 install -r requirements.txt
+          pip3 install torch-npu==2.8.0.post2 \
+            --extra-index-url https://download.pytorch.org/whl/cpu
+
+      - name: Build wheel
+        run: make build_wheel
+
+      - name: Install wheel
+        run: pip install pto_kernels-*.whl
+
+      - name: Inspect site-packages
+        run: |
+          SITE_PACKAGES=$(python3 -c "import site; print(site.getsitepackages()[0])")
+          echo $SITE_PACKAGES
+          yum install -y -q tree
+          tree ${SITE_PACKAGES}/pto_kernels
+
+      - name: Auditwheel show
+        run: auditwheel show pto_kernels*.whl
+
+      - name: Repair wheel
+        run: |
+          SITE_PACKAGES=$(python3 -c "import site; print(site.getsitepackages()[0])")
+          export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:${SITE_PACKAGES}/pto_kernels/:${SITE_PACKAGES}/pto_kernels/lib:${SITE_PACKAGES}/pto_kernels/lib64
+          auditwheel repair \
+            --plat manylinux_2_27_${{ matrix.ARCH }} \
+            --exclude libtorch.so \
+            --exclude libtorch_cpu.so \
+            --exclude libc10.so \
+            --exclude libhccl.so \
+            --exclude libprofapi.so \
+            --exclude libtorch_npu.so \
+            pto_kernels*.whl -w wheelhouse/
+
+      - name: Upload repaired wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: repaired-wheel-${{ matrix.PYTHON_VERSION }}
+          path: '**/wheelhouse/pto_kernels*manylinux*.whl'
+          retention-days: 2
