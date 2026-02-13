@@ -72,7 +72,7 @@ jobs:
           export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/Ascend/ascend-toolkit/latest/`uname -i`-linux/devlib
           pip3 install pyyaml setuptools pytest packaging
           pip3 install -r requirements.txt
-          make build_wheel
+          make clean build_wheel
 
 
   pypackaging:
