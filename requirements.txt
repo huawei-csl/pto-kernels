@@ -1,0 +1,21 @@
+# --------------------------------------------------------------------------------
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# All rights reserved.
+# See LICENSE in the root of the software repository:
+# https://github.com/huawei-csl/pto-kernels/
+# for the full License text.
+# --------------------------------------------------------------------------------
+setuptools==80.9.0
+wheel
+expecttest
+scikit-build-core==0.11.6
+pip==26.0.1
+pytest==8.3.4
+numpy==1.26.4
+scipy==1.13.1
+decorator==5.1.1
+psutil==6.1.0
+pybind11==3.0.1
+PyYAML==6.0.2
+attrs==24.2.0
+pybind11==3.0.1

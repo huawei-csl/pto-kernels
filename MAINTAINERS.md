@@ -1,0 +1,4 @@
+- Anastasios Zouzias https://github.com/zouzias
+- Aleksandros Sobczyk https://github.com/asobczyk
+- Gioele Gottardo https://github.com/gioelegott
+- Jiawei Zhuang https://github.com/learning-chip
