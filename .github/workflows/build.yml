@@ -75,7 +75,7 @@ jobs:
           source /usr/local/Ascend/ascend-toolkit/set_env.sh
           source /usr/local/Ascend/nnal/atb/set_env.sh
           export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/Ascend/ascend-toolkit/latest/`uname -i`-linux/devlib
-          pip3 install pyyaml setuptools pytest packaging
+          pip3 install pyyaml setuptools pytest packaging pybind11[global]
           pip3 install -r requirements.txt
           pip3 install torch-npu==2.8.0.post2 --extra-index-url https://download.pytorch.org/whl/cpu # https://github.com/sgl-project/sgl-kernel-npu/pull/326
           make clean build_cmake
