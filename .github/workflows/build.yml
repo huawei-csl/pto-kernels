@@ -66,8 +66,8 @@ jobs:
 
       - name: Install Python dev headers
         run: |
-          sudo apt-get update
-          sudo apt-get install -yq python3-dev cmake build-essential
+          apt-get update
+          apt-get install -yq python3-dev cmake build-essential
 
       - name: Run bash commands
         shell: bash   # <-- explicitly use Bash
@@ -94,8 +94,8 @@ jobs:
 
       - name: Install Python dev headers
         run: |
-          sudo apt-get update
-          sudo apt-get install -yq python3-dev cmake build-essential
+          apt-get update
+          apt-get install -yq python3-dev cmake build-essential
 
       - name: Run bash commands
         shell: bash
