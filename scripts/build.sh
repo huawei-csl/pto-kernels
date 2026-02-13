@@ -59,4 +59,3 @@ cmake -S ${PARENT_DIR} \
       -DASCEND_CANN_PACKAGE_PATH="${_ASCEND_INSTALL_PATH}"
 
 cmake --build build  -j
-
