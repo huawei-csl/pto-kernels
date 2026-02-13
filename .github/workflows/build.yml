@@ -67,7 +67,7 @@ jobs:
       - name: Install Python dev headers
         run: |
           apt-get update
-          apt-get install -yq python3-dev cmake build-essential
+          apt-get install -yq python3.11 python3.11-dev cmake
 
       - name: Run bash commands
         shell: bash   # <-- explicitly use Bash
