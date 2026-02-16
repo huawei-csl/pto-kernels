@@ -29,7 +29,7 @@ extern "C" __global__ AICORE void simple_matmul_fp32(__gm__ void* a,
 
 #include <pto/pto-inst.hpp>
 
-#include "kernel_operator.h"
+#define GM_ADDR __gm__ uint8_t*  // To avoid #include "kernel_operator.h"
 
 using namespace pto;
 
