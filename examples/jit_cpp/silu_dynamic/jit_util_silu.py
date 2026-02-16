@@ -59,9 +59,7 @@ def load_lib(lib_path, check_type=True):
 
     def silu_func(x, y, block_dim=default_block_dim, stream_ptr=None):
         if stream_ptr is None:
-            stream_ptr = (
-                torch.npu.current_stream()._as_parameter_
-            )  # pylint: disable=protected-access
+            stream_ptr = torch.npu.current_stream()._as_parameter_  # noqa
         N = x.numel()
         lib.call_kernel(
             block_dim,
