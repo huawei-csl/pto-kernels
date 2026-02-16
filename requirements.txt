@@ -6,8 +6,8 @@
 # for the full License text.
 # --------------------------------------------------------------------------------
 setuptools==80.9.0
+packaging
 wheel
-expecttest
 scikit-build-core==0.11.6
 pip==26.0.1
 pytest==8.3.4
