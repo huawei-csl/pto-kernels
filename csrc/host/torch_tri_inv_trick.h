@@ -30,12 +30,12 @@ at::Tensor run_tri_inv_trick(const at::Tensor& M) {
   if (matrix_size != M.size(-2)) {
     throw std::runtime_error("Only square matrices are supported.\n");
   }
-
-  const uint32_t block_dim = M.size(0);
+  const uint32_t num_elems = static_cast<uint32_t>(M.numel());
+  const uint32_t block_dim =
+      static_cast<uint32_t>(num_elems / (matrix_size * matrix_size));
 
   const at::Tensor M_inv =
-      at::zeros({block_dim, matrix_size, matrix_size},
-                at::TensorOptions().dtype(dtype_out).device(device));
+      at::zeros_like(M, at::TensorOptions().dtype(dtype_out).device(device));
 
   const at::Tensor I_neg =
       at::zeros({matrix_size, matrix_size},
