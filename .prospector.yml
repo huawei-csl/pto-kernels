@@ -41,5 +41,3 @@ pylint:
     - logging-not-lazy
     - too-many-branches
     - c-extension-no-member # To avoid pto_kernels
-
-
