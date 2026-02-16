@@ -59,4 +59,4 @@ wheel.packages = ["python/pto_kernels"]
 
 
 [tool.ruff]
-src = ["python", "examples", "tests"]
+exclude = ["build"]
