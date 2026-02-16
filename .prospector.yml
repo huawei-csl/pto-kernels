@@ -1,0 +1,45 @@
+strictness: medium
+test-warnings: true
+doc-warnings: false
+autodetect: false
+max-line-length: 140
+
+ignore-paths:
+  - build/
+  - scripts/
+  - csrc/
+
+python-targets:
+  - 3
+
+pep8:
+  full: false
+  disable:
+    - N803 # argument name should be lowercase
+    - N806 # variable in function should be lowercase
+    - N812 # lowercase imported as non lowercase
+    - E501 # line too long
+    - W605 # allow latex strings, i.e., $\lambda$
+    - D203 # 1 blank line required before class docstring
+    - D212 # Multi-line docstring summary should start at the first line
+    - D213 # Multi-line docstring summary should start at the second line
+
+pylint:
+  run: true
+  options:
+    max-args: 6
+    max-positional-arguments: 6
+  disable:
+    - import-error
+    - too-many-locals
+    - arguments-differ
+    - no-else-return
+    - inconsistent-return-statements
+    - too-many-arguments
+    - too-many-statements
+    - logging-fstring-interpolation
+    - logging-not-lazy
+    - too-many-branches
+    - c-extension-no-member # To avoid pto_kernels
+
+

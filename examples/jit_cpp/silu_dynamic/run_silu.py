@@ -1,6 +1,6 @@
 import random
 import torch
-import torch_npu
+import torch_npu # noqa
 
 from jit_util_silu import jit_compile
 

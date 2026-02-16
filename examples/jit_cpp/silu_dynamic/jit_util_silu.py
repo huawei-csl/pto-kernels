@@ -28,7 +28,7 @@ def compile_cpp(kernel_cpp: str, verbose: bool = False, timeout: int = 120) -> s
         print(f"compile {kernel_cpp} with command: \n", command)
 
     try:
-        subprocess.run(command, timeout=timeout)
+        subprocess.run(command, timeout=timeout, check=True)
     except Exception as e:
         raise RuntimeError(f"Compile failed: {e}") from e
 
@@ -59,7 +59,7 @@ def load_lib(lib_path, check_type=True):
 
     def silu_func(x, y, block_dim=default_block_dim, stream_ptr=None):
         if stream_ptr is None:
-            stream_ptr = torch.npu.current_stream()._as_parameter_
+            stream_ptr = torch.npu.current_stream()._as_parameter_ # pylint: disable=protected-access
         N = x.numel()
         lib.call_kernel(
             block_dim,

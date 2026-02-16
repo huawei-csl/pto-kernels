@@ -8,7 +8,6 @@
 
 import torch
 import pytest
-import torch
 from pto_kernels import pto_simple_matmul
 
 
