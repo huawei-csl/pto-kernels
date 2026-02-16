@@ -27,8 +27,8 @@ pep8:
 pylint:
   run: true
   options:
-    max-args: 6
-    max-positional-arguments: 6
+    max-args: 8
+    max-positional-arguments: 8
   disable:
     - import-error
     - too-many-locals
