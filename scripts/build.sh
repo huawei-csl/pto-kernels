@@ -43,11 +43,11 @@ source "$_ASCEND_INSTALL_PATH"/bin/setenv.bash
 echo "Current compile soc version is ${SOC_VERSION}"
 
 # See https://docs.pytorch.org/cppdocs/installing.html
-CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:$(python3 -c "import torch; print(torch.utils.cmake_prefix_path)")
+CMAKE_MODULE_PATH=${CMAKE_MODULE_PATH}:$(python3 -c "import torch; print(torch.utils.cmake_prefix_path)")
 export CMAKE_PREFIX_PATH
 
 
-echo "CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}"
+echo "CMAKE_MODULE_PATH=${CMAKE_MODULE_PATH}"
 
 
 set -e
