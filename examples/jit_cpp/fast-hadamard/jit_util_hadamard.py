@@ -20,7 +20,7 @@ def compile_cpp(kernel_cpp: str, verbose: bool = False, timeout: int = 120) -> s
         "-xcce",
         "-DMEMORY_BASE",
         "-O2",
-        "-std=gnu++17",
+        "-std=c++17",
         "--cce-soc-version=Ascend910B4",
         "--cce-soc-core-type=VecCore",
         f"-I{PTO_LIB_PATH}/include",
