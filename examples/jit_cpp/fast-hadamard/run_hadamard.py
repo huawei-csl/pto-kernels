@@ -118,7 +118,7 @@ def benchmark(hadamard_func, warmup=20, repeats=100):
 
     # Write CSV
     csv_path = "fht_pto.csv"
-    with open(csv_path, "w") as f:
+    with open(csv_path, "w", encoding="utf-8") as f:
         f.write("\n".join(csv_lines) + "\n")
     print(f"\nResults saved to {csv_path}")
 

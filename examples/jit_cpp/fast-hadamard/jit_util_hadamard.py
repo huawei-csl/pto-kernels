@@ -63,7 +63,8 @@ def load_lib(lib_path):
         x, batch, n, log2_n, block_dim=default_block_dim, stream_ptr=None
     ):
         if stream_ptr is None:
-            stream_ptr = torch.npu.current_stream()._as_parameter_
+            stream = torch.npu.current_stream()
+            stream_ptr = getattr(stream, "_as_parameter_", None)
         lib.call_kernel(
             block_dim,
             stream_ptr,
