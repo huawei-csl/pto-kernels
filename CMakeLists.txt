@@ -20,7 +20,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(PIP_INSTALL "True if building via pip" OFF)
 
-find_package(PythonLibs REQUIRED)
+find_package(Python REQUIRED COMPONENTS Interpreter Development)
 find_package(pybind11 CONFIG REQUIRED)
 find_package(Torch REQUIRED)
 
@@ -57,12 +57,6 @@ set(CMAKE_CPP_COMPILE_OPTIONS -xc++ "SHELL:-include stdint.h"
 
 include_directories(${ASCEND_HOME_PATH}/include
                     ${ASCEND_DRIVER_PATH}/kernel/inc)
-
-# set PTO_LIB_PATH before running cmake, for example: export
-# PTO_LIB_PATH=[YOUR_PATH]/pto-isa
-set(PTO_LIB_PATH
-    "$ENV{PTO_LIB_PATH}"
-    CACHE STRING "PTO library path")
 
 if(EXISTS ${ASCEND_CANN_PACKAGE_PATH}/tools/tikcpp/ascendc_kernel_cmake)
   set(ASCENDC_CMAKE_DIR

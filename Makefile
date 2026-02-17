@@ -12,9 +12,9 @@ clean:
 
 setup_once:
 	pip3 install -r requirements.txt
-	pip3 install torch-npu==2.8.0.post2 --extra-index-url https://download.pytorch.org/whl/cpu # https://github.com/sgl-project/sgl-kernel-npu/pull/326
+	pip3 install torch-npu==2.8.0.post2 --extra-index-url https://download.pytorch.org/whl/cpu
 
-build_cmake:
+build_cmake: clean
 	bash scripts/build.sh
 
 build_wheel:
