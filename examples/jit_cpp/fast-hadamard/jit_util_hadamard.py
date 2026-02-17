@@ -18,10 +18,11 @@ def compile_cpp(kernel_cpp: str, verbose: bool = False, timeout: int = 120) -> s
         "-fPIC",
         "-shared",
         "-xcce",
-        "--npu-arch=dav-2201",
         "-DMEMORY_BASE",
         "-O2",
-        "-std=c++17",
+        "-std=gnu++17",
+        "--cce-soc-version=Ascend910B4",
+        "--cce-soc-core-type=VecCore",
         f"-I{PTO_LIB_PATH}/include",
     ]
 
