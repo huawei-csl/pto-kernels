@@ -42,14 +42,19 @@ fi
 source "$_ASCEND_INSTALL_PATH"/bin/setenv.bash
 echo "Current compile soc version is ${SOC_VERSION}"
 
-TORCH_DIR=$(python3 -c "import torch;print(torch.utils.cmake_prefix_path, end='')")
+# See https://docs.pytorch.org/cppdocs/installing.html
+CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:$(python3 -c 'import torch; print(torch.utils.cmake_prefix_path, end="")')
+export CMAKE_PREFIX_PATH
+
+
+echo "CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}"
+
 
 set -e
 rm -rf build
 mkdir -p build
 cmake -S "${PARENT_DIR}" \
       -B build \
-      -DCMAKE_PREFIX_PATH="${TORCH_DIR}" \
       -DSOC_VERSION="${SOC_VERSION}" \
       -DASCEND_CANN_PACKAGE_PATH="${_ASCEND_INSTALL_PATH}"
 
