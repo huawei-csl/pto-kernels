@@ -59,7 +59,7 @@ AICORE void runTFastHadamard(__gm__ T *x, uint32_t batch, uint32_t n, uint32_t l
                           1, ELEMENTS_PER_TILE / 2,
                           BLayout::RowMajor, -1, -1>;
 
-    uint32_t samples_per_load = (n < ELEMENTS_PER_TILE) ? ELEMENTS_PER_TILE / n : 1;
+    const uint32_t samples_per_load = (n < ELEMENTS_PER_TILE) ? ELEMENTS_PER_TILE / n : 1;
 
     const uint32_t n_half = n >> 1;
 
@@ -85,9 +85,9 @@ AICORE void runTFastHadamard(__gm__ T *x, uint32_t batch, uint32_t n, uint32_t l
         uint32_t elements_to_load = cur_samples * n;
 
         // Select ping or pong UB base addresses
-        unsigned x_base    = ping ? X_PING    : X_PONG;
-        unsigned even_base = ping ? EVEN_PING : EVEN_PONG;
-        unsigned odd_base  = ping ? ODD_PING  : ODD_PONG;
+        const unsigned x_base    = ping ? X_PING    : X_PONG;
+        const unsigned even_base = ping ? EVEN_PING : EVEN_PONG;
+        const unsigned odd_base  = ping ? ODD_PING  : ODD_PONG;
 
         FullTile xBulkTile(1, elements_to_load);
         TASSIGN(xBulkTile, x_base);
@@ -106,7 +106,6 @@ AICORE void runTFastHadamard(__gm__ T *x, uint32_t batch, uint32_t n, uint32_t l
 
         // DMA: GM -> UB (MTE2 pipeline)
         TLOAD(xBulkTile, xGlobal);
-        pipe_barrier(PIPE_ALL);
 
         set_flag(PIPE_MTE2, PIPE_V, ev);
         wait_flag(PIPE_MTE2, PIPE_V, ev);
@@ -167,7 +166,7 @@ AICORE void runTFastHadamard(__gm__ T *x, uint32_t batch, uint32_t n, uint32_t l
 #endif
 }
 
-__global__ AICORE void fast_hadamard_custom(__gm__ void *x, uint32_t batch,
+__global__ AICORE void fast_hadamard_fp16(__gm__ void *x, uint32_t batch,
                                             uint32_t n, uint32_t log2_n)
 {
     runTFastHadamard<half>((__gm__ half *)x, batch, n, log2_n);
@@ -176,5 +175,5 @@ __global__ AICORE void fast_hadamard_custom(__gm__ void *x, uint32_t batch,
 extern "C" void call_kernel(uint32_t blockDim, void *stream,
                             uint8_t *x, uint32_t batch, uint32_t n, uint32_t log2_n)
 {
-    fast_hadamard_custom<<<blockDim, nullptr, stream>>>(x, batch, n, log2_n);
+    fast_hadamard_fp16<<<blockDim, nullptr, stream>>>(x, batch, n, log2_n);
 }
