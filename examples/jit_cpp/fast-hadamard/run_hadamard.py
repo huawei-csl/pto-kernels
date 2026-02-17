@@ -96,12 +96,8 @@ def benchmark(hadamard_func, warmup=20, repeats=100):
             torch.npu.synchronize()
 
             # Timed runs
-            start_events = [
-                torch.npu.Event(enable_timing=True) for _ in range(repeats)
-            ]
-            end_events = [
-                torch.npu.Event(enable_timing=True) for _ in range(repeats)
-            ]
+            start_events = [torch.npu.Event(enable_timing=True) for _ in range(repeats)]
+            end_events = [torch.npu.Event(enable_timing=True) for _ in range(repeats)]
 
             for i in range(repeats):
                 start_events[i].record()
@@ -110,9 +106,7 @@ def benchmark(hadamard_func, warmup=20, repeats=100):
 
             torch.npu.synchronize()
 
-            times_ms = [
-                s.elapsed_time(e) for s, e in zip(start_events, end_events)
-            ]
+            times_ms = [s.elapsed_time(e) for s, e in zip(start_events, end_events)]
             dur_us = sum(times_ms) / len(times_ms) * 1000.0  # ms -> us
 
             # Bandwidth: read + write = 2 * batch * n * sizeof(half)

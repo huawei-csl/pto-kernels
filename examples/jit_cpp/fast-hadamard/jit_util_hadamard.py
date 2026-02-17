@@ -10,9 +10,7 @@ BLOCK_DIM = 20  # 910B4 VecCore count
 
 
 def compile_cpp(kernel_cpp: str, verbose: bool = False, timeout: int = 120) -> str:
-    lib_path = os.path.join(
-        os.path.dirname(kernel_cpp), "fast_hadamard_jit.so"
-    )
+    lib_path = os.path.join(os.path.dirname(kernel_cpp), "fast_hadamard_jit.so")
 
     flags = [
         "-fPIC",
@@ -61,7 +59,9 @@ def load_lib(lib_path):
 
     default_block_dim = BLOCK_DIM
 
-    def hadamard_func(x, batch, n, log2_n, block_dim=default_block_dim, stream_ptr=None):
+    def hadamard_func(
+        x, batch, n, log2_n, block_dim=default_block_dim, stream_ptr=None
+    ):
         if stream_ptr is None:
             stream_ptr = torch.npu.current_stream()._as_parameter_
         lib.call_kernel(
