@@ -48,8 +48,8 @@ rm -rf build
 mkdir -p build
 cmake -S "${PARENT_DIR}" \
       -B build \
-      -DCMAKE_PREFIX_PATH=`python3 -c 'import torch;print(torch.utils.cmake_prefix_path)' \
-      -DTorch_DIR=$(python -c "import torch; print(torch.utils.cmake_prefix_path)") \
+      -DCMAKE_PREFIX_PATH="$(python3 -c 'import torch;print(torch.utils.cmake_prefix_path)')" \
+      -DTorch_DIR="$(python -c 'import torch; print(torch.utils.cmake_prefix_path)')" \
       -DSOC_VERSION="${SOC_VERSION}" \
       -DASCEND_CANN_PACKAGE_PATH="${_ASCEND_INSTALL_PATH}"
 
