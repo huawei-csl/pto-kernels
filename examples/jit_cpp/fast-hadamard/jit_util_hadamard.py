@@ -6,7 +6,7 @@ import torch
 
 ASCEND_TOOLKIT_HOME = os.environ["ASCEND_TOOLKIT_HOME"]
 PTO_LIB_PATH = os.environ.get("PTO_LIB_PATH", ASCEND_TOOLKIT_HOME)
-BLOCK_DIM = 20  # 910B4 VecCore count
+BLOCK_DIM = 20  # hard-coded to 910B4 vector core number
 
 
 def compile_cpp(kernel_cpp: str, verbose: bool = False, timeout: int = 120) -> str:
