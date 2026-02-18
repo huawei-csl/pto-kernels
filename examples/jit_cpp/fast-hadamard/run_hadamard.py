@@ -10,7 +10,7 @@ from jit_util_hadamard import jit_compile
 
 # Test configs matching test_hadamard_pto.py
 TEST_BATCHES = [1, 7, 22, 65]
-TEST_NS = [128, 256, 512, 1024, 2048, 4096, 8192, 16384]
+TEST_HIDDEN_DIMS = [128, 256, 512, 1024, 2048, 4096, 8192, 16384]
 TEST_SEEDS = [0, 1]
 
 BENCH_BATCHES = [1, 5, 8, 10, 16, 20, 32, 40, 64, 128, 256, 512, 1024]
@@ -48,7 +48,7 @@ def test_correctness(hadamard_func):
     total = 0
     for seed in TEST_SEEDS:
         for batch in TEST_BATCHES:
-            for n in TEST_NS:
+            for n in TEST_HIDDEN_DIMS:
                 total += 1
                 torch.manual_seed(seed)
                 log2_n = int(math.log2(n))
@@ -59,7 +59,7 @@ def test_correctness(hadamard_func):
                 hadamard_func(x, batch, n, log2_n)
                 torch.npu.synchronize()
 
-                if torch.allclose(x, y_ref):
+                if torch.equal(x, y_ref):
                     passed += 1
                     print(f"  PASS  seed={seed} batch={batch:>4d}, N={n:>5d}")
                 else:
@@ -94,7 +94,7 @@ def benchmark(hadamard_func, warmup=2, repeats=20, output_dir="./perf_data/"):
         records = []
 
         for batch in BENCH_BATCHES:
-            for n in TEST_NS:
+            for n in TEST_HIDDEN_DIMS:
                 log2_n = int(math.log2(n))
                 allocated = warmup + repeats
 
