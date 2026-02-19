@@ -94,6 +94,9 @@ execute_process(
   OUTPUT_STRIP_TRAILING_WHITESPACE
   OUTPUT_VARIABLE TORCH_NPU_PATH)
 
+string(REPLACE "\n" "" TORCH_NPU_PATH "${TORCH_NPU_PATH}")
+string(REPLACE "path string is NULL" "" TORCH_NPU_PATH "${TORCH_NPU_PATH}")
+
 message("***********************************************************")
 message("* ASCEND_CANN_PACKAGE_PATH : ${ASCEND_CANN_PACKAGE_PATH}")
 message("* TORCH_INSTALL_PREFIX     : ${TORCH_INSTALL_PREFIX}")
