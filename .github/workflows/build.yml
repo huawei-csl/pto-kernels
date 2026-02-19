@@ -52,8 +52,8 @@ jobs:
       - uses: actions/checkout@v4
       - run: gitleaks detect -v --source .
 
-  cmake_build_docker:
-    name: Cmake Build in quay.io/ascend/cann
+  build_cmake_docker:
+    name: Cmake docker build inside quay.io/ascend/cann
     runs-on: ubuntu-latest
     container:
       image: quay.io/ascend/cann:8.5.0-910b-ubuntu22.04-py3.11
@@ -76,3 +76,28 @@ jobs:
           pip3 install -r requirements.txt
           pip3 install torch-npu==2.8.0.post2 --extra-index-url https://download.pytorch.org/whl/cpu
           make clean build_cmake
+
+  build_wheel_docker:
+    name: Cmake docker build inside quay.io/ascend/cann
+    runs-on: ubuntu-latest
+    container:
+      image: quay.io/ascend/cann:8.5.0-910b-ubuntu22.04-py3.11
+    steps:
+      - name: Show OS
+        run: cat /etc/os-release
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run bash commands
+        shell: bash
+        run: |
+          apt-get update
+          apt-get install -yq python-is-python3 python3.11 python3.11-dev cmake
+          source /usr/local/Ascend/ascend-toolkit/set_env.sh
+          source /usr/local/Ascend/nnal/atb/set_env.sh
+          export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/Ascend/ascend-toolkit/latest/`uname -i`-linux/devlib # to avoid libascend_hal.so issue
+          pip3 install pyyaml setuptools pytest packaging pybind11[global]
+          pip3 install -r requirements.txt
+          pip3 install torch-npu==2.8.0.post2 --extra-index-url https://download.pytorch.org/whl/cpu
+          make clean build_wheel
