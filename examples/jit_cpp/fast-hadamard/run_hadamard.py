@@ -16,7 +16,7 @@ TEST_SEEDS = [0, 1]
 BENCH_BATCHES = [1, 5, 8, 10, 16, 20, 32, 40, 64, 128, 256, 512, 1024]
 BENCH_BLOCK_DIMS = [20, 24]
 
-DEVICE = "npu"
+DEVICE = "npu:7"
 DTYPE = torch.float16
 
 
@@ -199,7 +199,7 @@ def plot_bandwidth(input_dir="./perf_data/", output_path="bw_vs_shape.png"):
 
 
 if __name__ == "__main__":
-    torch.npu.set_device("npu")
+    torch.npu.set_device(DEVICE)
 
     print("Compiling fast_hadamard_pto-isa.cpp ...")
     hadamard_func = jit_compile("fast_hadamard_pto-isa.cpp")
