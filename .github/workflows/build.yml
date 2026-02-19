@@ -53,7 +53,7 @@ jobs:
       - run: gitleaks detect -v --source .
 
   build_cmake_docker:
-    name: Cmake docker build inside quay.io/ascend/cann
+    name: Cmake build inside quay.io/ascend/cann
     runs-on: ubuntu-latest
     container:
       image: quay.io/ascend/cann:8.5.0-910b-ubuntu22.04-py3.11
@@ -78,7 +78,7 @@ jobs:
           make clean build_cmake
 
   build_wheel_docker:
-    name: Cmake docker build inside quay.io/ascend/cann
+    name: Build wheel inside quay.io/ascend/cann
     runs-on: ubuntu-latest
     container:
       image: quay.io/ascend/cann:8.5.0-910b-ubuntu22.04-py3.11
