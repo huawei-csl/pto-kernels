@@ -2,35 +2,19 @@
 
 using namespace pto;
 
-#define DIV_ROUNDUP(x, y) (((x) + (y) - 1) / (y))
-
 #if defined(__CHECK_FEATURE_AT_PRECOMPILE) || \
     (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))
-
-constexpr uint32_t M_TILE = 128;
-constexpr uint32_t N = 128;
-constexpr uint32_t K = 128;
-constexpr uint32_t TILE_ELEMS = M_TILE * K;
-constexpr uint32_t TILE_BYTES = TILE_ELEMS * sizeof(half);  // 0x8000 = 32KB
 
 // L1 memory layout (512KB total):
 //   L1_A_PING: 0x00000 .. 0x40000  (8 * 32KB = 256KB)  slot 0 doubles as B
 //   staging L1_A_PONG: 0x40000 .. 0x80000  (8 * 32KB = 256KB) Total: 512KB,
 //   fully utilised
+namespace detail {
+
 constexpr uint32_t DEPTH = 8;
-constexpr unsigned L1_B = 0x0;  // overlap ok, B extracted before A needs it
-constexpr unsigned L1_A_PING = 0x0;
-constexpr unsigned L1_A_PONG = L1_A_PING + DEPTH * TILE_BYTES;  // 0x40000
-constexpr unsigned L1_A_BASE[2] = {L1_A_PING, L1_A_PONG};
 
 // L0A: 64KB = 2 x 32KB (ping/pong for matmul)
-constexpr unsigned L0A_PING = 0x0;
-constexpr unsigned L0A_PONG = L0A_PING + TILE_BYTES;
-
 // L0C: 128KB = 2 x 64KB (ping/pong for matmul)
-constexpr uint32_t ACC_TILE_BYTES = M_TILE * N * sizeof(float);  // 0x10000
-constexpr unsigned L0C_PING = 0x0;
-constexpr unsigned L0C_PONG = L0C_PING + ACC_TILE_BYTES;
 
 template <pipe_t SrcPipe, pipe_t DstPipe>
 AICORE inline void SetFlag(uint32_t id) {
@@ -41,18 +25,8 @@ AICORE inline void WaitFlag(uint32_t id) {
   wait_flag(SrcPipe, DstPipe, static_cast<event_t>(id));
 }
 
-/* Tile types (shared between loadBatch and runBlockRotate) */
-using TensorShape = TileShape2D<half, M_TILE, K, Layout::ND>;
-using TensorStrides = BaseShape2D<half, M_TILE, K, Layout::ND>;
-using GlobalIn = GlobalTensor<half, TensorShape, TensorStrides, Layout::ND>;
-
-using TileL1 = Tile<TileType::Mat, half, M_TILE, K, BLayout::ColMajor, M_TILE,
-                    K, SLayout::RowMajor, 512>;
-
-// Load batch of up to DEPTH tiles from GM into one L1 half-buffer.
-// Tiles are strided by num_cores (interleaved distribution).
-// Returns the number of tiles transferred and advances *next_load by num_cores
-// each step.
+// Internal helper: load up to DEPTH A-tiles from GM into one L1 half-buffer.
+template <uint32_t TILE_ELEMS, typename GlobalIn, typename TileL1>
 AICORE uint32_t loadBatch(__gm__ half* a, TileL1* a_l1_slots, uint32_t buf,
                           uint32_t total_batches, uint32_t num_cores,
                           uint32_t* next_load, uint32_t* buf_batch_base) {
@@ -68,8 +42,19 @@ AICORE uint32_t loadBatch(__gm__ half* a, TileL1* a_l1_slots, uint32_t buf,
   return count;
 }
 
+// Internal kernel body with L1 and L0 double-buffering.
+template <uint32_t M_TILE, uint32_t N, uint32_t K>
 AICORE void runBlockRotate(__gm__ half* a, __gm__ half* b, __gm__ half* c,
                            uint32_t m) {
+  constexpr uint32_t TILE_ELEMS = M_TILE * K;
+  constexpr uint32_t TILE_BYTES = TILE_ELEMS * sizeof(half);
+
+  using TensorShape = TileShape2D<half, M_TILE, K, Layout::ND>;
+  using TensorStrides = BaseShape2D<half, M_TILE, K, Layout::ND>;
+  using GlobalIn = GlobalTensor<half, TensorShape, TensorStrides, Layout::ND>;
+  using TileL1 = Tile<TileType::Mat, half, M_TILE, K, BLayout::ColMajor, M_TILE,
+                      K, SLayout::RowMajor, 512>;
+
   const uint32_t total_batches = m / M_TILE;
   const uint32_t core_id = get_block_idx();
   const uint32_t num_cores = block_num;
@@ -93,17 +78,17 @@ AICORE void runBlockRotate(__gm__ half* a, __gm__ half* b, __gm__ half* c,
   // --- L1 tiles ---
   TileL1 b_l1;
   TileL1 a_l1_slots[2][DEPTH];
-  TASSIGN(b_l1, L1_B);
+  TASSIGN(b_l1, 0x0);
   for (uint32_t buf = 0; buf < 2; ++buf) {
     for (uint32_t i = 0; i < DEPTH; ++i) {
-      TASSIGN(a_l1_slots[buf][i], L1_A_BASE[buf] + i * TILE_BYTES);
+      TASSIGN(a_l1_slots[buf][i], (buf * DEPTH + i) * TILE_BYTES);
     }
   }
 
   // --- L0A tiles: ping/pong ---
   TileL0A a_l0[2];
-  TASSIGN(a_l0[0], L0A_PING);
-  TASSIGN(a_l0[1], L0A_PONG);
+  TASSIGN(a_l0[0], 0x0);
+  TASSIGN(a_l0[1], TILE_BYTES);
 
   // --- L0B tile ---
   TileL0B b_l0;
@@ -111,8 +96,8 @@ AICORE void runBlockRotate(__gm__ half* a, __gm__ half* b, __gm__ half* c,
 
   // --- L0C tiles: ping/pong ---
   TileL0C c_l0[2];
-  TASSIGN(c_l0[0], L0C_PING);
-  TASSIGN(c_l0[1], L0C_PONG);
+  TASSIGN(c_l0[0], 0x0);
+  TASSIGN(c_l0[1], M_TILE * N * sizeof(float));
 
   // === Load B once: GM -> L1 -> L0B ===
   GlobalIn b_global(b);
@@ -139,8 +124,9 @@ AICORE void runBlockRotate(__gm__ half* a, __gm__ half* b, __gm__ half* c,
   uint32_t buf_batch_base[2] = {0, 0};
 
   // --- Prefetch first batch into ping ---
-  buf_tile_count[0] = loadBatch(a, a_l1_slots[0], 0, total_batches, num_cores,
-                                &next_load, buf_batch_base);
+  buf_tile_count[0] = loadBatch<TILE_ELEMS, GlobalIn, TileL1>(
+      a, a_l1_slots[0], 0, total_batches, num_cores, &next_load,
+      buf_batch_base);
   load_buf = 1;
 
   // --- Main double-buffer loop ---
@@ -152,9 +138,9 @@ AICORE void runBlockRotate(__gm__ half* a, __gm__ half* b, __gm__ half* c,
 
     // Fire DMA for next batch while we process current
     if (next_load < total_batches) {
-      buf_tile_count[load_buf] =
-          loadBatch(a, a_l1_slots[load_buf], load_buf, total_batches, num_cores,
-                    &next_load, buf_batch_base);
+      buf_tile_count[load_buf] = loadBatch<TILE_ELEMS, GlobalIn, TileL1>(
+          a, a_l1_slots[load_buf], load_buf, total_batches, num_cores,
+          &next_load, buf_batch_base);
       load_buf ^= 1;
     }
 
@@ -215,18 +201,37 @@ AICORE void runBlockRotate(__gm__ half* a, __gm__ half* b, __gm__ half* c,
   }
 }
 
+}  // namespace detail
+
 #endif
 
+/*
+ * @brief External C ABI kernel entrypoint pinned to 128x128x128 tiles.
+ * @param a Pointer to A in global memory.
+ * @param b Pointer to B in global memory.
+ * @param c Pointer to C in global memory.
+ * @param m Total rows of A (and C) processed.
+ */
 extern "C" __global__ AICORE void block_rotate_fp16(__gm__ void* a,
                                                     __gm__ void* b,
                                                     __gm__ void* c,
                                                     uint32_t m) {
 #if defined(__CHECK_FEATURE_AT_PRECOMPILE) || \
     (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))
-  runBlockRotate((__gm__ half*)a, (__gm__ half*)b, (__gm__ half*)c, m);
+  detail::runBlockRotate<128, 128, 128>((__gm__ half*)a, (__gm__ half*)b,
+                                        (__gm__ half*)c, m);
 #endif
 }
 
+/*
+ * @brief External host launcher for the 128x128x128 kernel variant.
+ * @param blockDim Number of kernel blocks (cores) to launch.
+ * @param stream Execution stream handle.
+ * @param a Pointer to A in global memory.
+ * @param b Pointer to B in global memory.
+ * @param c Pointer to C in global memory.
+ * @param m Total rows of A (and C) processed.
+ */
 extern "C" void call_kernel(uint32_t blockDim, void* stream, uint8_t* a,
                             uint8_t* b, uint8_t* c, uint32_t m) {
   block_rotate_fp16<<<blockDim, nullptr, stream>>>(a, b, c, m);
