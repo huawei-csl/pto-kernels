@@ -56,3 +56,7 @@ torch = [
 [tool.scikit-build]
 build-dir = "build/{wheel_tag}"
 wheel.packages = ["python/pto_kernels"]
+
+
+[tool.ruff]
+exclude = ["build"]
