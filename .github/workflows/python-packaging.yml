@@ -1,0 +1,80 @@
+name: Python Packaging
+
+on:
+  workflow_dispatch:
+
+jobs:
+  pypackaging:
+    name: manylinux build (py${{ matrix.py_ver }})
+    runs-on: ubuntu-latest
+
+    continue-on-error: true
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            python_version: py3.10
+            py_ver: "310"
+          - arch: x86_64
+            python_version: py3.11
+            py_ver: "311"
+
+    container:
+      image: quay.io/ascend/manylinux:8.5.0-910b-manylinux_2_28-${{ matrix.python_version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show OS
+        run: cat /etc/os-release
+
+      - name: Setup Ascend environment
+        run: source /usr/local/Ascend/ascend-toolkit/set_env.sh
+
+      - name: Install Python deps
+        run: |
+          pip3 install -r requirements.txt
+          pip3 install torch-npu==2.8.0.post2 \
+            --extra-index-url https://download.pytorch.org/whl/cpu
+
+      - name: Build wheel
+        run: make build_wheel
+
+      - name: Install built wheel
+        run: pip install pto_kernels-*.whl
+
+      - name: Inspect installed package
+        run: |
+          export SITE_PACKAGES=$(python3 -c "import site; print(site.getsitepackages()[0])")
+          echo "$SITE_PACKAGES"
+          yum install -y -q tree
+          tree ${SITE_PACKAGES}/pto_kernels
+
+      - name: Show wheel info
+        run: auditwheel show pto_kernels*.whl
+
+      - name: Repair wheel
+        run: |
+          export SITE_PACKAGES=$(python3 -c "import site; print(site.getsitepackages()[0])")
+          export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:${SITE_PACKAGES}/pto_kernels/:${SITE_PACKAGES}/pto_kernels/lib:${SITE_PACKAGES}/pto_kernels/lib64
+
+          auditwheel repair \
+            --plat manylinux_2_27_${{ matrix.arch }} \
+            --exclude libtorch.so \
+            --exclude libtorch_cpu.so \
+            --exclude libc10.so \
+            --exclude libhccl.so \
+            --exclude libprofapi.so \
+            --exclude libtorch_npu.so \
+            pto_kernels*.whl \
+            -w wheelhouse/
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pto_kernels-${{ matrix.py_ver }}
+          path: wheelhouse/pto_kernels*manylinux*.whl
+          retention-days: 1
