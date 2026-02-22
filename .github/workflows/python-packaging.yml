@@ -60,6 +60,7 @@ jobs:
         run: |
           export SITE_PACKAGES=$(python3 -c "import site; print(site.getsitepackages()[0])")
           export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:${SITE_PACKAGES}/pto_kernels/:${SITE_PACKAGES}/pto_kernels/lib:${SITE_PACKAGES}/pto_kernels/lib64
+          export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/Ascend/ascend-toolkit/latest/`uname -i`-linux/devlib # to avoid libascend_hal.so issue
 
           auditwheel repair \
             --plat manylinux_2_27_${{ matrix.arch }} \
