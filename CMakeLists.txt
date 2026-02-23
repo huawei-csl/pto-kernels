@@ -117,6 +117,8 @@ ascendc_include_directories(
   no_workspace_kernel PRIVATE ${libpto_isa_headers_SOURCE_DIR}/include
   ${libpto_isa_headers_SOURCE_DIR}/include/pto/common)
 
+ascendc_compile_options(no_workspace_kernel PRIVATE -Wall -Wextra -Werror)
+
 pybind11_add_module(pto_kernels_ops csrc/host/pybind11.cpp)
 
 target_compile_options(
