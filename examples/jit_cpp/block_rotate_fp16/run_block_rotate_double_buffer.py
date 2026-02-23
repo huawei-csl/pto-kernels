@@ -76,7 +76,11 @@ def _median(vals):
 
 
 def benchmark(
-    block_rotate_func, warmup=5, repeats=20, n_loops=5, output_dir="./perf_data/"
+    block_rotate_func,
+    warmup=5,
+    repeats=20,
+    n_loops=5,
+    output_dir="./perf_data_double_buffer/",
 ):
     """Benchmark block rotation across M values.
 
@@ -169,7 +173,7 @@ def benchmark(
             }
         )
 
-    csv_path = os.path.join(output_dir, "block_rotate_fp16.csv")
+    csv_path = os.path.join(output_dir, "block_rotate_fp16_double_buffer.csv")
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         fieldnames = [
             "M",
@@ -188,7 +192,7 @@ def benchmark(
     return records
 
 
-def plot_results(records, output_dir="./perf_data/"):
+def plot_results(records, output_dir="./perf_data_double_buffer/"):
     """Generate bandwidth and duration plots from benchmark data."""
     os.makedirs(output_dir, exist_ok=True)
 
@@ -225,7 +229,7 @@ def plot_results(records, output_dir="./perf_data/"):
         dur,
         "o-",
         color=COLOR_KERNEL,
-        label="PTO-ISA block_rotate",
+        label="PTO-ISA block_rotate (double buffer)",
         linewidth=2,
         markersize=2,
     )
@@ -254,7 +258,7 @@ def plot_results(records, output_dir="./perf_data/"):
         bw,
         "o-",
         color=COLOR_KERNEL,
-        label="PTO-ISA block_rotate",
+        label="PTO-ISA block_rotate (double buffer)",
         linewidth=2,
         markersize=2,
     )
@@ -265,14 +269,14 @@ def plot_results(records, output_dir="./perf_data/"):
     ax.grid(True, alpha=0.3)
 
     fig.suptitle(
-        "Block Rotate FP16 (PTO-ISA): Performance",
+        "Block Rotate FP16 Double Buffer (PTO-ISA): Performance",
         fontsize=14,
         fontweight="bold",
         y=1.02,
     )
     fig.tight_layout()
 
-    plot_path = os.path.join(output_dir, "block_rotate_fp16_perf.png")
+    plot_path = os.path.join(output_dir, "block_rotate_fp16_double_buffer_perf.png")
     fig.savefig(plot_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"Plot saved to {plot_path}")
@@ -287,8 +291,8 @@ def plot_results(records, output_dir="./perf_data/"):
 if __name__ == "__main__":
     torch.npu.set_device(DEVICE)
 
-    print("Compiling block_rotate_fp16.cpp ...")
-    block_rotate_func = jit_compile("block_rotate_fp16.cpp")
+    print("Compiling block_rotate_fp16_double_buffer.cpp ...")
+    block_rotate_func = jit_compile("block_rotate_fp16_double_buffer.cpp")
     print()
 
     test_correctness(block_rotate_func)

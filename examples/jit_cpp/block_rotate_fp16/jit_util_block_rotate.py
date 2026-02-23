@@ -59,7 +59,10 @@ def load_lib(lib_path):
 
     default_block_dim = BLOCK_DIM
 
-    def block_rotate_func(a, b, c, m, block_dim=default_block_dim, stream_ptr=None):
+    def block_rotate_func(a, b, c, m, block_dim=None, stream_ptr=None):
+        if block_dim is None:
+            active_batches = int(m) // 128
+            block_dim = min(max(active_batches, 1), default_block_dim)
         if stream_ptr is None:
             stream = torch.npu.current_stream()
             stream_ptr = getattr(  # pylint: disable=protected-access
