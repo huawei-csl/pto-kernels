@@ -66,6 +66,9 @@ AICORE void runBlockRotate(__gm__ half* a, __gm__ half* b, __gm__ half* c,
   const uint32_t remainder = total_batches % num_cores;
   const uint32_t batches_per_core = base_tiles + (core_id < remainder ? 1 : 0);
 
+  if (batches_per_core == 0) return;
+  const uint32_t core_tile_end = core_id + batches_per_core * num_cores;
+
   using TensorShapeOut = TileShape2D<half, M_TILE, N, Layout::ND>;
   using TensorStridesOut = BaseShape2D<half, M_TILE, N, Layout::ND>;
   using GlobalOut =
@@ -108,43 +111,38 @@ AICORE void runBlockRotate(__gm__ half* a, __gm__ half* b, __gm__ half* c,
   SetFlag<PIPE_MTE1, PIPE_M>(0);
   WaitFlag<PIPE_MTE1, PIPE_M>(0);
 
-  // NOTE: Without this it doesn't work. IDK why
   SetFlag<PIPE_MTE1, PIPE_MTE2>(0);
   WaitFlag<PIPE_MTE1, PIPE_MTE2>(0);
 
-  // Interleaved: each core starts at core_id, strides by num_cores
+  // Interleaved: each core starts at core_id, strides by num_cores.
   uint32_t next_load = core_id;
-  uint32_t next_proc = core_id;
-  uint32_t load_buf = 0;
+  uint32_t remaining_tiles = batches_per_core;
+  uint32_t tiles_done = 0;
 
-  const uint32_t end_proc =
-      core_id + batches_per_core * num_cores;  // virtual end for this core
+  // --- Main loop: each round can process up to 2 * DEPTH tiles (8 + 8) ---
+  while (remaining_tiles > 0) {
+    uint32_t buf_tile_count[2] = {0, 0};
+    uint32_t buf_batch_base[2] = {0, 0};
 
-  uint32_t buf_tile_count[2] = {0, 0};
-  uint32_t buf_batch_base[2] = {0, 0};
-
-  // --- Prefetch first batch into ping ---
-  buf_tile_count[0] = loadBatch<TILE_ELEMS, GlobalIn, TileL1>(
-      a, a_l1_slots[0], 0, total_batches, num_cores, &next_load,
-      buf_batch_base);
-  load_buf = 1;
-
-  // --- Main double-buffer loop ---
-  while (next_proc < end_proc) {
-    const uint32_t proc_buf = load_buf ^ 1;
-    const uint32_t tile_count = buf_tile_count[proc_buf];
-    const uint32_t batch_base =
-        buf_batch_base[proc_buf];  // first tile index in GM for this batch
-
-    // Fire DMA for next batch while we process current
-    if (next_load < total_batches) {
-      buf_tile_count[load_buf] = loadBatch<TILE_ELEMS, GlobalIn, TileL1>(
-          a, a_l1_slots[load_buf], load_buf, total_batches, num_cores,
-          &next_load, buf_batch_base);
-      load_buf ^= 1;
+    buf_tile_count[0] = loadBatch<TILE_ELEMS, GlobalIn, TileL1>(
+        a, a_l1_slots[0], 0, num_cores, core_tile_end, &next_load,
+        buf_batch_base);
+    if (buf_tile_count[0] > 0) {
+      WaitFlag<PIPE_MTE2, PIPE_MTE1>(0);
     }
 
-    WaitFlag<PIPE_MTE2, PIPE_MTE1>(proc_buf);
+    if (remaining_tiles > buf_tile_count[0] && next_load < core_tile_end) {
+      buf_tile_count[1] = loadBatch<TILE_ELEMS, GlobalIn, TileL1>(
+          a, a_l1_slots[1], 1, num_cores, core_tile_end, &next_load,
+          buf_batch_base);
+    }
+
+    bool buf1_waited = (buf_tile_count[1] == 0);
+
+    const uint32_t round_tile_count = buf_tile_count[0] + buf_tile_count[1];
+    if (round_tile_count == 0) {
+      break;
+    }
 
     // --- Pipelined tile processing with L0A/L0C ping-pong ---
     // Timeline for a given parity buffer (curr = r&1):
@@ -156,49 +154,64 @@ AICORE void runBlockRotate(__gm__ half* a, __gm__ half* b, __gm__ half* c,
     //   M -> MTE1 : "a_l0[curr] consumed, safe to refill for r+2"
     //   M -> FIX  : "c_l0[curr] produced, safe to store"
     //   FIX -> M  : "c_l0[curr] store done, safe to overwrite for r+2"
-    for (uint32_t r = 0; r < tile_count; ++r) {
+    for (uint32_t r = 0; r < round_tile_count; ++r) {
+      const uint32_t global_tile = tiles_done + r;
       const uint32_t curr = r & 1;
+      const uint32_t src_buf = (r < buf_tile_count[0]) ? 0 : 1;
+      const uint32_t src_idx = (src_buf == 0) ? r : (r - buf_tile_count[0]);
+      const bool has_next2 = (global_tile + 2 < batches_per_core);
+
+      if (src_buf == 1 && !buf1_waited) {
+        WaitFlag<PIPE_MTE2, PIPE_MTE1>(1);
+        buf1_waited = true;
+      }
 
       // Buffers are ping/pong by parity: curr=0/1 is reused every 2 iterations.
       // Before MTE1 writes a_l0[curr] for iteration r, wait until M has
       // consumed that same a_l0[curr] from iteration r-2.
-      if (r >= 2) WaitFlag<PIPE_M, PIPE_MTE1>(curr);
+      if (global_tile >= 2) WaitFlag<PIPE_M, PIPE_MTE1>(curr);
 
       // L1 -> L0A (producer: MTE1), then notify M pipe that a_l0[curr] is
       // ready.
-      TEXTRACT(a_l0[curr], a_l1_slots[proc_buf][r]);
+      TEXTRACT(a_l0[curr], a_l1_slots[src_buf][src_idx]);
       SetFlag<PIPE_MTE1, PIPE_M>(curr);
-      WaitFlag<PIPE_MTE1, PIPE_M>(curr);
 
       // c_l0[curr] is also reused every 2 iterations.
       // Before starting TMATMUL into c_l0[curr], wait until FIX has finished
       // storing c_l0[curr] produced by iteration r-2.
-      if (r >= 2) WaitFlag<PIPE_FIX, PIPE_M>(curr);
+      if (global_tile >= 2) WaitFlag<PIPE_FIX, PIPE_M>(curr);
+
+      // Wait for A tile readiness as late as possible so it can overlap with
+      // the c_l0 reuse dependency wait above.
+      WaitFlag<PIPE_MTE1, PIPE_M>(curr);
 
       TMATMUL(c_l0[curr], a_l0[curr], b_l0);
 
       // If iteration r+2 will exist, permit MTE1 to refill a_l0[curr] after
       // this matmul has consumed current a_l0[curr].
-      if (r + 2 < tile_count) SetFlag<PIPE_M, PIPE_MTE1>(curr);
+      if (has_next2) SetFlag<PIPE_M, PIPE_MTE1>(curr);
 
       // Matmul result in c_l0[curr] is ready for FIX pipe to store.
       SetFlag<PIPE_M, PIPE_FIX>(curr);
       WaitFlag<PIPE_M, PIPE_FIX>(curr);
 
       // Output address is the original GM tile index for this tile
-      // batch_base + r * num_cores gives the interleaved GM tile index
-      GlobalOut c_gm(c + (batch_base + r * num_cores) * TILE_ELEMS);
+      // batch_base + src_idx * num_cores gives this core's GM tile index.
+      GlobalOut c_gm(c + (buf_batch_base[src_buf] + src_idx * num_cores) *
+                             TILE_ELEMS);
       TSTORE(c_gm, c_l0[curr]);
 
       // If iteration r+2 will reuse c_l0[curr], allow M to proceed only after
       // FIX completes this store and the accumulator buffer is safe to
       // overwrite.
-      if (r + 2 < tile_count) SetFlag<PIPE_FIX, PIPE_M>(curr);
+      if (has_next2) SetFlag<PIPE_FIX, PIPE_M>(curr);
     }
 
-    pipe_barrier(PIPE_ALL);
-    next_proc += tile_count * num_cores;
+    tiles_done += round_tile_count;
+    remaining_tiles -= round_tile_count;
   }
+
+  pipe_barrier(PIPE_ALL);
 }
 
 }  // namespace detail
