@@ -125,15 +125,15 @@ AICORE void runBlockRotate(__gm__ half* a, __gm__ half* b, __gm__ half* c,
     uint32_t buf_batch_base[2] = {0, 0};
 
     buf_tile_count[0] = loadBatch<TILE_ELEMS, GlobalIn, TileL1>(
-        a, a_l1_slots[0], 0, num_cores, core_tile_end, &next_load,
+        a, a_l1_slots[0], 0, total_batches, num_cores, &next_load,
         buf_batch_base);
     if (buf_tile_count[0] > 0) {
       WaitFlag<PIPE_MTE2, PIPE_MTE1>(0);
     }
 
-    if (remaining_tiles > buf_tile_count[0] && next_load < core_tile_end) {
+    if (remaining_tiles > buf_tile_count[0] && next_load < total_batches) {
       buf_tile_count[1] = loadBatch<TILE_ELEMS, GlobalIn, TileL1>(
-          a, a_l1_slots[1], 1, num_cores, core_tile_end, &next_load,
+          a, a_l1_slots[1], 1, total_batches, num_cores, &next_load,
           buf_batch_base);
     }
 
