@@ -7,7 +7,7 @@ import torch
 ASCEND_TOOLKIT_HOME = os.environ["ASCEND_TOOLKIT_HOME"]
 PTO_LIB_PATH = os.environ.get("PTO_LIB_PATH", ASCEND_TOOLKIT_HOME)
 
-DEFAULT_MAX_BLOCK_DIM = int(os.environ.get("PTO_MATMUL_MAX_BLOCK_DIM", "20"))
+DEFAULT_MAX_BLOCK_DIM = int(os.environ.get("PTO_MATMUL_MAX_BLOCK_DIM", "24"))
 
 M_TILE = 128
 N_TILE = 256
@@ -26,7 +26,7 @@ def compile_cpp(kernel_cpp: str, verbose: bool = False, timeout: int = 120) -> s
         "-DMEMORY_BASE",
         "-O2",
         "-std=c++17",
-        "--cce-soc-version=Ascend910B4",
+        "--cce-soc-version=Ascend910B2",
         "--cce-soc-core-type=CubeCore",
         f"-I{PTO_LIB_PATH}/include",
     ]
@@ -136,7 +136,9 @@ def load_lib(lib_path):
             c_work = torch.empty((m, n), device=a.device, dtype=a.dtype)
 
         block_dim = _choose_block_dim(m_pad, n_pad, max_block_dim)
-        _launch_kernel_f16(a_work, b_work, c_work, m_pad, n_pad, k_pad, block_dim, stream_ptr)
+        _launch_kernel_f16(
+            a_work, b_work, c_work, m_pad, n_pad, k_pad, block_dim, stream_ptr
+        )
         return c_work[:m, :n]
 
     def matmul_abt(

@@ -71,7 +71,9 @@ def _shape_colors(df: pd.DataFrame):
 
 
 def _style(name: str) -> dict:
-    return BACKEND_STYLE.get(name, {"color": "#2ca02c", "marker": "^", "linestyle": "-"})
+    return BACKEND_STYLE.get(
+        name, {"color": "#2ca02c", "marker": "^", "linestyle": "-"}
+    )
 
 
 def _time_backend(func, a_list, b_list):

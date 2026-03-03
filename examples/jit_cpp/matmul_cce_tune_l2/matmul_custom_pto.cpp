@@ -151,8 +151,7 @@ AICORE void computeTile(__gm__ half* x, __gm__ half* y, __gm__ half* z,
       // Load B half-tile (GM → L1)
       WaitFlag<PIPE_MTE1, PIPE_MTE2>(bEvt);
       {
-        GlobB gb(y + nOffset * K + kOffset + h * K_TILE, {},
-                 DynStrideDN(K));
+        GlobB gb(y + nOffset * K + kOffset + h * K_TILE, {}, DynStrideDN(K));
         TLOAD(b_l1[h], gb);
       }
       SetFlag<PIPE_MTE2, PIPE_MTE1>(bEvt);
@@ -181,7 +180,8 @@ AICORE void computeTile(__gm__ half* x, __gm__ half* y, __gm__ half* z,
         // -- Extract B sub-tile → L0B[pingPongIdx] --
         TEXTRACT(b_l0[pingPongIdx], b_l1[h], quarterPhaseIdx * K_QTILE, 0);
 
-        // Keep MTE1->M on one event lane (id 0). Using id 1 can stall on some setups.
+        // Keep MTE1->M on one event lane (id 0). Using id 1 can stall on some
+        // setups.
         SetFlag<PIPE_MTE1, PIPE_M>(0);
 
         // release B L1 buffer after the last TEXTRACT from this half
@@ -203,8 +203,7 @@ AICORE void computeTile(__gm__ half* x, __gm__ half* y, __gm__ half* z,
     if (kIdx + 1 < kDtileNum) {
       WaitFlag<PIPE_MTE1, PIPE_MTE2>(next);
       {
-        GlobA ga(x + mOffset * K + kOffset + K_DTILE, {},
-                 DynStrideND(K));
+        GlobA ga(x + mOffset * K + kOffset + K_DTILE, {}, DynStrideND(K));
         TLOAD(a_l1[next], ga);
       }
       SetFlag<PIPE_MTE2, PIPE_MTE1>(next);
@@ -237,9 +236,10 @@ AICORE void computeTile(__gm__ half* x, __gm__ half* y, __gm__ half* z,
  * @param N Number of rows in B (columns of C).
  * @param K Number of columns in A and B.
  */
-extern "C" __global__ AICORE void matmul_kernel_ABt(
-  __gm__ uint8_t* x, __gm__ uint8_t* y, __gm__ uint8_t* z, int M, int N,
-  int K) {
+extern "C" __global__ AICORE void matmul_kernel_ABt(__gm__ uint8_t* x,
+                                                    __gm__ uint8_t* y,
+                                                    __gm__ uint8_t* z, int M,
+                                                    int N, int K) {
   __gm__ half* xh = (__gm__ half*)x;
   __gm__ half* yh = (__gm__ half*)y;
   __gm__ half* zh = (__gm__ half*)z;
@@ -299,9 +299,10 @@ extern "C" __global__ AICORE void matmul_kernel_ABt(
 
 #else  // vector-core stub
 
-extern "C" __global__ AICORE void matmul_kernel_ABt(
-    __gm__ uint8_t* x, __gm__ uint8_t* y, __gm__ uint8_t* z, int M, int N,
-    int K) {
+extern "C" __global__ AICORE void matmul_kernel_ABt(__gm__ uint8_t* x,
+                                                    __gm__ uint8_t* y,
+                                                    __gm__ uint8_t* z, int M,
+                                                    int N, int K) {
   pipe_barrier(PIPE_ALL);
 }
 
