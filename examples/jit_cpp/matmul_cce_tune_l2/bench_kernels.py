@@ -123,7 +123,7 @@ def bench_one_shape(backends, m, n, k):
 
     for a, b in zip(a_list[:N_WARMUP], b_list[:N_WARMUP]):
         F.linear(a, b)
-    dur_ref_us = _time_backend(lambda x, y: F.linear(x, y), a_list, b_list)
+    dur_ref_us = _time_backend(F.linear, a_list, b_list)
 
     flops = 2.0 * m * n * k
     torch_total_bytes = (m * k + n * k) * 2 + m * n * int(c_ref.element_size())

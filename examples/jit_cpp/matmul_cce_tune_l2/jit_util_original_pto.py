@@ -39,7 +39,7 @@ def _choose_partition(m: int, n: int, max_block_dim: int):
     for m_iter in _divisors(m_tiles):
         for n_iter in _divisors(n_tiles):
             blocks = m_iter * n_iter
-            if blocks <= max_block_dim and blocks > best_blocks:
+            if best_blocks < blocks <= max_block_dim:
                 best_m_iter = m_iter
                 best_n_iter = n_iter
                 best_blocks = blocks
@@ -54,6 +54,7 @@ def compile_cpp(
     m_iter: int,
     n_iter: int,
     block_dim: int,
+    *,
     verbose: bool = False,
     timeout: int = 120,
 ) -> str:
