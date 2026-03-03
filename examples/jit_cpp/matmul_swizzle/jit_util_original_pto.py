@@ -72,8 +72,7 @@ def compile_cpp(
         "-DMEMORY_BASE",
         "-O2",
         "-std=c++17",
-        "--cce-soc-version=Ascend910B4",
-        "--cce-soc-core-type=CubeCore",
+        "--npu-arch=dav-2201",
         f"-I{PTO_LIB_PATH}/include",
         f"-DORIG_PTO_M={m}",
         f"-DORIG_PTO_N={n}",
@@ -205,3 +204,7 @@ def jit_compile(src_path, verbose=True, clean_up=False):
         return wrapped
 
     return matmul_abt
+
+
+if __name__ == "__main__":
+    jit_compile("./matmul_original_pto.cpp")

@@ -26,8 +26,7 @@ def compile_cpp(kernel_cpp: str, verbose: bool = False, timeout: int = 120) -> s
         "-DMEMORY_BASE",
         "-O2",
         "-std=c++17",
-        "--cce-soc-version=Ascend910B4",
-        "--cce-soc-core-type=CubeCore",
+        "--npu-arch=dav-2201",
         f"-I{PTO_LIB_PATH}/include",
     ]
 
@@ -171,3 +170,7 @@ def jit_compile(src_path, verbose=True, clean_up=False):
     if clean_up:
         os.remove(lib_path)
     return func
+
+
+if __name__ == "__main__":
+    jit_compile("./matmul_custom_pto.cpp")

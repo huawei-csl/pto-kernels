@@ -19,6 +19,9 @@ Input convention:
 ## Run
 
 ```bash
+# for example, 910B2 cube cores nums
+export PTO_MATMUL_MAX_BLOCK_DIM=24
+export ORIG_PTO_MATMUL_BLOCK_DIM=24
 # Default benchmark + plots in one run:
 python bench_kernels.py
 ```

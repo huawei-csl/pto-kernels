@@ -2,9 +2,6 @@
 
 using namespace pto;
 
-#if defined(__CHECK_FEATURE_AT_PRECOMPILE) || \
-    (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))
-
 namespace detail {
 
 // ---------------------------------------------------------------------------
@@ -240,6 +237,7 @@ extern "C" __global__ AICORE void matmul_kernel_ABt(__gm__ uint8_t* x,
                                                     __gm__ uint8_t* y,
                                                     __gm__ uint8_t* z, int M,
                                                     int N, int K) {
+  #if defined(__DAV_CUBE__)
   __gm__ half* xh = (__gm__ half*)x;
   __gm__ half* yh = (__gm__ half*)y;
   __gm__ half* zh = (__gm__ half*)z;
@@ -295,18 +293,8 @@ extern "C" __global__ AICORE void matmul_kernel_ABt(__gm__ uint8_t* x,
   detail::WaitFlag<PIPE_MTE1, PIPE_MTE2>(0);
   detail::WaitFlag<PIPE_M, PIPE_MTE1>(0);
   detail::WaitFlag<PIPE_M, PIPE_MTE1>(1);
+  #endif // __DAV_CUBE__
 }
-
-#else  // vector-core stub
-
-extern "C" __global__ AICORE void matmul_kernel_ABt(__gm__ uint8_t* x,
-                                                    __gm__ uint8_t* y,
-                                                    __gm__ uint8_t* z, int M,
-                                                    int N, int K) {
-  pipe_barrier(PIPE_ALL);
-}
-
-#endif
 
 // ===========================================================================
 // Host launcher
