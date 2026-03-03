@@ -7,7 +7,7 @@ import torch
 ASCEND_TOOLKIT_HOME = os.environ["ASCEND_TOOLKIT_HOME"]
 PTO_LIB_PATH = os.environ.get("PTO_LIB_PATH", ASCEND_TOOLKIT_HOME)
 
-DEFAULT_MAX_BLOCK_DIM = int(os.environ.get("ORIG_PTO_MATMUL_BLOCK_DIM", "24"))
+DEFAULT_MAX_BLOCK_DIM = int(os.environ.get("ORIG_PTO_MATMUL_BLOCK_DIM", "20"))
 M_TILE = 128
 N_TILE = 256
 K_TILE = 64
@@ -72,7 +72,7 @@ def compile_cpp(
         "-DMEMORY_BASE",
         "-O2",
         "-std=c++17",
-        "--cce-soc-version=Ascend910B2",
+        "--cce-soc-version=Ascend910B4",
         "--cce-soc-core-type=CubeCore",
         f"-I{PTO_LIB_PATH}/include",
         f"-DORIG_PTO_M={m}",

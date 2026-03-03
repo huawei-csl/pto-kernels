@@ -29,7 +29,7 @@ Outputs:
 - Default plots: `outputs/plots/{duration,flops,error}.png`
 
 ## Notes
-
+- Best performance for `matmul_custom_pto.cpp` if **M = 128k,  (k ∈ ℤ)**.
 - Both wrappers contain padding/tail handling with aligned fast path + dynamic block-dim.
 - `original_pto` backend compiles a shape-specialized kernel per padded `(M,N,K)` and emits float32 output.
 - Tunables:

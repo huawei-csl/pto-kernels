@@ -17,32 +17,7 @@ N_REPEAT = 20
 N_WARMUP = 5
 N_ALLOC = N_REPEAT + N_WARMUP
 
-M_LIST = [
-    1,
-    2,
-    4,
-    8,
-    12,
-    16,
-    20,
-    24,
-    28,
-    32,
-    64,
-    96,
-    128,
-    160,
-    192,
-    224,
-    256,
-    288,
-    320,
-    352,
-    384,
-    416,
-    448,
-    512,
-]
+M_LIST = [128 * i for i in range(1, 33)]  # 128, 256, ..., 4096
 
 # B is [N, K], output is [M, N]
 SHAPES_NK = [
