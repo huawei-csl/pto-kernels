@@ -23,5 +23,8 @@ build_wheel:
 install: build_wheel
 	bash scripts/install-wheel.sh
 
+docs:
+	doxygen doxygen/Doxyfile
+
 test:
 	pytest -v tests/

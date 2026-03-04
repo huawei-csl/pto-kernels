@@ -17,6 +17,13 @@ for the full License text.
 
 namespace pto_isa_ops {
 
+/**
+ * @brief Simple matrix multiplication A @ B.
+ *
+ * @param [in] a Input left martrix
+ * @param [in] b Input right matrix
+ * @return at::Tensor Matrix multiplication result of a @ b.
+ */
 at::Tensor run_simple_matmul(const at::Tensor& a, const at::Tensor& b) {
   const at::Device device = a.options().device();
   const auto dtype = a.options().dtype();

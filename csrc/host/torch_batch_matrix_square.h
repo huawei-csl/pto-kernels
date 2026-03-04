@@ -17,6 +17,13 @@ for the full License text.
 
 namespace pto_isa_ops {
 
+/**
+ * @brief Batch matrix square given a tensor whose last two dimensions form a
+ * square matrix.
+ *
+ * @param [in] x Input tensor whose last two dimensions form a square matrix.
+ * @return at::Tensor Tensor of same shape as `x` that contains matrix squares.
+ */
 at::Tensor run_batch_matrix_square(const at::Tensor& x) {
   const at::Device device = x.options().device();
   const auto dtype = x.options().dtype();

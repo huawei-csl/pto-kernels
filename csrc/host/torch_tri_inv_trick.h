@@ -16,6 +16,13 @@ for the full License text.
 
 namespace pto_isa_ops {
 
+/**
+ * @brief Triangular inverse using the "inverse trick" method.
+ *
+ * @param [in] M Input tensor containing square matrices on the last two
+ * dimensions.
+ * @return at::Tensor Tensor containing inverses of input matrices.
+ */
 at::Tensor run_tri_inv_trick(const at::Tensor& M) {
   const at::Device device = M.options().device();
   const auto dtype = M.options().dtype();
