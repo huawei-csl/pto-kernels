@@ -232,11 +232,15 @@ AICORE void computeTile(__gm__ half* x, __gm__ half* y, __gm__ half* z,
  * @param M Number of rows in A and C.
  * @param N Number of rows in B (columns of C).
  * @param K Number of columns in A and B.
+ * @param swizzle_direction Swizzle direction: 0=Zn, 1=Nz.
+ * @param swizzle_count Number of tiles per swizzle group; <=0 disables swizzle.
  */
 extern "C" __global__ AICORE void matmul_kernel_ABt(__gm__ uint8_t* x,
                                                     __gm__ uint8_t* y,
                                                     __gm__ uint8_t* z, int M,
-                                                    int N, int K) {
+                                                    int N, int K,
+                                                    int swizzle_direction,
+                                                    int swizzle_count) {
 #if defined(__DAV_CUBE__)
   __gm__ half* xh = (__gm__ half*)x;
   __gm__ half* yh = (__gm__ half*)y;
@@ -247,9 +251,6 @@ extern "C" __global__ AICORE void matmul_kernel_ABt(__gm__ uint8_t* x,
   const int nLoop = (N + N_FULL - 1) / N_FULL;
   const int mLoop = M / detail::M_TILE;
   if (mLoop <= 0 || nLoop <= 0) return;
-
-  constexpr int swizzle_direction = 1;  // Nz  (direction 0=Zn, 1=Nz)
-  constexpr int swizzle_count = 3;
 
   const int coreLoop = nLoop * mLoop;
   const int kDtileNum = K / detail::K_DTILE;
@@ -309,8 +310,12 @@ extern "C" __global__ AICORE void matmul_kernel_ABt(__gm__ uint8_t* x,
  * @param M                 Number of rows in A and C.
  * @param N                 Number of rows in B (columns of C).
  * @param K                 Number of columns in A and B.
+ * @param swizzle_direction Swizzle direction: 0=Zn, 1=Nz.
+ * @param swizzle_count     Number of tiles per swizzle group; <=0 disables swizzle.
  */
 extern "C" void call_kernel(uint32_t blockDim, void* stream, uint8_t* x,
-                            uint8_t* y, uint8_t* z, int M, int N, int K) {
-  matmul_kernel_ABt<<<blockDim, nullptr, stream>>>(x, y, z, M, N, K);
+                            uint8_t* y, uint8_t* z, int M, int N, int K,
+                            int swizzle_direction, int swizzle_count) {
+  matmul_kernel_ABt<<<blockDim, nullptr, stream>>>(
+      x, y, z, M, N, K, swizzle_direction, swizzle_count);
 }

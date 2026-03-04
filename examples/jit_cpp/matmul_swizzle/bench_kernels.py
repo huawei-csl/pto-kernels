@@ -17,6 +17,11 @@ N_REPEAT = 20
 N_WARMUP = 5
 N_ALLOC = N_REPEAT + N_WARMUP
 
+# Custom-kernel swizzle runtime params (used by jit_util_matmul.py wrapper).
+# Direction: 0=Zn, 1=Nz. Count <= 0 disables swizzle.
+CUSTOM_SWIZZLE_DIRECTION = 0
+CUSTOM_SWIZZLE_COUNT = 4
+
 M_LIST = [128 * i for i in range(1, 33)]  # 128, 256, ..., 4096
 
 # B is [N, K], output is [M, N]
@@ -36,14 +41,6 @@ BACKEND_STYLE = {
 
 def _shape_label(n: int, k: int) -> str:
     return f"N={int(n)},K={int(k)}"
-
-
-def _shape_colors(df: pd.DataFrame):
-    shape_keys = list(df.groupby(["N", "K"], sort=False).groups.keys())
-    cmap_name = "tab10" if len(shape_keys) <= 10 else "tab20"
-    cmap = plt.get_cmap(cmap_name, max(1, len(shape_keys)))
-    return {key: cmap(i) for i, key in enumerate(shape_keys)}
-
 
 def _style(name: str) -> dict:
     return BACKEND_STYLE.get(
@@ -107,6 +104,8 @@ def bench_one_shape(backends, m, n, k):
         "M": m,
         "N": n,
         "K": k,
+        "custom_swizzle_direction": CUSTOM_SWIZZLE_DIRECTION,
+        "custom_swizzle_count": CUSTOM_SWIZZLE_COUNT,
         "torch_time_us": dur_ref_us,
         "torch_tflops": flops / dur_ref_us / 1e6,
         "torch_bandwidth_gbs": torch_total_bytes * 1e6 / dur_ref_us / (1024**3),
@@ -262,6 +261,11 @@ def main():
     torch.npu.set_device(DEVICE)
     base = Path(__file__).resolve().parent
 
+    print(
+        "custom swizzle config: "
+        f"direction={CUSTOM_SWIZZLE_DIRECTION}, count={CUSTOM_SWIZZLE_COUNT}"
+    )
+
     backend_builders = {
         "custom": (jit_compile_custom, base / "matmul_custom_pto.cpp"),
         "original": (jit_compile_original, base / "matmul_original_pto.cpp"),
@@ -271,7 +275,18 @@ def main():
     for name, (builder, path) in backend_builders.items():
         try:
             print(f"Compiling {path.name} for backend '{name}' ...")
-            backends[name] = builder(str(path), verbose=True)
+            built = builder(str(path), verbose=True)
+            if name == "custom":
+                backends[name] = (
+                    lambda a, b, _fn=built: _fn(
+                        a,
+                        b,
+                        swizzle_direction=CUSTOM_SWIZZLE_DIRECTION,
+                        swizzle_count=CUSTOM_SWIZZLE_COUNT,
+                    )
+                )
+            else:
+                backends[name] = built
         except Exception as exc:
             print(f"[WARN] backend '{name}' unavailable: {exc}")
 
