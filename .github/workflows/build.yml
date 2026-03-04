@@ -62,6 +62,8 @@ jobs:
       matrix:
         include:
           - arch: x86_64
+            python_version: 3.10
+          - arch: x86_64
             python_version: 3.11
           - arch: x86_64
             python_version: 3.12
@@ -89,10 +91,24 @@ jobs:
           make clean build_cmake
 
   build_wheel_docker:
-    name: Build wheel inside quay.io/ascend/cann
+    
+    name: Build wheel inside quay.io/ascend/cann (py${{ matrix.python_version }})
     runs-on: ubuntu-latest
+    continue-on-error: true
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            python_version: 3.10
+          - arch: x86_64
+            python_version: 3.11
+          - arch: x86_64
+            python_version: 3.12
+
     container:
-      image: quay.io/ascend/cann:8.5.0-910b-ubuntu22.04-py3.11
+      image: quay.io/ascend/cann:8.5.1-910b-ubuntu22.04-py${{ matrix.python_version }}
     steps:
       - name: Show OS
         run: cat /etc/os-release
@@ -104,7 +120,7 @@ jobs:
         shell: bash
         run: |
           apt-get update
-          apt-get install -yq python-is-python3 python3.11 python3.11-dev cmake
+          apt-get install -yq python-is-python3 python3-dev cmake
           source /usr/local/Ascend/ascend-toolkit/set_env.sh
           source /usr/local/Ascend/nnal/atb/set_env.sh
           export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/Ascend/ascend-toolkit/latest/`uname -i`-linux/devlib # to avoid libascend_hal.so issue
