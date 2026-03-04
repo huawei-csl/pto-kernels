@@ -89,13 +89,11 @@ jobs:
           pip3 install -r requirements.txt
           pip3 install torch-npu==2.8.0.post2 --extra-index-url https://download.pytorch.org/whl/cpu
           make clean build_cmake
-
+          
   build_wheel_docker:
-    
     name: Build wheel inside quay.io/ascend/cann (py${{ matrix.python_version }})
     runs-on: ubuntu-latest
     continue-on-error: true
-
     strategy:
       fail-fast: false
       matrix:
@@ -106,7 +104,6 @@ jobs:
             python_version: 3.11
           - arch: x86_64
             python_version: 3.12
-
     container:
       image: quay.io/ascend/cann:8.5.1-910b-ubuntu22.04-py${{ matrix.python_version }}
     steps:
