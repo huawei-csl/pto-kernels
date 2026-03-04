@@ -1,6 +1,6 @@
 # pto-isa kernels
 
-Ascend NPU kernels using [pto-isa](https://gitcode.com/cann/pto-isa/). Parallel Tile Operation (PTO) is a virtual instruction set architecture designed by Ascend CANN, focusing on tile-level operations.
+Ascend NPU kernels using [pto-isa](https://github.com/PTO-ISA/pto-isa/). Parallel Tile Operation (PTO) is a virtual instruction set architecture designed by Ascend CANN, focusing on tile-level operations.
 
 ## Build
 
