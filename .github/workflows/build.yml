@@ -62,8 +62,6 @@ jobs:
       matrix:
         include:
           - arch: x86_64
-            python_version: "3.10"
-          - arch: x86_64
             python_version: 3.11
           - arch: x86_64
             python_version: 3.12
@@ -89,7 +87,7 @@ jobs:
           pip3 install -r requirements.txt
           pip3 install torch-npu==2.8.0.post2 --extra-index-url https://download.pytorch.org/whl/cpu
           make clean build_cmake
-          
+
   build_wheel_docker:
     name: Build wheel inside quay.io/ascend/cann (py${{ matrix.python_version }})
     runs-on: ubuntu-latest
@@ -98,8 +96,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - arch: x86_64
-            python_version: "3.10"
           - arch: x86_64
             python_version: 3.11
           - arch: x86_64
