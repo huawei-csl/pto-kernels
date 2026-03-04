@@ -1,4 +1,4 @@
-name: Build and Deploy Doxygen Docs
+name: Check Doxygen Docs
 
 on:
   push:
