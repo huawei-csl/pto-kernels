@@ -11,7 +11,7 @@ full text of the License.
 */
 
 // Modified from
-// https://gitcode.com/cann/pto-isa/blob/master/demos/torch_jit/gemm/gemm_kernel.cpp
+// https://github.com/PTO-ISA/pto-isa/blob/master/demos/torch_jit/gemm/gemm_kernel.cpp
 // to make it work for the benchmark. Original license above.
 
 #include <cstdint>
