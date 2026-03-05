@@ -56,6 +56,11 @@ def _parse_args():
             "--swizzle 0,0 --swizzle 0,5 --swizzle 1,12"
         ),
     )
+    parser.add_argument(
+        "--without-torch",
+        action="store_true",
+        help="Disable torch baseline timing/throughput benchmarking.",
+    )
     original_group = parser.add_mutually_exclusive_group()
     original_group.add_argument(
         "--with-original",
@@ -138,7 +143,14 @@ def _bench_backend(func, a_list, b_list, c_ref):
 
 
 def bench_one_shape(
-    custom_backend, original_backend, swizzle_configs, m, n, k, original_enabled
+    custom_backend,
+    original_backend,
+    swizzle_configs,
+    m,
+    n,
+    k,
+    original_enabled,
+    torch_enabled,
 ):
     print(f"\n=== (M, N, K) = {m}, {n}, {k} ===")
 
@@ -149,24 +161,34 @@ def bench_one_shape(
     ref_b = b_list[N_WARMUP - 1]
     c_ref = F.linear(ref_a, ref_b)
 
-    for a, b in zip(a_list[:N_WARMUP], b_list[:N_WARMUP]):
-        F.linear(a, b)
-    dur_ref_us = _time_backend(F.linear, a_list, b_list)
-
     flops = 2.0 * m * n * k
     torch_total_bytes = (m * k + n * k) * 2 + m * n * int(c_ref.element_size())
+
+    if torch_enabled:
+        for a, b in zip(a_list[:N_WARMUP], b_list[:N_WARMUP]):
+            F.linear(a, b)
+        dur_ref_us = _time_backend(F.linear, a_list, b_list)
+        torch_tflops = flops / dur_ref_us / 1e6
+        torch_bandwidth = torch_total_bytes * 1e6 / dur_ref_us / (1024**3)
+        torch_error = ""
+        print(f"torch duration: {dur_ref_us:.3f} us")
+        print(f"torch TFLOPS: {torch_tflops:.3f}")
+    else:
+        dur_ref_us = float("nan")
+        torch_tflops = float("nan")
+        torch_bandwidth = float("nan")
+        torch_error = "disabled"
+        print("torch unavailable: disabled by --without-torch")
 
     base_record = {
         "M": m,
         "N": n,
         "K": k,
         "torch_time_us": dur_ref_us,
-        "torch_tflops": flops / dur_ref_us / 1e6,
-        "torch_bandwidth_gbs": torch_total_bytes * 1e6 / dur_ref_us / (1024**3),
+        "torch_tflops": torch_tflops,
+        "torch_bandwidth_gbs": torch_bandwidth,
+        "torch_error": torch_error,
     }
-
-    print(f"torch duration: {dur_ref_us:.3f} us")
-    print(f"torch TFLOPS: {base_record['torch_tflops']:.3f}")
 
     original_stats = None
     original_error = ""
@@ -259,6 +281,7 @@ def main():
     args = _parse_args()
     swizzle_configs = _build_swizzle_configs(args.swizzle)
     n_swizzles = len(swizzle_configs)
+    include_torch = not args.without_torch
 
     if args.with_original:
         include_original = True
@@ -287,6 +310,7 @@ def main():
         "Custom swizzle configs: "
         + ", ".join(f"(direction={d}, count={c})" for d, c in swizzle_configs)
     )
+    print(f"Torch baseline: {'enabled' if include_torch else 'disabled'}")
     print(f"Original PTO backend: {'enabled' if include_original else 'disabled'} ({original_reason})")
 
     custom_backend = None
@@ -324,6 +348,7 @@ def main():
                     n,
                     k,
                     include_original,
+                    include_torch,
                 )
             )
 

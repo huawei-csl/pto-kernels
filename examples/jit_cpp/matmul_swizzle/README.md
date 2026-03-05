@@ -33,6 +33,9 @@ python bench_kernels.py --swizzle 0,0 --swizzle 0,5 --swizzle 1,12
 # Add original PTO as well when benchmarking multiple swizzles:
 python bench_kernels.py --swizzle 0,0 --swizzle 0,5 --swizzle 1,12 --with-original
 
+# Disable torch baseline benchmark:
+python bench_kernels.py --without-torch
+
 # Generate plots from benchmark CSV:
 python plot_kernels.py
 
@@ -41,6 +44,9 @@ python plot_kernels.py --swizzle 0,0 --swizzle 0,5 --swizzle 1,12
 
 # Swizzle tuning for fixed N/K across a range of M:
 python tune_swizzle.py --n 4096 --k 4096
+
+# Swizzle tuning with explicit M range and step:
+python tune_swizzle.py --n 4096 --k 4096 --m-min 512 --m-max 4096 --m-step 256
 ```
 
 Outputs:
@@ -60,3 +66,4 @@ Outputs:
   - `PTO_MATMUL_SWIZZLE_COUNT` (default `3`, used by Python wrapper default)
 - Swizzle direction/count are runtime args now; no kernel source edits are needed.
 - In `bench_kernels.py`, original PTO is enabled by default only when there is at most one swizzle config (including the no-`--swizzle` default case). For 2+ swizzles, add `--with-original` to include it.
+- Add `--without-torch` to skip torch timing/throughput benchmarking.

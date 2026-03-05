@@ -113,64 +113,17 @@ def load_lib(lib_path):
         m_pad = _round_up(m, M_TILE)
         n_pad = _round_up(n, N_TILE)
         k_pad = _round_up(k, K_TILE)
-
-        # Fast path: if N/K are aligned, avoid padded-M launch for the tail.
-        if n == n_pad and k == k_pad:
-            m_main = (m // M_TILE) * M_TILE
-            if m_main == m and m_main > 0:
-                out = torch.empty((m, n), device=a.device, dtype=a.dtype)
-                block_dim = _choose_block_dim(m, n, max_block_dim)
-                _launch_kernel_f16(
-                    a,
-                    b,
-                    out,
-                    m,
-                    n,
-                    k,
-                    block_dim,
-                    stream_ptr,
-                    swizzle_direction,
-                    swizzle_count,
-                )
-                return out
-
-            if m_main == 0:
-                return torch.matmul(a, b.transpose(0, 1))
-
-            out = torch.empty((m, n), device=a.device, dtype=a.dtype)
-            a_main = a[:m_main, :]
-            out_main = out[:m_main, :]
-            block_dim = _choose_block_dim(m_main, n, max_block_dim)
-            _launch_kernel_f16(
-                a_main,
-                b,
-                out_main,
-                m_main,
-                n,
-                k,
-                block_dim,
-                stream_ptr,
-                swizzle_direction,
-                swizzle_count,
-            )
-
-            out_tail = out[m_main:, :]
-            tail = torch.matmul(a[m_main:, :], b.transpose(0, 1))
-            out_tail.copy_(tail)
-            return out
-
-        # General padded path (simple, no caching/partial-zero optimization).
+        
         if m_pad != m or n_pad != n or k_pad != k:
             a_work = torch.zeros((m_pad, k_pad), device=a.device, dtype=a.dtype)
             b_work = torch.zeros((n_pad, k_pad), device=b.device, dtype=b.dtype)
             a_work[:m, :k] = a
             b_work[:n, :k] = b
-            c_work = torch.empty((m_pad, n_pad), device=a.device, dtype=a.dtype)
         else:
             a_work = a
             b_work = b
-            c_work = torch.empty((m, n), device=a.device, dtype=a.dtype)
 
+        c_work = torch.empty((m_pad, n_pad), device=a.device, dtype=a.dtype)
         torch.npu.synchronize()
 
         block_dim = _choose_block_dim(m_pad, n_pad, max_block_dim)
