@@ -131,10 +131,7 @@ target_link_libraries(
           torch_cpu
           torch_npu
           ascendcl
-          tiling_api
-          register
           platform
-          ascendalog
           dl
           no_workspace_kernel)
 
