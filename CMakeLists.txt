@@ -132,7 +132,6 @@ target_link_libraries(
           torch_npu
           ascendcl
           platform
-          dl
           no_workspace_kernel)
 
 target_link_directories(pto_kernels_ops PRIVATE ${TORCH_INSTALL_PREFIX}/lib
