@@ -5,6 +5,11 @@ import csv
 import torch
 import torch_npu  # noqa
 
+try:
+    import matplotlib.pyplot as plt
+except ImportError:
+    plt = None
+
 from jit_util_hadamard import jit_compile
 
 # Test configs matching test_hadamard_pto.py
@@ -143,12 +148,6 @@ def benchmark(hadamard_func, warmup=2, repeats=20, output_dir="./perf_data/"):
 
 def plot_bandwidth(input_dir="./perf_data/", output_path="bw_vs_shape.png"):
     """Generate bandwidth plot from benchmark CSVs."""
-
-    try:
-        import matplotlib.pyplot as plt
-    except ImportError:
-        plt = None
-
     if plt is None:
         print("Warning: matplotlib is not installed; skipping plot generation.")
         return
