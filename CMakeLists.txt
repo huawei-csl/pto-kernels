@@ -120,18 +120,10 @@ ascendc_include_directories(
 
 pybind11_add_module(pto_kernels_ops csrc/host/pybind11.cpp)
 
-target_compile_options(
-  pto_kernels_ops PRIVATE ${CMAKE_CCE_COMPILE_OPTIONS}
-                          --cce-aicore-arch=dav-2201 -std=c++17)
-
 target_link_libraries(
   pto_kernels_ops
-  PRIVATE ${TORCH_LIBRARIES}
-          c10
-          torch_cpu
-          torch_npu
-          ascendcl
-          platform
+  PRIVATE ${TORCH_LIBRARIES} c10 torch_cpu torch_npu
+          platform # Required for 'ascendc_platform->GetCoreNumAic()'
           no_workspace_kernel)
 
 target_link_directories(pto_kernels_ops PRIVATE ${TORCH_INSTALL_PREFIX}/lib
