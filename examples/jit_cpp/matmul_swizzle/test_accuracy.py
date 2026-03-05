@@ -10,7 +10,6 @@ from pathlib import Path
 import pytest
 import torch
 import torch.nn.functional as F
-import torch_npu  # noqa
 
 from jit_util_matmul import jit_compile
 

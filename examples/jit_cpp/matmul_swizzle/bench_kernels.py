@@ -49,7 +49,6 @@ def _style(name: str) -> dict:
 
 
 def _time_backend(func, a_list, b_list):
-    torch.npu.synchronize()
     start = torch.npu.Event(enable_timing=True)
     end = torch.npu.Event(enable_timing=True)
     start.record()

@@ -98,7 +98,14 @@ def load_lib(lib_path):
             swizzle_count,
         )
 
-    def _matmul_single(a, b, max_block_dim, stream_ptr, swizzle_direction, swizzle_count):
+    def _matmul_single(
+        a,
+        b,
+        max_block_dim,
+        stream_ptr,
+        swizzle_direction,
+        swizzle_count,
+    ):
         m = int(a.shape[0])
         k = int(a.shape[1])
         n = int(b.shape[0])
@@ -163,6 +170,8 @@ def load_lib(lib_path):
             a_work = a
             b_work = b
             c_work = torch.empty((m, n), device=a.device, dtype=a.dtype)
+
+        torch.npu.synchronize()
 
         block_dim = _choose_block_dim(m_pad, n_pad, max_block_dim)
         _launch_kernel_f16(
