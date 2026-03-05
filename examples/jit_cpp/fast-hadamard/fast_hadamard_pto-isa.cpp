@@ -32,9 +32,11 @@ AICORE void runTFastHadamard(__gm__ T *x, uint32_t batch, uint32_t n,
     return;
   }
 
-  const uint32_t num_cores = block_num;
+  const uint32_t num_cores = get_block_num() * get_subblockdim();
+  const uint32_t vid = get_block_idx() * get_subblockdim() + get_subblockid();
+
   const uint32_t samples_per_core = DIV_ROUNDUP(batch, num_cores);
-  const uint32_t sample_offset = samples_per_core * block_idx;
+  const uint32_t sample_offset = samples_per_core * vid;
   if (sample_offset >= batch) {
     return;
   }
