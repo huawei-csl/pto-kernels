@@ -58,14 +58,10 @@ SHAPES = [
 # ---------------------------------------------------------------------------
 # Swizzle parameter combinations: (swizzle_direction, swizzle_count)
 # ---------------------------------------------------------------------------
-SWIZZLE_PARAMS = [
-    (0, 0),  # no swizzle (baseline)
-    (1, 0),  # no swizzle (direction ignored when count=0)
-    (0, 1),  # Zn, count=1
-    (0, 3),  # Zn, count=3
-    (1, 1),  # Nz, count=1
-    (1, 3),  # Nz, count=3
-]
+SWIZZLE_PARAMS = []
+for direction in range(2):
+    for count in range(13):
+        SWIZZLE_PARAMS.append((direction, count))
 
 # fp16 matmul tolerance: allow up to 1e-2 mean abs error (hardware-dependent).
 MEAN_ABS_TOL = 1e-2
