@@ -1,7 +1,6 @@
 import math
 import os
 import csv
-import matplotlib.pyplot as plt
 
 import torch
 import torch_npu  # noqa
@@ -144,6 +143,15 @@ def benchmark(hadamard_func, warmup=2, repeats=20, output_dir="./perf_data/"):
 
 def plot_bandwidth(input_dir="./perf_data/", output_path="bw_vs_shape.png"):
     """Generate bandwidth plot from benchmark CSVs."""
+
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        plt = None
+
+    if plt is None:
+        print("Warning: matplotlib is not installed; skipping plot generation.")
+        return
 
     fig, axes = plt.subplots(1, len(BENCH_BLOCK_DIMS), figsize=(14, 6), sharey=True)
     if len(BENCH_BLOCK_DIMS) == 1:
