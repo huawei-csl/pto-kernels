@@ -81,7 +81,7 @@ include(FetchContent)
 FetchContent_Declare(
   libpto_isa_headers
   GIT_REPOSITORY https://gitcode.com/cann/pto-isa.git
-  GIT_TAG 8.5.0)
+  GIT_TAG v8.5.0-beta.1)
 
 FetchContent_Populate(libpto_isa_headers)
 

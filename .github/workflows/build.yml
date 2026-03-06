@@ -67,7 +67,7 @@ jobs:
             python_version: 3.12
 
     container:
-      image: quay.io/ascend/cann:8.5.1-910b-ubuntu22.04-py${{ matrix.python_version }}
+      image: quay.io/ascend/cann:8.5.0-910b-ubuntu22.04-py${{ matrix.python_version }}
     steps:
       - name: Show OS
         run: cat /etc/os-release
