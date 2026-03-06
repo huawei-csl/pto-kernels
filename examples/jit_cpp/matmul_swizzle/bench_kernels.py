@@ -1,7 +1,7 @@
+import argparse
 import os
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import pandas as pd
 import torch
 import torch.nn.functional as F
@@ -17,6 +17,12 @@ N_REPEAT = 20
 N_WARMUP = 5
 N_ALLOC = N_REPEAT + N_WARMUP
 
+# Custom-kernel swizzle runtime params (used by jit_util_matmul.py wrapper).
+# Direction: 0=Zn, 1=Nz. Count <= 0 disables swizzle.
+CUSTOM_SWIZZLE_DIRECTION = 1
+CUSTOM_SWIZZLE_COUNT = 3
+DEFAULT_SWIZZLE_CONFIGS = [(CUSTOM_SWIZZLE_DIRECTION, CUSTOM_SWIZZLE_COUNT)]
+
 M_LIST = [128 * i for i in range(1, 33)]  # 128, 256, ..., 4096
 
 # B is [N, K], output is [M, N]
@@ -24,35 +30,81 @@ SHAPES_NK = [
     (4096, 4096),
 ]
 
-PLOT_N = 4096
-PLOT_K = 4096
-
-BACKEND_STYLE = {
-    "torch": {"color": "#111111", "marker": "x", "linestyle": "--"},
-    "custom": {"color": "#1f77b4", "marker": "o", "linestyle": "-"},
-    "original": {"color": "#ff7f0e", "marker": "s", "linestyle": "-."},
-}
+DEFAULT_CSV_REL_PATH = Path("outputs") / "csv" / "matmul_timing.csv"
 
 
-def _shape_label(n: int, k: int) -> str:
-    return f"N={int(n)},K={int(k)}"
-
-
-def _shape_colors(df: pd.DataFrame):
-    shape_keys = list(df.groupby(["N", "K"], sort=False).groups.keys())
-    cmap_name = "tab10" if len(shape_keys) <= 10 else "tab20"
-    cmap = plt.get_cmap(cmap_name, max(1, len(shape_keys)))
-    return {key: cmap(i) for i, key in enumerate(shape_keys)}
-
-
-def _style(name: str) -> dict:
-    return BACKEND_STYLE.get(
-        name, {"color": "#2ca02c", "marker": "^", "linestyle": "-"}
+def _parse_args():
+    parser = argparse.ArgumentParser(
+        description=(
+            "Benchmark torch/custom/original matmul kernels and save the results to "
+            "a CSV file."
+        )
     )
+    parser.add_argument(
+        "--csv",
+        type=str,
+        default=str(DEFAULT_CSV_REL_PATH),
+        help=f"Output CSV path (default: {DEFAULT_CSV_REL_PATH})",
+    )
+    parser.add_argument(
+        "--swizzle",
+        action="append",
+        default=[],
+        help=(
+            "Custom swizzle config as 'direction,count' (or 'direction:count'). "
+            "Repeat this argument to compare multiple swizzles, e.g. "
+            "--swizzle 0,0 --swizzle 0,5 --swizzle 1,12"
+        ),
+    )
+    parser.add_argument(
+        "--with-torch",
+        action="store_true",
+        help="Include torch baseline timing/throughput benchmarking.",
+    )
+    parser.add_argument(
+        "--with-original",
+        action="store_true",
+        help="Include the original PTO backend in the benchmark run.",
+    )
+    return parser.parse_args()
+
+
+def _parse_swizzle_pair(raw: str) -> tuple[int, int]:
+    text = raw.strip().replace(":", ",")
+    parts = [p.strip() for p in text.split(",") if p.strip()]
+    if len(parts) != 2:
+        raise ValueError(
+            f"Invalid --swizzle value '{raw}'. Expected 'direction,count' (for example: 0,5)."
+        )
+
+    direction = int(parts[0])
+    count = int(parts[1])
+    if direction not in (0, 1):
+        raise ValueError(
+            f"Invalid swizzle direction {direction}. Supported values are 0 or 1."
+        )
+    return direction, count
+
+
+def _build_swizzle_configs(raw_values: list[str]) -> list[tuple[int, int]]:
+    if not raw_values:
+        return list(DEFAULT_SWIZZLE_CONFIGS)
+
+    configs = []
+    seen = set()
+    for raw in raw_values:
+        cfg = _parse_swizzle_pair(raw)
+        if cfg in seen:
+            continue
+        configs.append(cfg)
+        seen.add(cfg)
+
+    if not configs:
+        raise ValueError("No valid swizzle configs were provided.")
+    return configs
 
 
 def _time_backend(func, a_list, b_list):
-    torch.npu.synchronize()
     start = torch.npu.Event(enable_timing=True)
     end = torch.npu.Event(enable_timing=True)
     start.record()
@@ -65,8 +117,35 @@ def _time_backend(func, a_list, b_list):
     return start.elapsed_time(end) / N_REPEAT * 1e3
 
 
-def bench_one_shape(backends, m, n, k):
-    print(f"\n === (M, N, K) = {m}, {n}, {k} ===")
+def _bench_backend(func, a_list, b_list, c_ref):
+    c = None
+    for a, b in zip(a_list[:N_WARMUP], b_list[:N_WARMUP]):
+        c = func(a, b)
+    if c is None:
+        raise RuntimeError("backend returned no output")
+
+    mean_diff = float(torch.mean(torch.abs(c - c_ref)).cpu())
+    abs_error = float(torch.max(torch.abs(c - c_ref)).cpu())
+    dur_us = _time_backend(func, a_list, b_list)
+    return {
+        "time_us": dur_us,
+        "mean_diff": mean_diff,
+        "abs_error": abs_error,
+        "out_elem_bytes": int(c.element_size()),
+    }
+
+
+def bench_one_shape(
+    custom_backend,
+    original_backend,
+    swizzle_configs,
+    m,
+    n,
+    k,
+    original_enabled,
+    torch_enabled,
+):
+    print(f"\n=== (M, N, K) = {m}, {n}, {k} ===")
 
     a_list = [torch.randn(m, k, dtype=DTYPE, device=DEVICE) for _ in range(N_ALLOC)]
     b_list = [torch.randn(n, k, dtype=DTYPE, device=DEVICE) for _ in range(N_ALLOC)]
@@ -75,236 +154,193 @@ def bench_one_shape(backends, m, n, k):
     ref_b = b_list[N_WARMUP - 1]
     c_ref = F.linear(ref_a, ref_b)
 
-    backend_stats = {}
-    backend_errors = {}
-    for name, func in backends.items():
-        try:
-            c = None
-            for a, b in zip(a_list[:N_WARMUP], b_list[:N_WARMUP]):
-                c = func(a, b)
-            if c is None:
-                raise RuntimeError("backend returned no output")
-            mean_diff = float(torch.mean(torch.abs(c - c_ref)).cpu())
-            abs_error = float(torch.max(torch.abs(c - c_ref)).cpu())
-            dur_us = _time_backend(func, a_list, b_list)
-            backend_stats[name] = {
-                "time_us": dur_us,
-                "mean_diff": mean_diff,
-                "abs_error": abs_error,
-                "out_elem_bytes": int(c.element_size()),
-            }
-        except Exception as exc:
-            backend_errors[name] = str(exc)
-
-    for a, b in zip(a_list[:N_WARMUP], b_list[:N_WARMUP]):
-        F.linear(a, b)
-    dur_ref_us = _time_backend(F.linear, a_list, b_list)
-
     flops = 2.0 * m * n * k
     torch_total_bytes = (m * k + n * k) * 2 + m * n * int(c_ref.element_size())
 
-    record = {
+    if torch_enabled:
+        for a, b in zip(a_list[:N_WARMUP], b_list[:N_WARMUP]):
+            F.linear(a, b)
+        dur_ref_us = _time_backend(F.linear, a_list, b_list)
+        torch_tflops = flops / dur_ref_us / 1e6
+        torch_bandwidth = torch_total_bytes * 1e6 / dur_ref_us / (1024**3)
+        torch_error = ""
+        print(f"torch duration: {dur_ref_us:.3f} us")
+        print(f"torch TFLOPS: {torch_tflops:.3f}")
+    else:
+        dur_ref_us = float("nan")
+        torch_tflops = float("nan")
+        torch_bandwidth = float("nan")
+        torch_error = "disabled"
+
+    base_record = {
         "M": m,
         "N": n,
         "K": k,
         "torch_time_us": dur_ref_us,
-        "torch_tflops": flops / dur_ref_us / 1e6,
-        "torch_bandwidth_gbs": torch_total_bytes * 1e6 / dur_ref_us / (1024**3),
+        "torch_tflops": torch_tflops,
+        "torch_bandwidth_gbs": torch_bandwidth,
+        "torch_error": torch_error,
     }
 
-    print(f"torch duration: {dur_ref_us:.3f} us")
-    print(f"torch TFLOPS: {record['torch_tflops']:.3f}")
-
-    for name in backends:
-        if name in backend_stats:
-            s = backend_stats[name]
-            tflops = flops / s["time_us"] / 1e6
-            total_bytes_backend = (m * k + n * k) * 2 + m * n * s["out_elem_bytes"]
-            bw = total_bytes_backend * 1e6 / s["time_us"] / (1024**3)
-            record[f"{name}_time_us"] = s["time_us"]
-            record[f"{name}_tflops"] = tflops
-            record[f"{name}_bandwidth_gbs"] = bw
-            record[f"{name}_mean_diff"] = s["mean_diff"]
-            record[f"{name}_abs_error"] = s["abs_error"]
-            record[f"{name}_speedup_vs_torch"] = dur_ref_us / s["time_us"]
-            record[f"{name}_error"] = ""
-            print(f"{name} duration: {s['time_us']:.3f} us")
-            print(f"{name} TFLOPS: {tflops:.3f}")
-            print(f"{name} mean diff: {s['mean_diff']}")
+    original_stats = None
+    original_error = ""
+    if original_backend is not None:
+        try:
+            original_stats = _bench_backend(original_backend, a_list, b_list, c_ref)
+            print(f"original duration: {original_stats['time_us']:.3f} us")
+            print(f"original TFLOPS: {flops / original_stats['time_us'] / 1e6:.3f}")
+            print(f"original mean diff: {original_stats['mean_diff']}")
+        except Exception as exc:
+            original_error = str(exc)
+            print(f"original unavailable: {original_error}")
+    else:
+        if original_enabled:
+            original_error = "backend not compiled"
+            print(f"original unavailable: {original_error}")
         else:
-            record[f"{name}_time_us"] = float("nan")
-            record[f"{name}_tflops"] = float("nan")
-            record[f"{name}_bandwidth_gbs"] = float("nan")
-            record[f"{name}_mean_diff"] = float("nan")
-            record[f"{name}_abs_error"] = float("nan")
-            record[f"{name}_speedup_vs_torch"] = float("nan")
-            record[f"{name}_error"] = backend_errors.get(name, "unknown error")
-            print(f"{name} unavailable: {record[f'{name}_error']}")
+            original_error = "disabled"
 
-    return record
+    records = []
+    for direction, count in swizzle_configs:
+        swizzle_label = f"d{direction}_c{count}"
 
+        def _custom_with_swizzle(a, b, _fn=custom_backend, _d=direction, _c=count):
+            return _fn(a, b, swizzle_direction=_d, swizzle_count=_c)
 
-def plot_runtime(df: pd.DataFrame, out_dir: Path, backends: list[str]) -> Path:
-    plt.figure(figsize=(10, 5))
-    for (n, k), group in df.groupby(["N", "K"], sort=False):
-        g = group.sort_values("M")
-        label = _shape_label(n, k)
-        torch_style = _style("torch")
-        plt.plot(
-            g["M"],
-            g["torch_time_us"],
-            marker=torch_style["marker"],
-            linestyle=torch_style["linestyle"],
-            color=torch_style["color"],
-            label=f"torch ({label})",
-        )
-        for b in backends:
-            c = f"{b}_time_us"
-            if c not in g.columns:
-                continue
-            style = _style(b)
-            plt.plot(
-                g["M"],
-                g[c],
-                marker=style["marker"],
-                linestyle=style["linestyle"],
-                color=style["color"],
-                label=f"{b} ({label})",
+        record = {
+            **base_record,
+            "custom_swizzle_direction": direction,
+            "custom_swizzle_count": count,
+            "custom_swizzle": swizzle_label,
+        }
+
+        try:
+            custom_stats = _bench_backend(_custom_with_swizzle, a_list, b_list, c_ref)
+            custom_tflops = flops / custom_stats["time_us"] / 1e6
+            custom_total_bytes = (m * k + n * k) * 2 + m * n * custom_stats[
+                "out_elem_bytes"
+            ]
+            custom_bw = custom_total_bytes * 1e6 / custom_stats["time_us"] / (1024**3)
+            record["custom_time_us"] = custom_stats["time_us"]
+            record["custom_tflops"] = custom_tflops
+            record["custom_bandwidth_gbs"] = custom_bw
+            record["custom_mean_diff"] = custom_stats["mean_diff"]
+            record["custom_abs_error"] = custom_stats["abs_error"]
+            record["custom_speedup_vs_torch"] = dur_ref_us / custom_stats["time_us"]
+            record["custom_error"] = ""
+            print(
+                f"custom({swizzle_label}) duration: {custom_stats['time_us']:.3f} us, "
+                f"TFLOPS: {custom_tflops:.3f}, mean diff: {custom_stats['mean_diff']}"
             )
-    plt.xlabel("M")
-    plt.ylabel("Runtime (us)")
-    plt.title("Runtime vs M")
-    plt.xlim(left=0)
-    plt.ylim(bottom=0)
-    plt.grid(True, alpha=0.25)
-    plt.legend(fontsize=8)
-    plt.tight_layout()
-    out_path = out_dir / "duration.png"
-    plt.savefig(out_path, dpi=160)
-    plt.close()
-    return out_path
+        except Exception as exc:
+            record["custom_time_us"] = float("nan")
+            record["custom_tflops"] = float("nan")
+            record["custom_bandwidth_gbs"] = float("nan")
+            record["custom_mean_diff"] = float("nan")
+            record["custom_abs_error"] = float("nan")
+            record["custom_speedup_vs_torch"] = float("nan")
+            record["custom_error"] = str(exc)
+            print(f"custom({swizzle_label}) unavailable: {record['custom_error']}")
 
-
-def plot_tflops(df: pd.DataFrame, out_dir: Path, backends: list[str]) -> Path:
-    plt.figure(figsize=(10, 5))
-    for (n, k), group in df.groupby(["N", "K"], sort=False):
-        g = group.sort_values("M")
-        label = _shape_label(n, k)
-        torch_style = _style("torch")
-        plt.plot(
-            g["M"],
-            g["torch_tflops"],
-            marker=torch_style["marker"],
-            linestyle=torch_style["linestyle"],
-            color=torch_style["color"],
-            label=f"torch ({label})",
-        )
-        for b in backends:
-            c = f"{b}_tflops"
-            if c not in g.columns:
-                continue
-            style = _style(b)
-            plt.plot(
-                g["M"],
-                g[c],
-                marker=style["marker"],
-                linestyle=style["linestyle"],
-                color=style["color"],
-                label=f"{b} ({label})",
+        if original_stats is not None:
+            original_tflops = flops / original_stats["time_us"] / 1e6
+            original_total_bytes = (m * k + n * k) * 2 + m * n * original_stats[
+                "out_elem_bytes"
+            ]
+            original_bw = (
+                original_total_bytes * 1e6 / original_stats["time_us"] / (1024**3)
             )
-    plt.xlabel("M")
-    plt.ylabel("TFLOPS")
-    plt.title("TFLOPS vs M")
-    plt.xlim(left=0)
-    plt.ylim(bottom=0)
-    plt.grid(True, alpha=0.25)
-    plt.legend(fontsize=8)
-    plt.tight_layout()
-    out_path = out_dir / "flops.png"
-    plt.savefig(out_path, dpi=160)
-    plt.close()
-    return out_path
+            record["original_time_us"] = original_stats["time_us"]
+            record["original_tflops"] = original_tflops
+            record["original_bandwidth_gbs"] = original_bw
+            record["original_mean_diff"] = original_stats["mean_diff"]
+            record["original_abs_error"] = original_stats["abs_error"]
+            record["original_speedup_vs_torch"] = dur_ref_us / original_stats["time_us"]
+            record["original_error"] = ""
+        else:
+            record["original_time_us"] = float("nan")
+            record["original_tflops"] = float("nan")
+            record["original_bandwidth_gbs"] = float("nan")
+            record["original_mean_diff"] = float("nan")
+            record["original_abs_error"] = float("nan")
+            record["original_speedup_vs_torch"] = float("nan")
+            record["original_error"] = original_error
 
+        records.append(record)
 
-def plot_error(df: pd.DataFrame, out_dir: Path, backends: list[str]) -> Path:
-    plt.figure(figsize=(10, 5))
-    for (n, k), group in df.groupby(["N", "K"], sort=False):
-        g = group.sort_values("M")
-        label = _shape_label(n, k)
-        for b in backends:
-            c = f"{b}_mean_diff"
-            if c not in g.columns:
-                continue
-            style = _style(b)
-            plt.plot(
-                g["M"],
-                g[c],
-                marker=style["marker"],
-                linestyle=style["linestyle"],
-                color=style["color"],
-                label=f"{b} ({label})",
-            )
-    plt.xlabel("M")
-    plt.ylabel("Mean Abs Error")
-    plt.title("Error vs M")
-    plt.xlim(left=0)
-    plt.ylim(bottom=0)
-    plt.grid(True, alpha=0.25)
-    plt.legend(fontsize=8)
-    plt.tight_layout()
-    out_path = out_dir / "error.png"
-    plt.savefig(out_path, dpi=160)
-    plt.close()
-    return out_path
+    return records
 
 
 def main():
+    args = _parse_args()
+    swizzle_configs = _build_swizzle_configs(args.swizzle)
+    include_torch = args.with_torch
+
+    include_original = args.with_original
+    original_reason = (
+        "enabled by --with-original" if include_original else "disabled by default"
+    )
+
     torch.npu.set_device(DEVICE)
     base = Path(__file__).resolve().parent
 
-    backend_builders = {
-        "custom": (jit_compile_custom, base / "matmul_custom_pto.cpp"),
-        "original": (jit_compile_original, base / "matmul_original_pto.cpp"),
-    }
+    csv_path = Path(args.csv)
+    if not csv_path.is_absolute():
+        csv_path = base / csv_path
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
 
-    backends = {}
-    for name, (builder, path) in backend_builders.items():
+    print(
+        "Custom swizzle configs: "
+        + ", ".join(f"(direction={d}, count={c})" for d, c in swizzle_configs)
+    )
+    if include_torch:
+        print("Torch baseline: enabled")
+    print(
+        f"Original PTO backend: {'enabled' if include_original else 'disabled'} ({original_reason})"
+    )
+
+    custom_backend = None
+    original_backend = None
+
+    custom_path = base / "matmul_custom_pto.cpp"
+    try:
+        print(f"Compiling {custom_path.name} for backend 'custom' ...")
+        custom_backend = jit_compile_custom(str(custom_path), verbose=True)
+    except Exception as exc:
+        print(f"[WARN] backend 'custom' unavailable: {exc}")
+
+    if include_original:
+        original_path = base / "matmul_original_pto.cpp"
         try:
-            print(f"Compiling {path.name} for backend '{name}' ...")
-            backends[name] = builder(str(path), verbose=True)
+            print(f"Compiling {original_path.name} for backend 'original' ...")
+            original_backend = jit_compile_original(str(original_path), verbose=True)
         except Exception as exc:
-            print(f"[WARN] backend '{name}' unavailable: {exc}")
+            print(f"[WARN] backend 'original' unavailable: {exc}")
+    else:
+        print("Skipping compile for backend 'original'.")
 
-    if not backends:
-        raise RuntimeError("No custom PTO backends could be compiled.")
+    if custom_backend is None:
+        raise RuntimeError("Custom PTO backend could not be compiled.")
 
     records = []
     for n, k in SHAPES_NK:
         for m in M_LIST:
-            records.append(bench_one_shape(backends, m, n, k))
+            records.extend(
+                bench_one_shape(
+                    custom_backend,
+                    original_backend,
+                    swizzle_configs,
+                    m,
+                    n,
+                    k,
+                    include_original,
+                    include_torch,
+                )
+            )
 
-    csv_dir = base / "outputs" / "csv"
-    plot_dir = base / "outputs" / "plots"
-    csv_dir.mkdir(parents=True, exist_ok=True)
-    plot_dir.mkdir(parents=True, exist_ok=True)
-
-    csv_path = csv_dir / "matmul_timing.csv"
     df = pd.DataFrame.from_records(records)
     df.to_csv(csv_path, index=False)
     print(f"\nSaved benchmark CSV: {csv_path}")
-
-    backend_names = [b for b in ("custom", "original") if f"{b}_time_us" in df.columns]
-    plot_df = df[(df["N"] == PLOT_N) & (df["K"] == PLOT_K)]
-    if plot_df.empty:
-        raise RuntimeError(f"No rows found for plot filter N={PLOT_N}, K={PLOT_K}")
-
-    runtime_path = plot_runtime(plot_df, plot_dir, backend_names)
-    flops_path = plot_tflops(plot_df, plot_dir, backend_names)
-    error_path = plot_error(plot_df, plot_dir, backend_names)
-
-    print(f"Saved runtime plot (N={PLOT_N}, K={PLOT_K}): {runtime_path}")
-    print(f"Saved flops plot (N={PLOT_N}, K={PLOT_K}):   {flops_path}")
-    print(f"Saved error plot (N={PLOT_N}, K={PLOT_K}):   {error_path}")
 
 
 if __name__ == "__main__":
