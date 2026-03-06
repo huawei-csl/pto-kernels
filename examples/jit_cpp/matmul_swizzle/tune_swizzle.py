@@ -4,6 +4,9 @@ from pathlib import Path
 
 import pandas as pd
 import torch
+import torch_npu  # noqa: F401  # required for NPU device support
+
+from jit_util_matmul import jit_compile
 
 DEVICE = os.environ.get("NPU_DEVICE", "npu:0")
 DTYPE = torch.float16
@@ -138,9 +141,6 @@ def _measure_us(
 def main():
     args = _parse_args()
 
-    import torch_npu  # noqa: F401
-    from jit_util_matmul import jit_compile
-
     if args.n <= 0 or args.k <= 0:
         raise ValueError("--n and --k must be > 0")
     if args.warmup < 0:
@@ -168,7 +168,7 @@ def main():
         a = torch.randn(m, args.k, dtype=DTYPE, device=DEVICE)
         b = torch.randn(args.n, args.k, dtype=DTYPE, device=DEVICE)
 
-        best = None
+        best: dict | None = None
         for direction, count in swizzle_configs:
             t_us = _measure_us(
                 kernel,

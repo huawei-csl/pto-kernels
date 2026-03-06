@@ -83,7 +83,7 @@ def load_lib(lib_path):
     lib.call_kernel.restype = None
 
     def _launch_kernel_f16(
-        a, b, c, m, n, k, block_dim, stream_ptr, swizzle_direction, swizzle_count
+        a, b, c, m, n, k, block_dim, stream_ptr, *, swizzle_direction, swizzle_count
     ):
         lib.call_kernel(
             block_dim,
@@ -136,8 +136,8 @@ def load_lib(lib_path):
             k_pad,
             block_dim,
             stream_ptr,
-            swizzle_direction,
-            swizzle_count,
+            swizzle_direction=swizzle_direction,
+            swizzle_count=swizzle_count,
         )
         return c_work[:m, :n]
 
