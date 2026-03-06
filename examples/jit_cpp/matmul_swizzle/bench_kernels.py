@@ -277,7 +277,9 @@ def main():
     include_torch = args.with_torch
 
     include_original = args.with_original
-    original_reason = "enabled by --with-original" if include_original else "disabled by default"
+    original_reason = (
+        "enabled by --with-original" if include_original else "disabled by default"
+    )
 
     torch.npu.set_device(DEVICE)
     base = Path(__file__).resolve().parent
@@ -293,7 +295,9 @@ def main():
     )
     if include_torch:
         print("Torch baseline: enabled")
-    print(f"Original PTO backend: {'enabled' if include_original else 'disabled'} ({original_reason})")
+    print(
+        f"Original PTO backend: {'enabled' if include_original else 'disabled'} ({original_reason})"
+    )
 
     custom_backend = None
     original_backend = None
