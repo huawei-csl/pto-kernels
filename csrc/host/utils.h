@@ -22,7 +22,9 @@ namespace pto_isa_ops {
 
 #define DEVICE_TYPE c10::DeviceType::PrivateUse1
 
-// Copied from tools/build/asc_rt/ascendc_runtime.h
+// Copied from tools/build/asc_rt/ascendc_runtime.h to avoid dependency on the
+// header file. See
+// https://gitcode.com/cann/asc-devkit/blob/v8.5.0/tools/build/asc_rt/ascendc_runtime.h
 #define ASSERT_RETVAL(exp, ret)         \
   do {                                  \
     if (!(exp)) {                       \
@@ -30,6 +32,8 @@ namespace pto_isa_ops {
       return (ret);                     \
     }                                   \
   } while (0)
+
+#define ASSERT_RTOK_RETVAL(v) ASSERT_RETVAL(((v) == 0), (1))
 
 /**
  * @brief Returns the number of Cube cores on the specified device.
