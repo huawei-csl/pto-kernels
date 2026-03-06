@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pandas as pd
 import torch
-import torch_npu  # noqa: F401  # required for NPU device support
 
 from jit_util_matmul import jit_compile
 
@@ -168,42 +167,46 @@ def main():
         a = torch.randn(m, args.k, dtype=DTYPE, device=DEVICE)
         b = torch.randn(args.n, args.k, dtype=DTYPE, device=DEVICE)
 
-        best: dict | None = None
-        for direction, count in swizzle_configs:
-            t_us = _measure_us(
-                kernel,
-                a,
-                b,
-                swizzle_direction=direction,
-                swizzle_count=count,
-                max_block_dim=int(args.max_block_dim),
-                warmup=int(args.warmup),
-                repeat=int(args.repeat),
-            )
-            records.append(
-                {
-                    "M": m,
-                    "N": args.n,
-                    "K": args.k,
-                    "swizzle_direction": direction,
-                    "swizzle_count": count,
-                    "time_us": t_us,
-                }
-            )
-            if best is None or t_us < best["time_us"]:
-                best = {
-                    "swizzle_direction": direction,
-                    "swizzle_count": count,
-                    "time_us": t_us,
-                }
+        best_direction = None
+    best_count = None
+    best_time_us = None
 
-        assert best is not None
-        print(
-            "best:"
-            f" dir={best['swizzle_direction']},"
-            f" count={best['swizzle_count']},"
-            f" time={best['time_us']:.3f} us"
+    for direction, count in swizzle_configs:
+        t_us = _measure_us(
+            kernel,
+            a,
+            b,
+            swizzle_direction=direction,
+            swizzle_count=count,
+            max_block_dim=int(args.max_block_dim),
+            warmup=int(args.warmup),
+            repeat=int(args.repeat),
         )
+        records.append(
+            {
+                "M": m,
+                "N": args.n,
+                "K": args.k,
+                "swizzle_direction": direction,
+                "swizzle_count": count,
+                "time_us": t_us,
+            }
+        )
+        if best_time_us is None or t_us < best_time_us:
+            best_direction = direction
+            best_count = count
+            best_time_us = t_us
+
+    assert best_direction is not None
+    assert best_count is not None
+    assert best_time_us is not None
+
+    print(
+        "best:"
+        f" dir={best_direction},"
+        f" count={best_count},"
+        f" time={best_time_us:.3f} us"
+    )
 
     df = pd.DataFrame.from_records(records)
     df = df.sort_values(["M", "time_us"], kind="mergesort")
