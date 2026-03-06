@@ -61,19 +61,10 @@ def _parse_args():
         action="store_true",
         help="Disable torch baseline timing/throughput benchmarking.",
     )
-    original_group = parser.add_mutually_exclusive_group()
-    original_group.add_argument(
+    parser.add_argument(
         "--with-original",
         action="store_true",
-        help=(
-            "Force-enable the original PTO backend. Useful when benchmarking "
-            "2+ swizzle configs where original is auto-disabled by default."
-        ),
-    )
-    original_group.add_argument(
-        "--without-original",
-        action="store_true",
-        help="Force-disable the original PTO backend.",
+        help="Include the original PTO backend in the benchmark run.",
     )
     return parser.parse_args()
 
@@ -280,23 +271,10 @@ def bench_one_shape(
 def main():
     args = _parse_args()
     swizzle_configs = _build_swizzle_configs(args.swizzle)
-    n_swizzles = len(swizzle_configs)
     include_torch = not args.without_torch
 
-    if args.with_original:
-        include_original = True
-        original_reason = "enabled by --with-original"
-    elif args.without_original:
-        include_original = False
-        original_reason = "disabled by --without-original"
-    else:
-        include_original = n_swizzles <= 1
-        if include_original:
-            original_reason = "enabled by default (<= 1 swizzle config)"
-        else:
-            original_reason = (
-                "disabled by default (>= 2 swizzle configs); use --with-original to enable"
-            )
+    include_original = args.with_original
+    original_reason = "enabled by --with-original" if include_original else "disabled by default"
 
     torch.npu.set_device(DEVICE)
     base = Path(__file__).resolve().parent
