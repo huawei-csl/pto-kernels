@@ -80,7 +80,9 @@ def _parse_swizzle_pair(raw: str) -> tuple[int, int]:
     direction = int(parts[0])
     count = int(parts[1])
     if direction not in (0, 1):
-        raise ValueError(f"Invalid swizzle direction {direction}. Supported values are 0 or 1.")
+        raise ValueError(
+            f"Invalid swizzle direction {direction}. Supported values are 0 or 1."
+        )
     return direction, count
 
 
@@ -215,9 +217,9 @@ def bench_one_shape(
         try:
             custom_stats = _bench_backend(_custom_with_swizzle, a_list, b_list, c_ref)
             custom_tflops = flops / custom_stats["time_us"] / 1e6
-            custom_total_bytes = (
-                (m * k + n * k) * 2 + m * n * custom_stats["out_elem_bytes"]
-            )
+            custom_total_bytes = (m * k + n * k) * 2 + m * n * custom_stats[
+                "out_elem_bytes"
+            ]
             custom_bw = custom_total_bytes * 1e6 / custom_stats["time_us"] / (1024**3)
             record["custom_time_us"] = custom_stats["time_us"]
             record["custom_tflops"] = custom_tflops
@@ -242,10 +244,12 @@ def bench_one_shape(
 
         if original_stats is not None:
             original_tflops = flops / original_stats["time_us"] / 1e6
-            original_total_bytes = (
-                (m * k + n * k) * 2 + m * n * original_stats["out_elem_bytes"]
+            original_total_bytes = (m * k + n * k) * 2 + m * n * original_stats[
+                "out_elem_bytes"
+            ]
+            original_bw = (
+                original_total_bytes * 1e6 / original_stats["time_us"] / (1024**3)
             )
-            original_bw = original_total_bytes * 1e6 / original_stats["time_us"] / (1024**3)
             record["original_time_us"] = original_stats["time_us"]
             record["original_tflops"] = original_tflops
             record["original_bandwidth_gbs"] = original_bw

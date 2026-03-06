@@ -113,7 +113,7 @@ def load_lib(lib_path):
         m_pad = _round_up(m, M_TILE)
         n_pad = _round_up(n, N_TILE)
         k_pad = _round_up(k, K_TILE)
-        
+
         if m_pad != m or n_pad != n or k_pad != k:
             a_work = torch.zeros((m_pad, k_pad), device=a.device, dtype=a.dtype)
             b_work = torch.zeros((n_pad, k_pad), device=b.device, dtype=b.dtype)
