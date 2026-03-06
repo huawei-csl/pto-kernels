@@ -57,9 +57,9 @@ def _parse_args():
         ),
     )
     parser.add_argument(
-        "--without-torch",
+        "--with-torch",
         action="store_true",
-        help="Disable torch baseline timing/throughput benchmarking.",
+        help="Include torch baseline timing/throughput benchmarking.",
     )
     parser.add_argument(
         "--with-original",
@@ -169,7 +169,6 @@ def bench_one_shape(
         torch_tflops = float("nan")
         torch_bandwidth = float("nan")
         torch_error = "disabled"
-        print("torch unavailable: disabled by --without-torch")
 
     base_record = {
         "M": m,
@@ -271,7 +270,7 @@ def bench_one_shape(
 def main():
     args = _parse_args()
     swizzle_configs = _build_swizzle_configs(args.swizzle)
-    include_torch = not args.without_torch
+    include_torch = args.with_torch
 
     include_original = args.with_original
     original_reason = "enabled by --with-original" if include_original else "disabled by default"
@@ -288,7 +287,8 @@ def main():
         "Custom swizzle configs: "
         + ", ".join(f"(direction={d}, count={c})" for d, c in swizzle_configs)
     )
-    print(f"Torch baseline: {'enabled' if include_torch else 'disabled'}")
+    if include_torch:
+        print("Torch baseline: enabled")
     print(f"Original PTO backend: {'enabled' if include_original else 'disabled'} ({original_reason})")
 
     custom_backend = None
