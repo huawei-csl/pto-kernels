@@ -19,8 +19,8 @@ N_ALLOC = N_REPEAT + N_WARMUP
 
 # Custom-kernel swizzle runtime params (used by jit_util_matmul.py wrapper).
 # Direction: 0=Zn, 1=Nz. Count <= 0 disables swizzle.
-CUSTOM_SWIZZLE_DIRECTION = 0
-CUSTOM_SWIZZLE_COUNT = 4
+CUSTOM_SWIZZLE_DIRECTION = 1
+CUSTOM_SWIZZLE_COUNT = 3
 DEFAULT_SWIZZLE_CONFIGS = [(CUSTOM_SWIZZLE_DIRECTION, CUSTOM_SWIZZLE_COUNT)]
 
 M_LIST = [128 * i for i in range(1, 33)]  # 128, 256, ..., 4096
