@@ -18,6 +18,7 @@ jobs:
       - name: Run cppcheck
         run: |
           cppcheck \
+            --force \
             --enable=all \
             --std=c++17 \
             --suppress=missingInclude \
