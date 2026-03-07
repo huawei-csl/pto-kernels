@@ -23,4 +23,5 @@ jobs:
             --std=c++17 \
             --suppress=missingInclude \
             --suppress=missingIncludeSystem \
+            --error-exitcode=1 \
             csrc/
