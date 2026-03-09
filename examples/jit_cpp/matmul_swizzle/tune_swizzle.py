@@ -7,8 +7,6 @@ from jit_util_matmul import jit_compile
 import pandas as pd
 import torch
 
-from jit_util_matmul import jit_compile
-
 DEVICE = os.environ.get("NPU_DEVICE", "npu:0")
 DTYPE = torch.float16
 M_TILE = 128
@@ -22,8 +20,12 @@ def _parse_args():
             "the fastest configuration."
         )
     )
-    parser.add_argument("--n", type=int, required=True, help="N dimension")
-    parser.add_argument("--k", type=int, required=True, help="K dimension")
+    parser.add_argument(
+        "--n", type=int, required=True, help="N dimension", default=16834
+    )
+    parser.add_argument(
+        "--k", type=int, required=True, help="K dimension", default=16834
+    )
     parser.add_argument(
         "--m-min",
         type=int,
