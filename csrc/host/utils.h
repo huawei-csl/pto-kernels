@@ -38,6 +38,9 @@ namespace pto_isa_ops {
 /**
  * @brief Returns the number of Cube cores on the specified device.
  *
+ * Important: aclInit() must be called before this function to initialize the
+ ACL runtime.
+ *
  * @param [in] device_id Device ID, default is 0.
  * @return uint32_t Number of Cube cores on the specified device.
  */
@@ -51,6 +54,9 @@ uint32_t GetNumCubeCores(int32_t device_id = 0) {
 
 /**
  * @brief Get the number of vector Cores.
+ *
+ * Important: aclInit() must be called before this function to initialize the
+ * ACL runtime.
  *
  * @param [in] device_id Device ID, default is 0.
  * @return uint32_t Number of vector cores on the specified device.
