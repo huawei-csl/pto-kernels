@@ -120,11 +120,8 @@ ascendc_include_directories(
 
 pybind11_add_module(pto_kernels_ops csrc/host/pybind11.cpp)
 
-target_link_libraries(
-  pto_kernels_ops
-  PRIVATE ${TORCH_LIBRARIES} c10 torch_cpu torch_npu
-          platform # Required for 'ascendc_platform->GetCoreNumAic()'
-          no_workspace_kernel)
+target_link_libraries(pto_kernels_ops PRIVATE ${TORCH_LIBRARIES} c10 torch_cpu
+                                              torch_npu no_workspace_kernel)
 
 target_link_directories(pto_kernels_ops PRIVATE ${TORCH_INSTALL_PREFIX}/lib
                         ${TORCH_NPU_PATH}/lib)
