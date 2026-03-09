@@ -38,8 +38,14 @@ at::Tensor run_tri_inv(const at::Tensor& x) {
   }
 
   const uint32_t num_elems = static_cast<uint32_t>(x.numel());
-  const uint32_t block_dim =
+  const uint32_t total_tiles =
       static_cast<uint32_t>(num_elems / (matrix_size * matrix_size));
+
+  uint32_t block_dim = GetNumCubeCores();
+  if (total_tiles < block_dim) {
+    block_dim = total_tiles;
+  }
+
   const at::Tensor z = at::empty_like(x);
 
   if (dtype == at::kHalf) {
