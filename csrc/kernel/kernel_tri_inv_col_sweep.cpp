@@ -40,7 +40,7 @@ AICORE void runTTriInv(__gm__ T* vec_in, __gm__ T* vec_out,
   const uint32_t num_aiv_cores = get_block_num() * get_subblockdim();
   const uint32_t aiv_core_id =
       get_block_idx() * get_subblockdim() + get_subblockid();
-  uint32_t num_tiles_per_aiv =
+  const uint32_t num_tiles_per_aiv =
       kernel_utils::CeilDiv(total_length, (tile_len * num_aiv_cores));
   const uint32_t b_size = S * sizeof(T);
   const uint32_t diff_size = S * sizeof(T);
