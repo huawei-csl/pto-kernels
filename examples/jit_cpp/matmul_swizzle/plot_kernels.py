@@ -173,7 +173,9 @@ def plot_runtime(df: pd.DataFrame, out_dir: Path, n: int, k: int) -> Path:
             label=label,
         )
 
-    _finalize_plot(title=f"Runtime vs M: k={k}, n={n}", xlabel="M", ylabel="Runtime (us)")
+    _finalize_plot(
+        title=f"Runtime vs M: k={k}, n={n}", xlabel="M", ylabel="Runtime (us)"
+    )
 
     out_path = out_dir / "duration.png"
     plt.savefig(out_path, dpi=160)
@@ -218,7 +220,9 @@ def plot_error(df: pd.DataFrame, out_dir: Path, n: int, k: int) -> Path:
             label=label,
         )
 
-    _finalize_plot(title=f"Error vs M: k={k}, n={n}", xlabel="M", ylabel="Mean Abs Error")
+    _finalize_plot(
+        title=f"Error vs M: k={k}, n={n}", xlabel="M", ylabel="Mean Abs Error"
+    )
 
     out_path = out_dir / "error.png"
     plt.savefig(out_path, dpi=160)
