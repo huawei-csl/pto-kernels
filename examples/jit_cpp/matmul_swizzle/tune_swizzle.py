@@ -2,6 +2,8 @@ import argparse
 import os
 from pathlib import Path
 
+from jit_util_matmul import jit_compile
+
 import pandas as pd
 import torch
 
@@ -101,15 +103,15 @@ def _build_m_values(args) -> list[int]:
 
 def _measure_us(
     kernel,
-    a,
-    b,
+    a_list,
+    b_list,
     swizzle_direction: int,
     swizzle_count: int,
     max_block_dim: int,
     warmup: int,
     repeat: int,
 ) -> float:
-    for _ in range(warmup):
+    for a, b in zip(a_list[:warmup], b_list[:warmup]):
         kernel(
             a,
             b,
@@ -123,7 +125,7 @@ def _measure_us(
     end = torch.npu.Event(enable_timing=True)
 
     start.record()
-    for _ in range(repeat):
+    for a, b in zip(a_list[warmup : warmup + repeat], b_list[warmup : warmup + repeat]):
         kernel(
             a,
             b,
@@ -135,6 +137,62 @@ def _measure_us(
     torch.npu.synchronize()
 
     return start.elapsed_time(end) / repeat * 1e3
+
+
+def _sweep_one_m(
+    kernel,
+    m: int,
+    n: int,
+    k: int,
+    swizzle_configs: list[tuple[int, int]],
+    max_block_dim: int,
+    warmup: int,
+    repeat: int,
+) -> list[dict[str, int | float]]:
+    print(f"\n=== Sweeping M={m}, N={n}, K={k} ===")
+
+    n_alloc = warmup + repeat
+    a_list = [torch.randn(m, k, dtype=DTYPE, device=DEVICE) for _ in range(n_alloc)]
+    b_list = [torch.randn(n, k, dtype=DTYPE, device=DEVICE) for _ in range(n_alloc)]
+
+    records = []
+    best = None
+    for direction, count in swizzle_configs:
+        t_us = _measure_us(
+            kernel,
+            a_list,
+            b_list,
+            swizzle_direction=direction,
+            swizzle_count=count,
+            max_block_dim=max_block_dim,
+            warmup=warmup,
+            repeat=repeat,
+        )
+        records.append(
+            {
+                "M": m,
+                "N": n,
+                "K": k,
+                "swizzle_direction": direction,
+                "swizzle_count": count,
+                "time_us": t_us,
+            }
+        )
+        if best is None or t_us < best["time_us"]:
+            best = {
+                "swizzle_direction": direction,
+                "swizzle_count": count,
+                "time_us": t_us,
+            }
+
+    assert best is not None
+    print(
+        "best:"
+        f" dir={best['swizzle_direction']},"
+        f" count={best['swizzle_count']},"
+        f" time={best['time_us']:.3f} us"
+    )
+    return records
 
 
 def main():
@@ -163,49 +221,17 @@ def main():
     records = []
 
     for m in m_values:
-        print(f"\n=== Sweeping M={m}, N={args.n}, K={args.k} ===")
-        a = torch.randn(m, args.k, dtype=DTYPE, device=DEVICE)
-        b = torch.randn(args.n, args.k, dtype=DTYPE, device=DEVICE)
-
-        best_direction = None
-        best_count = None
-        best_time_us = None
-
-        for direction, count in swizzle_configs:
-            t_us = _measure_us(
+        records.extend(
+            _sweep_one_m(
                 kernel,
-                a,
-                b,
-                swizzle_direction=direction,
-                swizzle_count=count,
+                m=m,
+                n=args.n,
+                k=args.k,
+                swizzle_configs=swizzle_configs,
                 max_block_dim=int(args.max_block_dim),
                 warmup=int(args.warmup),
                 repeat=int(args.repeat),
             )
-            records.append(
-                {
-                    "M": m,
-                    "N": args.n,
-                    "K": args.k,
-                    "swizzle_direction": direction,
-                    "swizzle_count": count,
-                    "time_us": t_us,
-                }
-            )
-            if best_time_us is None or t_us < best_time_us:
-                best_direction = direction
-                best_count = count
-                best_time_us = t_us
-
-        assert best_direction is not None
-        assert best_count is not None
-        assert best_time_us is not None
-
-        print(
-            "best:"
-            f" dir={best_direction},"
-            f" count={best_count},"
-            f" time={best_time_us:.3f} us"
         )
 
     df = pd.DataFrame.from_records(records)
