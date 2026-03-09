@@ -6,8 +6,8 @@ import pandas as pd
 
 DEFAULT_CSV_REL_PATH = Path("outputs") / "csv" / "matmul_timing.csv"
 DEFAULT_PLOT_REL_DIR = Path("outputs") / "plots"
-DEFAULT_PLOT_N = 4096
-DEFAULT_PLOT_K = 4096
+DEFAULT_PLOT_N = 16384
+DEFAULT_PLOT_K = 16384
 
 BACKEND_STYLE = {
     "torch": {"color": "#111111", "marker": "x", "linestyle": "--"},
@@ -158,7 +158,7 @@ def _iter_custom_metric_groups(df: pd.DataFrame, metric_col: str):
         yield "custom", g, _style("custom")
 
 
-def plot_runtime(df: pd.DataFrame, out_dir: Path) -> Path:
+def plot_runtime(df: pd.DataFrame, out_dir: Path, n: int, k: int) -> Path:
     plt.figure(figsize=(10, 5))
     _plot_baseline(df, "torch_time_us", "torch", _style("torch"))
     _plot_baseline(df, "original_time_us", "original", _style("original"))
@@ -173,7 +173,7 @@ def plot_runtime(df: pd.DataFrame, out_dir: Path) -> Path:
             label=label,
         )
 
-    _finalize_plot(title="Runtime vs M", xlabel="M", ylabel="Runtime (us)")
+    _finalize_plot(title=f"Runtime vs M: k={k}, n={n}", xlabel="M", ylabel="Runtime (us)")
 
     out_path = out_dir / "duration.png"
     plt.savefig(out_path, dpi=160)
@@ -181,7 +181,7 @@ def plot_runtime(df: pd.DataFrame, out_dir: Path) -> Path:
     return out_path
 
 
-def plot_tflops(df: pd.DataFrame, out_dir: Path) -> Path:
+def plot_tflops(df: pd.DataFrame, out_dir: Path, n: int, k: int) -> Path:
     plt.figure(figsize=(10, 5))
     _plot_baseline(df, "torch_tflops", "torch", _style("torch"))
     _plot_baseline(df, "original_tflops", "original", _style("original"))
@@ -196,7 +196,7 @@ def plot_tflops(df: pd.DataFrame, out_dir: Path) -> Path:
             label=label,
         )
 
-    _finalize_plot(title="TFLOPS vs M", xlabel="M", ylabel="TFLOPS")
+    _finalize_plot(title=f"TFLOPS vs M: k={k}, n={n}", xlabel="M", ylabel="TFLOPS")
 
     out_path = out_dir / "flops.png"
     plt.savefig(out_path, dpi=160)
@@ -204,7 +204,7 @@ def plot_tflops(df: pd.DataFrame, out_dir: Path) -> Path:
     return out_path
 
 
-def plot_error(df: pd.DataFrame, out_dir: Path) -> Path:
+def plot_error(df: pd.DataFrame, out_dir: Path, n: int, k: int) -> Path:
     plt.figure(figsize=(10, 5))
     _plot_baseline(df, "original_mean_diff", "original", _style("original"))
 
@@ -218,7 +218,7 @@ def plot_error(df: pd.DataFrame, out_dir: Path) -> Path:
             label=label,
         )
 
-    _finalize_plot(title="Error vs M", xlabel="M", ylabel="Mean Abs Error")
+    _finalize_plot(title=f"Error vs M: k={k}, n={n}", xlabel="M", ylabel="Mean Abs Error")
 
     out_path = out_dir / "error.png"
     plt.savefig(out_path, dpi=160)
@@ -288,9 +288,9 @@ def main():
                 f"Available swizzles in CSV: {available_swizzles}"
             )
 
-    runtime_path = plot_runtime(plot_df, plot_dir)
-    flops_path = plot_tflops(plot_df, plot_dir)
-    error_path = plot_error(plot_df, plot_dir)
+    runtime_path = plot_runtime(plot_df, plot_dir, args.n, args.k)
+    flops_path = plot_tflops(plot_df, plot_dir, args.n, args.k)
+    error_path = plot_error(plot_df, plot_dir, args.n, args.k)
 
     print(f"Loaded CSV: {csv_path}")
     if swizzle_filter:

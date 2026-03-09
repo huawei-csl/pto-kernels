@@ -5,7 +5,6 @@ from pathlib import Path
 import pandas as pd
 import torch
 import torch.nn.functional as F
-import torch_npu  # noqa
 
 from jit_util_matmul import jit_compile as jit_compile_custom
 from jit_util_original_pto import jit_compile as jit_compile_original
@@ -27,7 +26,7 @@ M_LIST = [128 * i for i in range(1, 33)]  # 128, 256, ..., 4096
 
 # B is [N, K], output is [M, N]
 SHAPES_NK = [
-    (4096, 4096),
+    (16384, 16384),
 ]
 
 DEFAULT_CSV_REL_PATH = Path("outputs") / "csv" / "matmul_timing.csv"
