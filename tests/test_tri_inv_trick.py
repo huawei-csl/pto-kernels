@@ -10,17 +10,12 @@ import torch
 from pto_kernels import pto_tri_inv_trick
 import pytest
 import numpy as np
-import os
 import random
 from typing import Callable
 
 random.seed(42)
 torch.manual_seed(42)
 np.random.seed(42)
-
-NPU_DEVICE = os.environ.get("NPU_DEVICE", "npu:0")
-torch.npu.config.allow_internal_format = False
-torch.npu.set_device(NPU_DEVICE)
 
 
 def random_matrix(n, block_dim_x, block_dim_y, scale=0.01):
@@ -56,7 +51,7 @@ def _test_tri_inv_trick(U: torch.tensor, atol: float, rtol: float, ftol: float):
 
     n = U.shape[-1]
     U = U.to(torch.half)
-    U_npu = U.to(NPU_DEVICE)
+    U_npu = U.npu()
     torch.npu.synchronize()
 
     Identity = np.ones((n, n), dtype=np.double)
