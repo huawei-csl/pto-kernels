@@ -10,7 +10,6 @@
 import torch
 import pytest
 import numpy as np
-import os
 import random
 from typing import Callable
 from pto_kernels import pto_tri_inv_rec_unroll
@@ -18,10 +17,6 @@ from pto_kernels import pto_tri_inv_rec_unroll
 random.seed(42)
 torch.manual_seed(42)
 np.random.seed(42)
-
-NPU_DEVICE = os.environ.get("NPU_DEVICE", "npu:1")
-torch.npu.config.allow_internal_format = False
-torch.npu.set_device(NPU_DEVICE)
 
 
 def random_triu_matrix(n, block_dim_x, block_dim_y, scale=0.1):
@@ -77,7 +72,7 @@ def _test_tri_inv_rec_unroll(U: torch.tensor, atol: float, rtol: float, ftol: fl
     U = U.to(torch.half)
     golden_cpu = linalg_inv(U)
 
-    U_npu = U.to(NPU_DEVICE)
+    U_npu = U.npu()
 
     torch.npu.synchronize()
     actual = pto_tri_inv_rec_unroll(U_npu, is_bsnd_format=False)
@@ -117,7 +112,7 @@ def _test_tri_inv_rec_unroll_bsnd(
     torch.npu.synchronize()
     golden_cpu = golden_cpu.transpose(1, 2).contiguous().reshape(B, S, N, D)
 
-    U_npu = U.to(NPU_DEVICE)
+    U_npu = U.npu()
 
     torch.npu.synchronize()
     actual = pto_tri_inv_rec_unroll(U_npu, is_bsnd_format=True)
