@@ -7,9 +7,9 @@ import torch
 ASCEND_TOOLKIT_HOME = os.environ["ASCEND_TOOLKIT_HOME"]
 PTO_LIB_PATH = os.environ.get("PTO_LIB_PATH", ASCEND_TOOLKIT_HOME)
 
-DEFAULT_MAX_BLOCK_DIM = int(os.environ.get("PTO_MATMUL_MAX_BLOCK_DIM", "20"))
-DEFAULT_SWIZZLE_DIRECTION = int(os.environ.get("PTO_MATMUL_SWIZZLE_DIRECTION", "1"))
-DEFAULT_SWIZZLE_COUNT = int(os.environ.get("PTO_MATMUL_SWIZZLE_COUNT", "3"))
+BLOCK_DIM = int(getattr(torch.npu.get_device_properties("npu:0"), "cube_core_num", 20))
+SWIZZLE_DIRECTION = int(os.environ.get("PTO_MATMUL_SWIZZLE_DIRECTION", "1"))
+SWIZZLE_COUNT = int(os.environ.get("PTO_MATMUL_SWIZZLE_COUNT", "3"))
 
 M_TILE = 128
 N_TILE = 256
@@ -144,10 +144,10 @@ def load_lib(lib_path):
     def matmul_abt(
         a,
         b,
-        max_block_dim=DEFAULT_MAX_BLOCK_DIM,
+        max_block_dim=BLOCK_DIM,
         stream_ptr=None,
-        swizzle_direction=DEFAULT_SWIZZLE_DIRECTION,
-        swizzle_count=DEFAULT_SWIZZLE_COUNT,
+        swizzle_direction=SWIZZLE_DIRECTION,
+        swizzle_count=SWIZZLE_COUNT,
     ):
         if a.ndim != 2 or b.ndim != 2:
             raise ValueError("matmul_abt expects 2D tensors: a[M,K], b[N,K]")
