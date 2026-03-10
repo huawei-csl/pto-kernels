@@ -37,6 +37,7 @@ PYBIND11_MODULE(pto_kernels_ops, m) {
   m.def("pto_batch_matrix_square", &pto_isa_ops::run_batch_matrix_square);
   m.def("pto_simple_matmul", &pto_isa_ops::run_simple_matmul);
   m.def("pto_tri_inv_trick", &pto_isa_ops::run_tri_inv_trick);
-  m.def("pto_tri_inv_rec_unroll", &pto_isa_ops::run_tri_inv_rec_unroll);
+  m.def("pto_tri_inv_rec_unroll", &pto_isa_ops::run_tri_inv_rec_unroll,
+        py::arg("M"), py::arg("is_bsnd_format") = false);
   m.def("pto_tri_inv", &pto_isa_ops::run_tri_inv);
 }
