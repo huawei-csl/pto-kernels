@@ -138,23 +138,29 @@ AICORE inline void PrepareAuxiliaryMatrices(
     TileL0A a_l0_tile, TileL0B b_l0_tile, TileL0C c_l0_tile) {
   TMOV(a_l0_tile, I_neg_l1_tile);  // a_l0 initialized with I_neg
   TMOV(b_l0_tile, I_neg_l1_tile);  // b_l0 initialized with I_neg
-  SetWaitFlag<PIPE_MTE1, PIPE_M>(0);
+  set_flag(PIPE_MTE1, PIPE_M, static_cast<event_t>(0));
+  wait_flag(PIPE_MTE1, PIPE_M, static_cast<event_t>(0));
 
   TMATMUL(c_l0_tile, a_l0_tile, b_l0_tile);  // c_l0 contains I
-  SetWaitFlag<PIPE_M, PIPE_FIX>(0);
+  set_flag(PIPE_M, PIPE_FIX, static_cast<event_t>(0));
+  wait_flag(PIPE_M, PIPE_FIX, static_cast<event_t>(0));
 
   TMOV(I_l1_tile, c_l0_tile);  // I_l1 now contains I
-  SetWaitFlag<PIPE_FIX, PIPE_MTE1>(0);
+  set_flag(PIPE_FIX, PIPE_MTE1, static_cast<event_t>(0));
+  wait_flag(PIPE_FIX, PIPE_MTE1, static_cast<event_t>(0));
 
   TMOV(b_l0_tile, I_l1_tile);  // b_l0 contains I
-  SetWaitFlag<PIPE_MTE1, PIPE_M>(0);
+  set_flag(PIPE_MTE1, PIPE_M, static_cast<event_t>(0));
+  wait_flag(PIPE_MTE1, PIPE_M, static_cast<event_t>(0));
 
   TMATMUL_ACC(c_l0_tile, c_l0_tile, a_l0_tile,
               b_l0_tile);  // c_l0 contains zeros
-  SetWaitFlag<PIPE_M, PIPE_FIX>(0);
+  set_flag(PIPE_M, PIPE_FIX, static_cast<event_t>(0));
+  wait_flag(PIPE_M, PIPE_FIX, static_cast<event_t>(0));
 
   TMOV(Zero_l1_tile, c_l0_tile);  // Zeros_l1 now contains zeros
-  SetWaitFlag<PIPE_FIX, PIPE_MTE1>(0);
+  set_flag(PIPE_FIX, PIPE_MTE1, static_cast<event_t>(0));
+  wait_flag(PIPE_FIX, PIPE_MTE1, static_cast<event_t>(0));
 }
 
 /*
@@ -451,10 +457,10 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
   using GlobalTileIn =
       GlobalTensor<InputT, GlobalTileShapeIn, GlobalTileStridesIn, Layout::ND>;
 
-  using GlobalTileStridesNeg =
+  using GlobalTileStridesINeg =
       BaseShape2D<InputT, MatrixSize, MatrixSize, Layout::ND>;
-  using GlobalTileNeg =
-      GlobalTensor<InputT, GlobalTileShapeIn, GlobalTileStridesNeg, Layout::ND>;
+  using GlobalTileINeg =
+      GlobalTensor<InputT, GlobalTileShapeIn, GlobalTileStridesINeg, Layout::ND>;
 
   using GlobalTileShapeOut =
       TileShape2D<OutputT, MatrixSize, MatrixSize, Layout::ND>;
@@ -473,7 +479,7 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
   using TileL0B = TileRight<InputT, MatrixSize, MatrixSize>;
   using TileL0C = TileAcc<OutputT, MatrixSize, MatrixSize>;
 
-  GlobalTileNeg I_neg_global_in(I_neg);
+  GlobalTileINeg I_neg_global_in(I_neg);
 
   TileL1AB X_l1_tile;
   TileL1AB I_l1_tile;
@@ -502,7 +508,8 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
             0x0 + buffer_num * TileLen * sizeof(OutputT));
   }
   TLOAD(I_neg_l1_tile, I_neg_global_in);
-  SetWaitFlag<PIPE_MTE2, PIPE_MTE1>(0);
+  set_flag(PIPE_MTE2, PIPE_MTE1, static_cast<event_t>(0));
+  wait_flag(PIPE_MTE2, PIPE_MTE1, static_cast<event_t>(0));
 
   PrepareAuxiliaryMatrices<TileL1AB, TileL0A, TileL0B, TileL0C>(
       I_neg_l1_tile, Zero_l1_tile, I_l1_tile, a_l0_tile[0], b_l0_tile[0],

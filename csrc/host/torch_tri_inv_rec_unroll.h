@@ -12,7 +12,6 @@ for the full License text.
 #include <torch/library.h>
 
 #include "aclrtlaunch_tri_inv_rec_unroll_fp16.h"
-#include "tiling/platform/platform_ascendc.h"
 #include "utils.h"
 
 namespace pto_isa_ops {
@@ -47,10 +46,7 @@ at::Tensor run_tri_inv_rec_unroll(const at::Tensor& M,
   const uint32_t total_tiles =
       static_cast<uint32_t>(num_elems / (matrix_size * matrix_size));
 
-  const auto ascendc_platform =
-      platform_ascendc::PlatformAscendCManager::GetInstance();
-
-  uint32_t block_dim = ascendc_platform->GetCoreNumAic();
+  uint32_t block_dim = GetNumCubeCores();
   if (total_tiles < block_dim) {
     block_dim = total_tiles;
   }
