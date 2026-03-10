@@ -99,7 +99,14 @@ def _test_tri_inv_trick(U: torch.tensor, atol: float, rtol: float, ftol: float):
 
 
 def _test_tri_inv_rec_unroll_bsnd(
-    U: torch.tensor, B: int, S: int, N: int, D: int, atol: float, rtol: float, ftol: float
+    U: torch.tensor,
+    B: int,
+    S: int,
+    N: int,
+    D: int,
+    atol: float,
+    rtol: float,
+    ftol: float,
 ):
 
     U = U.to(torch.half)
