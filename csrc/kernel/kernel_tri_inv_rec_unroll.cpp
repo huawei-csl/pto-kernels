@@ -425,7 +425,14 @@ AICORE inline void InvertSingleTile(TileL1AB X_l1_tile, TileL1AB I_l1_tile,
  * @tparam MatrixSize Size of the entire input/output matrices.
  * @tparam NumTilesPerCubeIter How many matrices to load and invert in a single
  * cube iteration.
- * @tparam IsBSND True if the input tensor is in BSND layout.
+ * @tparam IsBSND if IsBSDN is false then the last two dimensions represent a 2D
+ * triangular matrix in row-major format, while the other dimensions are batch
+ * dimensions.
+ * If IsBSND is true, then the dimensions represent in order: B batch size, S
+ * sequence length (which is chunked in tiles of size D), N number of heads
+ * (equivalent to a second batch dimension for this kernel), and D chunk size.
+ * The inverse is over the dimensions S (chunked) and D, row-major within each
+ * tile.
  *
  * @param M_inv pointer to the global memory to store the final inverse.
  * @param M Pointer to the global tensor matrix in global memory.
