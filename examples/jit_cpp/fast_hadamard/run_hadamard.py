@@ -208,8 +208,8 @@ def plot_bandwidth(input_dir="./perf_data/", output_path="bw_vs_shape.png"):
 if __name__ == "__main__":
     torch.npu.set_device(DEVICE)
 
-    print("Compiling fast_hadamard_pto-isa.cpp ...")
-    hadamard_func = jit_compile("fast_hadamard_pto-isa.cpp")
+    print("Compiling fast_hadamard.cpp ...")
+    hadamard_func = jit_compile("fast_hadamard.cpp")
     print()
 
     test_correctness(hadamard_func)
