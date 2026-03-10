@@ -99,16 +99,16 @@ def _test_tri_inv_trick(U: torch.tensor, atol: float, rtol: float, ftol: float):
 
 
 def _test_tri_inv_rec_unroll_bsnd(
-    U: torch.tensor, atol: float, rtol: float, ftol: float
+    U: torch.tensor, B: int, S: int, N: int, D: int, atol: float, rtol: float, ftol: float
 ):
 
     U = U.to(torch.half)
     golden_cpu = linalg_inv(U)
 
     # Transform to bsnd layout
-    U = U.transpose(1, 2).contiguous()
+    U = U.transpose(1, 2).contiguous().reshape(B, S, N, D)
     torch.npu.synchronize()
-    golden_cpu = golden_cpu.transpose(1, 2).contiguous()
+    golden_cpu = golden_cpu.transpose(1, 2).contiguous().reshape(B, S, N, D)
 
     U_npu = U.to(NPU_DEVICE)
 
@@ -183,4 +183,4 @@ def test_tri_inv_rec_unroll_bsnd(
     if S % D != 0:
         pytest.skip("Sequence length must be a multiple of chunk size D.")
     U = matrix_gen(D, B * S // D, N)
-    _test_tri_inv_rec_unroll_bsnd(U, atol, rtol, ftol)
+    _test_tri_inv_rec_unroll_bsnd(U, B, S, N, D, atol, rtol, ftol)
