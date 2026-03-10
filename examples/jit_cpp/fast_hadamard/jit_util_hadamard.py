@@ -56,9 +56,7 @@ def load_lib(lib_path):
     ]
     lib.call_kernel.restype = None
 
-    def hadamard_func(
-        x, batch, n, log2_n, block_dim=BLOCK_DIM, stream_ptr=None
-    ):
+    def hadamard_func(x, batch, n, log2_n, block_dim=BLOCK_DIM, stream_ptr=None):
         if stream_ptr is None:
             stream = torch.npu.current_stream()
             stream_ptr = getattr(stream, "_as_parameter_", None)
