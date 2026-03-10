@@ -459,8 +459,8 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
 
   using GlobalTileStridesINeg =
       BaseShape2D<InputT, MatrixSize, MatrixSize, Layout::ND>;
-  using GlobalTileINeg =
-      GlobalTensor<InputT, GlobalTileShapeIn, GlobalTileStridesINeg, Layout::ND>;
+  using GlobalTileINeg = GlobalTensor<InputT, GlobalTileShapeIn,
+                                      GlobalTileStridesINeg, Layout::ND>;
 
   using GlobalTileShapeOut =
       TileShape2D<OutputT, MatrixSize, MatrixSize, Layout::ND>;
