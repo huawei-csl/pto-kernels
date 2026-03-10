@@ -112,7 +112,7 @@ def _test_tri_inv_rec_unroll_bsnd(
     torch.npu.synchronize()
     golden_cpu = golden_cpu.transpose(1, 2).contiguous().reshape(B, S, N, D)
 
-    U_npu = U.to(NPU_DEVICE)
+    U_npu = U.npu()
 
     torch.npu.synchronize()
     actual = pto_tri_inv_rec_unroll(U_npu, is_bsnd_format=True)
