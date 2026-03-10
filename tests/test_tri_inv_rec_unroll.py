@@ -72,7 +72,7 @@ def linalg_inv(U: torch.tensor) -> torch.tensor:
     return torch.from_numpy(golden_numpy)
 
 
-def _test_tri_inv_trick(U: torch.tensor, atol: float, rtol: float, ftol: float):
+def _test_tri_inv_rec_unroll(U: torch.tensor, atol: float, rtol: float, ftol: float):
 
     U = U.to(torch.half)
     golden_cpu = linalg_inv(U)
@@ -150,7 +150,7 @@ def _test_tri_inv_rec_unroll_bsnd(
         (random_triu_matrix, 5e-5, 0.1, 1e-4),
     ],
 )
-def test_tri_inv_trick(
+def test_tri_inv_rec_unroll(
     n: int,
     block_dim_x: int,
     block_dim_y: int,
@@ -160,7 +160,7 @@ def test_tri_inv_trick(
     ftol: float,
 ):
     U = matrix_gen(n, block_dim_x, block_dim_y)
-    _test_tri_inv_trick(U, atol, rtol, ftol)
+    _test_tri_inv_rec_unroll(U, atol, rtol, ftol)
 
 
 @pytest.mark.parametrize("B", [1, 4])
