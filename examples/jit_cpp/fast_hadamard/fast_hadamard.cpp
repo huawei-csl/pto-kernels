@@ -24,7 +24,7 @@ constexpr unsigned ODD_PONG = (EVEN_PONG + 0x4000 + 0x100);
 template <typename T>
 AICORE void runTFastHadamard(__gm__ T *x, uint32_t batch, uint32_t n,
                              uint32_t log2_n) {
-#if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
+#if defined(__DAV_VEC__)
   set_mask_norm();
   set_vector_mask(-1, -1);
 
