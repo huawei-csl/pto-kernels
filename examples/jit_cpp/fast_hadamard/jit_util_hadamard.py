@@ -6,7 +6,7 @@ import torch
 
 ASCEND_TOOLKIT_HOME = os.environ["ASCEND_TOOLKIT_HOME"]
 PTO_LIB_PATH = os.environ.get("PTO_LIB_PATH", ASCEND_TOOLKIT_HOME)
-BLOCK_DIM = 20  # hard-coded to 910B4 vector core number
+BLOCK_DIM = int(getattr(torch.npu.get_device_properties("npu:0"), "cube_core_num", 20))
 
 
 def compile_cpp(kernel_cpp: str, verbose: bool = False, timeout: int = 120) -> str:
@@ -56,11 +56,7 @@ def load_lib(lib_path):
     ]
     lib.call_kernel.restype = None
 
-    default_block_dim = BLOCK_DIM
-
-    def hadamard_func(
-        x, batch, n, log2_n, block_dim=default_block_dim, stream_ptr=None
-    ):
+    def hadamard_func(x, batch, n, log2_n, block_dim=BLOCK_DIM, stream_ptr=None):
         if stream_ptr is None:
             stream = torch.npu.current_stream()
             stream_ptr = getattr(stream, "_as_parameter_", None)
