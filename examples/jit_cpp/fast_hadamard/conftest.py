@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from jit_util_hadamard import normalize_npu_device
+from jit_util_hadamard import jit_compile, normalize_npu_device
 
 
 def pytest_addoption(parser):
@@ -28,8 +28,6 @@ def setup_npu_device(npu_device):
 
 @pytest.fixture(scope="session")
 def hadamard_kernel(npu_device):
-    from jit_util_hadamard import jit_compile
-
     base = Path(__file__).resolve().parent
     src = base / "fast_hadamard.cpp"
     return jit_compile(str(src), verbose=True, device=npu_device)

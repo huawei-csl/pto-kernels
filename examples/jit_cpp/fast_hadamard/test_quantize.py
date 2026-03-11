@@ -3,6 +3,8 @@ from pathlib import Path
 import pytest
 import torch
 
+from jit_util_quantize import jit_compile
+
 TEST_BATCHES = [1, 7, 65]
 TEST_HIDDEN_DIMS = [128, 1024, 16384]
 TEST_SCALES = [0.5, 1.0, 2.0]
@@ -48,8 +50,6 @@ def assert_quantize_matches_ref(quantize_kernel, x, scale):
 
 @pytest.fixture(scope="session")
 def quantize_kernel():
-    from jit_util_quantize import jit_compile
-
     base = Path(__file__).resolve().parent
     src = base / "quantize.cpp"
     return jit_compile(str(src), verbose=True)

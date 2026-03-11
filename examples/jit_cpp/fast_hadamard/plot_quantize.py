@@ -7,7 +7,7 @@ from jit_util_hadamard import chmod_output_path, normalize_npu_device
 
 try:
     import matplotlib.pyplot as plt
-    import matplotlib.ticker as ticker
+    from matplotlib import ticker
 except ImportError:
     plt = None
     ticker = None

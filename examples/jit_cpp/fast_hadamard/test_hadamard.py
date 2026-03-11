@@ -116,21 +116,21 @@ def test_samples_per_load_boundaries(hadamard_kernel, npu_device, n):
 
 
 @pytest.mark.parametrize("n", [192, MAX_HADAMARD_N + 1])
-def test_invalid_n_rejected(hadamard_kernel, npu_device, n):
+def test_invalid_n_rejected(npu_device, n):
     x = torch.randn(2, n, device=npu_device, dtype=DTYPE)
 
     with pytest.raises(ValueError, match="power of two|<= 16384"):
         validate_hadamard_args(x, 2, n, int(math.log2(n)))
 
 
-def test_wrong_log2_rejected(hadamard_kernel, npu_device):
+def test_wrong_log2_rejected(npu_device):
     x = torch.randn(2, 1024, device=npu_device, dtype=DTYPE)
 
     with pytest.raises(ValueError, match="log2_n"):
         validate_hadamard_args(x, 2, 1024, 9)
 
 
-def test_noncontiguous_input_rejected(hadamard_kernel, npu_device):
+def test_noncontiguous_input_rejected(npu_device):
     x = torch.randn(1024, 5, device=npu_device, dtype=DTYPE).transpose(0, 1)
     assert x.shape == (5, 1024)
     assert not x.is_contiguous()
@@ -139,14 +139,14 @@ def test_noncontiguous_input_rejected(hadamard_kernel, npu_device):
         validate_hadamard_args(x, 5, 1024, 10)
 
 
-def test_wrong_dtype_rejected(hadamard_kernel, npu_device):
+def test_wrong_dtype_rejected(npu_device):
     x = torch.randn(2, 1024, device=npu_device, dtype=torch.float32)
 
     with pytest.raises(TypeError, match="torch.float16"):
         validate_hadamard_args(x, 2, 1024, 10)
 
 
-def test_shape_mismatch_rejected(hadamard_kernel, npu_device):
+def test_shape_mismatch_rejected(npu_device):
     x = torch.randn(2, 1024, device=npu_device, dtype=DTYPE)
 
     with pytest.raises(ValueError, match="must match batch=1 and n=1024"):
