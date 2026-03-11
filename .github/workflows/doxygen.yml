@@ -2,7 +2,10 @@ name: Check Doxygen Docs
 
 on:
   push:
-    branches: [ main ]
+    branches: [ "main" ]
+  schedule:
+    - cron: "0 2 * * *"   # runs every day at 02:00 UTC
+  workflow_dispatch:       # allows manual trigger
   pull_request:
 
 permissions:
