@@ -9,7 +9,6 @@ for the full License text.
 #if defined __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
 
 // Placeholder for VEC compilation (the real kernel is CUBE-only).
-#define MEMORY_BASE
 #include <pto/common/type.hpp>
 
 extern "C" __global__ AICORE void simple_matmul_fp16(__gm__ void* a,
@@ -24,8 +23,6 @@ extern "C" __global__ AICORE void simple_matmul_fp32(__gm__ void* a,
 
 #elif (__CHECK_FEATURE_AT_PRECOMPILE) || \
     (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))
-
-#define MEMORY_BASE
 
 #include <pto/pto-inst.hpp>
 

@@ -8,7 +8,6 @@ for the full License text.
 */
 #pragma once
 
-#define MEMORY_BASE
 #include <pto/pto-inst.hpp>
 
 namespace kernel_utils {

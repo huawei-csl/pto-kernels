@@ -6,8 +6,6 @@ See LICENSE in the root of the software repository:
 https://github.com/huawei-csl/pto-kernels/
 for the full License text.
 */
-
-#define MEMORY_BASE
 #include <pto/pto-inst.hpp>
 
 #define GM_ADDR __gm__ uint8_t*  // To avoid #include "kernel_operator.h"

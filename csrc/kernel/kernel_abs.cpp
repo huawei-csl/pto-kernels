@@ -9,8 +9,6 @@ for the full License text.
 
 #if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
 
-#define MEMORY_BASE
-
 #include <pto/pto-inst.hpp>
 
 #define GM_ADDR __gm__ uint8_t*  // To avoid #include "kernel_operator.h"

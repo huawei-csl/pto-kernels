@@ -7,7 +7,7 @@ https://github.com/huawei-csl/pto-kernels/
 for the full License text.
 */
 
-#define MEMORY_BASE
+#include <cstdint>
 #include <pto/pto-inst.hpp>
 
 #include "kernel_utils.h"
@@ -448,7 +448,6 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
   /* Initializations */
   constexpr uint32_t TileLen = MatrixSize * MatrixSize;
   constexpr uint32_t FractalSize = 16;  // fractal size for half
-  constexpr uint32_t NumFractalsRowWise = MatrixSize / FractalSize;
   constexpr uint32_t NumL0Buffers = 2;
 
   if (get_block_idx() * NumTilesPerCubeIter >= total_tiles) {
