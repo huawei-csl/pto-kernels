@@ -7,16 +7,13 @@ https://github.com/huawei-csl/pto-kernels/
 for the full License text.
 */
 
-#if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
-
-#include <pto/pto-inst.hpp>
-
-#define GM_ADDR __gm__ uint8_t*  // To avoid #include "kernel_operator.h"
+#include "kernel_utils.h"
 
 using namespace pto;
 
 template <typename T, unsigned matrix_size>
 AICORE void runTAbs(__gm__ T* x, __gm__ T* z, uint32_t total_length) {
+#if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
   // define GlobalData on global memory with shape and stride
   using ShapeDim5 = pto::Shape<1, 1, 1, matrix_size, matrix_size>;
   using StrideDim5 = pto::Stride<1, 1, 1, matrix_size, 1>;
@@ -76,6 +73,7 @@ AICORE void runTAbs(__gm__ T* x, __gm__ T* z, uint32_t total_length) {
     set_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
     wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
   }
+#endif
 }
 
 extern "C" __global__ AICORE void vabs_fp16(GM_ADDR x, GM_ADDR z,
@@ -91,5 +89,3 @@ extern "C" __global__ AICORE void vabs_fp32(GM_ADDR x, GM_ADDR z,
   // main kernel, in_length is dynamic input
   runTAbs<float, martix_size>((__gm__ float*)x, (__gm__ float*)z, in_length);
 }
-
-#endif

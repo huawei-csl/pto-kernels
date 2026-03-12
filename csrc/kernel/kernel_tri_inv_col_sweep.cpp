@@ -7,11 +7,7 @@ https://github.com/huawei-csl/pto-kernels/
 for the full License text.
 */
 
-#include <pto/pto-inst.hpp>
-
 #include "kernel_utils.h"
-
-#define GM_ADDR __gm__ uint8_t*  // To avoid #include "kernel_operator.h"
 
 using namespace pto;
 

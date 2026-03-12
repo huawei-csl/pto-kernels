@@ -8,7 +8,13 @@ for the full License text.
 */
 #pragma once
 
+#define MEMORY_BASE
+
+#include <cstdint>
 #include <pto/pto-inst.hpp>
+
+// To avoid #include "kernel_operator.h"
+#define GM_ADDR __gm__ uint8_t*
 
 namespace kernel_utils {
 /**

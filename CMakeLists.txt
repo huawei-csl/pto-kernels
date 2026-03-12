@@ -47,14 +47,8 @@ set(CMAKE_COMPILER bisheng)
 set(CMAKE_C_COMPILER ${CMAKE_COMPILER})
 set(CMAKE_CXX_COMPILER ${CMAKE_COMPILER})
 
-add_compile_options(
-  -D_FORTIFY_SOURCE=2
-  -O2
-  -DMEMORY_BASE
-  -std=c++17
-  -Wno-macro-redefined
-  -Wno-ignored-attributes
-  -fstack-protector-strong)
+add_compile_options(-D_FORTIFY_SOURCE=2 -O2 -std=c++17 -Wno-macro-redefined
+                    -Wno-ignored-attributes -fstack-protector-strong)
 
 add_link_options(-s -Wl,-z,relro -Wl,-z,now)
 
@@ -119,10 +113,6 @@ ascendc_library(
   csrc/kernel/kernel_batch_matrix_square.cpp
   csrc/kernel/kernel_tri_inv_rec_unroll.cpp
   csrc/kernel/kernel_tri_inv_trick.cpp)
-
-# TODO(anastasios): Configure this depending on the NPU device. For A5, use
-# REGISTER_BASE.
-ascendc_compile_definitions(no_workspace_kernel PRIVATE MEMORY_BASE=1)
 
 ascendc_include_directories(
   no_workspace_kernel PRIVATE ${libpto_isa_headers_SOURCE_DIR}/include
