@@ -26,15 +26,12 @@ jobs:
         run: |
           git config user.name "GitHub Action"
           git config user.email "action@github.com"
-          
           TAG_NAME="v${{ steps.get_version.outputs.version }}"
-          
           # Check if tag already exists
           if git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
             echo "Tag $TAG_NAME already exists, skipping..."
             exit 0
           fi
-          
           git tag -a "$TAG_NAME" -m "Release $TAG_NAME"
           git push origin "$TAG_NAME"
           echo "Created tag: $TAG_NAME"
