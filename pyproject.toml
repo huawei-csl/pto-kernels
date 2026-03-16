@@ -50,7 +50,7 @@ dependencies = [
 
 [project.optional-dependencies]
 torch = [
-  "torch-npu==2.8.0.post2",
+  "torch-npu",
 ]
 
 [tool.pip]
