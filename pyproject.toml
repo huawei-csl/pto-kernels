@@ -8,6 +8,7 @@ requires = [
   "psutil==6.1.0",
   "PyYAML==6.0.2",
   "attrs==24.2.0",
+  "torch==2.8.0",
   "torch-npu==2.8.0.post2",
 ]
 build-backend = "scikit_build_core.build"
@@ -52,6 +53,9 @@ dependencies = [
 torch = [
   "torch-npu==2.8.0.post2",
 ]
+
+[tool.pip]
+extra-index-url = ["https://download.pytorch.org/whl/cpu"]
 
 [tool.scikit-build]
 build-dir = "build/{wheel_tag}"

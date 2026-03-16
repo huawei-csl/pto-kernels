@@ -19,6 +19,14 @@ make setup_once
 
 ---
 
+## Remove installation using pip
+
+The repository is "pip installable", i.e.,
+
+```bash
+export CMAKE_GENERATOR="Unix Makefiles" && pip wheel -v git+https://github.com/huawei-csl/pto-dsl.git
+```
+
 ## Build
 
 ```bash
