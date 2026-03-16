@@ -8,7 +8,6 @@ from jit_util_hadamard import DEFAULT_DEVICE, get_cube_block_dim, normalize_npu_
 
 ASCEND_TOOLKIT_HOME = os.environ["ASCEND_TOOLKIT_HOME"]
 PTO_LIB_PATH = os.environ.get("PTO_LIB_PATH", ASCEND_TOOLKIT_HOME)
-BLOCK_DIM = int(getattr(torch.npu.get_device_properties("npu:0"), "cube_core_num", 20))
 
 
 def compile_cpp(
