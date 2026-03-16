@@ -207,7 +207,7 @@ def main():
 
     print(f"Using device: {args.npu}")
     print("Compiling quantize.cpp ...")
-    quantize_func = jit_compile(str(kernel_path), verbose=True)
+    quantize_func = jit_compile(str(kernel_path), verbose=True, device=args.npu)
     print()
 
     benchmark(

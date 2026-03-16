@@ -180,49 +180,62 @@ AICORE void runTFastHadamardQuant(__gm__ InT *x, __gm__ OutT *y,
         pipe_barrier(PIPE_V);
       }
     }
-    wait_flag(PIPE_MTE3, PIPE_V, current_ev);
-    const uint32_t groups_per_row = n / group_size;
-    const uint32_t row_index_base = current_tile.gm_offset / n;
     const bool has_group_scales = group_scales != nullptr;
     const bool has_group_offsets = group_offsets != nullptr;
-    for (uint32_t s = 0; s < current_tile.sample_count; ++s) {
-      const uint32_t row_index = row_index_base + s;
-      const unsigned row_x_base = current_x_base + s * n * sizeof(InT);
-      const unsigned row_y_base = current_y_base + s * n * sizeof(OutT);
-
-      for (uint32_t g = 0; g < groups_per_row; ++g) {
-        const unsigned group_x_base = row_x_base + g * group_size * sizeof(InT);
-        const unsigned group_y_base =
-            row_y_base + g * group_size * sizeof(OutT);
-
-        FullTile xGroupTile(1, group_size);
-        QuantTile yGroupTile(1, group_size);
-        TASSIGN(xGroupTile, group_x_base);
-        TASSIGN(yGroupTile, group_y_base);
-
-        InT group_scale = (InT)scale;
-        if (has_group_scales) {
-          const uint32_t scale_index = (scale_group_stride == 0)
-                                           ? g
-                                           : row_index * scale_group_stride + g;
-          group_scale = group_scales[scale_index];
-        }
-
-        TMULS(xGroupTile, xGroupTile, group_scale);
+    wait_flag(PIPE_MTE3, PIPE_V, current_ev);
+    if (!has_group_scales && !has_group_offsets) {
+      // Uniform scale/offset is equivalent for any group_size, so keep the
+      // old whole-tile path to avoid grouped-loop overhead.
+      TMULS(xBulkTile, xBulkTile, (InT)scale);
+      pipe_barrier(PIPE_V);
+      if (q_offset != 0.0f) {
+        TADDS(xBulkTile, xBulkTile, (InT)q_offset);
         pipe_barrier(PIPE_V);
-        if (has_group_offsets || q_offset != 0.0f) {
-          InT group_offset = (InT)q_offset;
-          if (has_group_offsets) {
-            const uint32_t offset_index =
-                (offset_group_stride == 0)
-                    ? g
-                    : row_index * offset_group_stride + g;
-            group_offset = group_offsets[offset_index];
+      }
+      TCVT(yBulkTile, xBulkTile, RoundMode::CAST_NONE);
+    } else {
+      const uint32_t groups_per_row = n / group_size;
+      const uint32_t row_index_base = current_tile.gm_offset / n;
+      for (uint32_t s = 0; s < current_tile.sample_count; ++s) {
+        const uint32_t row_index = row_index_base + s;
+        const unsigned row_x_base = current_x_base + s * n * sizeof(InT);
+        const unsigned row_y_base = current_y_base + s * n * sizeof(OutT);
+
+        for (uint32_t g = 0; g < groups_per_row; ++g) {
+          const unsigned group_x_base =
+              row_x_base + g * group_size * sizeof(InT);
+          const unsigned group_y_base =
+              row_y_base + g * group_size * sizeof(OutT);
+
+          FullTile xGroupTile(1, group_size);
+          QuantTile yGroupTile(1, group_size);
+          TASSIGN(xGroupTile, group_x_base);
+          TASSIGN(yGroupTile, group_y_base);
+
+          InT group_scale = (InT)scale;
+          if (has_group_scales) {
+            const uint32_t scale_index =
+                (scale_group_stride == 0) ? g
+                                          : row_index * scale_group_stride + g;
+            group_scale = group_scales[scale_index];
           }
-          TADDS(xGroupTile, xGroupTile, group_offset);
+
+          TMULS(xGroupTile, xGroupTile, group_scale);
           pipe_barrier(PIPE_V);
+          if (has_group_offsets || q_offset != 0.0f) {
+            InT group_offset = (InT)q_offset;
+            if (has_group_offsets) {
+              const uint32_t offset_index =
+                  (offset_group_stride == 0)
+                      ? g
+                      : row_index * offset_group_stride + g;
+              group_offset = group_offsets[offset_index];
+            }
+            TADDS(xGroupTile, xGroupTile, group_offset);
+            pipe_barrier(PIPE_V);
+          }
+          TCVT(yGroupTile, xGroupTile, RoundMode::CAST_NONE);
         }
-        TCVT(yGroupTile, xGroupTile, RoundMode::CAST_NONE);
       }
     }
 
@@ -248,7 +261,7 @@ AICORE void runTFastHadamardQuant(__gm__ InT *x, __gm__ OutT *y,
 
 }  // namespace
 
-__global__ AICORE void fast_hadamard_quant_fp16_to_int8_new(
+__global__ AICORE void fast_hadamard_quant_fp16_to_int8(
     __gm__ void *x, __gm__ void *y, __gm__ void *group_scales,
     __gm__ void *group_offsets, uint32_t scale_group_stride,
     uint32_t offset_group_stride, uint32_t batch, uint32_t n, uint32_t log2_n,
@@ -271,7 +284,7 @@ extern "C" void call_fused_kernel(uint32_t blockDim, void *stream, uint8_t *x,
                                   uint32_t n, uint32_t log2_n, float scale,
                                   uint32_t group_size, float q_offset) {
   blockDim = blockDim * 2;
-  fast_hadamard_quant_fp16_to_int8_new<<<blockDim, nullptr, stream>>>(
+  fast_hadamard_quant_fp16_to_int8<<<blockDim, nullptr, stream>>>(
       x, y, group_scales, group_offsets, scale_group_stride,
       offset_group_stride, batch, n, log2_n, scale, group_size, q_offset);
 }

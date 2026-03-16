@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 
 import torch
+from jit_util_hadamard import DEFAULT_DEVICE, get_cube_block_dim, normalize_npu_device
 
 ASCEND_TOOLKIT_HOME = os.environ["ASCEND_TOOLKIT_HOME"]
 PTO_LIB_PATH = os.environ.get("PTO_LIB_PATH", ASCEND_TOOLKIT_HOME)
@@ -54,9 +55,15 @@ def torch_to_ctypes(tensor):
     return ctypes.c_void_p(tensor.data_ptr())
 
 
-def load_lib(lib_path):
+def load_lib(lib_path, device: str | int = DEFAULT_DEVICE, block_dim=None):
     lib_path = os.path.abspath(lib_path)
     lib = ctypes.CDLL(lib_path)
+    resolved_device = normalize_npu_device(device)
+    resolved_block_dim = (
+        max(1, int(block_dim))
+        if block_dim is not None
+        else get_cube_block_dim(resolved_device)
+    )
 
     lib.call_quantize_kernel.argtypes = [
         ctypes.c_uint32,  # blockDim
@@ -69,11 +76,12 @@ def load_lib(lib_path):
     ]
     lib.call_quantize_kernel.restype = None
 
-    def quantize_func(x, y, scale, block_dim=BLOCK_DIM, stream_ptr=None):
+    def quantize_func(x, y, scale, block_dim=resolved_block_dim, stream_ptr=None):
         if stream_ptr is None:
             stream_ptr = torch.npu.current_stream()._as_parameter_  # noqa
+        launch_block_dim = resolved_block_dim if block_dim is None else int(block_dim)
         lib.call_quantize_kernel(
-            block_dim,
+            launch_block_dim,
             stream_ptr,
             torch_to_ctypes(x),
             torch_to_ctypes(y),
@@ -82,13 +90,21 @@ def load_lib(lib_path):
             scale,
         )
 
-    quantize_func.block_dim = BLOCK_DIM
+    quantize_func.block_dim = resolved_block_dim
     return quantize_func
 
 
-def jit_compile(src_path, verbose=True, clean_up=False, so_dir=None):
+def jit_compile(
+    src_path,
+    verbose=True,
+    clean_up=False,
+    so_dir=None,
+    device: str | int = DEFAULT_DEVICE,
+    block_dim=None,
+):
+    resolved_device = normalize_npu_device(device)
     lib_path = compile_cpp(src_path, verbose=verbose, so_dir=so_dir)
-    func = load_lib(lib_path)
+    func = load_lib(lib_path, device=resolved_device, block_dim=block_dim)
     if clean_up:
         os.remove(lib_path)
     return func

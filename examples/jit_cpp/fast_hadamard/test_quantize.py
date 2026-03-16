@@ -49,10 +49,10 @@ def assert_quantize_matches_ref(quantize_kernel, x, scale):
 
 
 @pytest.fixture(scope="session")
-def quantize_kernel():
+def quantize_kernel(npu_device):
     base = Path(__file__).resolve().parent
     src = base / "quantize.cpp"
-    return jit_compile(str(src), verbose=True)
+    return jit_compile(str(src), verbose=True, device=npu_device)
 
 
 @pytest.mark.parametrize("seed", TEST_SEEDS)

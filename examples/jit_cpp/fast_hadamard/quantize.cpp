@@ -7,11 +7,14 @@ using namespace pto;
 constexpr uint32_t X_BUFFER_BYTES = 32 * 1024;
 constexpr uint32_t ELEMENTS_PER_TILE = X_BUFFER_BYTES / sizeof(half);
 constexpr uint32_t Y_BUFFER_BYTES = ELEMENTS_PER_TILE * sizeof(int8_t);
+constexpr uint32_t UB_USABLE_BYTES = 256 * 1024;
 
 constexpr unsigned X_PING = 0x00000;
 constexpr unsigned Y_PING = (X_PING + X_BUFFER_BYTES + 0x100);
 constexpr unsigned X_PONG = (Y_PING + Y_BUFFER_BYTES + 0x100);
 constexpr unsigned Y_PONG = (X_PONG + X_BUFFER_BYTES + 0x100);
+static_assert(Y_PONG + Y_BUFFER_BYTES <= UB_USABLE_BYTES,
+              "Quantize UB layout exceeds usable UB.");
 
 namespace {
 

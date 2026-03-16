@@ -81,3 +81,24 @@ def test_fast_hadamard_quant_does_not_mutate_input(hadamard_quant_kernel, npu_de
     run_fused(hadamard_quant_kernel, x, y, 1.0)
 
     assert torch.equal(x, x_before)
+
+
+@pytest.mark.parametrize("n", [3, 257, 16385])
+def test_fast_hadamard_quant_rejects_unsupported_n(
+    hadamard_quant_kernel, npu_device, n
+):
+    x = torch.randn(2, n, device=npu_device, dtype=DTYPE)
+    y = torch.empty(2, n, device=npu_device, dtype=torch.int8)
+
+    with pytest.raises(ValueError, match="n must"):
+        hadamard_quant_kernel(x, y, scale=1.0)
+
+
+def test_fast_hadamard_quant_rejects_incorrect_log2_n(
+    hadamard_quant_kernel, npu_device
+):
+    x = torch.randn(2, 1024, device=npu_device, dtype=DTYPE)
+    y = torch.empty(2, 1024, device=npu_device, dtype=torch.int8)
+
+    with pytest.raises(ValueError, match="log2_n must equal"):
+        hadamard_quant_kernel(x, y, scale=1.0, log2_n=9)

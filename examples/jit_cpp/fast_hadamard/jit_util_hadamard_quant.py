@@ -13,6 +13,8 @@ from jit_util_hadamard import (
     torch_to_ctypes,
 )
 
+MAX_HADAMARD_N = 16384
+
 
 def _optional_torch_to_ctypes(tensor):
     if tensor is None:
@@ -61,6 +63,20 @@ def _infer_group_size(n, group_size, q_scales):
     if groups_per_row <= 0 or n % groups_per_row != 0:
         raise ValueError("Could not infer a valid group_size from q_scales.")
     return n // groups_per_row
+
+
+def _validate_hadamard_shape(n, log2_n):
+    if n <= 0:
+        raise ValueError(f"n must be a positive integer, but got n={n}.")
+    if n & (n - 1):
+        raise ValueError(f"n must be a power of two, but got n={n}.")
+    if n > MAX_HADAMARD_N:
+        raise ValueError(
+            f"n must be <= {MAX_HADAMARD_N} (kernel limit), but got n={n}."
+        )
+    expected_log2_n = int(math.log2(n))
+    if log2_n != expected_log2_n:
+        raise ValueError(f"log2_n must equal int(log2(n)); got n={n}, log2_n={log2_n}.")
 
 
 def load_lib(lib_path, block_dim=BLOCK_DIM):
@@ -119,6 +135,7 @@ def load_lib(lib_path, block_dim=BLOCK_DIM):
             log2_n = int(math.log2(n))
         else:
             log2_n = int(log2_n)
+        _validate_hadamard_shape(n, log2_n)
 
         if stream_ptr is None:
             stream = torch.npu.current_stream()
