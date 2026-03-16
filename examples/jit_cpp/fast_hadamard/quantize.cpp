@@ -13,6 +13,8 @@ constexpr unsigned Y_PING = (X_PING + X_BUFFER_BYTES + 0x100);
 constexpr unsigned X_PONG = (Y_PING + Y_BUFFER_BYTES + 0x100);
 constexpr unsigned Y_PONG = (X_PONG + X_BUFFER_BYTES + 0x100);
 
+namespace {
+
 template <typename InT, typename OutT>
 AICORE void runTQuantize(__gm__ OutT *y, __gm__ InT *x, uint32_t batch,
                          uint32_t n, uint32_t num_cores, uint32_t vid,
@@ -90,6 +92,7 @@ AICORE void runTQuantize(__gm__ OutT *y, __gm__ InT *x, uint32_t batch,
       pipe_barrier(PIPE_V);
 
       TCVT(yTile, xTile, RoundMode::CAST_NONE);
+      pipe_barrier(PIPE_V);
 
       set_flag(PIPE_V, PIPE_MTE3, ev);
       wait_flag(PIPE_V, PIPE_MTE3, ev);
@@ -109,6 +112,8 @@ AICORE void runTQuantize(__gm__ OutT *y, __gm__ InT *x, uint32_t batch,
   wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
   wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID1);
 }
+
+}  // namespace
 
 __global__ AICORE void quantize_fp16_to_int8(__gm__ void *x, __gm__ void *y,
                                              uint32_t batch, uint32_t n,
@@ -138,5 +143,6 @@ __global__ AICORE void quantize_fp16_to_int8(__gm__ void *x, __gm__ void *y,
 extern "C" void call_quantize_kernel(uint32_t blockDim, void *stream,
                                      uint8_t *x, uint8_t *y, uint32_t batch,
                                      uint32_t n, float scale) {
+  blockDim = blockDim * 2;
   quantize_fp16_to_int8<<<blockDim, nullptr, stream>>>(x, y, batch, n, scale);
 }

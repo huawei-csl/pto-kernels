@@ -31,7 +31,7 @@ def compile_cpp(
         "-O2",
         "-std=c++17",
         "-Wno-ignored-attributes",
-        "--npu-arch=dav-2201",
+        "--cce-aicore-arch=dav-c220-vec",
         "-isystem",
         f"{PTO_LIB_PATH}/include",
     ]

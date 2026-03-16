@@ -18,7 +18,7 @@ DEFAULT_PLOT_DIR = Path("outputs") / "plots"
 
 def _parse_args():
     parser = argparse.ArgumentParser(
-        description="Plot quantize benchmark comparison from CSV files."
+        description="Plot fused Hadamard+quant benchmark comparison from CSV files."
     )
     parser.add_argument(
         "--csv-dir",
@@ -41,11 +41,11 @@ def _load_rows(csv_path: Path):
 
 
 def _block_dim_from_path(csv_path: Path):
-    return int(csv_path.stem.removeprefix("quantize_compare_bd"))
+    return int(csv_path.stem.removeprefix("fht_quant_compare_bd"))
 
 
-def _format_log2_ticks(v, _):
-    return f"{int(v)}"
+def _format_log2_ticks(value, _):
+    return f"{int(value)}"
 
 
 def _group_by_batch(rows, value_keys):
@@ -53,15 +53,15 @@ def _group_by_batch(rows, value_keys):
     for row in rows:
         batch = int(row["batch"])
         n = int(row["N"])
-        grouped.setdefault(batch, {})[n] = {k: float(row[k]) for k in value_keys}
+        grouped.setdefault(batch, {})[n] = {key: float(row[key]) for key in value_keys}
     return grouped
 
 
-def _make_line_plot(rows, block_dim, output_path: Path, y_keys, y_label, title):
+def _make_line_plot(rows, block_dim, output_path: Path, series, y_label, title):
     batches = sorted({int(row["batch"]) for row in rows})
     ncols = min(5, len(batches))
     nrows = math.ceil(len(batches) / ncols)
-    grouped = _group_by_batch(rows, y_keys)
+    grouped = _group_by_batch(rows, [key for key, _, _, _ in series])
 
     fig, axes = plt.subplots(nrows, ncols, figsize=(4.5 * ncols, 3.6 * nrows))
     if not isinstance(axes, (list, tuple)):
@@ -72,30 +72,20 @@ def _make_line_plot(rows, block_dim, output_path: Path, y_keys, y_label, title):
     else:
         axes = list(axes)
 
-    colors = {"pto": "#dc2626", "torch_npu": "#2563eb"}
-
     for idx, batch in enumerate(batches):
         ax = axes[idx]
         ns = sorted(grouped[batch].keys())
 
-        ax.plot(
-            ns,
-            [grouped[batch][n][y_keys[0]] for n in ns],
-            "s--",
-            color=colors["pto"],
-            label="PTO",
-            linewidth=2,
-            markersize=5,
-        )
-        ax.plot(
-            ns,
-            [grouped[batch][n][y_keys[1]] for n in ns],
-            "o-",
-            color=colors["torch_npu"],
-            label="torch_npu",
-            linewidth=2,
-            markersize=5,
-        )
+        for key, label, color, style in series:
+            ax.plot(
+                ns,
+                [grouped[batch][n][key] for n in ns],
+                style,
+                color=color,
+                label=label,
+                linewidth=2,
+                markersize=5,
+            )
 
         ax.set_xscale("log", base=2)
         ax.set_yscale("log")
@@ -117,14 +107,11 @@ def _make_line_plot(rows, block_dim, output_path: Path, y_keys, y_label, title):
     plt.close(fig)
 
 
-def _make_speedup_heatmap(rows, block_dim, output_path: Path):
+def _make_speedup_heatmap(rows, block_dim, output_path: Path, key, title):
     batches = sorted({int(row["batch"]) for row in rows})
     ns = sorted({int(row["N"]) for row in rows})
 
-    speedups = {
-        (int(row["batch"]), int(row["N"])): float(row["pto_speedup_vs_torch_npu"])
-        for row in rows
-    }
+    speedups = {(int(row["batch"]), int(row["N"])): float(row[key]) for row in rows}
     matrix = [[speedups[(batch, n)] for n in ns] for batch in batches]
     log_matrix = [[math.log2(max(value, 1e-9)) for value in row] for row in matrix]
     vmax = max(max(abs(value) for value in row) for row in log_matrix)
@@ -147,13 +134,13 @@ def _make_speedup_heatmap(rows, block_dim, output_path: Path):
     ax.set_xlabel("N")
     ax.set_ylabel("batch")
     ax.set_title(
-        f"PTO Speedup over torch_npu (BLOCK_DIM={block_dim}, log2 scale)",
+        f"{title} (BLOCK_DIM={block_dim}, log2 scale)",
         fontsize=13,
         fontweight="bold",
     )
 
-    for i, batch in enumerate(batches):
-        for j, n in enumerate(ns):
+    for i, _batch in enumerate(batches):
+        for j, _n in enumerate(ns):
             value = matrix[i][j]
             color = "white" if abs(log_matrix[i][j]) > vmax * 0.6 else "black"
             ax.text(
@@ -167,7 +154,7 @@ def _make_speedup_heatmap(rows, block_dim, output_path: Path):
                 color=color,
             )
 
-    cbar = fig.colorbar(im, ax=ax, label="log2(PTO speedup)")
+    cbar = fig.colorbar(im, ax=ax, label="log2(speedup)")
     cbar.set_ticks([-1, -0.5, 0, 0.5, 1])
     cbar.set_ticklabels(["0.5x", "0.71x", "1x", "1.41x", "2x"])
 
@@ -177,7 +164,7 @@ def _make_speedup_heatmap(rows, block_dim, output_path: Path):
     plt.close(fig)
 
 
-def plot_quantize(csv_path: Path, plot_dir: Path):
+def plot_hadamard_quant(csv_path: Path, plot_dir: Path):
     if plt is None:
         print("Warning: matplotlib is not installed; skipping plot generation.")
         return
@@ -194,23 +181,39 @@ def plot_quantize(csv_path: Path, plot_dir: Path):
     _make_line_plot(
         rows,
         block_dim,
-        plot_dir / f"quantize_duration_bd{block_dim}.png",
-        ("pto_duration_us", "torch_npu_duration_us"),
+        plot_dir / f"hadamard_quant_duration_bd{block_dim}.png",
+        (
+            ("fused_duration_us", "Fused PTO", "#dc2626", "s-"),
+            ("separate_duration_us", "Separate PTO", "#ea580c", "^-"),
+            ("torch_unfused_duration_us", "torch + torch_npu unfused", "#2563eb", "o-"),
+        ),
         "Duration (us)",
-        "Quantize Duration: PTO vs torch_npu",
+        "Hadamard+Quant Duration",
     )
     _make_line_plot(
         rows,
         block_dim,
-        plot_dir / f"quantize_bandwidth_bd{block_dim}.png",
-        ("pto_bandwidth_gbs", "torch_npu_bandwidth_gbs"),
+        plot_dir / f"hadamard_quant_bandwidth_bd{block_dim}.png",
+        (
+            ("fused_bandwidth_gbs", "Fused PTO", "#dc2626", "s-"),
+            ("separate_bandwidth_gbs", "Separate PTO", "#ea580c", "^-"),
+        ),
         "Bandwidth (GB/s)",
-        "Quantize Effective Bandwidth: PTO vs torch_npu",
+        "Hadamard+Quant Effective Bandwidth",
     )
     _make_speedup_heatmap(
         rows,
         block_dim,
-        plot_dir / f"quantize_speedup_heatmap_bd{block_dim}.png",
+        plot_dir / f"hadamard_quant_speedup_vs_separate_bd{block_dim}.png",
+        "fused_speedup_vs_separate",
+        "Fused PTO Speedup over Separate PTO",
+    )
+    _make_speedup_heatmap(
+        rows,
+        block_dim,
+        plot_dir / f"hadamard_quant_speedup_vs_torch_bd{block_dim}.png",
+        "fused_speedup_vs_torch_unfused",
+        "Fused PTO Speedup over torch + torch_npu unfused",
     )
 
     print(f"Plotted {csv_path.name}")
@@ -229,15 +232,15 @@ def main():
         plot_dir = base / plot_dir
 
     csv_paths = sorted(
-        csv_dir.glob("quantize_compare_bd*.csv"),
+        csv_dir.glob("fht_quant_compare_bd*.csv"),
         key=_block_dim_from_path,
     )
     if not csv_paths:
-        print(f"Warning: no quantize benchmark CSV files found in {csv_dir}.")
+        print(f"Warning: no Hadamard+quant benchmark CSV files found in {csv_dir}.")
         return
 
     for csv_path in csv_paths:
-        plot_quantize(csv_path, plot_dir)
+        plot_hadamard_quant(csv_path, plot_dir)
 
 
 if __name__ == "__main__":

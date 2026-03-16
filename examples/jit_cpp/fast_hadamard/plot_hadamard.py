@@ -2,7 +2,7 @@ import argparse
 import csv
 from pathlib import Path
 
-from jit_util_hadamard import chmod_output_path, normalize_npu_device
+from jit_util_hadamard import chmod_output_path
 
 try:
     import matplotlib.pyplot as plt
@@ -11,7 +11,6 @@ except ImportError:
 
 BENCH_BATCHES = [1, 5, 8, 10, 16, 20, 32, 40, 64, 128, 256, 512, 1024]
 
-DEFAULT_DEVICE = "npu:0"
 DEFAULT_CSV_DIR = Path("outputs") / "csv"
 DEFAULT_PLOT_DIR = Path("outputs") / "plots"
 DEFAULT_PLOT_NAME = "bw_vs_shape.png"
@@ -20,12 +19,6 @@ DEFAULT_PLOT_NAME = "bw_vs_shape.png"
 def _parse_args():
     parser = argparse.ArgumentParser(
         description="Plot Fast Hadamard benchmark bandwidth from CSV files."
-    )
-    parser.add_argument(
-        "--npu",
-        type=normalize_npu_device,
-        default=DEFAULT_DEVICE,
-        help="Accepted for interface consistency (examples: 0, npu:0).",
     )
     parser.add_argument(
         "--csv-dir",
@@ -131,7 +124,6 @@ def main():
         plot_dir = base / plot_dir
 
     output_path = plot_dir / args.plot_name
-    print(f"Using device option: {args.npu}")
     plot_bandwidth(csv_dir, output_path)
 
 
