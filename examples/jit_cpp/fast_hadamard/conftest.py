@@ -3,7 +3,8 @@ from pathlib import Path
 import pytest
 import torch
 
-from jit_util_hadamard import jit_compile, normalize_npu_device
+from jit_util_common import normalize_npu_device
+from jit_util_hadamard import jit_compile
 
 
 def pytest_addoption(parser):

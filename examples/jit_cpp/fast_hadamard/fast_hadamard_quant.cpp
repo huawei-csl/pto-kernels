@@ -193,6 +193,7 @@ AICORE void runTFastHadamardQuant(__gm__ InT *x, __gm__ OutT *y,
         pipe_barrier(PIPE_V);
       }
       TCVT(yBulkTile, xBulkTile, RoundMode::CAST_NONE);
+      pipe_barrier(PIPE_V);
     } else {
       const uint32_t groups_per_row = n / group_size;
       const uint32_t row_index_base = current_tile.gm_offset / n;
@@ -235,6 +236,7 @@ AICORE void runTFastHadamardQuant(__gm__ InT *x, __gm__ OutT *y,
             pipe_barrier(PIPE_V);
           }
           TCVT(yGroupTile, xGroupTile, RoundMode::CAST_NONE);
+          pipe_barrier(PIPE_V);
         }
       }
     }
