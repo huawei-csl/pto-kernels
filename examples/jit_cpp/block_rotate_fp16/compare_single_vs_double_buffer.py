@@ -6,7 +6,6 @@ from typing import Dict, List
 
 import matplotlib.pyplot as plt
 
-
 DEFAULT_SINGLE_CSV = "./perf_data/block_rotate_fp16.csv"
 DEFAULT_DOUBLE_CSV = "./perf_data_double_buffer/block_rotate_fp16_double_buffer.csv"
 DEFAULT_OUTPUT_DIR = "./perf_compare"

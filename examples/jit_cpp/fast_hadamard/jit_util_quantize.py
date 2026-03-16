@@ -12,42 +12,37 @@ from jit_util_common import (
 )
 
 
-def load_lib(lib_path, block_dim=BLOCK_DIM):
+def load_lib(lib_path, block_dim=None):
     lib = load_cdll(lib_path)
-    resolved_block_dim = max(1, int(block_dim))
+    resolved_block_dim = max(1, int(BLOCK_DIM if block_dim is None else block_dim))
 
     kernel = load_required_symbol(
         lib,
-        "call_kernel",
+        "call_quantize_kernel",
         [
-            ctypes.c_uint32,
-            ctypes.c_void_p,
-            ctypes.c_void_p,
-            ctypes.c_uint32,
-            ctypes.c_uint32,
-            ctypes.c_uint32,
+            ctypes.c_uint32,  # blockDim
+            ctypes.c_void_p,  # stream
+            ctypes.c_void_p,  # x
+            ctypes.c_void_p,  # y
+            ctypes.c_uint32,  # batch
+            ctypes.c_uint32,  # n
+            ctypes.c_float,  # scale
         ],
     )
 
-    def hadamard_func(
-        x,
-        batch,
-        n,
-        log2_n,
-        block_dim=resolved_block_dim,
-        stream_ptr=None,
-    ):
+    def quantize_func(x, y, scale, block_dim=resolved_block_dim, stream_ptr=None):
         kernel(
             resolve_launch_block_dim(block_dim, resolved_block_dim),
             resolve_stream_ptr(stream_ptr),
             torch_to_ctypes(x),
-            batch,
-            n,
-            log2_n,
+            torch_to_ctypes(y),
+            x.shape[0],
+            x.shape[1],
+            scale,
         )
 
-    hadamard_func.block_dim = resolved_block_dim
-    return hadamard_func
+    quantize_func.block_dim = resolved_block_dim
+    return quantize_func
 
 
 def jit_compile(
@@ -56,6 +51,7 @@ def jit_compile(
     clean_up=False,
     so_dir=None,
     device: str | int = DEFAULT_DEVICE,
+    block_dim=None,
 ):
     return jit_compile_with_loader(
         src_path,
@@ -64,4 +60,5 @@ def jit_compile(
         clean_up=clean_up,
         so_dir=so_dir,
         device=device,
+        block_dim=block_dim,
     )
