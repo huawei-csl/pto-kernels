@@ -101,7 +101,7 @@ AICORE void runTTriInv(__gm__ T* vec_in, __gm__ T* vec_out,
     wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
     // For every output column j-th
-    for (int32_t j = 0; j < S; j++) {
+    for (int32_t j = S-1; j >= 0; j--) {
       // Column sweep on each column.
 
       // `b` vector is  j-th standard vector (e_j).
@@ -114,7 +114,7 @@ AICORE void runTTriInv(__gm__ T* vec_in, __gm__ T* vec_out,
       // Must be offset by UB address
       TASSIGN(x, out_start_ub_addr + j * S * sizeof(T));
 
-      for (int32_t k = S - 1; k >= 0; k--) {
+      for (int32_t k = j; k >= 1; k--) {
         TASSIGN(A_k, k * S * sizeof(T));
 
         set_flag(PIPE_V, PIPE_S, EVENT_ID0);
