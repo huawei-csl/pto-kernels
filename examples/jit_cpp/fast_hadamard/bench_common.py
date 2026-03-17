@@ -1,4 +1,5 @@
 import math
+import statistics
 from pathlib import Path
 
 import torch
@@ -12,6 +13,7 @@ DTYPE = torch.float16
 DEFAULT_SCALE = 9.0
 DEFAULT_CSV_DIR = Path("outputs") / "csv"
 DEFAULT_BUFFER_POOL = 8
+DEFAULT_TRIALS = 3
 POOL_RANDN_FP16 = "randn_fp16"
 POOL_EMPTY_FP16 = "empty_fp16"
 POOL_EMPTY_INT8 = "empty_int8"
@@ -32,6 +34,7 @@ def add_common_benchmark_args(
     *,
     default_warmup: int,
     default_repeats: int,
+    default_trials: int = DEFAULT_TRIALS,
     include_scale: bool = False,
     default_scale: float = DEFAULT_SCALE,
 ):
@@ -61,6 +64,29 @@ def add_common_benchmark_args(
         help=f"Timed iterations per shape (default: {default_repeats}).",
     )
     parser.add_argument(
+        "--trials",
+        type=int,
+        default=default_trials,
+        help=(
+            "Independent benchmark trials per shape; the canonical CSV duration uses "
+            f"the trial median (default: {default_trials})."
+        ),
+    )
+    parser.add_argument(
+        "--batches",
+        type=int,
+        nargs="*",
+        default=None,
+        help="Optional batch-size subset. Defaults to the full benchmark grid.",
+    )
+    parser.add_argument(
+        "--hidden-dims",
+        type=int,
+        nargs="*",
+        default=None,
+        help="Optional hidden-dimension subset. Defaults to the full benchmark grid.",
+    )
+    parser.add_argument(
         "--csv-dir",
         type=str,
         default=str(DEFAULT_CSV_DIR),
@@ -74,6 +100,20 @@ def validate_benchmark_args(args) -> None:
         raise ValueError("--warmup must be >= 0")
     if args.repeats <= 0:
         raise ValueError("--repeats must be > 0")
+    if args.trials <= 0:
+        raise ValueError("--trials must be > 0")
+    if args.batches is not None and any(batch <= 0 for batch in args.batches):
+        raise ValueError("--batches values must be > 0")
+    if args.hidden_dims is not None and any(dim <= 0 for dim in args.hidden_dims):
+        raise ValueError("--hidden-dims values must be > 0")
+
+
+def benchmark_batches(args):
+    return args.batches if args.batches else BENCH_BATCHES
+
+
+def benchmark_hidden_dims(args):
+    return args.hidden_dims if args.hidden_dims else BENCH_HIDDEN_DIMS
 
 
 def resolve_dir_arg(base: Path, path_arg: str) -> Path:
@@ -231,6 +271,32 @@ def benchmark_npu_us(warmup: int, repeats: int, iteration_fn) -> float:
     return start.elapsed_time(end) / repeats * 1e3
 
 
+def summarize_trial_samples(samples):
+    if not samples:
+        raise ValueError("expected at least one benchmark sample")
+
+    mean_us = statistics.fmean(samples)
+    median_us = statistics.median(samples)
+    min_us = min(samples)
+    max_us = max(samples)
+    std_us = statistics.stdev(samples) if len(samples) > 1 else 0.0
+    cv_pct = (std_us / mean_us * 100.0) if mean_us > 0 else 0.0
+    return {
+        "samples_us": tuple(samples),
+        "count": len(samples),
+        "mean_us": mean_us,
+        "median_us": median_us,
+        "min_us": min_us,
+        "max_us": max_us,
+        "std_us": std_us,
+        "cv_pct": cv_pct,
+    }
+
+
+def benchmark_trials_us(trials: int, benchmark_once):
+    return summarize_trial_samples([benchmark_once() for _ in range(trials)])
+
+
 def benchmark_hadamard_us(
     hadamard_func, x_list, *, block_dim, warmup, repeats
 ) -> float:
@@ -381,8 +447,9 @@ def summarize_fused_hadamard_quant_shape(
 def print_fused_hadamard_quant_shape_summary(result) -> None:
     print(
         f"{result['batch']:>6d}  {result['n']:>6d}"
-        f"  {result['fused_us']:>10.2f}  {result['separate_us']:>12.2f}"
-        f"  {result['torch_unfused_us']:>16.2f}"
+        f"  {result['fused_us']:>10.2f}  {result['fused_cv_pct']:>8.2f}"
+        f"  {result['separate_us']:>12.2f}  {result['separate_cv_pct']:>8.2f}"
+        f"  {result['torch_unfused_us']:>16.2f}  {result['torch_unfused_cv_pct']:>8.2f}"
         f"  {result['fused_bw']:>14.2f}  {result['separate_bw']:>17.2f}"
         f"  {result['fused_speedup_vs_separate']:>12.3f}"
         f"  {result['fused_speedup_vs_unfused']:>17.3f}"
@@ -395,7 +462,15 @@ def format_fused_hadamard_quant_csv_record(scale: float, result) -> str:
         f"{result['separate_us']:.4f},{result['torch_unfused_us']:.4f},"
         f"{result['fused_bw']:.4f},{result['separate_bw']:.4f},"
         f"{result['fused_speedup_vs_separate']:.4f},"
-        f"{result['fused_speedup_vs_unfused']:.4f}"
+        f"{result['fused_speedup_vs_unfused']:.4f},{result['trials']},"
+        f"{result['fused_mean_us']:.4f},{result['fused_std_us']:.4f},"
+        f"{result['fused_min_us']:.4f},{result['fused_max_us']:.4f},"
+        f"{result['fused_cv_pct']:.4f},{result['separate_mean_us']:.4f},"
+        f"{result['separate_std_us']:.4f},{result['separate_min_us']:.4f},"
+        f"{result['separate_max_us']:.4f},{result['separate_cv_pct']:.4f},"
+        f"{result['torch_unfused_mean_us']:.4f},"
+        f"{result['torch_unfused_std_us']:.4f},{result['torch_unfused_min_us']:.4f},"
+        f"{result['torch_unfused_max_us']:.4f},{result['torch_unfused_cv_pct']:.4f}"
     )
 
 
@@ -411,6 +486,7 @@ def measure_fused_hadamard_quant_shape(
     block_dim,
     warmup,
     repeats,
+    trials,
     device,
     hadamard_stagewise_fn=hadamard_torch_stagewise,
     torch_quantize_fn=torch_npu_quantize,
@@ -423,41 +499,71 @@ def measure_fused_hadamard_quant_shape(
         device=device,
         pool_kinds=FUSED_HADAMARD_QUANT_POOL_KINDS,
     )
-    fused_us = benchmark_fused_hadamard_quant_us(
-        fused_func,
-        pools["fused_x"],
-        pools["fused_y"],
-        scale,
-        block_dim=block_dim,
-        warmup=warmup,
-        repeats=repeats,
+    fused_stats = benchmark_trials_us(
+        trials,
+        lambda: benchmark_fused_hadamard_quant_us(
+            fused_func,
+            pools["fused_x"],
+            pools["fused_y"],
+            scale,
+            block_dim=block_dim,
+            warmup=warmup,
+            repeats=repeats,
+        ),
     )
-    separate_us = benchmark_separate_hadamard_quant_us(
-        hadamard_func,
-        quantize_func,
-        pools["separate_x"],
-        pools["separate_y"],
-        scale,
-        block_dim=block_dim,
-        warmup=warmup,
-        repeats=repeats,
+    separate_stats = benchmark_trials_us(
+        trials,
+        lambda: benchmark_separate_hadamard_quant_us(
+            hadamard_func,
+            quantize_func,
+            pools["separate_x"],
+            pools["separate_y"],
+            scale,
+            block_dim=block_dim,
+            warmup=warmup,
+            repeats=repeats,
+        ),
     )
-    torch_unfused_us = benchmark_torch_unfused_hadamard_quant_us(
-        pools["torch_x"],
-        pools["torch_work"],
-        scale_tensor,
-        warmup=warmup,
-        repeats=repeats,
-        hadamard_stagewise_fn=hadamard_stagewise_fn,
-        torch_quantize_fn=torch_quantize_fn,
+    torch_stats = benchmark_trials_us(
+        trials,
+        lambda: benchmark_torch_unfused_hadamard_quant_us(
+            pools["torch_x"],
+            pools["torch_work"],
+            scale_tensor,
+            warmup=warmup,
+            repeats=repeats,
+            hadamard_stagewise_fn=hadamard_stagewise_fn,
+            torch_quantize_fn=torch_quantize_fn,
+        ),
     )
-    return summarize_fused_hadamard_quant_shape(
+    result = summarize_fused_hadamard_quant_shape(
         batch,
         n,
-        fused_us,
-        separate_us,
-        torch_unfused_us,
+        fused_stats["median_us"],
+        separate_stats["median_us"],
+        torch_stats["median_us"],
     )
+    result.update(
+        {
+            "trials": trials,
+            "fused_mean_us": fused_stats["mean_us"],
+            "fused_std_us": fused_stats["std_us"],
+            "fused_min_us": fused_stats["min_us"],
+            "fused_max_us": fused_stats["max_us"],
+            "fused_cv_pct": fused_stats["cv_pct"],
+            "separate_mean_us": separate_stats["mean_us"],
+            "separate_std_us": separate_stats["std_us"],
+            "separate_min_us": separate_stats["min_us"],
+            "separate_max_us": separate_stats["max_us"],
+            "separate_cv_pct": separate_stats["cv_pct"],
+            "torch_unfused_mean_us": torch_stats["mean_us"],
+            "torch_unfused_std_us": torch_stats["std_us"],
+            "torch_unfused_min_us": torch_stats["min_us"],
+            "torch_unfused_max_us": torch_stats["max_us"],
+            "torch_unfused_cv_pct": torch_stats["cv_pct"],
+        }
+    )
+    return result
 
 
 def write_csv_records(csv_path: Path, header: str, records) -> None:

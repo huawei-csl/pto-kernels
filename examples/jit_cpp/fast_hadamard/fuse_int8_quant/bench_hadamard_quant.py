@@ -6,10 +6,10 @@ import torch
 import torch_npu  # noqa
 
 from bench_common import (
-    BENCH_BATCHES,
-    BENCH_HIDDEN_DIMS,
     DEFAULT_SCALE,
     add_common_benchmark_args,
+    benchmark_batches,
+    benchmark_hidden_dims,
     ensure_output_dir,
     format_fused_hadamard_quant_csv_record,
     hadamard_torch_stagewise,
@@ -21,9 +21,9 @@ from bench_common import (
     validate_benchmark_args,
     write_csv_records,
 )
-from jit_util_hadamard import jit_compile as jit_compile_hadamard
-from jit_util_hadamard_quant import jit_compile as jit_compile_fused
-from jit_util_quantize import jit_compile as jit_compile_quantize
+from fuse_int8_quant.jit_util_hadamard_quant import jit_compile as jit_compile_fused
+from fuse_int8_quant.jit_util_quantize import jit_compile as jit_compile_quantize
+from standard.jit_util_hadamard import jit_compile as jit_compile_hadamard
 
 DEFAULT_WARMUP = 10
 DEFAULT_REPEATS = 100
@@ -31,7 +31,13 @@ CSV_HEADER = (
     "batch,N,scale,fused_duration_us,separate_duration_us,"
     "torch_unfused_duration_us,"
     "fused_effective_bandwidth_gbs,separate_effective_bandwidth_gbs,"
-    "fused_speedup_vs_separate,fused_speedup_vs_torch_unfused\n"
+    "fused_speedup_vs_separate,fused_speedup_vs_torch_unfused,trials,"
+    "fused_duration_mean_us,fused_duration_std_us,fused_duration_min_us,"
+    "fused_duration_max_us,fused_duration_cv_pct,separate_duration_mean_us,"
+    "separate_duration_std_us,separate_duration_min_us,separate_duration_max_us,"
+    "separate_duration_cv_pct,torch_unfused_duration_mean_us,"
+    "torch_unfused_duration_std_us,torch_unfused_duration_min_us,"
+    "torch_unfused_duration_max_us,torch_unfused_duration_cv_pct\n"
 )
 
 
@@ -55,11 +61,15 @@ def benchmark(
     fused_func,
     hadamard_func,
     quantize_func,
+    *,
     scale: float,
     warmup: int,
     repeats: int,
+    trials: int,
     output_dir: Path,
     device: str,
+    batches,
+    hidden_dims,
 ):
     ensure_output_dir(output_dir)
     block_dim = fused_func.block_dim
@@ -75,7 +85,9 @@ def benchmark(
     print(f"{'=' * 108}")
     header = (
         f"{'batch':>6s}  {'N':>6s}"
-        f"  {'fused_us':>10s}  {'separate_us':>12s}  {'torch_unfused_us':>16s}"
+        f"  {'fused_us':>10s}  {'fused_cv%':>8s}"
+        f"  {'separate_us':>12s}  {'sep_cv%':>8s}"
+        f"  {'torch_unfused_us':>16s}  {'torch_cv%':>8s}"
         f"  {'fused_eff_bw':>14s}  {'separate_eff_bw':>17s}"
         f"  {'fused_vs_sep':>12s}  {'fused_vs_unfused':>17s}"
     )
@@ -84,8 +96,8 @@ def benchmark(
 
     records = []
 
-    for batch in BENCH_BATCHES:
-        for n in BENCH_HIDDEN_DIMS:
+    for batch in batches:
+        for n in hidden_dims:
             result = measure_shape(
                 fused_func,
                 hadamard_func,
@@ -97,6 +109,7 @@ def benchmark(
                 block_dim=block_dim,
                 warmup=warmup,
                 repeats=repeats,
+                trials=trials,
                 device=device,
             )
             print_fused_hadamard_quant_shape_summary(result)
@@ -113,9 +126,10 @@ def main():
 
     torch.npu.set_device(args.npu)
     base = Path(__file__).resolve().parent
+    standard_base = base.parent / "standard"
 
     fused_kernel_path = base / "fast_hadamard_quant.cpp"
-    hadamard_kernel_path = base / "fast_hadamard.cpp"
+    hadamard_kernel_path = standard_base / "fast_hadamard.cpp"
     quantize_kernel_path = base / "quantize.cpp"
     csv_dir = resolve_dir_arg(base, args.csv_dir)
 
@@ -140,8 +154,11 @@ def main():
         scale=args.scale,
         warmup=args.warmup,
         repeats=args.repeats,
+        trials=args.trials,
         output_dir=csv_dir,
         device=args.npu,
+        batches=benchmark_batches(args),
+        hidden_dims=benchmark_hidden_dims(args),
     )
 
 

@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from jit_util_quantize import jit_compile
+from fuse_int8_quant.jit_util_quantize import jit_compile
 
 TEST_BATCHES = [1, 7, 65]
 TEST_HIDDEN_DIMS = [128, 1024, 16384]
