@@ -123,7 +123,6 @@ AICORE void runTTriInv(__gm__ T* vec_in, __gm__ T* vec_out,
         const T alpha = b.GetValue(k);
         x.SetValue(k, alpha);
 
-        if (k > 0) {
           // b[:k] -= A[:k, k] * x[k]
           TEXPANDS(diff, static_cast<T>(0));
           TMULS(diff, A_k, alpha);
@@ -132,7 +131,11 @@ AICORE void runTTriInv(__gm__ T* vec_in, __gm__ T* vec_out,
 
           TSUB(b, b, diff);
         }
-      }
+      set_flag(PIPE_V, PIPE_S, EVENT_ID0);
+      wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
+      // x[k] = b[k] / A[k, k]
+      const T alpha = b.GetValue(0);
+      x.SetValue(0, alpha);
     }
 
     set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
