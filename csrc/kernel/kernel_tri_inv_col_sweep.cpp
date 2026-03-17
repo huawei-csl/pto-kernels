@@ -101,7 +101,7 @@ AICORE void runTTriInv(__gm__ T* vec_in, __gm__ T* vec_out,
     wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
     // For every output column j-th
-    for (int32_t j = S-1; j >= 0; j--) {
+    for (int32_t j = S - 1; j >= 0; j--) {
       // Column sweep on each column.
 
       // `b` vector is  j-th standard vector (e_j).
