@@ -269,8 +269,8 @@ __global__ AICORE void fast_hadamard_quant_fp16_to_int8(
     uint32_t offset_group_stride, uint32_t batch, uint32_t n, uint32_t log2_n,
     float scale, uint32_t group_size, float q_offset) {
 #if defined(__DAV_VEC__)
-  const uint32_t num_cores = block_num;
-  const uint32_t vid = block_idx;
+  const uint32_t num_cores = get_block_num() * get_subblockdim();
+  const uint32_t vid = get_block_idx() * get_subblockdim() + get_subblockid();
   runTFastHadamardQuant<half, int8_t>(
       (__gm__ half *)x, (__gm__ int8_t *)y, (__gm__ half *)group_scales,
       (__gm__ half *)group_offsets, scale_group_stride, offset_group_stride,

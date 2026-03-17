@@ -83,6 +83,80 @@ def collect_csv_paths(csv_dir: Path, pattern: str, prefix: str, warning: str):
     return csv_paths
 
 
+def pair_csv_paths_by_block_dim(
+    left_paths,
+    right_paths,
+    *,
+    prefix: str,
+    left_label: str,
+    right_label: str,
+):
+    left_by_block_dim = {block_dim_from_path(path, prefix): path for path in left_paths}
+    right_by_block_dim = {
+        block_dim_from_path(path, prefix): path for path in right_paths
+    }
+
+    common_block_dims = sorted(left_by_block_dim.keys() & right_by_block_dim.keys())
+    missing_left = sorted(right_by_block_dim.keys() - left_by_block_dim.keys())
+    missing_right = sorted(left_by_block_dim.keys() - right_by_block_dim.keys())
+
+    if missing_left:
+        print(
+            f"Warning: missing {left_label} CSVs for BLOCK_DIM={missing_left}; "
+            f"skipping those comparisons."
+        )
+    if missing_right:
+        print(
+            f"Warning: missing {right_label} CSVs for BLOCK_DIM={missing_right}; "
+            f"skipping those comparisons."
+        )
+
+    return [
+        (
+            block_dim,
+            left_by_block_dim[block_dim],
+            right_by_block_dim[block_dim],
+        )
+        for block_dim in common_block_dims
+    ]
+
+
+def pair_rows_by_shape(
+    left_rows,
+    right_rows,
+    *,
+    left_label: str,
+    right_label: str,
+):
+    left_by_shape = {(int(row["batch"]), int(row["N"])): row for row in left_rows}
+    right_by_shape = {(int(row["batch"]), int(row["N"])): row for row in right_rows}
+
+    common_shapes = sorted(left_by_shape.keys() & right_by_shape.keys())
+    missing_left = sorted(right_by_shape.keys() - left_by_shape.keys())
+    missing_right = sorted(left_by_shape.keys() - right_by_shape.keys())
+
+    if missing_left:
+        print(
+            f"Warning: missing {left_label} rows for shapes {missing_left}; "
+            f"skipping those comparisons."
+        )
+    if missing_right:
+        print(
+            f"Warning: missing {right_label} rows for shapes {missing_right}; "
+            f"skipping those comparisons."
+        )
+
+    return [
+        (
+            batch,
+            n,
+            left_by_shape[(batch, n)],
+            right_by_shape[(batch, n)],
+        )
+        for batch, n in common_shapes
+    ]
+
+
 def plot_csv_collection(
     csv_dir: Path,
     plot_dir: Path,
