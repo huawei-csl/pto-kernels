@@ -114,27 +114,22 @@ AICORE void runTTriInv(__gm__ T* vec_in, __gm__ T* vec_out,
       // Must be offset by UB address
       TASSIGN(x, out_start_ub_addr + j * S * sizeof(T));
 
+      T alpha = static_cast<T>(1);
+
       for (int32_t k = j; k >= 1; k--) {
         TASSIGN(A_k, k * S * sizeof(T));
 
+        // Keep the scalar pipe busy with the x write while the vector pipe
+        // computes the rank-1 update for the next backward-substitution step.
+        TMULS(diff, A_k, alpha);
+        x.SetValue(k, alpha);
+        pipe_barrier(PIPE_V);
+        TSUB(b, b, diff);
+
         set_flag(PIPE_V, PIPE_S, EVENT_ID0);
         wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-        // x[k] = b[k] / A[k, k]
-        const T alpha = b.GetValue(k);
-        x.SetValue(k, alpha);
-
-          // b[:k] -= A[:k, k] * x[k]
-          TEXPANDS(diff, static_cast<T>(0));
-          TMULS(diff, A_k, alpha);
-          set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-          wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-
-          TSUB(b, b, diff);
-        }
-      set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-      wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-      // x[k] = b[k] / A[k, k]
-      const T alpha = b.GetValue(0);
+        alpha = b.GetValue(k - 1);
+      }
       x.SetValue(0, alpha);
     }
 
