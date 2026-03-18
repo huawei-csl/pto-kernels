@@ -6,8 +6,10 @@
 # for the full License text.
 # --------------------------------------------------------------------------------
 
+import csv
+from pathlib import Path
 import torch
-from pto_kernels import pto_tri_inv
+from pto_kernels import pto_tri_inv, do_bench
 import pytest
 import numpy as np
 import random
@@ -133,7 +135,6 @@ def test_tri_inv_col_sweep_np_linalg_inv(
 
 
 def plot_csv(path):
-    import csv
     import matplotlib.pyplot as plt
 
     series = {}
@@ -160,10 +161,6 @@ def plot_csv(path):
 
 
 if __name__ == "__main__":
-    import csv
-    from pathlib import Path
-    from pto_kernels import do_bench
-
     rows = [["dtype", "matrix_size", "batch_size", "time_ms", "bandwidth_gbps"]]
     for dt in (np.float16, np.float32):
         for S in (16, 32, 64, 128):
