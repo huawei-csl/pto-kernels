@@ -133,10 +133,11 @@ def test_tri_inv_col_sweep_np_linalg_inv(
 
 
 def plot_csv(path):
+    import csv
     import matplotlib.pyplot as plt
 
     series = {}
-    with open(path, newline="") as f:
+    with open(path, encoding="utf-8", newline="") as f:
         for row in csv.DictReader(f):
             key = (row["dtype"], row["batch_size"])
             series.setdefault(key, [[], []])
@@ -168,7 +169,7 @@ if __name__ == "__main__":
         for S in (16, 32, 64, 128):
             for bs in (256,):
                 x = torch.from_numpy(rand_np_tril(bs, S, dt).transpose(0, 2, 1)).npu()
-                ms = do_bench(lambda: pto_tri_inv(x), unit="ms")
+                ms = do_bench(lambda inp=x: pto_tri_inv(inp), unit="ms")
                 n_el, size = x.numel(), x.element_size()
                 gbps = 2 * n_el * size / (ms / 1e3) / 1e9
                 print(f"{dt.__name__}, N={S}, bs={bs}, {ms:.3f} ms, {gbps:.3f} GB/s")
@@ -176,7 +177,7 @@ if __name__ == "__main__":
 
     output = Path("benchmark_data/tri_inv_col_sweep.csv")
     output.parent.mkdir(parents=True, exist_ok=True)
-    with output.open("w", newline="") as f:
+    with output.open("w", encoding="utf-8", newline="") as f:
         csv.writer(f).writerows(rows)
     print(output)
     plot_csv(output)
