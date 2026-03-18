@@ -107,47 +107,49 @@ AICORE void runTTriInv(__gm__ T* vec_in, __gm__ T* vec_out,
 
       TASSIGN(x, out_start_ub_addr + j * S * sizeof(T));
 
-      float alpha = 1.0f;
-      float pending_alpha = 0.0f;
-      int32_t pending_k = -1;
+      if (j == 0) {
+        x.SetValue(0, static_cast<T>(1));
+        continue;
+      }
 
-      float next_alpha_base = 0.0f;
+      float xk = 1.0f;
+      float xkp1 = xk;
 
-      for (int32_t k = j; k >= 1; k--) {
+      TASSIGN(A_k, j * S * sizeof(T));
+      TMULS(diff, A_k, static_cast<T>(xk));
+      set_flag(PIPE_V, PIPE_S, EVENT_ID1);
+
+      pipe_barrier(PIPE_V);
+      TSUB(b, b, diff);
+      set_flag(PIPE_V, PIPE_S, EVENT_ID0);
+
+      wait_flag(PIPE_V, PIPE_S, EVENT_ID1);
+      xk = -static_cast<float>(diff.GetValue(j - 1));
+
+      for (int32_t k = j - 1; k >= 1; --k) {
         TASSIGN(A_k, k * S * sizeof(T));
 
-        // Software-pipeline two neighboring iterations:
-        // 1. overlap the previous scalar x write and current scalar b lane
-        //    read with the current TMULS;
-        // 2. form the next alpha from one diff lane while TSUB updates the
-        //    full vector state for the next iteration.
-        TMULS(diff, A_k, static_cast<T>(alpha));
+        // Keep one x lane buffered so the scalar write from the previous
+        // step overlaps the current vector update.
+        TMULS(diff, A_k, static_cast<T>(xk));
         set_flag(PIPE_V, PIPE_S, EVENT_ID1);
 
-        if (pending_k >= 0) {
-          x.SetValue(pending_k, static_cast<T>(pending_alpha));
-        }
-        if (k < j) {
-          wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-          next_alpha_base = static_cast<float>(b.GetValue(k - 1));
-        }
+        x.SetValue(k + 1, static_cast<T>(xkp1));
+        wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
+        const float bkm1 = static_cast<float>(b.GetValue(k - 1));
         pipe_barrier(PIPE_V);
         TSUB(b, b, diff);
         set_flag(PIPE_V, PIPE_S, EVENT_ID0);
 
-        pending_k = k;
-        pending_alpha = alpha;
+        xkp1 = xk;
 
         wait_flag(PIPE_V, PIPE_S, EVENT_ID1);
-        alpha = next_alpha_base - static_cast<float>(diff.GetValue(k - 1));
+        xk = bkm1 - static_cast<float>(diff.GetValue(k - 1));
       }
-      if (j > 0) {
-        wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-      }
-      if (pending_k >= 0) {
-        x.SetValue(pending_k, static_cast<T>(pending_alpha));
-      }
-      x.SetValue(0, static_cast<T>(alpha));
+
+      wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
+      x.SetValue(1, static_cast<T>(xkp1));
+      x.SetValue(0, static_cast<T>(xk));
     }
 
     set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
