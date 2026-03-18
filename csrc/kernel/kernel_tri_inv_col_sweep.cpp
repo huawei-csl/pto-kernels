@@ -74,7 +74,6 @@ AICORE void runTTriInv(__gm__ T* vec_in, __gm__ T* vec_out,
   TASSIGN(diff, UB_ZERO_ADDR + matrix_in_size + b_size);
   TileVecData A_k(1, S);
 
-  // synchronization operations between hardware pipelines
   set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID0);
   set_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
 
@@ -83,7 +82,7 @@ AICORE void runTTriInv(__gm__ T* vec_in, __gm__ T* vec_out,
        (tile_id < num_tiles_per_aiv) &&
        (global_tile_id + tile_id < total_length / tile_len);
        ++tile_id) {
-    // Set output to all zeros.
+    // TODO (filip) do we have to explictly zero Tiles?
     wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
     TEXPANDS(inv_matrix_out, static_cast<T>(0));
     set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
@@ -94,24 +93,18 @@ AICORE void runTTriInv(__gm__ T* vec_in, __gm__ T* vec_out,
     GlobalData global_out(vec_out);
     TASSIGN(global_in, vec_in + (global_tile_id + tile_id) * tile_len);
     TASSIGN(global_out, vec_out + (global_tile_id + tile_id) * tile_len);
-    // load data from global memory to UB buffer
     TLOAD(matrix_in, global_in);
 
     set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
     wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
-    // For every output column j-th
+    // Find inverse by doing back-sub for each basis vector b_j
     for (int32_t j = S - 1; j >= 0; j--) {
-      // Column sweep on each column.
-
-      // `b` vector is  j-th standard vector (e_j).
       TEXPANDS(b, static_cast<T>(0));
       set_flag(PIPE_V, PIPE_S, EVENT_ID0);
       wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
       b.SetValue(j, static_cast<T>(1));
 
-      // Solve A x = e_j for vector x
-      // Must be offset by UB address
       TASSIGN(x, out_start_ub_addr + j * S * sizeof(T));
 
       float alpha = 1.0f;
