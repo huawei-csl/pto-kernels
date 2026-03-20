@@ -82,7 +82,7 @@ AICORE void runTTriInv(__gm__ T* vec_in, __gm__ T* vec_out,
        (tile_id < num_tiles_per_aiv) &&
        (global_tile_id + tile_id < total_length / tile_len);
        ++tile_id) {
-    // TODO (filip) do we have to explictly zero Tiles?
+    // Set output to all zeros.
     wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
     TEXPANDS(inv_matrix_out, static_cast<T>(0));
     set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
@@ -99,6 +99,7 @@ AICORE void runTTriInv(__gm__ T* vec_in, __gm__ T* vec_out,
     wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
     // Find inverse by doing back-sub for each basis vector b_j
+    // Solve A x = e_j for vector x
     for (int32_t j = S - 1; j >= 0; j--) {
       TEXPANDS(b, static_cast<T>(0));
       set_flag(PIPE_V, PIPE_S, EVENT_ID0);
@@ -112,11 +113,7 @@ AICORE void runTTriInv(__gm__ T* vec_in, __gm__ T* vec_out,
         continue;
       }
 
-      float xk = 1.0f;
-      float xkp1 = xk;
-
       TASSIGN(A_k, j * S * sizeof(T));
-      TMULS(diff, A_k, static_cast<T>(xk));
       set_flag(PIPE_V, PIPE_S, EVENT_ID1);
 
       pipe_barrier(PIPE_V);
@@ -124,7 +121,9 @@ AICORE void runTTriInv(__gm__ T* vec_in, __gm__ T* vec_out,
       set_flag(PIPE_V, PIPE_S, EVENT_ID0);
 
       wait_flag(PIPE_V, PIPE_S, EVENT_ID1);
-      xk = -static_cast<float>(diff.GetValue(j - 1));
+      // Scalar core only supports fp32 arithmetic, so use float rather than T
+      float xk = -static_cast<float>(diff.GetValue(j - 1));
+      float xkp1 = 1.0f;
 
       for (int32_t k = j - 1; k >= 1; --k) {
         TASSIGN(A_k, k * S * sizeof(T));
