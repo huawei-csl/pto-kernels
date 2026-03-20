@@ -20,7 +20,7 @@ ASCEND_CANN_PACKAGE_PATH = {env="ASCEND_CANN_PACKAGE_PATH", default="/usr/local/
 
 [project]
 name = "pto-kernels"
-version = "0.1.1"
+version = "0.1.2"
 description="PTO kernels"
 readme = "README.md"
 authors = [
