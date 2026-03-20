@@ -37,8 +37,9 @@ full text of the License.
  * QUICK FIND: Search for "GenCastCallFp16ToInt4" or "TCVT_FP16_TO_INT4_PACKED".
  */
 
-
-// CANN 8.5.0's TCVT does not support int4, thus this custom wrapper as workaround
+/*
+CANN 8.5.0's TCVT does not support int4, thus this custom wrapper as workaround
+*/
 #ifndef FAST_HADAMARD_INTCVT4_HPP
 #define FAST_HADAMARD_INTCVT4_HPP
 
