@@ -236,24 +236,34 @@ included by `pto-inst.hpp` when `__CCE_AICORE__` is defined — i.e., in device-
 compilation contexts.  File-scope `using` aliases are compiled in host context too, where
 those types do not exist, causing `use of undeclared identifier 'DYNAMIC'` errors.
 
-**Fix:** declare tile and global type aliases **inside** the appropriate `#ifdef __DAV_C220_*__`
-block, not at file scope.  Aliases needed in both Cube and Vec blocks must be repeated in each:
+**Fix:** declare **all** tile, pipe, and global type aliases inside the `__global__ AICORE`
+kernel function body.  The entire function body is device context; file scope is not.
+
+- Aliases used by only one core type → inside the matching `#ifdef __DAV_C220_*__` block.
+- Aliases shared between Cube and Vec (e.g., `C2VPipe`) → at the top of the function body,
+  before any `#ifdef` block.
 
 ```cpp
 // ✗ Wrong — file scope, fails in host compilation
 using VecTile = Tile<TileType::Vec, float, 256, 256, BLayout::RowMajor, DYNAMIC, DYNAMIC>;
+using ProdTile = TileAcc<float, 16, 16>;  // also fails — TileAcc is device-only too
 
-// ✓ Correct — inside device-only block
+// ✓ Correct — inside the kernel function
+extern "C" __global__ AICORE void my_kernel(...) {
+    // shared aliases at the top of the function (before any #ifdef)
+    using ProdTile = TileAcc<float, 16, 16>;
+    using ConsTile = Tile<TileType::Vec, float, 8, 16, BLayout::RowMajor, 8, 16>;
+    using C2VPipe  = TPipe<0, FIFOType::GM_FIFO, 1, 1, ProdTile, ConsTile>;
+
 #ifdef __DAV_C220_VEC__
+    // core-specific aliases inside their block
     using VecTile    = Tile<TileType::Vec, float, 256, 256, BLayout::RowMajor, DYNAMIC, DYNAMIC>;
     using GMShape    = Shape<1, 1, 1, DYNAMIC, 256>;
     using GlobalFP32 = GlobalTensor<float, GMShape, Stride<1, 1, 1, 256, 1>>;
     ...
 #endif
+}
 ```
-
-`TPipe` / `TSync_Custom` type aliases that reference only file-scope types (e.g.,
-`TileAcc`, static-dim `Tile`) are safe at file scope because they don't use `DYNAMIC`.
 
 ---
 

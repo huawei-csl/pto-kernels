@@ -30,16 +30,6 @@
 
 using namespace pto;
 
-// Tile types only used for TPipe direction inference (is_c2v = true).
-// ProdTile=Acc, ConsTile=Vec → is_c2v = true (cube-to-vector direction).
-// These are template parameters only; actual data movement uses TLOAD/TSTORE.
-using ProdTile = TileAcc<float, 16, 16>;
-using ConsTile = Tile<TileType::Vec, float, 8, 16, BLayout::RowMajor, 8, 16>;
-
-// TPipe<FlagID, FIFOType, Depth, SyncPeriod, ProdTile, ConsTile>
-// FLAG_ID=0 matches the original kernel's flag_id variable.
-using C2VPipe = TPipe<0, FIFOType::GM_FIFO, 1, 1, ProdTile, ConsTile>;
-
 // ---------------------------------------------------------------------------
 // Kernel
 // ---------------------------------------------------------------------------
@@ -50,6 +40,15 @@ extern "C" __global__ AICORE void sync_c2v_tpushpop(
     __gm__ uint8_t * __restrict__ ffts_addr,
     int32_t N)
 {
+    // Tile types only used for TPipe direction inference (is_c2v = true).
+    // ProdTile=Acc, ConsTile=Vec → is_c2v = true (cube-to-vector direction).
+    // These are placeholder template parameters; actual data movement uses TLOAD/TSTORE.
+    using ProdTile = TileAcc<float, 16, 16>;
+    using ConsTile = Tile<TileType::Vec, float, 8, 16, BLayout::RowMajor, 8, 16>;
+    // TPipe<FlagID, FIFOType, Depth, SyncPeriod, ProdTile, ConsTile>
+    // FLAG_ID=0 matches the original kernel's flag_id variable.
+    using C2VPipe = TPipe<0, FIFOType::GM_FIFO, 1, 1, ProdTile, ConsTile>;
+
 #ifdef __DAV_C220_CUBE__
     // Mat tile for cube AIC side: L1/cbuf, row-major ND layout.
     using MatTile  = Tile<TileType::Mat, float, 256, 256, BLayout::RowMajor, DYNAMIC, DYNAMIC>;
