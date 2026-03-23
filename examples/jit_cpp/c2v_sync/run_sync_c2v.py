@@ -23,6 +23,7 @@ def compile_kernel(src_cpp: str, out_so: str, verbose: bool = False) -> None:
         f"-I{ascend}/include",
         f"-I{ascend}/pkg_inc",
         f"-I{ascend}/pkg_inc/runtime",
+        f"-I{ascend}/pkg_inc/profiling",
     ]
     cmd = ["bisheng", *flags, src_cpp, "-o", out_so]
     if verbose:
