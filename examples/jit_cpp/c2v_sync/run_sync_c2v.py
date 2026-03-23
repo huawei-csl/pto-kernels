@@ -87,9 +87,8 @@ def test_kernel(run_kernel, label: str, device: str = "npu") -> None:
     correct = torch.equal(gm_output, ref_result)
     print(f"[{label}] correct: {correct}")
     if not correct:
-        print(f"  ref:    {ref_result[:16]}")
-        print(f"  output: {gm_output[:16]}")
-        sys.exit(1)
+        print(f"  ref:    {ref_result}")
+        print(f"  output: {gm_output}")
 
 
 # ---------------------------------------------------------------------------
