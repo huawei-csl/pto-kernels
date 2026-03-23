@@ -1,34 +1,9 @@
 import ctypes
 import os
-import subprocess
 import sys
 
 import torch
 import torch_npu  # noqa: F401
-
-
-# ---------------------------------------------------------------------------
-# Compilation helpers
-# ---------------------------------------------------------------------------
-
-def compile_kernel(src_cpp: str, out_so: str, verbose: bool = False) -> None:
-    ascend = os.environ["ASCEND_TOOLKIT_HOME"]
-    pto = os.environ["PTO_LIB_PATH"]
-
-    flags = [
-        "-fPIC", "-shared", "-xcce", "-O2", "-std=c++17",
-        "--npu-arch=dav-2201",
-        "-DMEMORY_BASE",
-        f"-I{pto}/include",
-        f"-I{ascend}/include",
-        f"-I{ascend}/pkg_inc",
-        f"-I{ascend}/pkg_inc/runtime",
-        f"-I{ascend}/pkg_inc/profiling",
-    ]
-    cmd = ["bisheng", *flags, src_cpp, "-o", out_so]
-    if verbose:
-        print("compile:", " ".join(cmd))
-    subprocess.run(cmd, check=True)
 
 
 # ---------------------------------------------------------------------------
@@ -92,26 +67,24 @@ def test_kernel(run_kernel, label: str, device: str = "npu") -> None:
 
 
 # ---------------------------------------------------------------------------
-# Main
+# Main — expects .so files already built by compile.sh
 # ---------------------------------------------------------------------------
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 VERSIONS = [
-    ("TSYNC",       "sync_c2v_tsync.cpp",    "sync_c2v_tsync_lib.so"),
-    ("TPUSH/TPOP",  "sync_c2v_tpushpop.cpp", "sync_c2v_tpushpop_lib.so"),
+    ("TSYNC",      "sync_c2v_tsync_lib.so"),
+    ("TPUSH/TPOP", "sync_c2v_tpushpop_lib.so"),
 ]
 
-for label, src, so in VERSIONS:
-    src_path = os.path.join(HERE, src)
-    so_path  = os.path.join(HERE, so)
+for label, so in VERSIONS:
+    so_path = os.path.join(HERE, so)
+    if not os.path.exists(so_path):
+        print(f"ERROR: {so} not found — run compile.sh first", file=sys.stderr)
+        sys.exit(1)
 
-    print(f"\n=== {label}: compiling {src} ===")
-    compile_kernel(src_path, so_path, verbose=True)
-
+    print(f"\n=== {label}: loading {so} ===")
     run_kernel = load_lib(so_path)
     test_kernel(run_kernel, label)
-
-    os.remove(so_path)
 
 print("\nAll versions passed.")
