@@ -1,8 +1,5 @@
 ## C2V Sync — Cube-to-Vector synchronization via pto-isa wrappers
 
-Ports [`npu_kernels/c2v_sync_cce`](../../../../npu_kernels/c2v_sync_cce) to the
-pto-isa higher-level API in two flavours.
-
 ### What the kernel does
 
 Each cube core (AIC) copies a slice of `gm_input` through its L1 buffer into
