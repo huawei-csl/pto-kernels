@@ -1,5 +1,5 @@
 // Ported from npu_kernels/c2v_sync_cce/sync_c2v_kernel.cpp
-// Version: TSYNC — uses Event<TMOV_A2V,TADDS> + TLOAD / TSTORE / TADDS from pto-isa
+// Version: TSYNC — uses TLOAD / TSTORE / TADDS from pto-isa; raw intrinsics for sync
 //
 // Low-level intrinsic → pto-isa wrapper mapping
 //   copy_gm_to_cbuf   → TLOAD  (Mat tile, GM → L1)
@@ -7,25 +7,31 @@
 //   copy_gm_to_ubuf   → TLOAD  (Vec tile, GM → UB)
 //   copy_ubuf_to_gm   → TSTORE (Vec tile, UB → GM)
 //   vadds loop        → TADDS  (Vec tile, scalar add)
-//   ffts_cross_core_sync → Event<TMOV_A2V,TADDS,false>::Record<0>()
-//   wait_flag_dev        → Event<TMOV_A2V,TADDS,false>::Wait<0>()
 //
-// Event<TMOV_A2V, TADDS, false> is a cross-core event (IsCrossCore=true) because:
-//   srcOp=TMOV_A2V → srcPipe=PIPE_FIX, dstOp=TADDS → dstPipe=PIPE_V
-//   Record<flag_id>() → ffts_cross_core_sync(PIPE_FIX, getFFTSMsg(2, flag_id))
-//   Wait<flag_id>()   → wait_flag_dev(flag_id)
-// flag_id=0 is a compile-time template argument, matching the original's flag_id=0.
+// Cross-core sync (ffts_cross_core_sync / wait_flag_dev) is called directly
+// with literal arguments.  The pto-isa wrappers TSync_Custom and TSync.hpp Event
+// both fail with the bisheng compiler because ffts_cross_core_sync requires all
+// arguments to be compile-time literals:
+//   • TSync_Custom::record()  — second arg derived from runtime uint16_t flag_id
+//   • Event::Init()           — first arg is constexpr pipe_t, not a literal
+// Neither satisfies the bisheng strict-literal requirement; only TPipe::Producer
+// (which hard-codes PIPE_FIX + compile-time FlagID) passes.
+// The sync message is:  1 | (mode=2 << 4) | (flag_id=0 << 8) = 0x21 = 33
 //
-// Note: Record() emits ffts_cross_core_sync on PIPE_FIX.  We drain PIPE_MTE3
-// first via pipe_barrier so GM writes are visible before the signal fires.
+// Note: ffts_cross_core_sync emits on PIPE_FIX.  We drain PIPE_MTE3 first via
+// pipe_barrier so GM writes are visible before the signal fires.
 //
 // Tile shape convention (both Vec and Mat):
 //   cols = 256 floats = 1 KB per burst   (static, matches the original's burstLen=32 blocks)
 //   rows = N/256 or 2*N/256              (dynamic via DYNAMIC valid dim)
 // Static Rows=256 forces TADDS into "count mode" internally, which handles
 // arbitrary runtime element counts without overflow in the repeat counter.
-#include <pto/pto-inst.hpp>  // includes TSync.hpp (Event), TLoad, TStore, TAddS
+#include <pto/pto-inst.hpp>  // TLoad, TStore, TAddS
 #include "runtime/rt.h"      // rtGetC2cCtrlAddr
+
+// FFTS message: base=1, mode=CV_CORE_SYNC=2, flag_id=0
+// = 1 | (2 << 4) | (0 << 8) = 0x21
+static constexpr uint64_t kC2VSyncMsg = 1u | (2u << 4u) | (0u << 8u);
 
 using namespace pto;
 
@@ -65,13 +71,13 @@ extern "C" __global__ AICORE void sync_c2v_tsync(
 
     TSTORE(globalOut, l1_tile); // L1 → GM  (MTE3)
 
-    // Drain MTE3 (GM write) before the PIPE_FIX signal in TSync_Custom::record().
+    // Drain MTE3 (GM write) before emitting the PIPE_FIX signal.
     pipe_barrier(PIPE_MTE3);
 
     // Signal vector: data is ready in gm_output.
-    // Wraps: ffts_cross_core_sync(PIPE_FIX, getFFTSMsg(2, 0))
-    Event<Op::TMOV_A2V, Op::TADDS, false, EVENT_ID0> c2v_sync;
-    c2v_sync.Record<0>();
+    // kC2VSyncMsg = 1 | (CV_CORE_SYNC=2 << 4) | (flag_id=0 << 8) = 0x21 = 33
+    // Both args must be compile-time literals for bisheng.
+    ffts_cross_core_sync(PIPE_FIX, kC2VSyncMsg);
 
     pipe_barrier(PIPE_ALL);
 #endif  // __DAV_C220_CUBE__
@@ -97,9 +103,8 @@ extern "C" __global__ AICORE void sync_c2v_tsync(
     TASSIGN(ub_tile, (uint32_t)0x0);  // place at UB base
 
     // Wait for cube's "data ready" signal.
-    // Wraps: wait_flag_dev(0)
-    Event<Op::TMOV_A2V, Op::TADDS, false, EVENT_ID0> c2v_sync;
-    c2v_sync.Wait<0>();
+    // wait_flag_dev(flag_id=0) — literal arg, no bisheng restriction.
+    wait_flag_dev(0);
 
     TLOAD(ub_tile, globalOut);  // GM → UB  (MTE2)
 

@@ -110,21 +110,56 @@ c2v_sync.record();         // now safe: vector will see the written data
 
 ---
 
+## bisheng strict-literal requirement for `ffts_cross_core_sync`
+
+> **Critical:** bisheng requires **both** arguments of `ffts_cross_core_sync` to be compile-time
+> literals.  Passing a runtime value or a computed `constexpr` expression (as opposed to a
+> plain integer literal) silently produces wrong output or a compile error.
+
+| Sync mechanism | 1st arg (`pipe_t`) | 2nd arg (msg) | Works? |
+|---|---|---|---|
+| `TSync_Custom::record()` | `PIPE_FIX` (literal ✓) | `_getFFTSMsg(CV_CORE_SYNC, flag_id)` — runtime `uint16_t` ✗ | **Wrong output (silent)** |
+| `TSync.hpp Event::Init()` | `GetPipeByOp<TMOV_A2V>()` — computed constexpr ✗ | compile-time ✓ | **Compile error** |
+| `TPipe::Producer::record()` | `PIPE_FIX` (literal ✓) | `getFFTSMsgCfg(CV_CORES_SYNC, FlagID=0)` — template param folds to literal ✓ | **Works** |
+| Raw intrinsic (direct) | `PIPE_FIX` (literal ✓) | `kC2VSyncMsg` — `static constexpr uint64_t` folded to literal ✓ | **Works** |
+
+**Fix for TSYNC version:** call the raw intrinsics directly with a pre-computed compile-time constant:
+
+```cpp
+// Compute msg at compile time — bisheng treats this as a literal
+static constexpr uint64_t kC2VSyncMsg = 1u | (2u << 4u) | (0u << 8u);  // = 0x21 = 33
+// base=1, mode=CV_CORE_SYNC=2, flag_id=0
+
+// Cube side (__DAV_C220_CUBE__)
+pipe_barrier(PIPE_MTE3);
+ffts_cross_core_sync(PIPE_FIX, kC2VSyncMsg);  // both args are compile-time literals
+
+// Vector side (__DAV_C220_VEC__)
+wait_flag_dev(0);  // literal flag_id — no restriction
+```
+
+---
+
 ## TSync_Custom (TSYNC version)
+
+> **Warning:** `TSync_Custom` fails with bisheng due to runtime `flag_id` in the second arg of
+> `ffts_cross_core_sync`.  Use raw intrinsics (above) or `TPipe` (below) instead.
 
 ```cpp
 #include <pto/npu/a2a3/custom/TSync_Custom.hpp>
 #include <pto/npu/a2a3/custom/TSyncCVID.hpp>
 
-// flag_id = 0, baked in via aggregate initializer
-constexpr TSync_Custom<SyncOpType::TSTORE_C2GM, SyncOpType::TLOAD> c2v_sync = {0};
+// ✗ constexpr causes record()/wait() to be silently dropped by bisheng
+// ✗ even non-constexpr: flag_id is a runtime member → wrong output silently
+TSync_Custom<SyncOpType::TSTORE_C2GM, SyncOpType::TLOAD> c2v_sync{0};
 
 // Cube side (__DAV_C220_CUBE__)
 pipe_barrier(PIPE_MTE3);
-c2v_sync.record();   // → ffts_cross_core_sync(PIPE_FIX, _getFFTSMsg(CV_CORE_SYNC, 0))
+c2v_sync.record();   // → ffts_cross_core_sync(PIPE_FIX, _getFFTSMsg(CV_CORE_SYNC, flag_id))
+                     //   flag_id is runtime uint16_t → bisheng silent wrong output
 
 // Vector side (__DAV_C220_VEC__)
-c2v_sync.wait();     // → wait_flag_dev(0)
+c2v_sync.wait();     // → wait_flag_dev(flag_id) — this part works
 ```
 
 Template args `<TSTORE_C2GM, TLOAD>` encode the data-flow direction: cube stores to GM,
@@ -293,9 +328,9 @@ The symptom is that sync never fires: the vector core proceeds immediately witho
 - [ ] `copy_gm_to_cbuf` → `TLOAD(MatTile, GlobalTensor)`
 - [ ] `copy_cbuf_to_gm` → `TSTORE(GlobalTensor, MatTile)`
 - [ ] `vadds` loop → `TADDS(tile, tile, scalar)`
-- [ ] `ffts_cross_core_sync` + `wait_flag_dev` → `TSync_Custom` or `TPipe`
+- [ ] `ffts_cross_core_sync` + `wait_flag_dev` → **raw intrinsics** (preferred) or `TPipe` (both args must be compile-time literals; `TSync_Custom` fails silently)
 - [ ] **Static `Rows=256` (not `DYNAMIC`) on any tile passed to `TADDS`**
-- [ ] **`pipe_barrier(PIPE_MTE3)` before every `.record()` call**
+- [ ] **`pipe_barrier(PIPE_MTE3)` before every `ffts_cross_core_sync(PIPE_FIX, ...)` call**
 - [ ] `DYNAMIC` valid dims (`RowValid`, `ColValid`) for runtime tile sizes
 - [ ] `Shape<..., DYNAMIC, 256>` with `n_rows` passed to GlobalTensor constructor
 - [ ] `TASSIGN(tile, (uint32_t)0x0)` to bind tile to buffer base address
