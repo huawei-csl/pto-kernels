@@ -1,5 +1,5 @@
 // Ported from npu_kernels/c2v_sync_cce/sync_c2v_kernel.cpp
-// Version: TSYNC — uses TSync_Custom + TLOAD / TSTORE / TADDS from pto-isa
+// Version: TSYNC — uses Event<TMOV_A2V,TADDS> + TLOAD / TSTORE / TADDS from pto-isa
 //
 // Low-level intrinsic → pto-isa wrapper mapping
 //   copy_gm_to_cbuf   → TLOAD  (Mat tile, GM → L1)
@@ -7,22 +7,25 @@
 //   copy_gm_to_ubuf   → TLOAD  (Vec tile, GM → UB)
 //   copy_ubuf_to_gm   → TSTORE (Vec tile, UB → GM)
 //   vadds loop        → TADDS  (Vec tile, scalar add)
-//   ffts_cross_core_sync → TSync_Custom<TSTORE_C2GM, TLOAD>::record()
-//   wait_flag_dev        → TSync_Custom<TSTORE_C2GM, TLOAD>::wait()
+//   ffts_cross_core_sync → Event<TMOV_A2V,TADDS,false>::Record<0>()
+//   wait_flag_dev        → Event<TMOV_A2V,TADDS,false>::Wait<0>()
 //
-// Note: TSync_Custom::record() emits ffts_cross_core_sync on PIPE_FIX rather
-// than on PIPE_MTE3 as the original did.  We drain PIPE_MTE3 first via
-// pipe_barrier so the ordering guarantee is preserved.
+// Event<TMOV_A2V, TADDS, false> is a cross-core event (IsCrossCore=true) because:
+//   srcOp=TMOV_A2V → srcPipe=PIPE_FIX, dstOp=TADDS → dstPipe=PIPE_V
+//   Record<flag_id>() → ffts_cross_core_sync(PIPE_FIX, getFFTSMsg(2, flag_id))
+//   Wait<flag_id>()   → wait_flag_dev(flag_id)
+// flag_id=0 is a compile-time template argument, matching the original's flag_id=0.
+//
+// Note: Record() emits ffts_cross_core_sync on PIPE_FIX.  We drain PIPE_MTE3
+// first via pipe_barrier so GM writes are visible before the signal fires.
 //
 // Tile shape convention (both Vec and Mat):
 //   cols = 256 floats = 1 KB per burst   (static, matches the original's burstLen=32 blocks)
 //   rows = N/256 or 2*N/256              (dynamic via DYNAMIC valid dim)
 // Static Rows=256 forces TADDS into "count mode" internally, which handles
 // arbitrary runtime element counts without overflow in the repeat counter.
-#include <pto/pto-inst.hpp>
-#include <pto/npu/a2a3/custom/TSyncCVID.hpp>   // _getFFTSMsg, CVSyncMode
-#include <pto/npu/a2a3/custom/TSync_Custom.hpp> // TSync_Custom
-#include "runtime/rt.h"                          // rtGetC2cCtrlAddr
+#include <pto/pto-inst.hpp>  // includes TSync.hpp (Event), TLoad, TStore, TAddS
+#include "runtime/rt.h"      // rtGetC2cCtrlAddr
 
 using namespace pto;
 
@@ -66,9 +69,9 @@ extern "C" __global__ AICORE void sync_c2v_tsync(
     pipe_barrier(PIPE_MTE3);
 
     // Signal vector: data is ready in gm_output.
-    // Wraps: ffts_cross_core_sync(PIPE_FIX, _getFFTSMsg(CV_CORE_SYNC, 0))
-    TSync_Custom<SyncOpType::TSTORE_C2GM, SyncOpType::TLOAD> c2v_sync{0};
-    c2v_sync.record();
+    // Wraps: ffts_cross_core_sync(PIPE_FIX, getFFTSMsg(2, 0))
+    Event<Op::TMOV_A2V, Op::TADDS, false, EVENT_ID0> c2v_sync;
+    c2v_sync.Record<0>();
 
     pipe_barrier(PIPE_ALL);
 #endif  // __DAV_C220_CUBE__
@@ -95,8 +98,8 @@ extern "C" __global__ AICORE void sync_c2v_tsync(
 
     // Wait for cube's "data ready" signal.
     // Wraps: wait_flag_dev(0)
-    TSync_Custom<SyncOpType::TSTORE_C2GM, SyncOpType::TLOAD> c2v_sync{0};
-    c2v_sync.wait();
+    Event<Op::TMOV_A2V, Op::TADDS, false, EVENT_ID0> c2v_sync;
+    c2v_sync.Wait<0>();
 
     TLOAD(ub_tile, globalOut);  // GM → UB  (MTE2)
 
