@@ -1,5 +1,5 @@
 // Ported from npu_kernels/c2v_sync_cce/sync_c2v_kernel.cpp
-// Version: TSYNC — uses TLOAD / TSTORE / TADDS from pto-isa; raw intrinsics for sync
+// Version: TSYNC — uses TLOAD / TSTORE / TADDS from pto-isa; MyTSync for sync
 //
 // Low-level intrinsic → pto-isa wrapper mapping
 //   copy_gm_to_cbuf   → TLOAD  (Mat tile, GM → L1)
@@ -7,18 +7,13 @@
 //   copy_gm_to_ubuf   → TLOAD  (Vec tile, GM → UB)
 //   copy_ubuf_to_gm   → TSTORE (Vec tile, UB → GM)
 //   vadds loop        → TADDS  (Vec tile, scalar add)
+//   ffts_cross_core_sync + wait_flag_dev → MyTSync<FlagID> (see MyTSync.hpp)
 //
-// Cross-core sync (ffts_cross_core_sync / wait_flag_dev) is called directly
-// with literal arguments.  The pto-isa wrappers TSync_Custom and TSync.hpp Event
-// both fail with the bisheng compiler because ffts_cross_core_sync requires all
-// arguments to be compile-time literals:
-//   • TSync_Custom::record()  — second arg derived from runtime uint16_t flag_id
-//   • Event::Init()           — first arg is constexpr pipe_t, not a literal
-// Neither satisfies the bisheng strict-literal requirement; only TPipe::Producer
-// (which hard-codes PIPE_FIX + compile-time FlagID) passes.
-// The sync message is:  1 | (mode=2 << 4) | (flag_id=0 << 8) = 0x21 = 33
+// MyTSync<0> is a local bisheng-safe replacement for TSync_Custom (flag_id
+// promoted to a template parameter so kMsg is a compile-time literal).
+// See issue_report.md for the TSync_Custom / Event failure analysis.
 //
-// Note: ffts_cross_core_sync emits on PIPE_FIX.  We drain PIPE_MTE3 first via
+// Note: MyTSync::record() emits on PIPE_FIX.  We drain PIPE_MTE3 first via
 // pipe_barrier so GM writes are visible before the signal fires.
 //
 // Tile shape convention (both Vec and Mat):
@@ -27,11 +22,8 @@
 // Static Rows=256 forces TADDS into "count mode" internally, which handles
 // arbitrary runtime element counts without overflow in the repeat counter.
 #include <pto/pto-inst.hpp>  // TLoad, TStore, TAddS
+#include "MyTSync.hpp"       // bisheng-safe C2V sync wrapper (workaround)
 #include "runtime/rt.h"      // rtGetC2cCtrlAddr
-
-// FFTS message: base=1, mode=CV_CORE_SYNC=2, flag_id=0
-// = 1 | (2 << 4) | (0 << 8) = 0x21
-static constexpr uint64_t kC2VSyncMsg = 1u | (2u << 4u) | (0u << 8u);
 
 using namespace pto;
 
@@ -75,9 +67,8 @@ extern "C" __global__ AICORE void sync_c2v_tsync(
     pipe_barrier(PIPE_MTE3);
 
     // Signal vector: data is ready in gm_output.
-    // kC2VSyncMsg = 1 | (CV_CORE_SYNC=2 << 4) | (flag_id=0 << 8) = 0x21 = 33
-    // Both args must be compile-time literals for bisheng.
-    ffts_cross_core_sync(PIPE_FIX, kC2VSyncMsg);
+    MyTSync<0> c2v_sync;
+    c2v_sync.record();
 
     pipe_barrier(PIPE_ALL);
 #endif  // __DAV_C220_CUBE__
@@ -103,8 +94,8 @@ extern "C" __global__ AICORE void sync_c2v_tsync(
     TASSIGN(ub_tile, (uint32_t)0x0);  // place at UB base
 
     // Wait for cube's "data ready" signal.
-    // wait_flag_dev(flag_id=0) — literal arg, no bisheng restriction.
-    wait_flag_dev(0);
+    MyTSync<0> c2v_sync;
+    c2v_sync.wait();
 
     TLOAD(ub_tile, globalOut);  // GM → UB  (MTE2)
 
