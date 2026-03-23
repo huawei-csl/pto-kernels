@@ -46,7 +46,7 @@ using GlobalFP32 = GlobalTensor<float, GMShape, GMStride>;
 // Kernel
 // ---------------------------------------------------------------------------
 
-extern "C" __global__ __aicore__ void sync_c2v_tsync(
+extern "C" __global__ AICORE void sync_c2v_tsync(
     __gm__ float * __restrict__ gm_input,
     __gm__ float * __restrict__ gm_output,
     __gm__ uint8_t * __restrict__ ffts_addr,

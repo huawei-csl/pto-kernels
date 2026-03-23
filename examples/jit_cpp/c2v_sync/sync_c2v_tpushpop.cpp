@@ -58,7 +58,7 @@ using C2VPipe = TPipe<0, FIFOType::GM_FIFO, 1, 1, ProdTile, ConsTile>;
 // Kernel
 // ---------------------------------------------------------------------------
 
-extern "C" __global__ __aicore__ void sync_c2v_tpushpop(
+extern "C" __global__ AICORE void sync_c2v_tpushpop(
     __gm__ float * __restrict__ gm_input,
     __gm__ float * __restrict__ gm_output,
     __gm__ uint8_t * __restrict__ ffts_addr,
