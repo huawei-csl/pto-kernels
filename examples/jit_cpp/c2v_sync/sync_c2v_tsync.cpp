@@ -27,22 +27,6 @@
 using namespace pto;
 
 // ---------------------------------------------------------------------------
-// Tile types
-// ---------------------------------------------------------------------------
-
-// Vec tile for vector AIV side: UB, row-major ND layout.
-// Max static dims (256×256) ensure TADDS selects count mode for runtime sizes.
-using VecTile = Tile<TileType::Vec, float, 256, 256, BLayout::RowMajor, DYNAMIC, DYNAMIC>;
-
-// Mat tile for cube AIC side: L1/cbuf, row-major ND layout.
-using MatTile = Tile<TileType::Mat, float, 256, 256, BLayout::RowMajor, DYNAMIC, DYNAMIC>;
-
-// GlobalTensor: 1×1×1×rows×256, stride=(1,1,1,256,1) — contiguous burst layout.
-using GMShape    = Shape<1, 1, 1, DYNAMIC, 256>;
-using GMStride   = Stride<1, 1, 1, 256, 1>;
-using GlobalFP32 = GlobalTensor<float, GMShape, GMStride>;
-
-// ---------------------------------------------------------------------------
 // Kernel
 // ---------------------------------------------------------------------------
 
@@ -53,6 +37,12 @@ extern "C" __global__ AICORE void sync_c2v_tsync(
     int32_t N)
 {
 #ifdef __DAV_C220_CUBE__
+    // Mat tile for cube AIC side: L1/cbuf, row-major ND layout.
+    using MatTile  = Tile<TileType::Mat, float, 256, 256, BLayout::RowMajor, DYNAMIC, DYNAMIC>;
+    // GlobalTensor: 1×1×1×rows×256, stride=(1,1,1,256,1) — contiguous burst layout.
+    using GMShape  = Shape<1, 1, 1, DYNAMIC, 256>;
+    using GlobalFP32 = GlobalTensor<float, GMShape, Stride<1, 1, 1, 256, 1>>;
+
     set_ffts_base_addr((uint64_t)ffts_addr);
     set_padding(0);
     set_atomic_none();
@@ -84,6 +74,13 @@ extern "C" __global__ AICORE void sync_c2v_tsync(
 #endif  // __DAV_C220_CUBE__
 
 #ifdef __DAV_C220_VEC__
+    // Vec tile for vector AIV side: UB, row-major ND layout.
+    // Max static dims (256×256) ensure TADDS selects count mode for runtime sizes.
+    using VecTile  = Tile<TileType::Vec, float, 256, 256, BLayout::RowMajor, DYNAMIC, DYNAMIC>;
+    // GlobalTensor: 1×1×1×rows×256, stride=(1,1,1,256,1) — contiguous burst layout.
+    using GMShape  = Shape<1, 1, 1, DYNAMIC, 256>;
+    using GlobalFP32 = GlobalTensor<float, GMShape, Stride<1, 1, 1, 256, 1>>;
+
     set_atomic_none();
     set_mask_norm();
     set_ffts_base_addr((uint64_t)ffts_addr);

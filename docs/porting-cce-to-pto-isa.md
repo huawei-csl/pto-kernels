@@ -229,6 +229,34 @@ extern "C" __global__ __aicore__ void my_kernel(
 
 ---
 
+## File-scope type alias gotcha
+
+`pto_tile.hpp` (which defines `DYNAMIC`, `Shape`, `Stride`, `GlobalTensor`) is only
+included by `pto-inst.hpp` when `__CCE_AICORE__` is defined — i.e., in device-only
+compilation contexts.  File-scope `using` aliases are compiled in host context too, where
+those types do not exist, causing `use of undeclared identifier 'DYNAMIC'` errors.
+
+**Fix:** declare tile and global type aliases **inside** the appropriate `#ifdef __DAV_C220_*__`
+block, not at file scope.  Aliases needed in both Cube and Vec blocks must be repeated in each:
+
+```cpp
+// ✗ Wrong — file scope, fails in host compilation
+using VecTile = Tile<TileType::Vec, float, 256, 256, BLayout::RowMajor, DYNAMIC, DYNAMIC>;
+
+// ✓ Correct — inside device-only block
+#ifdef __DAV_C220_VEC__
+    using VecTile    = Tile<TileType::Vec, float, 256, 256, BLayout::RowMajor, DYNAMIC, DYNAMIC>;
+    using GMShape    = Shape<1, 1, 1, DYNAMIC, 256>;
+    using GlobalFP32 = GlobalTensor<float, GMShape, Stride<1, 1, 1, 256, 1>>;
+    ...
+#endif
+```
+
+`TPipe` / `TSync_Custom` type aliases that reference only file-scope types (e.g.,
+`TileAcc`, static-dim `Tile`) are safe at file scope because they don't use `DYNAMIC`.
+
+---
+
 ## Porting checklist
 
 - [ ] `copy_gm_to_ubuf` → `TLOAD(VecTile, GlobalTensor)`
