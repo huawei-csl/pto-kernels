@@ -12,6 +12,7 @@ COMMON_FLAGS=(
     -I"${ASCEND_TOOLKIT_HOME}/include"
     -I"${ASCEND_TOOLKIT_HOME}/pkg_inc"
     -I"${ASCEND_TOOLKIT_HOME}/pkg_inc/runtime"
+    -I"${ASCEND_TOOLKIT_HOME}/pkg_inc/profiling"
 )
 
 echo "=== Compiling TSYNC version ==="
