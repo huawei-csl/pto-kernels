@@ -36,30 +36,33 @@
 //                  C2V → PIPE_FIX,  V2C → PIPE_MTE3.
 template <uint8_t FlagID, bool IsCubeToVec = true>
 struct MyTSync {
-  // FFTS message word (encoding from TSyncCVID.hpp / _getFFTSMsg):
-  //   bits [3:0]   base    = 1
-  //   bits [5:4]   mode    = CV_CORE_SYNC = 2
-  //   bits [11:8]  flag_id = FlagID
-  // Every term is a template/compile-time constant → kMsg is a literal.
-  static constexpr uint16_t kBase = 1;
-  static constexpr uint16_t kMode = 2;  // CV_CORE_SYNC
-  static constexpr uint64_t kMsg =
-      kBase | (kMode << 4) | ((uint64_t)FlagID << 8);
+    // FFTS message word (encoding from TSyncCVID.hpp / _getFFTSMsg):
+    //   bits [3:0]   base    = 1
+    //   bits [5:4]   mode    = CV_CORE_SYNC = 2
+    //   bits [11:8]  flag_id = FlagID
+    // Every term is a template/compile-time constant → kMsg is a literal.
+    static constexpr uint16_t kBase = 1;
+    static constexpr uint16_t kMode = 2;  // CV_CORE_SYNC
+    static constexpr uint64_t kMsg  = kBase | (kMode << 4) | ((uint64_t)FlagID << 8);
 
-  // Producer side: signal that data written to GM is visible.
-  //
-  // C2V: emits ffts_cross_core_sync(PIPE_FIX, kMsg).
-  //      Caller must drain MTE3 first:  pipe_barrier(PIPE_MTE3).
-  // V2C: emits ffts_cross_core_sync(PIPE_MTE3, kMsg).
-  //      Caller must drain PIPE_V first: pipe_barrier(PIPE_V).
-  AICORE inline void record() const {
-    if constexpr (IsCubeToVec) {
-      ffts_cross_core_sync(PIPE_FIX, kMsg);
-    } else {
-      ffts_cross_core_sync(PIPE_MTE3, kMsg);
+    // Producer side: signal that data written to GM is visible.
+    //
+    // C2V: emits ffts_cross_core_sync(PIPE_FIX, kMsg).
+    //      Caller must drain MTE3 first:  pipe_barrier(PIPE_MTE3).
+    // V2C: emits ffts_cross_core_sync(PIPE_MTE3, kMsg).
+    //      Caller must drain PIPE_V first: pipe_barrier(PIPE_V).
+    AICORE inline void record() const
+    {
+        if constexpr (IsCubeToVec) {
+            ffts_cross_core_sync(PIPE_FIX, kMsg);
+        } else {
+            ffts_cross_core_sync(PIPE_MTE3, kMsg);
+        }
     }
-  }
 
-  // Consumer side: stall until the producer's record() signal arrives.
-  AICORE inline void wait() const { wait_flag_dev(FlagID); }
+    // Consumer side: stall until the producer's record() signal arrives.
+    AICORE inline void wait() const
+    {
+        wait_flag_dev(FlagID);
+    }
 };

@@ -10,15 +10,14 @@ import torch_npu  # noqa: F401
 # Library loader — same call_kernel ABI for both versions
 # ---------------------------------------------------------------------------
 
-
 def load_lib(so_path: str):
     lib = ctypes.CDLL(os.path.abspath(so_path))
     lib.call_kernel.argtypes = [
-        ctypes.c_uint32,  # blockDim
-        ctypes.c_void_p,  # stream
-        ctypes.c_void_p,  # gm_input
-        ctypes.c_void_p,  # gm_output
-        ctypes.c_int,  # N
+        ctypes.c_uint32,   # blockDim
+        ctypes.c_void_p,   # stream
+        ctypes.c_void_p,   # gm_input
+        ctypes.c_void_p,   # gm_output
+        ctypes.c_int,      # N
     ]
     lib.call_kernel.restype = None
 
@@ -39,7 +38,6 @@ def load_lib(so_path: str):
 # ---------------------------------------------------------------------------
 # Test logic (identical to the original run_sync_c2v.py)
 # ---------------------------------------------------------------------------
-
 
 def test_kernel(run_kernel, label: str, device: str = "npu") -> None:
     torch.npu.set_device(device)
@@ -75,7 +73,7 @@ def test_kernel(run_kernel, label: str, device: str = "npu") -> None:
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 VERSIONS = [
-    ("TSYNC", "sync_c2v_tsync_lib.so"),
+    ("TSYNC",      "sync_c2v_tsync_lib.so"),
     ("TPUSH/TPOP", "sync_c2v_tpushpop_lib.so"),
 ]
 
