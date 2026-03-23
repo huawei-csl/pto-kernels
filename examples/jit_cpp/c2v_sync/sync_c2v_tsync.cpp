@@ -67,7 +67,7 @@ extern "C" __global__ AICORE void sync_c2v_tsync(
 
     // Signal vector: data is ready in gm_output.
     // Wraps: ffts_cross_core_sync(PIPE_FIX, _getFFTSMsg(CV_CORE_SYNC, 0))
-    constexpr TSync_Custom<SyncOpType::TSTORE_C2GM, SyncOpType::TLOAD> c2v_sync = {0};
+    TSync_Custom<SyncOpType::TSTORE_C2GM, SyncOpType::TLOAD> c2v_sync{0};
     c2v_sync.record();
 
     pipe_barrier(PIPE_ALL);
@@ -95,7 +95,7 @@ extern "C" __global__ AICORE void sync_c2v_tsync(
 
     // Wait for cube's "data ready" signal.
     // Wraps: wait_flag_dev(0)
-    constexpr TSync_Custom<SyncOpType::TSTORE_C2GM, SyncOpType::TLOAD> c2v_sync = {0};
+    TSync_Custom<SyncOpType::TSTORE_C2GM, SyncOpType::TLOAD> c2v_sync{0};
     c2v_sync.wait();
 
     TLOAD(ub_tile, globalOut);  // GM → UB  (MTE2)

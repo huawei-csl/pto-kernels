@@ -267,6 +267,25 @@ extern "C" __global__ AICORE void my_kernel(...) {
 
 ---
 
+## `constexpr` sync object gotcha
+
+> **Silent bug:** declaring `TSync_Custom` as `constexpr` causes bisheng to silently drop the hardware intrinsic calls inside `record()` / `wait()`.
+
+```cpp
+// ✗ Wrong — bisheng may evaluate record()/wait() at compile time and drop
+//   ffts_cross_core_sync / wait_flag_dev as "unreachable" side effects
+constexpr TSync_Custom<SyncOpType::TSTORE_C2GM, SyncOpType::TLOAD> c2v_sync = {0};
+c2v_sync.record();
+
+// ✓ Correct — plain object, methods called at runtime
+TSync_Custom<SyncOpType::TSTORE_C2GM, SyncOpType::TLOAD> c2v_sync{0};
+c2v_sync.record();
+```
+
+The symptom is that sync never fires: the vector core proceeds immediately without waiting for the cube's data, and the output reflects stale/uninitialized GM values.
+
+---
+
 ## Porting checklist
 
 - [ ] `copy_gm_to_ubuf` → `TLOAD(VecTile, GlobalTensor)`
