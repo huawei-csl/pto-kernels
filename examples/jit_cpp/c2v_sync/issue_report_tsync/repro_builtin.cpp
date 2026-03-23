@@ -19,8 +19,8 @@
 // See repro_mytync.cpp for the fixed version using MyTSync<FlagID>.
 
 #include <pto/pto-inst.hpp>
-#include <pto/npu/a2a3/custom/TSync_Custom.hpp>
-#include <pto/npu/a2a3/custom/TSyncCVID.hpp>
+#include <pto/npu/a2a3/custom/TSyncCVID.hpp>    // defines CV_CORE_SYNC, _getFFTSMsg
+#include <pto/npu/a2a3/custom/TSync_Custom.hpp> // depends on TSyncCVID.hpp; include after
 #include "runtime/rt.h"
 
 using namespace pto;
