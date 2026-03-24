@@ -1,4 +1,4 @@
-// Reproducer: TPipe C2V producer path mismatch with real compute.
+// Reproducer: TPipe C2V producer path mismatch with wrapper data path.
 //
 // Purpose:
 // - Show that TPipe call style is convenient, but for this case we need producer
@@ -6,7 +6,7 @@
 //
 // Notes:
 // - This file is for issue documentation.
-// - It performs full C2V computation so numeric mismatch is observable.
+// - Data movement/compute use wrappers (TLOAD/TSTORE/TADDS), so only sync path differs.
 
 #include <pto/pto-inst.hpp>
 #include <pto/npu/a2a3/TPush.hpp>
@@ -50,30 +50,25 @@ extern "C" __global__ AICORE void repro_tpipe_issue(
     using C2VPipe = TPipe<0, FIFOType::GM_FIFO, 1, 1, ProdTile, ConsTile>;
 
 #ifdef __DAV_C220_CUBE__
+    using MatTile = Tile<TileType::Mat, float, 256, 256, BLayout::RowMajor, DYNAMIC, DYNAMIC>;
+    using GMShape = Shape<1, 1, 1, DYNAMIC, 256>;
+    using GlobalFP32 = GlobalTensor<float, GMShape, Stride<1, 1, 1, 256, 1>>;
+
     set_padding(0);
     set_atomic_none();
 
-    auto l1_buf = reinterpret_cast<__cbuf__ float*>((uintptr_t)0);
-    copy_gm_to_cbuf(
-        l1_buf,
-        gm_in + get_block_idx() * n * 2,
-        0,
-        n * 2 / 256,
-        32,
-        0, 0, PAD_NONE
-    );
+    int rows_2n = n * 2 / 256;
+    GlobalFP32 globalIn(gm_in + get_block_idx() * n * 2, GMShape(1, 1, 1, rows_2n, 256));
+    GlobalFP32 globalOut(gm_out + get_block_idx() * n * 2, GMShape(1, 1, 1, rows_2n, 256));
+    MatTile l1_tile(rows_2n, 256);
+    TASSIGN(l1_tile, (uint32_t)0x0);
+
+    TLOAD(l1_tile, globalIn);
 
     set_flag(PIPE_MTE2, PIPE_MTE3, EVENT_ID0);
     wait_flag(PIPE_MTE2, PIPE_MTE3, EVENT_ID0);
 
-    copy_cbuf_to_gm(
-        gm_out + get_block_idx() * n * 2,
-        l1_buf,
-        0,
-        n * 2 / 256,
-        32,
-        0, 0
-    );
+    TSTORE(globalOut, l1_tile);
 
     pipe_barrier(PIPE_MTE3);
 
@@ -92,53 +87,36 @@ extern "C" __global__ AICORE void repro_tpipe_issue(
 #endif
 
 #ifdef __DAV_C220_VEC__
+    using VecTile = Tile<TileType::Vec, float, 256, 256, BLayout::RowMajor, DYNAMIC, DYNAMIC>;
+    using GMShape = Shape<1, 1, 1, DYNAMIC, 256>;
+    using GlobalFP32 = GlobalTensor<float, GMShape, Stride<1, 1, 1, 256, 1>>;
+
     set_atomic_none();
     set_mask_norm();
     set_vector_mask((uint64_t)-1, (uint64_t)-1);
 
     int subblock_id = get_subblockid();
     int id = get_block_idx() * get_subblockdim() + subblock_id;
-    auto ub_buf = reinterpret_cast<__ubuf__ float*>((uintptr_t)0);
+    int rows_n = n / 256;
+    GlobalFP32 globalOut(gm_out + id * n, GMShape(1, 1, 1, rows_n, 256));
+    VecTile ub_tile(rows_n, 256);
+    TASSIGN(ub_tile, (uint32_t)0x0);
 
     // Consumer API style remains the same.
     typename C2VPipe::Consumer cons;
     cons.wait();
 
-    copy_gm_to_ubuf(
-        ub_buf,
-        gm_out + id * n,
-        0,
-        n / 256,
-        32,
-        0, 0
-    );
+    TLOAD(ub_tile, globalOut);
 
     set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
     wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
-    constexpr int ADD_REPEAT = 128;
-    constexpr int ADD_NUM_PER_REPEAT = ADD_REPEAT * 64;
-    for (int i = 0; i < (n + ADD_NUM_PER_REPEAT - 1) / ADD_NUM_PER_REPEAT; i++) {
-        vadds(
-            ub_buf + i * ADD_NUM_PER_REPEAT,
-            ub_buf + i * ADD_NUM_PER_REPEAT,
-            (float)subblock_id,
-            ADD_REPEAT,
-            1, 1, 8, 8
-        );
-    }
+    TADDS(ub_tile, ub_tile, (float)subblock_id);
 
     set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
     wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
 
-    copy_ubuf_to_gm(
-        gm_out + id * n,
-        ub_buf,
-        0,
-        n / 256,
-        32,
-        0, 0
-    );
+    TSTORE(globalOut, ub_tile);
 
     pipe_barrier(PIPE_ALL);
 #endif
