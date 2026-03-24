@@ -1,7 +1,7 @@
 # Porting Raw CCE Intrinsics to PTO-ISA
 
 A practical guide for migrating Ascend NPU kernels from low-level CCE intrinsics to the
-higher-level pto-isa tile API (`TLOAD` / `TSTORE` / `TADDS` / `TSync_Custom` / `TPipe`).
+higher-level pto-isa tile API (`TLOAD` / `TSTORE` / `TADDS` / sync wrappers).
 
 The completed reference port lives in [`examples/jit_cpp/c2v_sync/`](../examples/jit_cpp/c2v_sync/).
 
@@ -16,8 +16,8 @@ The completed reference port lives in [`examples/jit_cpp/c2v_sync/`](../examples
 | `copy_gm_to_cbuf(dst, src, sid, nBurst, burstLen, l1Gap, gmGap, PAD_NONE)` | `TLOAD(mat_tile, global_tensor)` | Tile must be `TileType::Mat` |
 | `copy_cbuf_to_gm(dst, src, sid, nBurst, burstLen, gmGap, l1Gap)` | `TSTORE(global_tensor, mat_tile)` | Tile must be `TileType::Mat` |
 | `vadds(dst, src, scalar, repeat, ...)` loop | `TADDS(tile, tile, scalar)` | See [count-mode gotcha](#tadds-count-mode-gotcha) |
-| `ffts_cross_core_sync(PIPE_MTE3, msg)` + `wait_flag_dev(id)` | `TSync_Custom<...>::record()` / `::wait()` | See [PIPE_FIX gotcha](#pipe_fix-vs-pipe_mte3-gotcha) |
-| same | `C2VPipe::Producer::record()` / `Consumer::wait()` | TPipe alternative |
+| `ffts_cross_core_sync(PIPE_MTE3, msg)` + `wait_flag_dev(id)` | `MyTSync<FlagID>::record()/wait()` | current recommended workaround for C2V |
+| same | `MyC2VPipe<FlagID>::Producer/Consumer` | TPUSH/TPOP-style workaround |
 
 ---
 
@@ -96,16 +96,19 @@ The original:
 ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (0 << 8));  // fires after GM writes drain
 ```
 
-`TSync_Custom::record()` and `TPipe::Producer::record()` both emit:
+In current a2a3 snapshot, `TSync_Custom::record()` and `TPipe::Producer::record()` C2V path emit:
 ```cpp
 ffts_cross_core_sync(PIPE_FIX, ...);  // different pipe — GM writes may not have drained yet
 ```
 
-**Fix:** drain MTE3 explicitly before calling `.record()`:
+For this C2V kernel shape, draining alone is not sufficient; producer signal pipe must
+match validated behavior (`PIPE_MTE3`) to avoid `...46` tail mismatch.
+
+**Working fix:** keep wrapper call style, but use local wrapper implementation that records on `PIPE_MTE3`:
 
 ```cpp
-pipe_barrier(PIPE_MTE3);   // ← drain GM-write pipeline
-c2v_sync.record();         // now safe: vector will see the written data
+pipe_barrier(PIPE_MTE3);   // drain GM-write pipeline
+my_sync.record();          // wrapper record() emits PIPE_MTE3
 ```
 
 ---
@@ -120,10 +123,11 @@ c2v_sync.record();         // now safe: vector will see the written data
 |---|---|---|---|
 | `TSync_Custom::record()` | `PIPE_FIX` (literal ✓) | `_getFFTSMsg(CV_CORE_SYNC, flag_id)` — runtime `uint16_t` ✗ | **Wrong output (silent)** |
 | `TSync.hpp Event::Init()` | `GetPipeByOp<TMOV_A2V>()` — computed constexpr ✗ | compile-time ✓ | **Compile error** |
-| `TPipe::Producer::record()` | `PIPE_FIX` (literal ✓) | `getFFTSMsgCfg(CV_CORES_SYNC, FlagID=0)` — template param folds to literal ✓ | **Works** |
+| `TPipe::Producer::record()` | `PIPE_FIX` (literal ✓) | `getFFTSMsgCfg(CV_CORES_SYNC, FlagID=0)` — template param folds to literal ✓ | **Compiles, but wrong for this C2V shape** |
 | Raw intrinsic (direct) | `PIPE_FIX` (literal ✓) | `kC2VSyncMsg` — `static constexpr uint64_t` folded to literal ✓ | **Works** |
 
-**Fix for TSYNC version:** call the raw intrinsics directly with a pre-computed compile-time constant:
+**Fix for TSYNC-like version in this repo:** use a local wrapper (`MyTSync`) that keeps a
+TSYNC-like API and emits a compile-time packed message on `PIPE_MTE3`.
 
 ```cpp
 // Compute msg at compile time — bisheng treats this as a literal
@@ -132,7 +136,7 @@ static constexpr uint64_t kC2VSyncMsg = 1u | (2u << 4u) | (0u << 8u);  // = 0x21
 
 // Cube side (__DAV_C220_CUBE__)
 pipe_barrier(PIPE_MTE3);
-ffts_cross_core_sync(PIPE_FIX, kC2VSyncMsg);  // both args are compile-time literals
+ffts_cross_core_sync(PIPE_MTE3, kC2VSyncMsg);  // both args are compile-time literals
 
 // Vector side (__DAV_C220_VEC__)
 wait_flag_dev(0);  // literal flag_id — no restriction
@@ -142,8 +146,8 @@ wait_flag_dev(0);  // literal flag_id — no restriction
 
 ## TSync_Custom (TSYNC version)
 
-> **Warning:** `TSync_Custom` fails with bisheng due to runtime `flag_id` in the second arg of
-> `ffts_cross_core_sync`.  Use raw intrinsics (above) or `TPipe` (below) instead.
+> **Warning:** in tested snapshot/toolchain, `TSync_Custom` has both header integration gaps and
+> C2V runtime mismatch in this workload. Prefer local workaround wrapper (`MyTSync`) for now.
 
 ```cpp
 #include <pto/npu/a2a3/custom/TSync_Custom.hpp>
@@ -181,15 +185,29 @@ using C2VPipe  = TPipe<0, FIFOType::GM_FIFO, 1, 1, ProdTile, ConsTile>;
 // Cube side
 pipe_barrier(PIPE_MTE3);
 C2VPipe::Producer prod;
-prod.record();   // → ffts_cross_core_sync(PIPE_FIX, getFFTSMsgCfg(CV_CORES_SYNC, 0))
+prod.record();   // upstream path uses PIPE_FIX
 
 // Vector side
 C2VPipe::Consumer cons;
 cons.wait();     // → wait_flag_dev(0)
 ```
 
-> **Note:** ProdTile / ConsTile are **placeholders only** — they influence direction inference
-> (`is_c2v`), not data movement.  Actual data transfer is done by TLOAD / TSTORE.
+> **Note:** For this C2V kernel, prefer a local TPUSH/TPOP-style wrapper (`MyC2VPipe`) whose
+> producer `record()` emits on `PIPE_MTE3`. Keep `Consumer::wait()` semantics unchanged.
+
+---
+
+## C2V sync learnings (from this port)
+
+- `TLOAD/TSTORE/TADDS` can fully replace raw copy/vector compute path for this kernel.
+- Sync wrappers in current snapshot are the fragile part, not tile compute wrappers.
+- `TSync_Custom` path may require local symbol shims (`CV_CORE_SYNC`, `_getFFTSMsg`) in some snapshots.
+- Even when wrappers compile, always verify numeric result; compile success alone is insufficient.
+- For this workload:
+  - `TSYNC_Custom` repro: WRONG (`...46` tail)
+  - `TPipe native Producer::record()` repro: WRONG (`...46` tail)
+  - custom `PIPE_MTE3` producer wrapper repro: CORRECT (`...47` tail)
+- Keep dedicated repro scripts under `examples/jit_cpp/c2v_sync/issue_report/` and run them during porting/regression checks.
 
 ---
 
@@ -328,9 +346,9 @@ The symptom is that sync never fires: the vector core proceeds immediately witho
 - [ ] `copy_gm_to_cbuf` → `TLOAD(MatTile, GlobalTensor)`
 - [ ] `copy_cbuf_to_gm` → `TSTORE(GlobalTensor, MatTile)`
 - [ ] `vadds` loop → `TADDS(tile, tile, scalar)`
-- [ ] `ffts_cross_core_sync` + `wait_flag_dev` → **raw intrinsics** (preferred) or `TPipe` (both args must be compile-time literals; `TSync_Custom` fails silently)
+- [ ] `ffts_cross_core_sync` + `wait_flag_dev` → use project-proven wrapper (`MyTSync` / `MyC2VPipe`) for C2V in current snapshot
 - [ ] **Static `Rows=256` (not `DYNAMIC`) on any tile passed to `TADDS`**
-- [ ] **`pipe_barrier(PIPE_MTE3)` before every `ffts_cross_core_sync(PIPE_FIX, ...)` call**
+- [ ] **Ensure producer sync emits on the validated pipe for target workload (C2V here: `PIPE_MTE3`)**
 - [ ] `DYNAMIC` valid dims (`RowValid`, `ColValid`) for runtime tile sizes
 - [ ] `Shape<..., DYNAMIC, 256>` with `n_rows` passed to GlobalTensor constructor
 - [ ] `TASSIGN(tile, (uint32_t)0x0)` to bind tile to buffer base address
