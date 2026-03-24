@@ -27,6 +27,7 @@
 #include <pto/pto-inst.hpp>
 #include <pto/npu/a2a3/TPush.hpp>
 #include <pto/npu/a2a3/TPop.hpp>
+#include "MyC2VPipe.hpp"
 #include "runtime/rt.h"           // rtGetC2cCtrlAddr
 
 using namespace pto;
@@ -75,11 +76,9 @@ extern "C" __global__ AICORE void sync_c2v_tpushpop(
     // Drain MTE3 before the FIX-pipeline FFTS signal emitted by Producer::record().
     pipe_barrier(PIPE_MTE3);
 
-    // Match the reference kernel exactly: PIPE_MTE3 + CV_CORES_SYNC(flag 0).
-    constexpr uint8_t flag_id = 0;
-    // Keep C2V producer on PIPE_MTE3 (matches validated reference behavior).
-    uint64_t config = C2VPipe::getFFTSMsgCfg(TSyncCVMode::CV_CORES_SYNC, flag_id);
-    ffts_cross_core_sync(PIPE_MTE3, config);
+    // TPUSH-style custom producer record.
+    MyC2VPipe<0>::Producer prod;
+    prod.record();
 
     pipe_barrier(PIPE_ALL);
 #endif  // __DAV_C220_CUBE__
@@ -106,8 +105,8 @@ extern "C" __global__ AICORE void sync_c2v_tpushpop(
     TASSIGN(ub_tile, (uint32_t)0x0);  // place at UB base
 
     // Match the reference kernel exactly.
-    // Use TPop-side consumer wait API.
-    typename C2VPipe::Consumer cons;
+    // TPOP-style custom consumer wait.
+    MyC2VPipe<0>::Consumer cons;
     cons.wait();
 
     TLOAD(ub_tile, globalOut);  // GM → UB  (MTE2)

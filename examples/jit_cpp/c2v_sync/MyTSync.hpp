@@ -22,8 +22,8 @@
 //   // Vector side — before TLOAD begins:
 //   c2v_sync.wait();
 //
-// Requires: included after <pto/pto-inst.hpp> (provides AICORE, PIPE_FIX,
-//           PIPE_MTE3, ffts_cross_core_sync, wait_flag_dev).
+// Requires: included after <pto/pto-inst.hpp> (provides AICORE, PIPE_MTE3,
+//           ffts_cross_core_sync, wait_flag_dev).
 
 #pragma once
 
@@ -32,8 +32,9 @@
 //   FlagID       — FFTS flag slot index [0..11]; compile-time template param.
 //   IsCubeToVec  — true (default): cube calls record(), vector calls wait().
 //                  false:          vector calls record(), cube calls wait().
-//                  This controls which hardware pipe the signal is emitted on:
-//                  C2V → PIPE_FIX,  V2C → PIPE_MTE3.
+//                  This controls wrapper call direction; current implementation
+//                  emits on PIPE_MTE3 for both directions to mirror the
+//                  validated c2v_sync behavior on this platform.
 template <uint8_t FlagID, bool IsCubeToVec = true>
 struct MyTSync {
     // FFTS message word (encoding from TSyncCVID.hpp / _getFFTSMsg):
@@ -47,17 +48,14 @@ struct MyTSync {
 
     // Producer side: signal that data written to GM is visible.
     //
-    // C2V: emits ffts_cross_core_sync(PIPE_FIX, kMsg).
+    // C2V: emits ffts_cross_core_sync(PIPE_MTE3, kMsg).
     //      Caller must drain MTE3 first:  pipe_barrier(PIPE_MTE3).
     // V2C: emits ffts_cross_core_sync(PIPE_MTE3, kMsg).
     //      Caller must drain PIPE_V first: pipe_barrier(PIPE_V).
     AICORE inline void record() const
     {
-        if constexpr (IsCubeToVec) {
-            ffts_cross_core_sync(PIPE_FIX, kMsg);
-        } else {
-            ffts_cross_core_sync(PIPE_MTE3, kMsg);
-        }
+        (void)IsCubeToVec;
+        ffts_cross_core_sync(PIPE_MTE3, kMsg);
     }
 
     // Consumer side: stall until the producer's record() signal arrives.

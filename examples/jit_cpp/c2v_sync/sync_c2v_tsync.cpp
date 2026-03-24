@@ -22,7 +22,7 @@
 // Static Rows=256 forces TADDS into "count mode" internally, which handles
 // arbitrary runtime element counts without overflow in the repeat counter.
 #include <pto/pto-inst.hpp>          // TLoad, TStore, TAddS
-#include <pto/npu/a2a3/TSync.hpp>    // getFFTSMsg / FFTS constants
+#include "MyTSync.hpp"
 #include "runtime/rt.h"      // rtGetC2cCtrlAddr
 
 using namespace pto;
@@ -66,11 +66,9 @@ extern "C" __global__ AICORE void sync_c2v_tsync(
     // Drain MTE3 (GM write) before emitting the PIPE_FIX signal.
     pipe_barrier(PIPE_MTE3);
 
-    // Match the reference kernel exactly: PIPE_MTE3 + CV_CORES_SYNC(flag 0).
-    constexpr uint8_t flag_id = 0;
-    // Build message via TSync.hpp helper to keep wrapper-side encoding.
-    uint64_t config = getFFTSMsg(FFTS_MODE_VAL, flag_id);
-    ffts_cross_core_sync(PIPE_MTE3, config);
+    // Wrapper-style TSYNC: packed compile-time msg + cross-core record.
+    MyTSync<0> c2v_sync;
+    c2v_sync.record();
 
     pipe_barrier(PIPE_ALL);
 #endif  // __DAV_C220_CUBE__
@@ -96,9 +94,9 @@ extern "C" __global__ AICORE void sync_c2v_tsync(
     VecTile ub_tile(rows_n, 256);
     TASSIGN(ub_tile, (uint32_t)0x0);  // place at UB base
 
-    // Match the reference kernel exactly.
-    constexpr uint8_t flag_id = 0;
-    wait_flag_dev(flag_id);
+    // Wrapper-style TSYNC wait.
+    MyTSync<0> c2v_sync;
+    c2v_sync.wait();
 
     TLOAD(ub_tile, globalOut);  // GM → UB  (MTE2)
 
