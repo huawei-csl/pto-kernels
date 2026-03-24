@@ -25,6 +25,8 @@
 // Static Rows=256 forces TADDS into "count mode" internally, which handles
 // arbitrary runtime element counts without overflow in the repeat counter.
 #include <pto/pto-inst.hpp>
+#include <pto/npu/a2a3/TPush.hpp>
+#include <pto/npu/a2a3/TPop.hpp>
 #include "runtime/rt.h"           // rtGetC2cCtrlAddr
 
 using namespace pto;
@@ -39,6 +41,11 @@ extern "C" __global__ AICORE void sync_c2v_tpushpop(
     __gm__ uint8_t * __restrict__ ffts_addr,
     int32_t N)
 {
+    // Placeholder tiles for C2V pipe traits and helper methods.
+    using ProdTile = TileAcc<float, 16, 16>;
+    using ConsTile = Tile<TileType::Vec, float, 8, 16, BLayout::RowMajor, 8, 16>;
+    using C2VPipe = TPipe<0, FIFOType::GM_FIFO, 1, 1, ProdTile, ConsTile>;
+
 #ifdef __DAV_C220_CUBE__
     // Mat tile for cube AIC side: L1/cbuf, row-major ND layout.
     using MatTile  = Tile<TileType::Mat, float, 256, 256, BLayout::RowMajor, DYNAMIC, DYNAMIC>;
@@ -69,9 +76,9 @@ extern "C" __global__ AICORE void sync_c2v_tpushpop(
     pipe_barrier(PIPE_MTE3);
 
     // Match the reference kernel exactly: PIPE_MTE3 + CV_CORES_SYNC(flag 0).
-    uint64_t flag_id = 0;
-    uint64_t mode = 2; // inner-group aic/aiv sync
-    uint64_t config = 1 | (mode << 4) | (flag_id << 8);
+    constexpr uint8_t flag_id = 0;
+    // Keep C2V producer on PIPE_MTE3 (matches validated reference behavior).
+    uint64_t config = C2VPipe::getFFTSMsgCfg(TSyncCVMode::CV_CORES_SYNC, flag_id);
     ffts_cross_core_sync(PIPE_MTE3, config);
 
     pipe_barrier(PIPE_ALL);
@@ -99,8 +106,9 @@ extern "C" __global__ AICORE void sync_c2v_tpushpop(
     TASSIGN(ub_tile, (uint32_t)0x0);  // place at UB base
 
     // Match the reference kernel exactly.
-    uint64_t flag_id = 0;
-    wait_flag_dev(flag_id);
+    // Use TPop-side consumer wait API.
+    typename C2VPipe::Consumer cons;
+    cons.wait();
 
     TLOAD(ub_tile, globalOut);  // GM → UB  (MTE2)
 

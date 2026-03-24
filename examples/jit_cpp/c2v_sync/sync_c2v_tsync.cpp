@@ -21,7 +21,8 @@
 //   rows = N/256 or 2*N/256              (dynamic via DYNAMIC valid dim)
 // Static Rows=256 forces TADDS into "count mode" internally, which handles
 // arbitrary runtime element counts without overflow in the repeat counter.
-#include <pto/pto-inst.hpp>  // TLoad, TStore, TAddS
+#include <pto/pto-inst.hpp>          // TLoad, TStore, TAddS
+#include <pto/npu/a2a3/TSync.hpp>    // getFFTSMsg / FFTS constants
 #include "runtime/rt.h"      // rtGetC2cCtrlAddr
 
 using namespace pto;
@@ -66,9 +67,9 @@ extern "C" __global__ AICORE void sync_c2v_tsync(
     pipe_barrier(PIPE_MTE3);
 
     // Match the reference kernel exactly: PIPE_MTE3 + CV_CORES_SYNC(flag 0).
-    uint64_t flag_id = 0;
-    uint64_t mode = 2; // inner-group aic/aiv sync
-    uint64_t config = 1 | (mode << 4) | (flag_id << 8);
+    constexpr uint8_t flag_id = 0;
+    // Build message via TSync.hpp helper to keep wrapper-side encoding.
+    uint64_t config = getFFTSMsg(FFTS_MODE_VAL, flag_id);
     ffts_cross_core_sync(PIPE_MTE3, config);
 
     pipe_barrier(PIPE_ALL);
@@ -96,7 +97,7 @@ extern "C" __global__ AICORE void sync_c2v_tsync(
     TASSIGN(ub_tile, (uint32_t)0x0);  // place at UB base
 
     // Match the reference kernel exactly.
-    uint64_t flag_id = 0;
+    constexpr uint8_t flag_id = 0;
     wait_flag_dev(flag_id);
 
     TLOAD(ub_tile, globalOut);  // GM → UB  (MTE2)
