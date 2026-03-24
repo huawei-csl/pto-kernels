@@ -25,7 +25,6 @@
 // Static Rows=256 forces TADDS into "count mode" internally, which handles
 // arbitrary runtime element counts without overflow in the repeat counter.
 #include <pto/pto-inst.hpp>
-#include <pto/npu/a2a3/TPop.hpp> // TPop.hpp includes TPush.hpp → TPipe
 #include "runtime/rt.h"           // rtGetC2cCtrlAddr
 
 using namespace pto;
@@ -40,15 +39,6 @@ extern "C" __global__ AICORE void sync_c2v_tpushpop(
     __gm__ uint8_t * __restrict__ ffts_addr,
     int32_t N)
 {
-    // Tile types only used for TPipe direction inference (is_c2v = true).
-    // ProdTile=Acc, ConsTile=Vec → is_c2v = true (cube-to-vector direction).
-    // These are placeholder template parameters; actual data movement uses TLOAD/TSTORE.
-    using ProdTile = TileAcc<float, 16, 16>;
-    using ConsTile = Tile<TileType::Vec, float, 8, 16, BLayout::RowMajor, 8, 16>;
-    // TPipe<FlagID, FIFOType, Depth, SyncPeriod, ProdTile, ConsTile>
-    // FLAG_ID=0 matches the original kernel's flag_id variable.
-    using C2VPipe = TPipe<0, FIFOType::GM_FIFO, 1, 1, ProdTile, ConsTile>;
-
 #ifdef __DAV_C220_CUBE__
     // Mat tile for cube AIC side: L1/cbuf, row-major ND layout.
     using MatTile  = Tile<TileType::Mat, float, 256, 256, BLayout::RowMajor, DYNAMIC, DYNAMIC>;
@@ -78,10 +68,11 @@ extern "C" __global__ AICORE void sync_c2v_tpushpop(
     // Drain MTE3 before the FIX-pipeline FFTS signal emitted by Producer::record().
     pipe_barrier(PIPE_MTE3);
 
-    // TPUSH producer side: signal "data ready" to vector.
-    // Internally: ffts_cross_core_sync(PIPE_FIX, getFFTSMsgCfg(CV_CORES_SYNC, 0))
-    C2VPipe::Producer prod;
-    prod.record();
+    // Match the reference kernel exactly: PIPE_MTE3 + CV_CORES_SYNC(flag 0).
+    uint64_t flag_id = 0;
+    uint64_t mode = 2; // inner-group aic/aiv sync
+    uint64_t config = 1 | (mode << 4) | (flag_id << 8);
+    ffts_cross_core_sync(PIPE_MTE3, config);
 
     pipe_barrier(PIPE_ALL);
 #endif  // __DAV_C220_CUBE__
@@ -107,10 +98,9 @@ extern "C" __global__ AICORE void sync_c2v_tpushpop(
     VecTile ub_tile(rows_n, 256);
     TASSIGN(ub_tile, (uint32_t)0x0);  // place at UB base
 
-    // TPOP consumer side: wait for cube's "data ready" signal.
-    // Internally: wait_flag_dev(0)
-    C2VPipe::Consumer cons;
-    cons.wait();
+    // Match the reference kernel exactly.
+    uint64_t flag_id = 0;
+    wait_flag_dev(flag_id);
 
     TLOAD(ub_tile, globalOut);  // GM → UB  (MTE2)
 

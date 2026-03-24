@@ -22,7 +22,6 @@
 // Static Rows=256 forces TADDS into "count mode" internally, which handles
 // arbitrary runtime element counts without overflow in the repeat counter.
 #include <pto/pto-inst.hpp>  // TLoad, TStore, TAddS
-#include "MyTSync.hpp"       // bisheng-safe C2V sync wrapper (workaround)
 #include "runtime/rt.h"      // rtGetC2cCtrlAddr
 
 using namespace pto;
@@ -66,9 +65,11 @@ extern "C" __global__ AICORE void sync_c2v_tsync(
     // Drain MTE3 (GM write) before emitting the PIPE_FIX signal.
     pipe_barrier(PIPE_MTE3);
 
-    // Signal vector: data is ready in gm_output.
-    MyTSync<0> c2v_sync;
-    c2v_sync.record();
+    // Match the reference kernel exactly: PIPE_MTE3 + CV_CORES_SYNC(flag 0).
+    uint64_t flag_id = 0;
+    uint64_t mode = 2; // inner-group aic/aiv sync
+    uint64_t config = 1 | (mode << 4) | (flag_id << 8);
+    ffts_cross_core_sync(PIPE_MTE3, config);
 
     pipe_barrier(PIPE_ALL);
 #endif  // __DAV_C220_CUBE__
@@ -94,9 +95,9 @@ extern "C" __global__ AICORE void sync_c2v_tsync(
     VecTile ub_tile(rows_n, 256);
     TASSIGN(ub_tile, (uint32_t)0x0);  // place at UB base
 
-    // Wait for cube's "data ready" signal.
-    MyTSync<0> c2v_sync;
-    c2v_sync.wait();
+    // Match the reference kernel exactly.
+    uint64_t flag_id = 0;
+    wait_flag_dev(flag_id);
 
     TLOAD(ub_tile, globalOut);  // GM → UB  (MTE2)
 
