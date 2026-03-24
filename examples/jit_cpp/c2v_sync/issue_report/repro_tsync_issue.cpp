@@ -6,6 +6,11 @@
 // Sync intentionally uses high-level TSYNC API to expose the current issue.
 
 #include <pto/pto-inst.hpp>
+// Compatibility shim: some pto-isa snapshots use CV_CORE_SYNC in
+// TSync_Custom.hpp without exporting the symbol in this include surface.
+#ifndef CV_CORE_SYNC
+#define CV_CORE_SYNC 2
+#endif
 #include <pto/npu/a2a3/custom/TSync_Custom.hpp>
 #include "runtime/rt.h"
 
