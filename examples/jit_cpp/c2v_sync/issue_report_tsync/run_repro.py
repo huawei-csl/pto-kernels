@@ -82,21 +82,27 @@ def run(lib, block_dim: int, gm_input, gm_output):
 
 
 def report(label: str, output, ref):
-    passed = torch.equal(output, ref)
+    # Compare on CPU: torch.equal on NPU tensors is unreliable in torch_npu.
+    # .cpu() also performs a synchronous device→host copy, providing a stronger
+    # barrier than torch.npu.synchronize() alone.
+    out_cpu = output.cpu()
+    ref_cpu = ref.cpu()
+    passed = torch.equal(out_cpu, ref_cpu)
     status = "PASS" if passed else "FAIL (sync bug)"
     print(f"  [{status}]  {label}")
     if not passed:
-        # Show the first differing block to make the pattern obvious.
-        n = N
-        got_sub0  = output[:n]
-        got_sub1  = output[n:2*n]
-        exp_sub0  = ref[:n]
-        exp_sub1  = ref[n:2*n]
-        print(f"    sub 0 — expected {exp_sub0[0].item():.1f}, "
-              f"got {got_sub0[0].item():.1f}")
-        print(f"    sub 1 — expected {exp_sub1[0].item():.1f}, "
-              f"got {got_sub1[0].item():.1f}")
-        print(f"    (if got = 0.0/1.0 the vector read stale zero-filled GM)")
+        diff_mask = out_cpu != ref_cpu
+        n_diff = int(diff_mask.sum())
+        first_i = int(diff_mask.nonzero(as_tuple=True)[0][0])
+        block_i  = first_i // (SUB_BLOCK_DIM * N)
+        sub_i    = (first_i % (SUB_BLOCK_DIM * N)) // N
+        print(f"    {n_diff}/{len(out_cpu)} elements differ")
+        print(f"    first mismatch at index {first_i} "
+              f"(block {block_i}, sub {sub_i}): "
+              f"expected {ref_cpu[first_i].item():.1f}, "
+              f"got {out_cpu[first_i].item():.1f}")
+        print(f"    (expected values: sub 0 → 100.0, sub 1 → 101.0; "
+              f"sync-bug values: sub 0 → 0.0, sub 1 → 1.0)")
 
 
 # ---------------------------------------------------------------------------
@@ -127,8 +133,9 @@ for label, so_name in VARIANTS:
     lib = load_lib(so_path)
     gm_input, gm_output, ref = make_tensors(block_dim)
     run(lib, block_dim, gm_input, gm_output)
+    passed = torch.equal(gm_output.cpu(), ref.cpu())
     report(label, gm_output, ref)
-    if not torch.equal(gm_output, ref):
+    if not passed:
         all_passed = False
 
 print()
