@@ -11,9 +11,13 @@
 #ifndef CV_CORE_SYNC
 #define CV_CORE_SYNC 2
 #endif
-// Compatibility shim: some snapshots call _getFFTSMsg while only getFFTSMsg
-// is exported in TSync.hpp.
-#include <pto/npu/a2a3/TSync.hpp>
+// Compatibility shim: avoid including TSync.hpp (it pulls event.hpp, which
+// references PIPE_FIX not declared in this compile surface). Provide local
+// getFFTSMsg + alias expected by TSync_Custom.hpp.
+static AICORE inline uint16_t getFFTSMsg(uint16_t mode, uint16_t eventId, uint16_t baseConst = 0x1)
+{
+    return ((baseConst & 0xf) + ((mode & 0x3) << 4) + ((eventId & 0xf) << 8));
+}
 #ifndef _getFFTSMsg
 #define _getFFTSMsg getFFTSMsg
 #endif
