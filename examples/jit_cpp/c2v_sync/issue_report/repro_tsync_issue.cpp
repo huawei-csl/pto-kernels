@@ -11,6 +11,12 @@
 #ifndef CV_CORE_SYNC
 #define CV_CORE_SYNC 2
 #endif
+// Compatibility shim: some snapshots call _getFFTSMsg while only getFFTSMsg
+// is exported in TSync.hpp.
+#include <pto/npu/a2a3/TSync.hpp>
+#ifndef _getFFTSMsg
+#define _getFFTSMsg getFFTSMsg
+#endif
 #include <pto/npu/a2a3/custom/TSync_Custom.hpp>
 #include "runtime/rt.h"
 
