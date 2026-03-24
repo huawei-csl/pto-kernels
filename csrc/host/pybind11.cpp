@@ -13,6 +13,7 @@ for the full License text.
 #include "torch_batch_matrix_square.h"
 #include "torch_simple_matmul.h"
 #include "torch_tri_inv.h"
+#include "torch_tri_inv_rec_unroll.h"
 #include "torch_tri_inv_trick.h"
 
 using namespace pto_isa_ops;
@@ -22,9 +23,21 @@ using namespace pto_isa_ops;
  */
 PYBIND11_MODULE(pto_kernels_ops, m) {
   m.doc() = "PTO-ISA Kernels";
+  m.def(
+      "get_aic_cores",
+      [](int32_t device_id) { return pto_isa_ops::GetNumCubeCores(device_id); },
+      pybind11::arg("device_id") = 0);
+  m.def(
+      "get_aiv_cores",
+      [](int32_t device_id) {
+        return pto_isa_ops::GetNumVectorCores(device_id);
+      },
+      pybind11::arg("device_id") = 0);
   m.def("pto_abs", &pto_isa_ops::run_abs);
   m.def("pto_batch_matrix_square", &pto_isa_ops::run_batch_matrix_square);
   m.def("pto_simple_matmul", &pto_isa_ops::run_simple_matmul);
   m.def("pto_tri_inv_trick", &pto_isa_ops::run_tri_inv_trick);
+  m.def("pto_tri_inv_rec_unroll", &pto_isa_ops::run_tri_inv_rec_unroll,
+        py::arg("M"), py::arg("is_bsnd_format") = false);
   m.def("pto_tri_inv", &pto_isa_ops::run_tri_inv);
 }

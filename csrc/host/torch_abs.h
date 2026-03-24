@@ -17,6 +17,13 @@ for the full License text.
 
 namespace pto_isa_ops {
 
+/**
+ * @brief Runs element-wise absolute value.
+ *
+ * @param [in] x Input tensor of dtype fp16 or fp32.
+ * @return at::Tensor Tensor containing the absolute value on each entry.
+ */
+
 at::Tensor run_abs(const at::Tensor& x) {
   const auto dtype = x.options().dtype();
   at::Tensor z = at::empty_like(x);

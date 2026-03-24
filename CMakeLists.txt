@@ -111,6 +111,7 @@ ascendc_library(
   csrc/kernel/kernel_abs.cpp
   csrc/kernel/kernel_simple_matmul.cpp
   csrc/kernel/kernel_batch_matrix_square.cpp
+  csrc/kernel/kernel_tri_inv_rec_unroll.cpp
   csrc/kernel/kernel_tri_inv_trick.cpp)
 
 ascendc_include_directories(
@@ -121,23 +122,8 @@ ascendc_compile_options(no_workspace_kernel PRIVATE -Wall -Wextra -Werror)
 
 pybind11_add_module(pto_kernels_ops csrc/host/pybind11.cpp)
 
-target_compile_options(
-  pto_kernels_ops PRIVATE ${CMAKE_CCE_COMPILE_OPTIONS}
-                          --cce-aicore-arch=dav-2201 -std=c++17)
-
-target_link_libraries(
-  pto_kernels_ops
-  PRIVATE ${TORCH_LIBRARIES}
-          c10
-          torch_cpu
-          torch_npu
-          ascendcl
-          tiling_api
-          register
-          platform
-          ascendalog
-          dl
-          no_workspace_kernel)
+target_link_libraries(pto_kernels_ops PRIVATE ${TORCH_LIBRARIES} c10 torch_cpu
+                                              torch_npu no_workspace_kernel)
 
 target_link_directories(pto_kernels_ops PRIVATE ${TORCH_INSTALL_PREFIX}/lib
                         ${TORCH_NPU_PATH}/lib)

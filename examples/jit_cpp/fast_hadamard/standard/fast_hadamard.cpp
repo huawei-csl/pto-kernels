@@ -20,11 +20,12 @@ constexpr unsigned X_PONG = (ODD_PING + 0x4000 + 0x100);
 constexpr unsigned EVEN_PONG = (X_PONG + 0x8000 + 0x100);
 constexpr unsigned ODD_PONG = (EVEN_PONG + 0x4000 + 0x100);
 
-// Fast Hadamard
+namespace {
+
 template <typename T>
 AICORE void runTFastHadamard(__gm__ T *x, uint32_t batch, uint32_t n,
                              uint32_t log2_n) {
-#if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
+#if defined(__DAV_VEC__)
   set_mask_norm();
   set_vector_mask(-1, -1);
 
@@ -32,9 +33,11 @@ AICORE void runTFastHadamard(__gm__ T *x, uint32_t batch, uint32_t n,
     return;
   }
 
-  const uint32_t num_cores = block_num;
+  const uint32_t num_cores = get_block_num() * get_subblockdim();
+  const uint32_t vid = get_block_idx() * get_subblockdim() + get_subblockid();
+
   const uint32_t samples_per_core = DIV_ROUNDUP(batch, num_cores);
-  const uint32_t sample_offset = samples_per_core * block_idx;
+  const uint32_t sample_offset = samples_per_core * vid;
   if (sample_offset >= batch) {
     return;
   }
@@ -62,7 +65,6 @@ AICORE void runTFastHadamard(__gm__ T *x, uint32_t batch, uint32_t n,
 
   const uint32_t n_half = n >> 1;
 
-  // Initialize event flags for double buffering
   set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
   set_flag(PIPE_V, PIPE_MTE2, EVENT_ID1);
   set_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
@@ -74,14 +76,12 @@ AICORE void runTFastHadamard(__gm__ T *x, uint32_t batch, uint32_t n,
        sample_done += samples_per_load) {
     const event_t ev = ping ? (event_t)EVENT_ID0 : (event_t)EVENT_ID1;
 
-    // Fix tail batch
     uint32_t cur_samples = samples_per_load;
     if (sample_done + cur_samples > samples_to_process) {
       cur_samples = samples_to_process - sample_done;
     }
     uint32_t elements_to_load = cur_samples * n;
 
-    // Select ping or pong UB base addresses
     const unsigned x_base = ping ? X_PING : X_PONG;
     const unsigned even_base = ping ? EVEN_PING : EVEN_PONG;
     const unsigned odd_base = ping ? ODD_PING : ODD_PONG;
@@ -92,46 +92,37 @@ AICORE void runTFastHadamard(__gm__ T *x, uint32_t batch, uint32_t n,
     GlobalData xGlobal(x + gm_offset);
     TASSIGN(xGlobal, (x + gm_offset));
 
-    // Shared even/odd scratch tiles (reused across rows and iterations)
     HalfTile evenTile(1, n_half);
     HalfTile oddTile(1, n_half);
     TASSIGN(evenTile, even_base);
     TASSIGN(oddTile, odd_base);
 
-    // Wait for this buffer set to be available (previous store completed)
     wait_flag(PIPE_V, PIPE_MTE2, ev);
 
-    // DMA: GM -> UB (MTE2 pipeline)
     TLOAD(xBulkTile, xGlobal);
 
     set_flag(PIPE_MTE2, PIPE_V, ev);
     wait_flag(PIPE_MTE2, PIPE_V, ev);
 
-    // Wait for any previous store on this buffer to complete
     wait_flag(PIPE_MTE3, PIPE_V, ev);
 
-    // Process each row with vectorized FHT
     for (uint32_t s = 0; s < cur_samples; ++s) {
       unsigned row_base = x_base + s * n * sizeof(T);
 
-      // Full-row tile for gather source
       FullTile xRowTile(1, n);
       TASSIGN(xRowTile, row_base);
 
-      // Half-row tiles for writing butterfly results
       HalfTile xFirstHalf(1, n_half);
       HalfTile xSecondHalf(1, n_half);
       TASSIGN(xFirstHalf, row_base);
       TASSIGN(xSecondHalf, row_base + n_half * sizeof(T));
 
       for (uint32_t iter_m = 0; iter_m < log2_n; ++iter_m) {
-        // Vectorized even/odd gather
         TGATHER<HalfTile, FullTile, MaskPattern::P0101>(evenTile, xRowTile);
         TGATHER<HalfTile, FullTile, MaskPattern::P1010>(oddTile, xRowTile);
 
         pipe_barrier(PIPE_V);
 
-        // Vectorized butterfly
         TADD(xFirstHalf, evenTile, oddTile);
         TSUB(xSecondHalf, evenTile, oddTile);
 
@@ -139,7 +130,6 @@ AICORE void runTFastHadamard(__gm__ T *x, uint32_t batch, uint32_t n,
       }
     }
 
-    // DMA: UB -> GM (MTE3 pipeline)
     set_flag(PIPE_V, PIPE_MTE3, ev);
     wait_flag(PIPE_V, PIPE_MTE3, ev);
 
@@ -152,15 +142,14 @@ AICORE void runTFastHadamard(__gm__ T *x, uint32_t batch, uint32_t n,
     ping = 1 - ping;
   }
 
-  // Drain remaining event flags
   wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
   wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID1);
   wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
   wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID1);
-#else
-  // Cube branch: do nothing
 #endif
 }
+
+}  // namespace
 
 __global__ AICORE void fast_hadamard_fp16(__gm__ void *x, uint32_t batch,
                                           uint32_t n, uint32_t log2_n) {
@@ -169,5 +158,6 @@ __global__ AICORE void fast_hadamard_fp16(__gm__ void *x, uint32_t batch,
 
 extern "C" void call_kernel(uint32_t blockDim, void *stream, uint8_t *x,
                             uint32_t batch, uint32_t n, uint32_t log2_n) {
+  blockDim = blockDim * 2;
   fast_hadamard_fp16<<<blockDim, nullptr, stream>>>(x, batch, n, log2_n);
 }

@@ -6,7 +6,7 @@ import torch
 
 ASCEND_TOOLKIT_HOME = os.environ["ASCEND_TOOLKIT_HOME"]
 PTO_LIB_PATH = os.environ["PTO_LIB_PATH"]
-BLOCK_DIM = 20  # 910B4, TODO: query platform information
+BLOCK_DIM = int(getattr(torch.npu.get_device_properties("npu:0"), "cube_core_num", 20))
 
 
 def compile_cpp(kernel_cpp: str, verbose: bool = False, timeout: int = 120) -> str:
@@ -55,9 +55,7 @@ def load_lib(lib_path, check_type=True):
         ]
         lib.call_kernel.restype = None
 
-    default_block_dim = BLOCK_DIM
-
-    def silu_func(x, y, block_dim=default_block_dim, stream_ptr=None):
+    def silu_func(x, y, block_dim=BLOCK_DIM, stream_ptr=None):
         if stream_ptr is None:
             stream_ptr = torch.npu.current_stream()._as_parameter_  # noqa
         N = x.numel()

@@ -8,3 +8,5 @@ build
 *.egg-info/
 venv/
 kernel_meta/
+doxygen/documentation/
+benchmark_data/

@@ -17,6 +17,14 @@ for the full License text.
 
 namespace pto_isa_ops {
 
+/**
+ * @brief Runs triangular inverse using vector-only column sweep method.
+ *
+ * @param [in] x Input tensor whose last two dimensions contain square
+ * triangular matrices to invert.
+ * @return at::Tensor Tensor of same shape as input where matrices are inverted.
+ */
+
 at::Tensor run_tri_inv(const at::Tensor& x) {
   const at::Device device = x.options().device();
   const auto dtype = x.options().dtype();
@@ -30,8 +38,14 @@ at::Tensor run_tri_inv(const at::Tensor& x) {
   }
 
   const uint32_t num_elems = static_cast<uint32_t>(x.numel());
-  const uint32_t block_dim =
+  const uint32_t total_tiles =
       static_cast<uint32_t>(num_elems / (matrix_size * matrix_size));
+
+  uint32_t block_dim = GetNumCubeCores();
+  if (total_tiles < block_dim) {
+    block_dim = total_tiles;
+  }
+
   const at::Tensor z = at::empty_like(x);
 
   if (dtype == at::kHalf) {

@@ -1,6 +1,19 @@
 # Contributing a new kernel
 
-This example shows how to contribute a new custom PTO-based kernel and expose it as a PyTorch operator via `torch_npu`.
+This example shows how to contribute a new custom PTO kernel and expose it as a PyTorch operator via `torch-npu`.
+
+
+### Code conventions
+
+Your contribution should pass all the coding conventions enforced by CI and pre-commit hooks.
+
+Before your contribution, please run the following on your diff
+
+```bash
+pip install pre-commit
+pre-commit install
+pre-commit run --all-files
+```
 
 ## Directory Layout
 

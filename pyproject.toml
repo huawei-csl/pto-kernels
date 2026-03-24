@@ -20,7 +20,7 @@ ASCEND_CANN_PACKAGE_PATH = {env="ASCEND_CANN_PACKAGE_PATH", default="/usr/local/
 
 [project]
 name = "pto-kernels"
-version = "0.1.0"
+version = "0.1.2"
 description="PTO kernels"
 readme = "README.md"
 authors = [
@@ -35,6 +35,7 @@ maintainers = [
 requires-python = ">=3.10"
 classifiers = [
   "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
 ]
 dependencies = [
@@ -45,7 +46,6 @@ dependencies = [
   "psutil==6.1.0",
   "PyYAML==6.0.2",
   "attrs==24.2.0",
-
 ]
 
 [project.optional-dependencies]

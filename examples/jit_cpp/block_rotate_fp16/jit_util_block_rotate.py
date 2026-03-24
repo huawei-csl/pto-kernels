@@ -6,7 +6,7 @@ import torch
 
 ASCEND_TOOLKIT_HOME = os.environ["ASCEND_TOOLKIT_HOME"]
 PTO_LIB_PATH = os.environ.get("PTO_LIB_PATH", ASCEND_TOOLKIT_HOME)
-BLOCK_DIM = 20  # hard-coded to 910B4 cube core number
+BLOCK_DIM = int(getattr(torch.npu.get_device_properties("npu:0"), "cube_core_num", 20))
 
 
 def compile_cpp(kernel_cpp: str, verbose: bool = False, timeout: int = 120) -> str:
@@ -57,12 +57,10 @@ def load_lib(lib_path):
     ]
     lib.call_kernel.restype = None
 
-    default_block_dim = BLOCK_DIM
-
-    def block_rotate_func(a, b, c, m, block_dim=None, stream_ptr=None):
+    def block_rotate_func(a, b, c, m, block_dim=BLOCK_DIM, stream_ptr=None):
         if block_dim is None:
             active_batches = int(m) // 128
-            block_dim = min(max(active_batches, 1), default_block_dim)
+            block_dim = min(max(active_batches, 1), BLOCK_DIM)
         if stream_ptr is None:
             stream = torch.npu.current_stream()
             stream_ptr = getattr(  # pylint: disable=protected-access

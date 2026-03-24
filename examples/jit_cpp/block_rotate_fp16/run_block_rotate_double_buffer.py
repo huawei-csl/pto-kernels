@@ -11,7 +11,7 @@ M_TILE = 128
 N = 128
 K = 128
 
-DEVICE = "npu:7"
+DEVICE = "npu:1"
 DTYPE = torch.float16
 
 # Correctness tests: match ascendc-to-pto-isa repo coverage
