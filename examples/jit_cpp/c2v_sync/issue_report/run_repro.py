@@ -35,8 +35,10 @@ def run_one(label: str, so_path: str, device: str = "npu"):
     sub_block_dim = 2
     total_len = block_dim * sub_block_dim * n
 
-    gm_input = torch.arange(total_len, dtype=torch.float32, device=device)
+    indices = torch.arange(total_len, dtype=torch.float32, device=device)
+    gm_input = (indices // (n * sub_block_dim)) * sub_block_dim
     gm_output = torch.zeros(total_len, dtype=torch.float32, device=device)
+    ref_result = indices // n
     stream_ptr = torch.npu.current_stream()._as_parameter_
 
     lib.call_kernel(
@@ -47,27 +49,58 @@ def run_one(label: str, so_path: str, device: str = "npu"):
         n,
     )
     torch.npu.synchronize()
-    print(f"[{label}] launch: OK")
+
+    correct = torch.equal(gm_output, ref_result)
+    print(f"[{label}] launch: OK, numeric_correct: {correct}")
+    if not correct:
+        print(f"  ref tail:    {ref_result[-16:]}")
+        print(f"  output tail: {gm_output[-16:]}")
+    return correct
 
 
 def main():
     here = os.path.dirname(os.path.abspath(__file__))
     repros = [
-        ("TSYNC repro", os.path.join(here, "repro_tsync_issue_lib.so")),
-        ("TPipe repro (native)", os.path.join(here, "repro_tpipe_native_lib.so")),
-        ("TPipe repro (workaround)", os.path.join(here, "repro_tpipe_workaround_lib.so")),
+        (
+            "TSYNC repro",
+            os.path.join(here, "repro_tsync_issue_lib.so"),
+            "expected behavior: CORRECT path (PIPE_MTE3 producer + wait_flag_dev)",
+        ),
+        (
+            "TPipe repro (native)",
+            os.path.join(here, "repro_tpipe_native_lib.so"),
+            "expected behavior: WRONG path in full kernel (native Producer::record uses PIPE_FIX)",
+        ),
+        (
+            "TPipe repro (workaround)",
+            os.path.join(here, "repro_tpipe_workaround_lib.so"),
+            "expected behavior: CORRECT path (custom Producer::record uses PIPE_MTE3)",
+        ),
     ]
 
-    failed = False
-    for label, so in repros:
+    print("=== Expected behavior matrix ===")
+    for label, _, expected in repros:
+        print(f"- [{label}] {expected}")
+
+    print("\n=== Runtime launch + numeric check ===")
+    launch_failed = False
+    numeric_results = []
+    for label, so, expected in repros:
         try:
-            run_one(label, so)
+            print(f"[{label}] {expected}")
+            numeric_correct = run_one(label, so)
+            numeric_results.append((label, numeric_correct))
         except Exception as e:
-            failed = True
+            launch_failed = True
             print(f"[{label}] launch: FAIL ({e})")
 
-    if failed:
+    if launch_failed:
         sys.exit(1)
+
+    print("\n=== Numeric summary ===")
+    for label, numeric_correct in numeric_results:
+        state = "CORRECT" if numeric_correct else "WRONG"
+        print(f"- [{label}] observed numeric behavior: {state}")
     print("All repro launches completed.")
 
 
