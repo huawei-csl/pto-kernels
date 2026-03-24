@@ -86,7 +86,8 @@ extern "C" __global__ AICORE void sync_c2v_tsync(
     set_ffts_base_addr((uint64_t)ffts_addr);
     set_vector_mask((uint64_t)-1, (uint64_t)-1);
 
-    int id     = get_block_idx() * get_subblockdim() + get_subblockid();
+    int subblock_id = get_subblockid();
+    int id     = get_block_idx() * get_subblockdim() + subblock_id;
     int rows_n = N / 256;  // N floats = rows_n bursts × 256 floats
 
     GlobalFP32 globalOut(gm_output + id * N, GMShape(1, 1, 1, rows_n, 256));
@@ -104,7 +105,7 @@ extern "C" __global__ AICORE void sync_c2v_tsync(
 
     // Add sub-block index to every element.
     // Replaces the vadds loop from the original kernel.
-    TADDS(ub_tile, ub_tile, (float)get_subblockid());
+    TADDS(ub_tile, ub_tile, (float)subblock_id);
 
     set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
     wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
