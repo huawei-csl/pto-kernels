@@ -1,11 +1,12 @@
-// Reproducer: TSYNC-related C2V behavior with real compute.
+// Reproducer: TSYNC_Custom C2V behavior with real compute.
 //
 // This kernel performs the same C2V data flow as the main example:
 // - cube: GM -> cbuf -> GM
 // - vec:  GM -> ub, add subblock id, ub -> GM
-// Sync uses the validated producer PIPE_MTE3 + wait_flag_dev path.
+// Sync intentionally uses high-level TSYNC API to expose the current issue.
 
 #include <pto/pto-inst.hpp>
+#include <pto/npu/a2a3/custom/TSync_Custom.hpp>
 #include "runtime/rt.h"
 
 using namespace pto;
@@ -16,6 +17,9 @@ extern "C" __global__ AICORE void repro_tsync_issue(
     __gm__ uint8_t* __restrict__ ffts_addr,
     int32_t n)
 {
+    // Intentionally use high-level TSYNC wrapper under test.
+    constexpr TSync_Custom<SyncOpType::TSTORE_C2GM, SyncOpType::TLOAD> c2v_sync = {0};
+
 #ifdef __DAV_C220_CUBE__
     set_ffts_base_addr((uint64_t)ffts_addr);
     set_padding(0);
@@ -43,9 +47,8 @@ extern "C" __global__ AICORE void repro_tsync_issue(
         0, 0
     );
 
-    // Known-good producer sync for this case (matches reference kernel).
-    constexpr uint64_t kCfg = 1 | (2ULL << 4) | (0ULL << 8); // CV_CORES_SYNC, flag 0
-    ffts_cross_core_sync(PIPE_MTE3, kCfg);
+    // Producer-side TSYNC API under test.
+    c2v_sync.record();
 
     pipe_barrier(PIPE_ALL);
 #endif
@@ -60,8 +63,8 @@ extern "C" __global__ AICORE void repro_tsync_issue(
     int id = get_block_idx() * get_subblockdim() + subblock_id;
     auto ub_buf = reinterpret_cast<__ubuf__ float*>((uintptr_t)0);
 
-    // Known-good consumer side.
-    wait_flag_dev(0);
+    // Consumer-side TSYNC API under test.
+    c2v_sync.wait();
 
     copy_gm_to_ubuf(
         ub_buf,

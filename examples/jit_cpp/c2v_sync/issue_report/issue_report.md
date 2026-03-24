@@ -44,7 +44,8 @@ These wrappers are temporary compatibility/workaround layers until upstream TSYN
 ## Reproducer files in this folder
 
 - `repro_tsync_issue.cpp`
-  - Shows the TSYNC/Event integration issue and validated `PIPE_MTE3 + wait_flag_dev` path.
+  - Uses high-level `TSync_Custom<SyncOpType::TSTORE_C2GM, SyncOpType::TLOAD>` in a full C2V compute path.
+  - Reproduces the current TSYNC wrapper issue.
 - `repro_tpipe_issue.cpp`
   - Shows that C2V via `TPipe::Producer::record()` (PIPE_FIX path) differs from validated `PIPE_MTE3` producer sync.
 - `compile.sh`

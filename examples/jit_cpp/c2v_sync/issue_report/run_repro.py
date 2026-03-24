@@ -64,7 +64,7 @@ def main():
         (
             "TSYNC repro",
             os.path.join(here, "repro_tsync_issue_lib.so"),
-            "expected behavior: CORRECT path (PIPE_MTE3 producer + wait_flag_dev)",
+            "expected behavior: WRONG path (TSync_Custom C2V record path)",
         ),
         (
             "TPipe repro (native)",
