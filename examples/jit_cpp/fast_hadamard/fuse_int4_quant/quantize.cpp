@@ -101,8 +101,8 @@ AICORE void runTQuantize(__gm__ OutT *y, __gm__ InT *x, uint32_t batch,
     TMULS(xTile, xTile, (InT)scale);
     pipe_barrier(PIPE_V);
 
-    fast_hadamard_int4::TCVT_FP16_TO_INT4_PACKED_NOCTRL(yTile, xTile,
-                                                        RoundMode::CAST_NONE);
+    fast_hadamard_int4::TCVT_FP16_TO_INT4_PACKED(yTile, xTile,
+                           RoundMode::CAST_NONE);
     pipe_barrier(PIPE_V);
 
     set_flag(PIPE_V, PIPE_MTE3, ev);
