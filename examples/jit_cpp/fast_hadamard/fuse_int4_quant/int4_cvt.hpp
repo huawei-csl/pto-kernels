@@ -22,8 +22,8 @@ full text of the License.
  * ====================================
  * FP16:  -> packed S4
  *
- * 1. GenCastCallFp16ToInt4 helper
- *    - fp16 -> packed int4
+ * 1. GenCastCallFp16ToInt4
+ *    - Dispatch to the correct vconv_f162s4 variant by RoundMode
  *
  * 2. TCvtHeadFp16ToInt4Packed
  *    - Processes aligned repeat blocks for the main data region
@@ -93,15 +93,6 @@ PTO_INTERNAL void GenCastCallFp16ToInt4(__ubuf__ void *dst,
   }
 }
 
-template <typename TileDataD, typename TileDataS>
-PTO_INTERNAL void GenCastCallFp16ToInt4None(
-    __ubuf__ void *dst, __ubuf__ typename TileDataS::DType *src,
-    uint8_t repeatNum, uint16_t dstBlockStride, uint16_t srcBlockStride,
-    uint16_t dstRepeatStride, uint16_t srcRepeatStride) {
-  vconv_f162s4(dst, src, repeatNum, dstBlockStride, srcBlockStride,
-               dstRepeatStride, srcRepeatStride);
-}
-
 // ============================================================================
 // Tile Conversion Helper: Process Main Data Block
 // ============================================================================
@@ -117,29 +108,6 @@ PTO_INST void TCvtHeadFp16ToInt4Packed(
     unsigned srcRepeatStride) {
   unsigned numLoop = numRepeatPerLine / REPEAT_MAX;
   unsigned remainAfterLoop = numRepeatPerLine % REPEAT_MAX;
-  if (mode == RoundMode::CAST_NONE) {
-    for (uint32_t i = 0; i < validRow; i++) {
-      if (numLoop > 0) {
-        for (uint32_t j = 0; j < numLoop; j++) {
-          GenCastCallFp16ToInt4None<TileDataD, TileDataS>(
-              (__ubuf__ void *)(dstPtr + i * DS +
-                                j * dstBytesPerRepeat * REPEAT_MAX),
-              srcPtr + i * SS + j * srcElementsPerRepeat * REPEAT_MAX,
-              (uint8_t)REPEAT_MAX, 1, 1, (uint16_t)dstRepeatStride,
-              (uint16_t)srcRepeatStride);
-        }
-      }
-      if (remainAfterLoop > 0) {
-        GenCastCallFp16ToInt4None<TileDataD, TileDataS>(
-            (__ubuf__ void *)(dstPtr + i * DS +
-                              numLoop * dstBytesPerRepeat * REPEAT_MAX),
-            srcPtr + i * SS + numLoop * srcElementsPerRepeat * REPEAT_MAX,
-            (uint8_t)remainAfterLoop, 1, 1, (uint16_t)dstRepeatStride,
-            (uint16_t)srcRepeatStride);
-      }
-    }
-    return;
-  }
 
   for (uint32_t i = 0; i < validRow; i++) {
     if (numLoop > 0) {
@@ -193,10 +161,9 @@ __tf__ AICORE void TCvtFp16ToInt4Packed(
     unsigned numRepeatPerLine, unsigned numRemainPerLine, unsigned validRow,
     unsigned srcElementsPerRepeat, unsigned dstBytesPerRepeat,
     unsigned dstRepeatStride, unsigned srcRepeatStride) {
-  // Save the original saturation mode state and force saturation ON.
+  // Save original CTRL and force saturation ON (bit 59 = 0).
   uint64_t originalCtrl = get_ctrl();
-  bool originalSatMode = (originalCtrl & (1ULL << SAT_MODE_BIT)) == 0;
-  set_ctrl(sbitset0(get_ctrl(), SAT_MODE_BIT));
+  set_ctrl(sbitset0(originalCtrl, SAT_MODE_BIT));
 
   __ubuf__ typename TileDataD::DType *dstPtr =
       (__ubuf__ typename TileDataD::DType *)__cce_get_tile_ptr(dst);
@@ -220,46 +187,24 @@ __tf__ AICORE void TCvtFp16ToInt4Packed(
     unsigned numLoop = validRow / REPEAT_MAX;
     unsigned remainAfterLoop = validRow % REPEAT_MAX;
     SetContinuousMask(numRemainPerLine);
-    if (mode == RoundMode::CAST_NONE) {
-      if (numLoop > 0) {
-        for (uint32_t j = 0; j < numLoop; j++) {
-          GenCastCallFp16ToInt4None<TileDataD, TileDataS>(
-              (__ubuf__ void *)(dstPtr + j * DS * REPEAT_MAX),
-              srcPtr + j * SS * REPEAT_MAX, (uint8_t)REPEAT_MAX, 1, 1,
-              (uint16_t)DS / dstNElemPerBlock, (uint16_t)SS / srcNElemPerBlock);
-        }
-      }
-      if (remainAfterLoop > 0) {
-        GenCastCallFp16ToInt4None<TileDataD, TileDataS>(
-            (__ubuf__ void *)(dstPtr + numLoop * DS * REPEAT_MAX),
-            srcPtr + numLoop * SS * REPEAT_MAX, (uint8_t)remainAfterLoop, 1, 1,
+    if (numLoop > 0) {
+      for (uint32_t j = 0; j < numLoop; j++) {
+        GenCastCallFp16ToInt4<TileDataD, TileDataS>(
+            (__ubuf__ void *)(dstPtr + j * DS * REPEAT_MAX),
+            srcPtr + j * SS * REPEAT_MAX, (uint8_t)REPEAT_MAX, mode, 1, 1,
             (uint16_t)DS / dstNElemPerBlock, (uint16_t)SS / srcNElemPerBlock);
       }
-    } else {
-      if (numLoop > 0) {
-        for (uint32_t j = 0; j < numLoop; j++) {
-          GenCastCallFp16ToInt4<TileDataD, TileDataS>(
-              (__ubuf__ void *)(dstPtr + j * DS * REPEAT_MAX),
-              srcPtr + j * SS * REPEAT_MAX, (uint8_t)REPEAT_MAX, mode, 1, 1,
-              (uint16_t)DS / dstNElemPerBlock, (uint16_t)SS / srcNElemPerBlock);
-        }
-      }
-      if (remainAfterLoop > 0) {
-        GenCastCallFp16ToInt4<TileDataD, TileDataS>(
-            (__ubuf__ void *)(dstPtr + numLoop * DS * REPEAT_MAX),
-            srcPtr + numLoop * SS * REPEAT_MAX, (uint8_t)remainAfterLoop, mode,
-            1, 1, (uint16_t)DS / dstNElemPerBlock,
-            (uint16_t)SS / srcNElemPerBlock);
-      }
+    }
+    if (remainAfterLoop > 0) {
+      GenCastCallFp16ToInt4<TileDataD, TileDataS>(
+          (__ubuf__ void *)(dstPtr + numLoop * DS * REPEAT_MAX),
+          srcPtr + numLoop * SS * REPEAT_MAX, (uint8_t)remainAfterLoop, mode, 1,
+          1, (uint16_t)DS / dstNElemPerBlock, (uint16_t)SS / srcNElemPerBlock);
     }
     set_vector_mask(-1, -1);
   }
 
-  if (originalSatMode) {
-    set_ctrl(sbitset0(get_ctrl(), SAT_MODE_BIT));
-  } else {
-    set_ctrl(sbitset1(get_ctrl(), SAT_MODE_BIT));
-  }
+  set_ctrl(originalCtrl);
 }
 
 // ============================================================================

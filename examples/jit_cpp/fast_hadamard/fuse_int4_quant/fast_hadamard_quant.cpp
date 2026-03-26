@@ -8,7 +8,7 @@ using namespace pto;
 
 // Keep some slack below PTO's TMP_UB_OFFSET (184KB) while increasing the
 // batched x tile a bit to improve samples_per_load for smaller block widths.
-constexpr uint32_t X_BUFFER_BYTES = 51 * 1024;
+constexpr uint32_t X_BUFFER_BYTES = 32 * 1024;
 constexpr uint32_t UB_HALF_BYTES = X_BUFFER_BYTES / 2;
 constexpr uint32_t ELEMENTS_PER_TILE = X_BUFFER_BYTES / sizeof(half);
 constexpr uint32_t Y_BUFFER_BYTES = ELEMENTS_PER_TILE / 2;
@@ -168,11 +168,6 @@ AICORE void runTFastHadamardQuant(__gm__ InT *x, __gm__ OutT *y,
   if (samples_to_process == 0) {
     return;
   }
-
-  // Fused int4 quant always uses saturated f162s4 semantics, so set the ctrl
-  // bit once per worker and use the no-ctrl conversion helper inside the loop.
-  uint64_t originalCtrl = get_ctrl();
-  set_ctrl(sbitset0(originalCtrl, fast_hadamard_int4::SAT_MODE_BIT));
 
   using InShapeDim5 = pto::Shape<1, 1, 1, 1, ELEMENTS_PER_TILE>;
   using OutShapeDim5 = pto::Shape<1, 1, 1, 1, ELEMENTS_PER_TILE / 2>;
@@ -347,8 +342,6 @@ AICORE void runTFastHadamardQuant(__gm__ InT *x, __gm__ OutT *y,
   wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID1);
   wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
   wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID1);
-
-  set_ctrl(originalCtrl);
 }
 
 }  // namespace

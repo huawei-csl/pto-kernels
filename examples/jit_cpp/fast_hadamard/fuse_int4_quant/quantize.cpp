@@ -10,7 +10,7 @@ using namespace pto;
 // amortization) and large-batch (smaller tiles for cache efficiency). Using
 // 48KB buffers gives good balance: large enough for amortization, small enough
 // to avoid TLB penalties on batch >= 128.
-constexpr uint32_t X_BUFFER_BYTES = 48 * 1024;
+constexpr uint32_t X_BUFFER_BYTES = 32 * 1024;
 constexpr uint32_t ELEMENTS_PER_TILE = X_BUFFER_BYTES / sizeof(half);
 constexpr uint32_t Y_BUFFER_BYTES = ELEMENTS_PER_TILE / 2;
 constexpr uint32_t UB_USABLE_BYTES = 256 * 1024;
@@ -43,12 +43,6 @@ AICORE void runTQuantize(__gm__ OutT *y, __gm__ InT *x, uint32_t batch,
   if (pairs_to_process == 0) {
     return;
   }
-
-  // Keep f162s4 saturation mode configured once for the full kernel slice.
-  const uint64_t originalCtrl = get_ctrl();
-  const bool originalSatMode =
-      (originalCtrl & (1ULL << fast_hadamard_int4::SAT_MODE_BIT)) == 0;
-  set_ctrl(sbitset0(get_ctrl(), fast_hadamard_int4::SAT_MODE_BIT));
 
   using InShapeDim5 = pto::Shape<1, 1, 1, 1, ELEMENTS_PER_TILE>;
   using OutShapeDim5 = pto::Shape<1, 1, 1, 1, ELEMENTS_PER_TILE / 2>;
@@ -119,12 +113,6 @@ AICORE void runTQuantize(__gm__ OutT *y, __gm__ InT *x, uint32_t batch,
   wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID1);
   wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
   wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID1);
-
-  if (originalSatMode) {
-    set_ctrl(sbitset0(get_ctrl(), fast_hadamard_int4::SAT_MODE_BIT));
-  } else {
-    set_ctrl(sbitset1(get_ctrl(), fast_hadamard_int4::SAT_MODE_BIT));
-  }
 }
 
 }  // namespace
