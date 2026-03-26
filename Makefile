@@ -20,8 +20,9 @@ build_cmake: clean
 build_wheel:
 	export CMAKE_GENERATOR="Unix Makefiles" && pip wheel -v  . --extra-index-url https://download.pytorch.org/whl/cpu
 
-install: build_wheel
-	bash scripts/install-wheel.sh
+install:
+	python3 -m pip install --force-reinstall pto_kernels-*.whl
+
 
 docs:
 	doxygen doxygen/Doxyfile
