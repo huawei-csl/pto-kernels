@@ -38,17 +38,17 @@ struct TileWork {
   uint32_t gm_offset, sample_count, elements;
 };
 
-template <typename InT, uint32_t kN, uint32_t kLog2N>
+template <typename InputT, uint32_t kN, uint32_t kLog2N>
 AICORE void runBatchedHadamardInPlace(unsigned x_base, uint32_t sample_count) {
   constexpr uint32_t kNHalf = kN >> 1;
   constexpr uint32_t kSamplesPerLoad = ELEMENTS_PER_TILE / kN;
 
-  using FullTile = Tile<TileType::Vec, InT, kSamplesPerLoad, kN,
+  using FullTile = Tile<TileType::Vec, InputT, kSamplesPerLoad, kN,
                         BLayout::RowMajor, DYNAMIC, kN>;
-  using HalfTile = Tile<TileType::Vec, InT, kSamplesPerLoad, kNHalf,
+  using HalfTile = Tile<TileType::Vec, InputT, kSamplesPerLoad, kNHalf,
                         BLayout::RowMajor, DYNAMIC, kNHalf>;
   using RowHalfTile =
-      Tile<TileType::Vec, InT, 1, kNHalf, BLayout::RowMajor, 1, kNHalf>;
+      Tile<TileType::Vec, InputT, 1, kNHalf, BLayout::RowMajor, 1, kNHalf>;
 
   FullTile xBulkTile(sample_count);
   HalfTile evenTile(sample_count);
@@ -64,9 +64,9 @@ AICORE void runBatchedHadamardInPlace(unsigned x_base, uint32_t sample_count) {
     pipe_barrier(PIPE_V);
 
     for (uint32_t s = 0; s < sample_count; ++s) {
-      const unsigned row_base = x_base + s * kN * sizeof(InT);
-      const unsigned even_row_base = EVEN_BASE + s * kNHalf * sizeof(InT);
-      const unsigned odd_row_base = ODD_BASE + s * kNHalf * sizeof(InT);
+      const unsigned row_base = x_base + s * kN * sizeof(InputT);
+      const unsigned even_row_base = EVEN_BASE + s * kNHalf * sizeof(InputT);
+      const unsigned odd_row_base = ODD_BASE + s * kNHalf * sizeof(InputT);
 
       RowHalfTile evenRow;
       RowHalfTile oddRow;
@@ -75,7 +75,7 @@ AICORE void runBatchedHadamardInPlace(unsigned x_base, uint32_t sample_count) {
       TASSIGN(evenRow, even_row_base);
       TASSIGN(oddRow, odd_row_base);
       TASSIGN(xFirstHalf, row_base);
-      TASSIGN(xSecondHalf, row_base + kNHalf * sizeof(InT));
+      TASSIGN(xSecondHalf, row_base + kNHalf * sizeof(InputT));
 
       TADD(xFirstHalf, evenRow, oddRow);
       TSUB(xSecondHalf, evenRow, oddRow);
@@ -85,14 +85,14 @@ AICORE void runBatchedHadamardInPlace(unsigned x_base, uint32_t sample_count) {
   }
 }
 
-template <typename InT>
-AICORE void issueTLoad(__gm__ InT *x, const TileWork &tile, unsigned x_base,
+template <typename InputT>
+AICORE void issueTLoad(__gm__ InputT *x, const TileWork &tile, unsigned x_base,
                        event_t ev) {
   using ShapeDim5 = pto::Shape<1, 1, 1, 1, ELEMENTS_PER_TILE>;
   using StridDim5 = pto::Stride<1, 1, 1, 1, 1>;
-  using InGlobal = pto::GlobalTensor<InT, ShapeDim5, StridDim5>;
-  using FullTile =
-      Tile<TileType::Vec, InT, 1, ELEMENTS_PER_TILE, BLayout::RowMajor, -1, -1>;
+  using InGlobal = pto::GlobalTensor<InputT, ShapeDim5, StridDim5>;
+  using FullTile = Tile<TileType::Vec, InputT, 1, ELEMENTS_PER_TILE,
+                        BLayout::RowMajor, -1, -1>;
 
   FullTile xBulkTile(1, tile.elements);
   TASSIGN(xBulkTile, x_base);
@@ -119,16 +119,16 @@ AICORE bool nextTile(uint32_t &sample_done, uint32_t gm_offset_base,
   return true;
 }
 
-template <typename InT>
+template <typename InputT>
 AICORE bool tryRunBatchedHadamard(unsigned x_base, uint32_t sample_count,
                                   uint32_t n, uint32_t log2_n) {
   switch (n) {
-#define FAST_HADAMARD_BATCHED_DISPATCH_CASE(N, LOG2)                 \
-  case N:                                                            \
-    if (log2_n == LOG2) {                                            \
-      runBatchedHadamardInPlace<InT, N, LOG2>(x_base, sample_count); \
-      return true;                                                   \
-    }                                                                \
+#define FAST_HADAMARD_BATCHED_DISPATCH_CASE(N, LOG2)                    \
+  case N:                                                               \
+    if (log2_n == LOG2) {                                               \
+      runBatchedHadamardInPlace<InputT, N, LOG2>(x_base, sample_count); \
+      return true;                                                      \
+    }                                                                   \
     break;
     FAST_HADAMARD_BATCHED_CASES(FAST_HADAMARD_BATCHED_DISPATCH_CASE)
 #undef FAST_HADAMARD_BATCHED_DISPATCH_CASE

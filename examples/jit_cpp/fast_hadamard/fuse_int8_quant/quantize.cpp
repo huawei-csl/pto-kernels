@@ -18,8 +18,8 @@ static_assert(Y_PONG + Y_BUFFER_BYTES <= UB_USABLE_BYTES,
 
 namespace {
 
-template <typename InT, typename OutT>
-AICORE void runTQuantize(__gm__ OutT *y, __gm__ InT *x, uint32_t batch,
+template <typename InputT, typename OutputT>
+AICORE void runTQuantize(__gm__ OutputT *y, __gm__ InputT *x, uint32_t batch,
                          uint32_t n, uint32_t num_cores, uint32_t vid,
                          float scale) {
   const uint32_t samples_per_core = DIV_ROUNDUP(batch, num_cores);
@@ -38,11 +38,11 @@ AICORE void runTQuantize(__gm__ OutT *y, __gm__ InT *x, uint32_t batch,
 
   using ShapeDim5 = pto::Shape<1, 1, 1, 1, ELEMENTS_PER_TILE>;
   using StridDim5 = pto::Stride<1, 1, 1, 1, 1>;
-  using InGlobal = pto::GlobalTensor<InT, ShapeDim5, StridDim5>;
-  using OutGlobal = pto::GlobalTensor<OutT, ShapeDim5, StridDim5>;
-  using InTile =
-      Tile<TileType::Vec, InT, 1, ELEMENTS_PER_TILE, BLayout::RowMajor, -1, -1>;
-  using OutTile = Tile<TileType::Vec, OutT, 1, ELEMENTS_PER_TILE,
+  using InGlobal = pto::GlobalTensor<InputT, ShapeDim5, StridDim5>;
+  using OutGlobal = pto::GlobalTensor<OutputT, ShapeDim5, StridDim5>;
+  using InTile = Tile<TileType::Vec, InputT, 1, ELEMENTS_PER_TILE,
+                      BLayout::RowMajor, -1, -1>;
+  using OutTile = Tile<TileType::Vec, OutputT, 1, ELEMENTS_PER_TILE,
                        BLayout::RowMajor, -1, -1>;
 
   const uint32_t samples_per_load =
@@ -91,7 +91,7 @@ AICORE void runTQuantize(__gm__ OutT *y, __gm__ InT *x, uint32_t batch,
       wait_flag(PIPE_MTE2, PIPE_V, ev);
       wait_flag(PIPE_MTE3, PIPE_V, ev);
 
-      TMULS(xTile, xTile, (InT)scale);
+      TMULS(xTile, xTile, (InputT)scale);
       pipe_barrier(PIPE_V);
 
       TCVT(yTile, xTile, RoundMode::CAST_NONE);

@@ -39,17 +39,17 @@ struct TileWork {
   uint32_t gm_offset, sample_count, elements;
 };
 
-template <typename InT, uint32_t kN, uint32_t kLog2N>
+template <typename InputT, uint32_t kN, uint32_t kLog2N>
 AICORE void runBatchedHadamardInPlace(unsigned x_base, uint32_t sample_count) {
   constexpr uint32_t kNHalf = kN >> 1;
   constexpr uint32_t kSamplesPerLoad = ELEMENTS_PER_TILE / kN;
 
-  using FullTile = Tile<TileType::Vec, InT, kSamplesPerLoad, kN,
+  using FullTile = Tile<TileType::Vec, InputT, kSamplesPerLoad, kN,
                         BLayout::RowMajor, DYNAMIC, kN>;
-  using HalfTile = Tile<TileType::Vec, InT, kSamplesPerLoad, kNHalf,
+  using HalfTile = Tile<TileType::Vec, InputT, kSamplesPerLoad, kNHalf,
                         BLayout::RowMajor, DYNAMIC, kNHalf>;
   using RowHalfTile =
-      Tile<TileType::Vec, InT, 1, kNHalf, BLayout::RowMajor, 1, kNHalf>;
+      Tile<TileType::Vec, InputT, 1, kNHalf, BLayout::RowMajor, 1, kNHalf>;
 
   FullTile xBulkTile(sample_count);
   HalfTile evenTile(sample_count);
@@ -65,9 +65,9 @@ AICORE void runBatchedHadamardInPlace(unsigned x_base, uint32_t sample_count) {
     pipe_barrier(PIPE_V);
 
     for (uint32_t s = 0; s < sample_count; ++s) {
-      const unsigned row_base = x_base + s * kN * sizeof(InT);
-      const unsigned even_row_base = EVEN_BASE + s * kNHalf * sizeof(InT);
-      const unsigned odd_row_base = ODD_BASE + s * kNHalf * sizeof(InT);
+      const unsigned row_base = x_base + s * kN * sizeof(InputT);
+      const unsigned even_row_base = EVEN_BASE + s * kNHalf * sizeof(InputT);
+      const unsigned odd_row_base = ODD_BASE + s * kNHalf * sizeof(InputT);
 
       RowHalfTile evenRow;
       RowHalfTile oddRow;
@@ -76,7 +76,7 @@ AICORE void runBatchedHadamardInPlace(unsigned x_base, uint32_t sample_count) {
       TASSIGN(evenRow, even_row_base);
       TASSIGN(oddRow, odd_row_base);
       TASSIGN(xFirstHalf, row_base);
-      TASSIGN(xSecondHalf, row_base + kNHalf * sizeof(InT));
+      TASSIGN(xSecondHalf, row_base + kNHalf * sizeof(InputT));
 
       TADD(xFirstHalf, evenRow, oddRow);
       TSUB(xSecondHalf, evenRow, oddRow);
@@ -86,14 +86,14 @@ AICORE void runBatchedHadamardInPlace(unsigned x_base, uint32_t sample_count) {
   }
 }
 
-template <typename InT>
-AICORE void issueTLoad(__gm__ InT *x, const TileWork &tile, unsigned x_base,
+template <typename InputT>
+AICORE void issueTLoad(__gm__ InputT *x, const TileWork &tile, unsigned x_base,
                        event_t ev) {
   using InShapeDim5 = pto::Shape<1, 1, 1, 1, ELEMENTS_PER_TILE>;
   using StridDim5 = pto::Stride<1, 1, 1, 1, 1>;
-  using InGlobal = pto::GlobalTensor<InT, InShapeDim5, StridDim5>;
-  using FullTile =
-      Tile<TileType::Vec, InT, 1, ELEMENTS_PER_TILE, BLayout::RowMajor, -1, -1>;
+  using InGlobal = pto::GlobalTensor<InputT, InShapeDim5, StridDim5>;
+  using FullTile = Tile<TileType::Vec, InputT, 1, ELEMENTS_PER_TILE,
+                        BLayout::RowMajor, -1, -1>;
 
   FullTile xBulkTile(1, tile.elements);
   TASSIGN(xBulkTile, x_base);
@@ -120,16 +120,16 @@ AICORE bool nextTile(uint32_t &sample_done, uint32_t gm_offset_base,
   return true;
 }
 
-template <typename InT>
+template <typename InputT>
 AICORE bool tryRunBatchedHadamard(unsigned x_base, uint32_t sample_count,
                                   uint32_t n, uint32_t log2_n) {
   switch (n) {
-#define FAST_HADAMARD_BATCHED_DISPATCH_CASE(N, LOG2)                 \
-  case N:                                                            \
-    if (log2_n == LOG2) {                                            \
-      runBatchedHadamardInPlace<InT, N, LOG2>(x_base, sample_count); \
-      return true;                                                   \
-    }                                                                \
+#define FAST_HADAMARD_BATCHED_DISPATCH_CASE(N, LOG2)                    \
+  case N:                                                               \
+    if (log2_n == LOG2) {                                               \
+      runBatchedHadamardInPlace<InputT, N, LOG2>(x_base, sample_count); \
+      return true;                                                      \
+    }                                                                   \
     break;
     FAST_HADAMARD_BATCHED_CASES(FAST_HADAMARD_BATCHED_DISPATCH_CASE)
 #undef FAST_HADAMARD_BATCHED_DISPATCH_CASE
@@ -139,10 +139,10 @@ AICORE bool tryRunBatchedHadamard(unsigned x_base, uint32_t sample_count,
   return false;
 }
 
-template <typename InT, typename OutT>
-AICORE void runTFastHadamardQuant(__gm__ InT *x, __gm__ OutT *y,
-                                  __gm__ InT *group_scales,
-                                  __gm__ InT *group_offsets,
+template <typename InputT, typename OutputT>
+AICORE void runTFastHadamardQuant(__gm__ InputT *x, __gm__ OutputT *y,
+                                  __gm__ InputT *group_scales,
+                                  __gm__ InputT *group_offsets,
                                   uint32_t scale_group_stride,
                                   uint32_t offset_group_stride, uint32_t batch,
                                   uint32_t n, uint32_t log2_n,
@@ -172,13 +172,13 @@ AICORE void runTFastHadamardQuant(__gm__ InT *x, __gm__ OutT *y,
   using InShapeDim5 = pto::Shape<1, 1, 1, 1, ELEMENTS_PER_TILE>;
   using OutShapeDim5 = pto::Shape<1, 1, 1, 1, ELEMENTS_PER_TILE / 2>;
   using StridDim5 = pto::Stride<1, 1, 1, 1, 1>;
-  using OutGlobal = pto::GlobalTensor<OutT, OutShapeDim5, StridDim5>;
+  using OutGlobal = pto::GlobalTensor<OutputT, OutShapeDim5, StridDim5>;
 
-  using FullTile =
-      Tile<TileType::Vec, InT, 1, ELEMENTS_PER_TILE, BLayout::RowMajor, -1, -1>;
-  using HalfTile = Tile<TileType::Vec, InT, 1, ELEMENTS_PER_TILE / 2,
+  using FullTile = Tile<TileType::Vec, InputT, 1, ELEMENTS_PER_TILE,
                         BLayout::RowMajor, -1, -1>;
-  using QuantTile = Tile<TileType::Vec, OutT, 1, ELEMENTS_PER_TILE / 2,
+  using HalfTile = Tile<TileType::Vec, InputT, 1, ELEMENTS_PER_TILE / 2,
+                        BLayout::RowMajor, -1, -1>;
+  using QuantTile = Tile<TileType::Vec, OutputT, 1, ELEMENTS_PER_TILE / 2,
                          BLayout::RowMajor, -1, -1>;
 
   const uint32_t samples_per_load =
@@ -232,17 +232,17 @@ AICORE void runTFastHadamardQuant(__gm__ InT *x, __gm__ OutT *y,
     OutGlobal yGlobal(y + (current_tile.gm_offset >> 1));
     TASSIGN(yGlobal, (y + (current_tile.gm_offset >> 1)));
 
-    if (!tryRunBatchedHadamard<InT>(current_x_base, current_tile.sample_count,
-                                    n, log2_n)) {
+    if (!tryRunBatchedHadamard<InputT>(current_x_base,
+                                       current_tile.sample_count, n, log2_n)) {
       for (uint32_t s = 0; s < current_tile.sample_count; ++s) {
-        const unsigned row_base = current_x_base + s * n * sizeof(InT);
+        const unsigned row_base = current_x_base + s * n * sizeof(InputT);
 
         FullTile xRowTile(1, n);
         HalfTile xFirstHalf(1, n_half);
         HalfTile xSecondHalf(1, n_half);
         TASSIGN(xRowTile, row_base);
         TASSIGN(xFirstHalf, row_base);
-        TASSIGN(xSecondHalf, row_base + n_half * sizeof(InT));
+        TASSIGN(xSecondHalf, row_base + n_half * sizeof(InputT));
 
         for (uint32_t iter_m = 0; iter_m < log2_n; ++iter_m) {
           TGATHER<HalfTile, FullTile, MaskPattern::P0101>(evenTile, xRowTile);
@@ -263,10 +263,10 @@ AICORE void runTFastHadamardQuant(__gm__ InT *x, __gm__ OutT *y,
       // Uniform scale/offset is equivalent for any group_size, so keep the
       // whole-tile path and overlap the scale/add with the previous store on
       // the opposite ping-pong buffer before we touch yBulkTile again.
-      TMULS(xBulkTile, xBulkTile, (InT)scale);
+      TMULS(xBulkTile, xBulkTile, (InputT)scale);
       pipe_barrier(PIPE_V);
       if (q_offset != 0.0f) {
-        TADDS(xBulkTile, xBulkTile, (InT)q_offset);
+        TADDS(xBulkTile, xBulkTile, (InputT)q_offset);
         pipe_barrier(PIPE_V);
       }
       wait_flag(PIPE_MTE3, PIPE_V, current_ev);
@@ -280,22 +280,22 @@ AICORE void runTFastHadamardQuant(__gm__ InT *x, __gm__ OutT *y,
       const uint32_t packed_group_size = group_size >> 1;
       for (uint32_t s = 0; s < current_tile.sample_count; ++s) {
         const uint32_t row_index = row_index_base + s;
-        const unsigned row_x_base = current_x_base + s * n * sizeof(InT);
+        const unsigned row_x_base = current_x_base + s * n * sizeof(InputT);
         const unsigned row_y_base =
-            current_y_base + s * packed_n * sizeof(OutT);
+            current_y_base + s * packed_n * sizeof(OutputT);
 
         for (uint32_t g = 0; g < groups_per_row; ++g) {
           const unsigned group_x_base =
-              row_x_base + g * group_size * sizeof(InT);
+              row_x_base + g * group_size * sizeof(InputT);
           const unsigned group_y_base =
-              row_y_base + g * packed_group_size * sizeof(OutT);
+              row_y_base + g * packed_group_size * sizeof(OutputT);
 
           FullTile xGroupTile(1, group_size);
           QuantTile yGroupTile(1, packed_group_size);
           TASSIGN(xGroupTile, group_x_base);
           TASSIGN(yGroupTile, group_y_base);
 
-          InT group_scale = (InT)scale;
+          InputT group_scale = (InputT)scale;
           if (has_group_scales) {
             const uint32_t scale_index =
                 (scale_group_stride == 0) ? g
@@ -306,7 +306,7 @@ AICORE void runTFastHadamardQuant(__gm__ InT *x, __gm__ OutT *y,
           TMULS(xGroupTile, xGroupTile, group_scale);
           pipe_barrier(PIPE_V);
           if (has_group_offsets || q_offset != 0.0f) {
-            InT group_offset = (InT)q_offset;
+            InputT group_offset = (InputT)q_offset;
             if (has_group_offsets) {
               const uint32_t offset_index =
                   (offset_group_stride == 0)
