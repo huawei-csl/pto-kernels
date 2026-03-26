@@ -14,9 +14,8 @@ import pytest
 @pytest.mark.parametrize("num_blocks", [1, 2, 10, 20, 32, 64])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.float32], ids=str)
 def test_pto_abs(num_blocks: int, dtype: torch.dtype):
-    # Define the tensor size
-    matrix_size = 64
-    tile_len = matrix_size * matrix_size
+    # FIXME: support only input length that are multiple of 64.
+    tile_len = 64
     length = [num_blocks, tile_len]
     # Create random input tensors on CPU with float16 data type
     x = torch.rand(length, device="cpu", dtype=dtype)

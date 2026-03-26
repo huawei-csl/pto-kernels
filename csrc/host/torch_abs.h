@@ -29,9 +29,14 @@ at::Tensor run_abs(const at::Tensor& x) {
   at::Tensor z = at::empty_like(x);
   // Define the number of blocks of vector core
   const uint32_t total_len = x.numel();
-  // FIXME: fixed for now
-  const uint32_t tile_len = 64 * 64;
-  const uint32_t block_dim = total_len / tile_len;
+  // FIXME: tile length is fixed to 64 for now
+  constexpr uint32_t TILE_LEN = 64;
+  const uint32_t block_dim = total_len / TILE_LEN;
+
+  if (total_len % TILE_LEN != 0) {
+    throw std::runtime_error(
+        "pto_abs supports only inputs with length that is multiple of 64.");
+  }
 
   if (dtype == at::kHalf) {
     EXEC_KERNEL_CMD(vabs_fp16, block_dim, x, z, total_len);

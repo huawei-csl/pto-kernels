@@ -37,7 +37,7 @@ make build_wheel
 This produces an installable Python wheel:
 
 ```
-pto_kernels-0.1.0-*.whl
+pto_kernels-X.Y.Z-*.whl
 ```
 
 ---
