@@ -10,7 +10,7 @@ using namespace pto;
 // amortization) and large-batch (smaller tiles for cache efficiency). Using
 // 48KB buffers gives good balance: large enough for amortization, small enough
 // to avoid TLB penalties on batch >= 128.
-constexpr uint32_t X_BUFFER_BYTES = 48 * 1024;
+constexpr uint32_t X_BUFFER_BYTES = 32 * 1024;
 constexpr uint32_t ELEMENTS_PER_TILE = X_BUFFER_BYTES / sizeof(half);
 constexpr uint32_t Y_BUFFER_BYTES = ELEMENTS_PER_TILE / 2;
 constexpr uint32_t UB_USABLE_BYTES = 256 * 1024;
@@ -24,8 +24,8 @@ static_assert(Y_PONG + Y_BUFFER_BYTES <= UB_USABLE_BYTES,
 
 namespace {
 
-template <typename InT, typename OutT>
-AICORE void runTQuantize(__gm__ OutT *y, __gm__ InT *x, uint32_t batch,
+template <typename InputT, typename OutputT>
+AICORE void runTQuantize(__gm__ OutputT *y, __gm__ InputT *x, uint32_t batch,
                          uint32_t n, uint32_t num_cores, uint32_t vid,
                          float scale) {
   // Partition by pairs for uniform load distribution across cores
@@ -44,20 +44,14 @@ AICORE void runTQuantize(__gm__ OutT *y, __gm__ InT *x, uint32_t batch,
     return;
   }
 
-  // Keep f162s4 saturation mode configured once for the full kernel slice.
-  const uint64_t originalCtrl = get_ctrl();
-  const bool originalSatMode =
-      (originalCtrl & (1ULL << fast_hadamard_int4::SAT_MODE_BIT)) == 0;
-  set_ctrl(sbitset0(get_ctrl(), fast_hadamard_int4::SAT_MODE_BIT));
-
   using InShapeDim5 = pto::Shape<1, 1, 1, 1, ELEMENTS_PER_TILE>;
   using OutShapeDim5 = pto::Shape<1, 1, 1, 1, ELEMENTS_PER_TILE / 2>;
   using StridDim5 = pto::Stride<1, 1, 1, 1, 1>;
-  using InGlobal = pto::GlobalTensor<InT, InShapeDim5, StridDim5>;
-  using OutGlobal = pto::GlobalTensor<OutT, OutShapeDim5, StridDim5>;
-  using InTile =
-      Tile<TileType::Vec, InT, 1, ELEMENTS_PER_TILE, BLayout::RowMajor, -1, -1>;
-  using OutTile = Tile<TileType::Vec, OutT, 1, ELEMENTS_PER_TILE / 2,
+  using InGlobal = pto::GlobalTensor<InputT, InShapeDim5, StridDim5>;
+  using OutGlobal = pto::GlobalTensor<OutputT, OutShapeDim5, StridDim5>;
+  using InTile = Tile<TileType::Vec, InputT, 1, ELEMENTS_PER_TILE,
+                      BLayout::RowMajor, -1, -1>;
+  using OutTile = Tile<TileType::Vec, OutputT, 1, ELEMENTS_PER_TILE / 2,
                        BLayout::RowMajor, -1, -1>;
 
   constexpr uint32_t PAIRS_PER_TILE = ELEMENTS_PER_TILE >> 1;
@@ -98,11 +92,11 @@ AICORE void runTQuantize(__gm__ OutT *y, __gm__ InT *x, uint32_t batch,
     wait_flag(PIPE_MTE2, PIPE_V, ev);
     wait_flag(PIPE_MTE3, PIPE_V, ev);
 
-    TMULS(xTile, xTile, (InT)scale);
+    TMULS(xTile, xTile, (InputT)scale);
     pipe_barrier(PIPE_V);
 
-    fast_hadamard_int4::TCVT_FP16_TO_INT4_PACKED_NOCTRL(yTile, xTile,
-                                                        RoundMode::CAST_NONE);
+    fast_hadamard_int4::TCVT_FP16_TO_INT4_PACKED(yTile, xTile,
+                                                 RoundMode::CAST_NONE);
     pipe_barrier(PIPE_V);
 
     set_flag(PIPE_V, PIPE_MTE3, ev);
@@ -119,12 +113,6 @@ AICORE void runTQuantize(__gm__ OutT *y, __gm__ InT *x, uint32_t batch,
   wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID1);
   wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
   wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID1);
-
-  if (originalSatMode) {
-    set_ctrl(sbitset0(get_ctrl(), fast_hadamard_int4::SAT_MODE_BIT));
-  } else {
-    set_ctrl(sbitset1(get_ctrl(), fast_hadamard_int4::SAT_MODE_BIT));
-  }
 }
 
 }  // namespace
