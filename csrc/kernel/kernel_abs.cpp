@@ -33,53 +33,92 @@ AICORE void runTAbs(__gm__ T* x, __gm__ T* z, uint32_t total_length) {
   using StrideDim5 = pto::Stride<1, 1, 1, TILE_LEN, 1>;
   using GlobalData = pto::GlobalTensor<T, ShapeDim5, StrideDim5>;
 
-  // define TileData on UB buffer with static shape and dynamic mask
+  // Define TileData on UB buffer with static shape and dynamic mask
   using TileData =
-      Tile<TileType::Vec, T, TILE_LEN, TILE_LEN, BLayout::RowMajor, -1, -1>;
+      Tile<TileType::Vec, T, TILE_LEN, TILE_LEN, BLayout::RowMajor>;
 
   set_mask_norm();
   set_vector_mask(-1, -1);
 
   constexpr unsigned UB_ZERO_ADDR = 0;
-  constexpr unsigned TILE_SIZE_IN_BYTES = TILE_LEN * sizeof(T);
-  const uint32_t num_tiles = total_length / TILE_LEN;
+  constexpr unsigned TILE_SIZE = TILE_LEN * TILE_LEN;
+  constexpr unsigned TILE_SIZE_IN_BYTES = TILE_SIZE * sizeof(T);
+  const uint32_t num_tiles = total_length / TILE_SIZE;
   const uint32_t max_num_tiles_per_block_ = num_tiles / get_block_num();
   const uint32_t global_offset =
-      block_idx * TILE_LEN * max_num_tiles_per_block_;
+      block_idx * TILE_SIZE * max_num_tiles_per_block_;
 
   GlobalData xGlobal(x);
   GlobalData zGlobal(z);
 
-  // define ping-pong buffer for related tiles
-  TileData xTiles(TILE_LEN, TILE_LEN);
-  TileData zTiles(TILE_LEN, TILE_LEN);
+  // Define full tile UB buffers
+  TileData xTiles;
+  TileData zTiles;
 
-  // assign the UB address for each tile
+  // Assign the UB address for each tile
   TASSIGN(xTiles, UB_ZERO_ADDR);
   TASSIGN(zTiles, UB_ZERO_ADDR + TILE_SIZE_IN_BYTES);
 
+  // Loop for full size tiles
   for (uint32_t i = 0; i < max_num_tiles_per_block_; i++) {
-    const unsigned inner_offset = global_offset + i * TILE_LEN;
+    const unsigned inner_offset = global_offset + i * TILE_SIZE;
     // Prepare read GM offset
     TASSIGN(xGlobal, x + inner_offset);
     TASSIGN(zGlobal, z + inner_offset);
-
     set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
     wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
 
-    // load data from global memory to UB buffer
+    // Load data from global memory to UB buffer
     TLOAD(xTiles, xGlobal);
-
     set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
     wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
-    // perform elementwise absolute value
+    // Perform elementwise absolute value
     TABS(zTiles, xTiles);
-
     set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
     wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
-    // store data from UB buffer to global memory
+
+    // Store data from UB buffer to global memory
     TSTORE(zGlobal, zTiles);
+    set_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
+    wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
+  }
+
+  // Tail tile handling (if any)
+  const int32_t remaining_elements = total_length % TILE_SIZE;
+  if (remaining_elements) {
+    // Handle the remaining elements
+    const int32_t remaining_cols = remaining_elements / TILE_LEN;
+
+    // Define global data for the tail tile
+    using TailShapeDim5 = pto::Shape<1, 1, 1, -1, TILE_LEN>;
+    using TailGlobalData = pto::GlobalTensor<T, TailShapeDim5, StrideDim5>;
+    TailGlobalData xTailGlobal(x + num_tiles * TILE_SIZE, {remaining_cols});
+    TailGlobalData zTailGlobal(z + num_tiles * TILE_SIZE, {remaining_cols});
+
+    // Define tail tile UB buffers
+    using TailTileData = Tile<TileType::Vec, T, TILE_LEN, TILE_LEN, BLayout::RowMajor, -1, TILE_LEN>;
+    TailTileData xTailTile(remaining_cols);
+    TailTileData zTailTile(remaining_cols);
+
+    // Assign the UB address for tail tile
+    TASSIGN(xTailTile, UB_ZERO_ADDR);
+    TASSIGN(zTailTile, UB_ZERO_ADDR + TILE_SIZE_IN_BYTES);
+    set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+    wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+
+    // Load tail tile data from global memory to UB buffer
+    TLOAD(xTailTile, xTailGlobal);
+    set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+    wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+
+    // Perform elementwise absolute value on the tail tile
+    TABS(zTailTile, xTailTile);
+    set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+    wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+
+    // Store tail tile data from UB buffer to global memory
+    TSTORE(zTailGlobal, zTailTile);
     set_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
     wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
   }
