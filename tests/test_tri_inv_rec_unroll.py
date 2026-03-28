@@ -62,14 +62,16 @@ def linalg_inv(U: torch.tensor) -> torch.tensor:
     for x in range(U.shape[0]):
         for y in range(U.shape[1]):
             golden_numpy[x, y] = np.linalg.inv(
-                U[x, y].numpy().astype(np.double) + Identity
+                U[x, y].float().numpy().astype(np.double) + Identity
             )
     return torch.from_numpy(golden_numpy)
 
 
-def _test_tri_inv_rec_unroll(U: torch.tensor, atol: float, rtol: float, ftol: float):
+def _test_tri_inv_rec_unroll(
+    U: torch.tensor, atol: float, rtol: float, ftol: float, dtype=torch.half
+):
 
-    U = U.to(torch.half)
+    U = U.to(dtype)
     golden_cpu = linalg_inv(U)
 
     U_npu = U.npu()
@@ -102,9 +104,10 @@ def _test_tri_inv_rec_unroll_bsnd(
     atol: float,
     rtol: float,
     ftol: float,
+    dtype=torch.half,
 ):
 
-    U = U.to(torch.half)
+    U = U.to(dtype)
     golden_cpu = linalg_inv(U)
 
     # Transform to bsnd layout
@@ -136,6 +139,7 @@ def _test_tri_inv_rec_unroll_bsnd(
 @pytest.mark.parametrize("n", [16, 32, 64, 128])
 @pytest.mark.parametrize("block_dim_x", [1, 2, 3, 4])
 @pytest.mark.parametrize("block_dim_y", [2, 4, 8])
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 @pytest.mark.parametrize(
     "matrix_gen,atol,rtol,ftol",
     [
@@ -149,19 +153,21 @@ def test_tri_inv_rec_unroll(
     n: int,
     block_dim_x: int,
     block_dim_y: int,
+    dtype: torch.dtype,
     matrix_gen: Callable,
     atol: float,
     rtol: float,
     ftol: float,
 ):
     U = matrix_gen(n, block_dim_x, block_dim_y)
-    _test_tri_inv_rec_unroll(U, atol, rtol, ftol)
+    _test_tri_inv_rec_unroll(U, atol, rtol, ftol, dtype)
 
 
 @pytest.mark.parametrize("B", [1, 4])
 @pytest.mark.parametrize("S", [128, 256, 1024])
 @pytest.mark.parametrize("N", [4, 8])
-@pytest.mark.parametrize("D", [16, 32, 64, 128])
+@pytest.mark.parametrize("C", [16, 32, 64, 128])
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 @pytest.mark.parametrize(
     "matrix_gen,atol,rtol,ftol",
     [
@@ -175,14 +181,15 @@ def test_tri_inv_rec_unroll_bsnd(
     B: int,
     S: int,
     N: int,
-    D: int,
+    C: int,
+    dtype: torch.dtype,
     matrix_gen: Callable,
     atol: float,
     rtol: float,
     ftol: float,
 ):
     # only test cases where the sequence length is a multiple of the chunk size are accepted
-    if S % D != 0:
-        pytest.skip("Sequence length must be a multiple of chunk size D.")
-    U = matrix_gen(D, B * S // D, N)
-    _test_tri_inv_rec_unroll_bsnd(U, B, S, N, D, atol, rtol, ftol)
+    if S % C != 0:
+        pytest.skip("Sequence length must be a multiple of chunk size C.")
+    U = matrix_gen(C, B * S // C, N)
+    _test_tri_inv_rec_unroll_bsnd(U, B, S, N, C, atol, rtol, ftol, dtype)

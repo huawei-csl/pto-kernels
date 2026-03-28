@@ -11,6 +11,7 @@ for the full License text.
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
+#include "aclrtlaunch_tri_inv_rec_unroll_bf16.h"
 #include "aclrtlaunch_tri_inv_rec_unroll_fp16.h"
 #include "utils.h"
 
@@ -32,10 +33,10 @@ at::Tensor run_tri_inv_rec_unroll(const at::Tensor& M,
   const at::Device device = M.options().device();
   const auto dtype = M.options().dtype();
   const auto dtype_out = at::kFloat;
-  if (!(dtype == at::kHalf)) {
+  if (!(dtype == at::kHalf) && !(dtype == at::kBFloat16)) {
     throw std::runtime_error(
         "Unsupported dtype for tri_inv_rec_unroll kernel. Supports only "
-        "fp16");
+        "fp16 and bf16");
   }
 
   const uint32_t matrix_size = static_cast<uint32_t>(M.size(-1));
@@ -61,6 +62,9 @@ at::Tensor run_tri_inv_rec_unroll(const at::Tensor& M,
 
   if (dtype == at::kHalf) {
     EXEC_KERNEL_CMD(tri_inv_rec_unroll_fp16, block_dim, M_inv, M, I_neg,
+                    matrix_size, total_tiles, num_bsnd_heads);
+  } else if (dtype == at::kBFloat16) {
+    EXEC_KERNEL_CMD(tri_inv_rec_unroll_bf16, block_dim, M_inv, M, I_neg,
                     matrix_size, total_tiles, num_bsnd_heads);
   }
 
