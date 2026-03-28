@@ -139,7 +139,7 @@ def _test_tri_inv_rec_unroll_bsnd(
 @pytest.mark.parametrize("n", [16, 32, 64, 128])
 @pytest.mark.parametrize("block_dim_x", [1, 2, 3, 4])
 @pytest.mark.parametrize("block_dim_y", [2, 4, 8])
-@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16], ids=str)
 @pytest.mark.parametrize(
     "matrix_gen,atol,rtol,ftol",
     [
@@ -167,7 +167,7 @@ def test_tri_inv_rec_unroll(
 @pytest.mark.parametrize("S", [128, 256, 1024])
 @pytest.mark.parametrize("N", [4, 8])
 @pytest.mark.parametrize("C", [16, 32, 64, 128])
-@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16], ids=str)
 @pytest.mark.parametrize(
     "matrix_gen,atol,rtol,ftol",
     [
