@@ -62,7 +62,7 @@ def linalg_inv(U: torch.tensor) -> torch.tensor:
     for x in range(U.shape[0]):
         for y in range(U.shape[1]):
             golden_numpy[x, y] = np.linalg.inv(
-                U[x, y].float().numpy().astype(np.double) + Identity
+                U[x, y].double().numpy().astype(np.double) + Identity
             )
     return torch.from_numpy(golden_numpy)
 
