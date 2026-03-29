@@ -84,7 +84,7 @@ jobs:
           apt-get update
           apt-get install -yq python-is-python3 python3-dev cmake
           wget http://container-obsfs-filesystem.obs.cn-north-4.myhuaweicloud.com/package/cann/pto-isa/version_compile/master/release_version/ubuntu_x86/cann-pto-isa_linux-x86_64.run
-          ./cann-pto-isa_linux-x86_64.run --full -q --install-path=/usr/local/Ascend/ascend-toolkit
+          sh ./cann-pto-isa_linux-x86_64.run --full -q --install-path=/usr/local/Ascend/ascend-toolkit
           source /usr/local/Ascend/ascend-toolkit/set_env.sh
           source /usr/local/Ascend/nnal/atb/set_env.sh
           export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/Ascend/ascend-toolkit/latest/`uname -i`-linux/devlib # to avoid libascend_hal.so issue
@@ -119,6 +119,8 @@ jobs:
         run: |
           apt-get update
           apt-get install -yq python-is-python3 python3-dev cmake
+          wget http://container-obsfs-filesystem.obs.cn-north-4.myhuaweicloud.com/package/cann/pto-isa/version_compile/master/release_version/ubuntu_x86/cann-pto-isa_linux-x86_64.run
+          sh ./cann-pto-isa_linux-x86_64.run --full -q --install-path=/usr/local/Ascend/ascend-toolkit
           source /usr/local/Ascend/ascend-toolkit/set_env.sh
           source /usr/local/Ascend/nnal/atb/set_env.sh
           export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/Ascend/ascend-toolkit/latest/`uname -i`-linux/devlib # to avoid libascend_hal.so issue
