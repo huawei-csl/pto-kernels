@@ -78,12 +78,6 @@ include(${ASCENDC_CMAKE_DIR}/ascendc.cmake)
 
 include(FetchContent)
 
-FetchContent_Declare(
-  libpto_isa_headers
-  GIT_REPOSITORY https://gitcode.com/cann/pto-isa.git
-  GIT_TAG 8.5.0)
-
-FetchContent_Populate(libpto_isa_headers)
 
 # TORCH_NPU_PATH is the location where PyTorch Ascend Adapter (torch_npu) is
 # installed.
@@ -115,8 +109,8 @@ ascendc_library(
   csrc/kernel/kernel_tri_inv_trick.cpp)
 
 ascendc_include_directories(
-  no_workspace_kernel PRIVATE ${libpto_isa_headers_SOURCE_DIR}/include
-  ${libpto_isa_headers_SOURCE_DIR}/include/pto/common)
+  no_workspace_kernel PRIVATE ${ASCEND_CANN_PACKAGE_PATH}/include
+  ${ASCEND_CANN_PACKAGE_PATH}/include/pto/common)
 
 ascendc_compile_options(no_workspace_kernel PRIVATE -Wall -Wextra -Werror)
 
