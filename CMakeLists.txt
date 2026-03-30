@@ -109,8 +109,8 @@ ascendc_library(
   csrc/kernel/kernel_tri_inv_trick.cpp)
 
 ascendc_include_directories(
-  no_workspace_kernel PRIVATE ${ASCEND_PTO_ISA_PATH}/cann/include
-  ${ASCEND_PTO_ISA_PATH}/cann/include/pto/common)
+  no_workspace_kernel PRIVATE /usr/local/pto-isa/cann/include
+  /usr/local/pto-isa/cann/include/pto/common)
 
 ascendc_compile_options(no_workspace_kernel PRIVATE -Wall -Wextra -Werror)
 
