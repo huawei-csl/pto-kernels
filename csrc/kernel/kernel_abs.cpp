@@ -59,29 +59,47 @@ AICORE void runTAbs(__gm__ T* x, __gm__ T* z, uint32_t total_length) {
   TASSIGN(xTiles, UB_ZERO_ADDR);
   TASSIGN(zTiles, UB_ZERO_ADDR + TILE_SIZE_IN_BYTES);
 
+  // Unlock first iteration
+  set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+  set_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
+
   // Loop for full size tiles
   for (uint32_t i = 0; i < max_num_tiles_per_block_; i++) {
     const unsigned inner_offset = global_offset + i * TILE_SIZE;
     // Prepare read GM offset
     TASSIGN(xGlobal, x + inner_offset);
     TASSIGN(zGlobal, z + inner_offset);
-    set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+
+    // MTE2 (load) wait for vector core to be done
+    // (previous iteration's computation)
     wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
 
     // Load data from global memory to UB buffer
     TLOAD(xTiles, xGlobal);
+
+    // Signal end of current load to vector core
     set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+
+    // Vector core wait for MTE2 (current load)
+    // and MTE3 (previous store) to be done
     wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+    wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
 
     // Perform elementwise absolute value
     TABS(zTiles, xTiles);
+
+    // Signal both MTE2 and MTE3 that the computation is done
+    set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
     set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+
+    // MTE3 (store) wait for vector core to be done
     wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
 
     // Store data from UB buffer to global memory
     TSTORE(zGlobal, zTiles);
+
+    // Signal end of MTE3 (current store) to vector core
     set_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
-    wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
   }
 
   // Tail tile handling (if any)
@@ -105,23 +123,37 @@ AICORE void runTAbs(__gm__ T* x, __gm__ T* z, uint32_t total_length) {
     // Assign the UB address for tail tile
     TASSIGN(xTailTile, UB_ZERO_ADDR);
     TASSIGN(zTailTile, UB_ZERO_ADDR + TILE_SIZE_IN_BYTES);
-    set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+
+    // MTE2 (load) wait for vector core to be done
+    // (previous iteration's computation)
     wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
 
     // Load tail tile data from global memory to UB buffer
     TLOAD(xTailTile, xTailGlobal);
+
+    // Signal end of current load to vector core
     set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+
+    // Vector core wait for MTE2 (current load)
+    // and MTE3 (previous store) to be done
     wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+    wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
 
     // Perform elementwise absolute value on the tail tile
     TABS(zTailTile, xTailTile);
+
+    // Signal both MTE2 and MTE3 that the computation is done
+    set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
     set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+
+    // MTE3 (store) wait for vector core to be done
     wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
 
     // Store tail tile data from UB buffer to global memory
     TSTORE(zTailGlobal, zTailTile);
+
+    // Signal end of MTE3 (current store) to vector core
     set_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
-    wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
   }
 }
 
