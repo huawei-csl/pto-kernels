@@ -104,7 +104,7 @@ AICORE void runTAbs(__gm__ T* x, __gm__ T* z, uint32_t total_length) {
 
   // Tail tile handling (if any)
   const int32_t remaining_elements = total_length % TILE_SIZE;
-  if (remaining_elements) {
+  if (remaining_elements && block_idx == get_block_num() - 1) {
     // Handle the remaining elements
     const int32_t remaining_cols = remaining_elements / TILE_LEN;
 
