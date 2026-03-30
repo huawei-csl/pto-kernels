@@ -11,7 +11,7 @@ from pto_kernels import pto_abs
 import pytest
 
 
-@pytest.mark.parametrize("num_blocks", [1])
+@pytest.mark.parametrize("num_blocks", [1, 2, 10, 20, 32, 64, 128])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.float32], ids=str)
 def test_pto_abs(num_blocks: int, dtype: torch.dtype):
     # FIXME: support only input length that are multiple of 64.
