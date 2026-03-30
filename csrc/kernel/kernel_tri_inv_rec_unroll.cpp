@@ -483,7 +483,8 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
   // L0 Memory
   using TileL0A = TileLeft<InputT, MatrixSize, MatrixSize>;
   using TileL0B = TileRight<InputT, MatrixSize, MatrixSize>;
-  using TileL0C = TileAcc<OutputT, MatrixSize, MatrixSize>;
+  // L0C accumulation is float32!
+  using TileL0C = TileAcc<float, MatrixSize, MatrixSize>;
 
   GlobalTileINeg I_neg_global_in(I_neg);
 
@@ -618,34 +619,37 @@ AICORE void runKernelTriInvRecUnroll(__gm__ OutputT* M_inv, __gm__ InputT* M,
 #endif
 }
 
-template <typename InputT, uint32_t NumTilesPerCubeIter, bool IsBSND>
-AICORE void run_tri_inv_rec_unroll(__gm__ float* tensor_out,
+template <typename InputT, typename OutputT, uint32_t NumTilesPerCubeIter,
+          bool IsBSND>
+AICORE void run_tri_inv_rec_unroll(__gm__ OutputT* tensor_out,
                                    __gm__ InputT* tensor_in,
                                    __gm__ InputT* minus_identity_in,
                                    uint32_t matrix_size, uint32_t num_matrices,
                                    uint32_t num_bsnd_heads) {
   static_assert(std::is_same_v<InputT, half>,
                 "tri_inv_rec_unroll supports only fp16.");
+  static_assert(std::is_same_v<OutputT, half> or std::is_same_v<OutputT, float>,
+                "tri_inv_rec_unroll supports only fp16 or float32.");
   switch (matrix_size) {
     case 16:
-      runKernelTriInvRecUnroll<InputT, float, 16, NumTilesPerCubeIter, IsBSND>(
-          tensor_out, tensor_in, minus_identity_in, num_matrices,
-          num_bsnd_heads);
+      runKernelTriInvRecUnroll<InputT, OutputT, 16, NumTilesPerCubeIter,
+                               IsBSND>(tensor_out, tensor_in, minus_identity_in,
+                                       num_matrices, num_bsnd_heads);
       break;
     case 32:
-      runKernelTriInvRecUnroll<InputT, float, 32, NumTilesPerCubeIter, IsBSND>(
-          tensor_out, tensor_in, minus_identity_in, num_matrices,
-          num_bsnd_heads);
+      runKernelTriInvRecUnroll<InputT, OutputT, 32, NumTilesPerCubeIter,
+                               IsBSND>(tensor_out, tensor_in, minus_identity_in,
+                                       num_matrices, num_bsnd_heads);
       break;
     case 64:
-      runKernelTriInvRecUnroll<InputT, float, 64, NumTilesPerCubeIter, IsBSND>(
-          tensor_out, tensor_in, minus_identity_in, num_matrices,
-          num_bsnd_heads);
+      runKernelTriInvRecUnroll<InputT, OutputT, 64, NumTilesPerCubeIter,
+                               IsBSND>(tensor_out, tensor_in, minus_identity_in,
+                                       num_matrices, num_bsnd_heads);
       break;
     case 128:
-      runKernelTriInvRecUnroll<InputT, float, 128, NumTilesPerCubeIter, IsBSND>(
-          tensor_out, tensor_in, minus_identity_in, num_matrices,
-          num_bsnd_heads);
+      runKernelTriInvRecUnroll<InputT, OutputT, 128, NumTilesPerCubeIter,
+                               IsBSND>(tensor_out, tensor_in, minus_identity_in,
+                                       num_matrices, num_bsnd_heads);
       break;
   }
 }
@@ -672,41 +676,41 @@ extern "C" __global__ AICORE void tri_inv_rec_unroll_fp16(
     uint32_t num_bsnd_heads) {
   if (num_bsnd_heads == 0) {
     if (num_matrices <= get_block_num()) {
-      run_tri_inv_rec_unroll<half, 1 /* NumTilesPerCubeIter */,
+      run_tri_inv_rec_unroll<half, half, 1 /* NumTilesPerCubeIter */,
                              false /* IsBSND */>(
-          (__gm__ float*)tensor_out, (__gm__ half*)tensor_in,
+          (__gm__ half*)tensor_out, (__gm__ half*)tensor_in,
           (__gm__ half*)minus_identity_in, matrix_size, num_matrices,
           num_bsnd_heads);
     } else if (num_matrices <= 2 * get_block_num()) {
-      run_tri_inv_rec_unroll<half, 2 /* NumTilesPerCubeIter */,
+      run_tri_inv_rec_unroll<half, half, 2 /* NumTilesPerCubeIter */,
                              false /* IsBSND */>(
-          (__gm__ float*)tensor_out, (__gm__ half*)tensor_in,
+          (__gm__ half*)tensor_out, (__gm__ half*)tensor_in,
           (__gm__ half*)minus_identity_in, matrix_size, num_matrices,
           num_bsnd_heads);
     } else {
-      run_tri_inv_rec_unroll<half, 4 /* NumTilesPerCubeIter */,
+      run_tri_inv_rec_unroll<half, half, 4 /* NumTilesPerCubeIter */,
                              false /* IsBSND */>(
-          (__gm__ float*)tensor_out, (__gm__ half*)tensor_in,
+          (__gm__ half*)tensor_out, (__gm__ half*)tensor_in,
           (__gm__ half*)minus_identity_in, matrix_size, num_matrices,
           num_bsnd_heads);
     }
   } else {
     if (num_matrices <= get_block_num()) {
-      run_tri_inv_rec_unroll<half, 1 /* NumTilesPerCubeIter */,
+      run_tri_inv_rec_unroll<half, half, 1 /* NumTilesPerCubeIter */,
                              true /* IsBSND */>(
-          (__gm__ float*)tensor_out, (__gm__ half*)tensor_in,
+          (__gm__ half*)tensor_out, (__gm__ half*)tensor_in,
           (__gm__ half*)minus_identity_in, matrix_size, num_matrices,
           num_bsnd_heads);
     } else if (num_matrices <= 2 * get_block_num()) {
-      run_tri_inv_rec_unroll<half, 2 /* NumTilesPerCubeIter */,
+      run_tri_inv_rec_unroll<half, half, 2 /* NumTilesPerCubeIter */,
                              true /* IsBSND */>(
-          (__gm__ float*)tensor_out, (__gm__ half*)tensor_in,
+          (__gm__ half*)tensor_out, (__gm__ half*)tensor_in,
           (__gm__ half*)minus_identity_in, matrix_size, num_matrices,
           num_bsnd_heads);
     } else {
-      run_tri_inv_rec_unroll<half, 4 /* NumTilesPerCubeIter */,
+      run_tri_inv_rec_unroll<half, half, 4 /* NumTilesPerCubeIter */,
                              true /* IsBSND */>(
-          (__gm__ float*)tensor_out, (__gm__ half*)tensor_in,
+          (__gm__ half*)tensor_out, (__gm__ half*)tensor_in,
           (__gm__ half*)minus_identity_in, matrix_size, num_matrices,
           num_bsnd_heads);
     }

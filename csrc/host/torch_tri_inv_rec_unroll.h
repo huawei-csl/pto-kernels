@@ -31,7 +31,7 @@ at::Tensor run_tri_inv_rec_unroll(const at::Tensor& M,
                                   const bool is_bsnd_format = false) {
   const at::Device device = M.options().device();
   const auto dtype = M.options().dtype();
-  const auto dtype_out = at::kFloat;
+  const auto dtype_out = dtype;
   if (!(dtype == at::kHalf)) {
     throw std::runtime_error(
         "Unsupported dtype for tri_inv_rec_unroll kernel. Supports only "
