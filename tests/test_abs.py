@@ -18,7 +18,7 @@ def test_pto_abs(num_blocks: int, dtype: torch.dtype):
     tile_len = 64
     length = [num_blocks, tile_len]
     # Create random input tensors on CPU with float16 data type
-    x = 2*torch.rand(length, device="cpu", dtype=dtype) - 1
+    x = 2 * torch.rand(length, device="cpu", dtype=dtype) - 1
     # Copy the input tensor to NPU
     x_npu = x.npu()
     # Call the custom my_add operator

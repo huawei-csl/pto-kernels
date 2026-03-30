@@ -35,7 +35,7 @@ at::Tensor run_abs(const at::Tensor& x) {
   const uint32_t block_dim = (total_len + TILE_SIZE - 1) / TILE_SIZE;
 
   // FIXME: re-implement with permanent kernel logic
-  if (block_dim > 2<<16) {
+  if (block_dim > 2 << 16) {
     throw std::runtime_error(
         "pto_abs supports only inputs size that is smaller than [2^22, 64].");
   }

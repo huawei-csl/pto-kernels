@@ -97,7 +97,8 @@ AICORE void runTAbs(__gm__ T* x, __gm__ T* z, uint32_t total_length) {
     TailGlobalData zTailGlobal(z + num_tiles * TILE_SIZE, {remaining_cols});
 
     // Define tail tile UB buffers
-    using TailTileData = Tile<TileType::Vec, T, TILE_LEN, TILE_LEN, BLayout::RowMajor, -1, TILE_LEN>;
+    using TailTileData = Tile<TileType::Vec, T, TILE_LEN, TILE_LEN,
+                              BLayout::RowMajor, -1, TILE_LEN>;
     TailTileData xTailTile(remaining_cols);
     TailTileData zTailTile(remaining_cols);
 
