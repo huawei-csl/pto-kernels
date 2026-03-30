@@ -11,6 +11,7 @@ for the full License text.
 
 #include "torch_abs.h"
 #include "torch_batch_matrix_square.h"
+#include "torch_histogram.h"
 #include "torch_simple_matmul.h"
 #include "torch_tri_inv.h"
 #include "torch_tri_inv_rec_unroll.h"
@@ -34,6 +35,8 @@ PYBIND11_MODULE(pto_kernels_ops, m) {
       },
       pybind11::arg("device_id") = 0);
   m.def("pto_abs", &pto_isa_ops::run_abs);
+  m.def("pto_histogram", &pto_isa_ops::run_histogram, py::arg("x"),
+        py::arg("bins") = 100, py::arg("min") = 0.0, py::arg("max") = 0.0);
   m.def("pto_batch_matrix_square", &pto_isa_ops::run_batch_matrix_square);
   m.def("pto_simple_matmul", &pto_isa_ops::run_simple_matmul);
   m.def("pto_tri_inv_trick", &pto_isa_ops::run_tri_inv_trick);
