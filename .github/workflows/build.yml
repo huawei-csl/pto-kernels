@@ -56,7 +56,7 @@ jobs:
       - run: gitleaks detect -v --source .
 
   build_cmake_docker:
-    name: Cmake build inside quay.io/ascend/cann (py${{ matrix.python_version }})
+    name: Cmake build inside quay.io/ascend/cann (${{ matrix.npu_device }}, py${{ matrix.python_version }})
     runs-on: ubuntu-latest
     continue-on-error: true
 
@@ -100,7 +100,7 @@ jobs:
           make clean build_cmake
 
   build_wheel_docker:
-    name: Build wheel inside quay.io/ascend/cann (py${{ matrix.python_version }})
+    name: Build wheel inside quay.io/ascend/cann (${{ matrix.npu_device }}, py${{ matrix.python_version }})
     runs-on: ubuntu-latest
     continue-on-error: true
     strategy:
@@ -109,10 +109,18 @@ jobs:
         include:
           - arch: x86_64
             python_version: 3.11
+            npu_device: 910b
           - arch: x86_64
             python_version: 3.12
+            npu_device: 910b
+          - arch: x86_64
+            python_version: 3.11
+            npu_device: a3
+          - arch: x86_64
+            python_version: 3.12
+            npu_device: a3
     container:
-      image: quay.io/ascend/cann:8.5.1-910b-ubuntu22.04-py${{ matrix.python_version }}
+      image: quay.io/ascend/cann:8.5.1-${{ matrix.npu_device }}-ubuntu22.04-py${{ matrix.python_version }}
     steps:
       - name: Show OS
         run: cat /etc/os-release
