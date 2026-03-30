@@ -155,6 +155,10 @@ AICORE void runTAbs(__gm__ T* x, __gm__ T* z, uint32_t total_length) {
     // Signal end of MTE3 (current store) to vector core
     set_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
   }
+
+  // Cleanup flags
+  wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+  wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
 }
 
 extern "C" __global__ AICORE void vabs_fp16(GM_ADDR x, GM_ADDR z,
