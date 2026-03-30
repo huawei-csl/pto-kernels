@@ -481,8 +481,8 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
            MatrixSize, MatrixSize, SLayout::RowMajor, 512>;
 
   // L0 Memory
-  using TileL0A = TileLeft<InputT, MatrixSize, MatrixSize>;
-  using TileL0B = TileRight<InputT, MatrixSize, MatrixSize>;
+  using TileL0A = TileLeft<half, MatrixSize, MatrixSize>;
+  using TileL0B = TileRight<half, MatrixSize, MatrixSize>;
   using TileL0C = TileAcc<OutputT, MatrixSize, MatrixSize>;
 
   GlobalTileINeg I_neg_global_in(I_neg);
