@@ -22,7 +22,7 @@ The implementation uses a two-phase recursive approach on Ascend cube cores:
 |------|---------|
 | `fast_inverse.cpp` | Thin JIT wrapper: includes the kernel and exposes `call_kernel` |
 | `jit_util_fast_inverse.py` | Compiles the kernel with `bisheng` and loads it via `ctypes` |
-| `run_fast_inverse.py` | Correctness test suite (mirrors the pytest unit tests) |
+| `run_fast_inverse.py` | Correctness test suite, including aligned and varlen BSND coverage |
 
 ### Usage
 
@@ -48,3 +48,12 @@ and batch configurations.
 |-----------------|---------------|
 | `0` (default) | Each matrix stored consecutively in row-major order (`B × … × N × D × D`) |
 | `> 0` | BSND layout: `(B, S, N, D)` where S is chunked into tiles of size D and N heads are interleaved |
+
+### Varlen BSND mode
+
+The standalone example also supports variable-length BSND inputs by padding each
+sequence to the next multiple of `D` and passing a `chunk_indices` tensor to the
+kernel. Each entry in `chunk_indices` is the padded row-start of one valid
+chunk. The kernel still inverts dense `D x D` tiles; the Python harness pads
+inputs before launch and slices the padded rows back away when validating the
+result.

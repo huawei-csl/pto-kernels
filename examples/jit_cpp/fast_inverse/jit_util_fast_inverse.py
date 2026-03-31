@@ -85,6 +85,7 @@ def load_lib(lib_path: str):
         ctypes.c_uint32,  # matrix_size
         ctypes.c_uint32,  # num_matrices
         ctypes.c_uint32,  # num_bsnd_heads
+        ctypes.c_void_p,  # chunk_indices (optional int32 metadata)
     ]
     lib.call_kernel.restype = None
 
@@ -95,11 +96,17 @@ def load_lib(lib_path: str):
         matrix_size: int,
         num_matrices: int,
         num_bsnd_heads: int = 0,
+        chunk_indices: torch.Tensor | None = None,
         block_dim: int = BLOCK_DIM,
         stream_ptr=None,
     ):
         if stream_ptr is None:
             stream_ptr = torch.npu.current_stream()._as_parameter_  # noqa
+        if chunk_indices is not None:
+            if chunk_indices.dtype != torch.int32:
+                raise TypeError("chunk_indices must be int32.")
+            if not chunk_indices.is_contiguous():
+                raise ValueError("chunk_indices must be contiguous.")
         effective_block_dim = min(block_dim, num_matrices)
         lib.call_kernel(
             effective_block_dim,
@@ -110,6 +117,9 @@ def load_lib(lib_path: str):
             matrix_size,
             num_matrices,
             num_bsnd_heads,
+            _torch_to_ctypes(chunk_indices)
+            if chunk_indices is not None
+            else ctypes.c_void_p(),
         )
 
     return tri_inv_func

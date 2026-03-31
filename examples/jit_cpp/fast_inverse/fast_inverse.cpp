@@ -26,12 +26,15 @@ for the full License text.
  * @param num_matrices  Total number of matrices to invert.
  * @param num_bsnd_heads  0 for standard (B…ND) layout;
  *                        N (number of heads) for BSND layout.
+ * @param chunk_indices  Optional int32 pointer used only for varlen BSND. Each
+ *                       entry is the absolute row offset of one padded D x D
+ *                       chunk within the BSND tensor.
  */
 extern "C" void call_kernel(uint32_t blockDim, void* stream, void* tensor_out,
                              void* tensor_in, void* minus_identity_in,
                              uint32_t matrix_size, uint32_t num_matrices,
-                             uint32_t num_bsnd_heads) {
+                             uint32_t num_bsnd_heads, void* chunk_indices) {
   tri_inv_rec_unroll_fp16<<<blockDim, nullptr, stream>>>(
       tensor_out, tensor_in, minus_identity_in, matrix_size, num_matrices,
-      num_bsnd_heads);
+      num_bsnd_heads, chunk_indices);
 }
