@@ -117,24 +117,35 @@ def _run_kernel_bsnd(
     tri_inv_func,
     U_bsnd_fp16: torch.Tensor,
     chunk_indices: torch.Tensor | None = None,
+    chunk_valid_sizes: torch.Tensor | None = None,
 ):
     """
     Run the kernel in BSND mode and return fp64 CPU result.
 
     U_bsnd_fp16 : (B, S, N, D) half tensor on NPU where each (D, D) block
                   along the S dimension is one matrix to invert.
-    chunk_indices : optional int32 tensor containing the padded row start of
+    chunk_indices : optional int32 tensor containing the unpadded row start of
                     each valid chunk for varlen BSND inputs.
+    chunk_valid_sizes : optional int32 tensor containing the runtime size of
+                        each chunk for varlen BSND inputs.
     """
     matrix_size = U_bsnd_fp16.shape[-1]
     num_bsnd_heads = U_bsnd_fp16.shape[-2]
-    num_matrices = U_bsnd_fp16.numel() // (matrix_size * matrix_size)
+    if chunk_indices is not None and chunk_valid_sizes is not None:
+        num_matrices = chunk_indices.numel() * num_bsnd_heads
+    else:
+        num_matrices = U_bsnd_fp16.numel() // (matrix_size * matrix_size)
     device = U_bsnd_fp16.device
 
     tensor_out = torch.zeros_like(U_bsnd_fp16, dtype=torch.float32)
     I_neg = _make_minus_identity(matrix_size, str(device))
     if chunk_indices is not None:
         chunk_indices = chunk_indices.to(device=device, dtype=torch.int32).contiguous()
+    if chunk_valid_sizes is not None:
+        chunk_valid_sizes = chunk_valid_sizes.to(
+            device=device,
+            dtype=torch.int32,
+        ).contiguous()
 
     torch.npu.synchronize()
     tri_inv_func(
@@ -145,6 +156,7 @@ def _run_kernel_bsnd(
         num_matrices,
         num_bsnd_heads,
         chunk_indices=chunk_indices,
+        chunk_valid_sizes=chunk_valid_sizes,
     )
     torch.npu.synchronize()
 
@@ -158,10 +170,11 @@ def _build_varlen_bsnd_case(
     chunk_size: int,
 ):
     """
-    Build a padded BSND tensor plus reference output for varlen testing.
+    Build an unpadded BSND tensor plus reference output for varlen testing.
 
-    Each sequence is padded independently to the next multiple of chunk_size.
-    chunk_indices records the padded row offset of every valid chunk.
+    Each sequence contributes only its true rows in the packed BSND tensor.
+    chunk_indices records the unpadded row offset of every valid chunk and
+    chunk_valid_sizes stores each chunk's runtime size.
     """
     seq_lens = [
         cu_seqlens[i + 1] - cu_seqlens[i]
@@ -179,14 +192,13 @@ def _build_varlen_bsnd_case(
     )
     chunk_mats = gen(chunk_size, num_chunks, num_heads).to(torch.float64)
 
-    padded_total = num_chunks * chunk_size
-    U_padded = torch.zeros((1, padded_total, num_heads, chunk_size), dtype=torch.float64)
+    U = torch.zeros((1, total_tokens, num_heads, chunk_size), dtype=torch.float64)
     golden = torch.zeros((1, total_tokens, num_heads, chunk_size), dtype=torch.float64)
 
     chunk_indices: list[int] = []
+    chunk_valid_sizes: list[int] = []
     chunk_infos: list[tuple[int, int, int]] = []
     chunk_idx = 0
-    padded_row = 0
 
     for seq_idx in range(len(cu_seqlens) - 1):
         seq_start = cu_seqlens[seq_idx]
@@ -196,9 +208,9 @@ def _build_varlen_bsnd_case(
             chunk = chunk_mats[chunk_idx]
             for head_idx in range(num_heads):
                 U_valid = chunk[head_idx, :actual_size, :actual_size]
-                U_padded[
+                U[
                     0,
-                    padded_row : padded_row + actual_size,
+                    chunk_start : chunk_start + actual_size,
                     head_idx,
                     :actual_size,
                 ] = U_valid
@@ -209,12 +221,18 @@ def _build_varlen_bsnd_case(
                     :actual_size,
                 ] = invert_single_chunk_ref(U_valid)
 
-            chunk_indices.append(padded_row)
-            chunk_infos.append((padded_row, chunk_start, actual_size))
-            padded_row += chunk_size
+            chunk_indices.append(chunk_start)
+            chunk_valid_sizes.append(actual_size)
+            chunk_infos.append((chunk_start, chunk_start, actual_size))
             chunk_idx += 1
 
-    return U_padded, golden, chunk_infos, torch.tensor(chunk_indices, dtype=torch.int32)
+    return (
+        U,
+        golden,
+        chunk_infos,
+        torch.tensor(chunk_indices, dtype=torch.int32),
+        torch.tensor(chunk_valid_sizes, dtype=torch.int32),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -300,28 +318,29 @@ def _test_case_bsnd_varlen(
     ftol: float,
     label: str,
 ):
-    U_padded, golden, chunk_infos, chunk_indices = _build_varlen_bsnd_case(
+    U_varlen, golden, chunk_infos, chunk_indices, chunk_valid_sizes = _build_varlen_bsnd_case(
         gen,
         cu_seqlens,
         N,
         D,
     )
-    actual_padded = _run_kernel_bsnd(
+    actual_varlen = _run_kernel_bsnd(
         tri_inv_func,
-        U_padded.to(torch.half).npu(),
+        U_varlen.to(torch.half).npu(),
         chunk_indices=chunk_indices.npu(),
+        chunk_valid_sizes=chunk_valid_sizes.npu(),
     )
 
     actual = torch.zeros_like(golden)
-    for padded_row, token_row, actual_size in chunk_infos:
+    for input_row, token_row, actual_size in chunk_infos:
         actual[
             :,
             token_row : token_row + actual_size,
             :,
             :actual_size,
-        ] = actual_padded[
+        ] = actual_varlen[
             :,
-            padded_row : padded_row + actual_size,
+            input_row : input_row + actual_size,
             :,
             :actual_size,
         ]

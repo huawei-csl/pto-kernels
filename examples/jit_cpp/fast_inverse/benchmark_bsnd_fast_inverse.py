@@ -104,7 +104,7 @@ def build_uniform_varlen_input(
     batch_size: int,
     seqlen: int,
     chunk_size: int,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     total_tokens = batch_size * seqlen
     packed_input = fixed_input.reshape(1, total_tokens, fixed_input.shape[2], chunk_size).contiguous()
     cu_seqlens = torch.arange(
@@ -121,7 +121,8 @@ def build_uniform_varlen_input(
         dtype=torch.int32,
         device=fixed_input.device,
     )
-    return packed_input, cu_seqlens, chunk_indices
+    chunk_valid_sizes = torch.full_like(chunk_indices, chunk_size)
+    return packed_input, cu_seqlens, chunk_indices, chunk_valid_sizes
 
 
 def sample_true_varlen_lengths(
@@ -150,7 +151,7 @@ def build_true_varlen_input(
     chunk_size: int,
     scale: float,
     device: str,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     cu_seqlens = np.cumsum([0, *seq_lens], dtype=np.int64)
     num_chunks = sum((seq_len + chunk_size - 1) // chunk_size for seq_len in seq_lens)
     chunk_mats = random_chunk_mats(
@@ -161,35 +162,37 @@ def build_true_varlen_input(
         device=device,
     )
 
-    padded_total = num_chunks * chunk_size
     packed_input = torch.zeros(
-        (1, padded_total, num_heads, chunk_size),
+        (1, int(cu_seqlens[-1]), num_heads, chunk_size),
         dtype=torch.half,
         device=device,
     )
     chunk_indices: list[int] = []
+    chunk_valid_sizes: list[int] = []
     chunk_idx = 0
-    padded_row = 0
+    token_row = 0
 
     for seq_len in seq_lens:
-        for chunk_start in range(0, seq_len, chunk_size):
-            actual_size = min(chunk_size, seq_len - chunk_start)
+        for local_chunk_start in range(0, seq_len, chunk_size):
+            actual_size = min(chunk_size, seq_len - local_chunk_start)
             chunk = chunk_mats[chunk_idx]
             for head_idx in range(num_heads):
                 packed_input[
                     0,
-                    padded_row : padded_row + actual_size,
+                    token_row : token_row + actual_size,
                     head_idx,
                     :actual_size,
                 ] = chunk[head_idx, :actual_size, :actual_size]
-            chunk_indices.append(padded_row)
-            padded_row += chunk_size
+            chunk_indices.append(token_row)
+            chunk_valid_sizes.append(actual_size)
+            token_row += actual_size
             chunk_idx += 1
 
     return (
         packed_input.contiguous(),
         torch.tensor(cu_seqlens.tolist(), dtype=torch.int32, device=device),
         torch.tensor(chunk_indices, dtype=torch.int32, device=device),
+        torch.tensor(chunk_valid_sizes, dtype=torch.int32, device=device),
     )
 
 
@@ -220,10 +223,11 @@ def make_varlen_runner(
     tri_inv_func,
     tensor_in: torch.Tensor,
     chunk_indices: torch.Tensor,
+    chunk_valid_sizes: torch.Tensor,
 ) -> tuple[callable, torch.Tensor]:
     matrix_size = tensor_in.shape[-1]
     num_bsnd_heads = tensor_in.shape[-2]
-    num_matrices = tensor_in.numel() // (matrix_size * matrix_size)
+    num_matrices = chunk_indices.numel() * num_bsnd_heads
     tensor_out = torch.empty_like(tensor_in, dtype=torch.float32)
     minus_identity = make_minus_identity(matrix_size, str(tensor_in.device))
 
@@ -236,6 +240,7 @@ def make_varlen_runner(
             num_matrices,
             num_bsnd_heads,
             chunk_indices=chunk_indices,
+            chunk_valid_sizes=chunk_valid_sizes,
         )
 
     return run, tensor_out
@@ -487,7 +492,7 @@ def main() -> None:
             num_heads=args.H,
             chunk_size=args.chunk_size,
         )
-        varlen_input, cu_seqlens, chunk_indices = build_uniform_varlen_input(
+        varlen_input, cu_seqlens, chunk_indices, chunk_valid_sizes = build_uniform_varlen_input(
             fixed_input,
             batch_size=args.B,
             seqlen=seqlen,
@@ -497,7 +502,12 @@ def main() -> None:
         print(f"  uniform cu_seqlens: {cu_seqlens.cpu().tolist()}")
 
         fixed_run, fixed_out = make_fixed_runner(tri_inv_func, fixed_input)
-        varlen_run, varlen_out = make_varlen_runner(tri_inv_func, varlen_input, chunk_indices)
+        varlen_run, varlen_out = make_varlen_runner(
+            tri_inv_func,
+            varlen_input,
+            chunk_indices,
+            chunk_valid_sizes,
+        )
 
         fixed_run()
         varlen_run()
@@ -569,7 +579,7 @@ def main() -> None:
 
         for sample_idx in range(args.true_varlen_samples):
             seq_lens = sample_true_varlen_lengths(args.B, total_tokens, rng)
-            packed_input, cu_seqlens, chunk_indices = build_true_varlen_input(
+            packed_input, cu_seqlens, chunk_indices, chunk_valid_sizes = build_true_varlen_input(
                 seq_lens=seq_lens,
                 num_heads=args.H,
                 chunk_size=args.chunk_size,
@@ -580,6 +590,7 @@ def main() -> None:
                 tri_inv_func,
                 packed_input,
                 chunk_indices,
+                chunk_valid_sizes,
             )
             times_ms = benchmark_ms(
                 varlen_run_true,
