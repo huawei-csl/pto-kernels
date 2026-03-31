@@ -23,6 +23,7 @@ The implementation uses a two-phase recursive approach on Ascend cube cores:
 | `fast_inverse.cpp` | Thin JIT wrapper: includes the kernel and exposes `call_kernel` |
 | `jit_util_fast_inverse.py` | Compiles the kernel with `bisheng` and loads it via `ctypes` |
 | `run_fast_inverse.py` | Correctness test suite, including aligned and varlen BSND coverage |
+| `benchmark_bsnd_fast_inverse.py` | Benchmarks fixed BSND vs varlen-uniform BSND and plots effective bandwidth |
 
 ### Usage
 
@@ -57,3 +58,26 @@ kernel. Each entry in `chunk_indices` is the padded row-start of one valid
 chunk. The kernel still inverts dense `D x D` tiles; the Python harness pads
 inputs before launch and slices the padded rows back away when validating the
 result.
+
+### Benchmark
+
+To compare the original fixed-length BSND path against the new varlen path in a
+matched-size sanity check:
+
+```bash
+export PTO_LIB_PATH=/sources/pto-isa/
+
+cd examples/jit_cpp/fast_inverse
+python benchmark_bsnd_fast_inverse.py --chunk-size 64
+```
+
+The benchmark script:
+
+- runs only the PTO-ISA BSND kernel
+- compares `bsnd-fixed` against `bsnd-varlen-uniform`
+- uses uniform `cu_seqlens=[0, T, 2T, ...]` so both paths process the same
+  total data size
+- reports numerical agreement between the two outputs
+- also generates a true-varlen benchmark that plots scattered bandwidth points
+  against aggregated sequence length
+- writes all CSV and PNG artifacts into `examples/jit_cpp/fast_inverse/benchmark_results/`
