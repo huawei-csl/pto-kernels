@@ -3,6 +3,7 @@
 ### Layout
 
 - `standard/`: plain Hadamard kernel, benchmark, plot, and test files
+- `copy_vs_hadamard/`: PTO copy, raw CCE copy, static 4096x4096 raw CCE copy, plus comparison benchmark/plot/test files
 - `fuse_int8_quant/`: int8 quantize and fused Hadamard+int8 quant files
 - `fuse_int4_quant/`: int4 quantize and fused Hadamard+int4 quant files
 - shared helpers stay at the top level:
@@ -24,6 +25,7 @@ python test.py --list
 
 # benchmark and write CSV files
 python benchmark.py --target standard --npu 0
+python benchmark.py --target copy_vs_hadamard --npu 0
 python benchmark.py --target quantize_int8 --npu 0
 python benchmark.py --target quantize_int4 --npu 0
 # run both standalone quantize suites for later int8-vs-int4 plotting
@@ -38,6 +40,7 @@ python benchmark.py --target all --npu 0
 
 # generate plots from CSV files
 python plot.py --target standard
+python plot.py --target copy_vs_hadamard
 python plot.py --target quantize_int8
 python plot.py --target quantize_int4
 # generate top-level int8-vs-int4 quantize comparison plots
@@ -51,6 +54,7 @@ python plot.py --target all
 
 # correctness tests
 python test.py --target standard -v --npu "npu:0"
+python test.py --target copy_vs_hadamard -v --npu "npu:0"
 python test.py --target quantize_int8 -v --npu "npu:0"
 python test.py --target quantize_int4 -v --npu "npu:0"
 python test.py --target hadamard_quant_int8 -v --npu "npu:0"
@@ -65,6 +69,7 @@ Benchmark scripts save CSV files into the subdirectories that own the real
 implementations:
 
 - `standard/outputs/csv/fht_pto_bd*.csv` from `benchmark.py --target standard`
+- `copy_vs_hadamard/outputs/csv/copy_vs_hadamard_bd*.csv` from `benchmark.py --target copy_vs_hadamard`
 - `fuse_int8_quant/outputs/csv/quantize_compare_bd*.csv` from `benchmark.py --target quantize_int8`
 - `fuse_int8_quant/outputs/csv/fht_quant_compare_bd*.csv` from `benchmark.py --target hadamard_quant_int8`
 - `fuse_int4_quant/outputs/csv/quantize_compare_bd*.csv` from `benchmark.py --target quantize_int4`
@@ -73,6 +78,7 @@ implementations:
 Plot scripts read CSV files from the same subdirectories and save figures to:
 
 - `standard/outputs/plots/`
+- `copy_vs_hadamard/outputs/plots/`
 - `fuse_int8_quant/outputs/plots/`
 - `fuse_int4_quant/outputs/plots/`
 - `outputs/plots/` for the top-level int8-vs-int4 comparison plot targets
@@ -80,6 +86,7 @@ Plot scripts read CSV files from the same subdirectories and save figures to:
 JIT-compiled shared libraries are saved to:
 
 - `standard/outputs/so/`
+- `copy_vs_hadamard/outputs/so/`
 - `fuse_int8_quant/outputs/so/`
 - `fuse_int4_quant/outputs/so/`
 

@@ -6,6 +6,7 @@ import pytest
 
 TARGET_TESTS = {
     "standard": ("standard/test_hadamard.py",),
+    "copy_vs_hadamard": ("copy_vs_hadamard/test_copy_vs_hadamard.py",),
     "quantize_int8": ("fuse_int8_quant/test_quantize.py",),
     "hadamard_quant_int8": ("fuse_int8_quant/test_hadamard_quant.py",),
     "quantize_int4": ("fuse_int4_quant/test_quantize.py",),

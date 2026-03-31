@@ -5,6 +5,7 @@ import sys
 
 CORE_TARGET_MODULES = {
     "standard": "standard.bench_hadamard",
+    "copy_vs_hadamard": "copy_vs_hadamard.bench_copy_vs_hadamard",
     "quantize_int8": "fuse_int8_quant.bench_quantize",
     "hadamard_quant_int8": "fuse_int8_quant.bench_hadamard_quant",
     "quantize_int4": "fuse_int4_quant.bench_quantize",

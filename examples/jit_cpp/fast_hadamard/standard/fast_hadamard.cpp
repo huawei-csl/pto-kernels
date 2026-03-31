@@ -4,20 +4,20 @@ using namespace pto;
 
 #define DIV_ROUNDUP(x, y) (((x) + (y) - 1) / (y))
 
-constexpr uint32_t X_BUFFER_BYTES = 32 * 1024;
+constexpr uint32_t X_BUFFER_BYTES = 64 * 1024;
 constexpr uint32_t UB_HALF_BYTES = X_BUFFER_BYTES / 2;
 constexpr uint32_t ELEMENTS_PER_TILE = X_BUFFER_BYTES / sizeof(half);
-constexpr uint32_t UB_USABLE_BYTES = 184 * 1024;
+constexpr uint32_t UB_USABLE_BYTES = 192 * 1024;
 
 // Double-buffered UB memory layout (ping/pong):
-//   x buffer: 32KB (ELEMENTS_PER_TILE elements)
+//   x buffer: 64KB (ELEMENTS_PER_TILE elements)
 // Shared scratch for hadamard butterfly:
-//   even buffer: 16KB (ELEMENTS_PER_TILE/2 elements)
-//   odd buffer: 16KB (ELEMENTS_PER_TILE/2 elements)
+//   even buffer: 32KB (ELEMENTS_PER_TILE/2 elements)
+//   odd buffer: 32KB (ELEMENTS_PER_TILE/2 elements)
 constexpr unsigned X_PING = 0x00000;
-constexpr unsigned X_PONG = X_PING + X_BUFFER_BYTES + 0x100;
-constexpr unsigned EVEN_BASE = X_PONG + X_BUFFER_BYTES + 0x100;
-constexpr unsigned ODD_BASE = EVEN_BASE + UB_HALF_BYTES + 0x100;
+constexpr unsigned X_PONG = X_PING + X_BUFFER_BYTES;
+constexpr unsigned EVEN_BASE = X_PONG + X_BUFFER_BYTES;
+constexpr unsigned ODD_BASE = EVEN_BASE + UB_HALF_BYTES;
 static_assert(ODD_BASE + UB_HALF_BYTES <= UB_USABLE_BYTES,
               "Fast Hadamard UB layout exceeds usable UB.");
 

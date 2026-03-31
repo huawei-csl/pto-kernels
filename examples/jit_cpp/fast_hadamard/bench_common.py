@@ -194,12 +194,14 @@ def make_shape_pools(
     device: str,
     pool_kinds,
     dtype=DTYPE,
+    buffer_pool: int = DEFAULT_BUFFER_POOL,
 ):
     return {
         name: make_buffer_pool(
             warmup,
             repeats,
             _shape_pool_factory(kind, batch, n, device, dtype),
+            buffer_pool=buffer_pool,
         )
         for name, kind in pool_kinds.items()
     }
@@ -223,6 +225,16 @@ def run_hadamard_iteration(hadamard_func, x, *, block_dim=None):
         tensor_batch(x),
         tensor_n(x),
         tensor_log2_n(x),
+        block_dim=block_dim,
+    )
+
+
+def run_copy_iteration(copy_func, x, y, *, block_dim=None):
+    copy_func(
+        x,
+        y,
+        tensor_batch(x),
+        tensor_n(x),
         block_dim=block_dim,
     )
 
@@ -311,6 +323,19 @@ def benchmark_hadamard_us(
     )
 
 
+def benchmark_copy_us(copy_func, x_list, y_list, *, block_dim, warmup, repeats) -> float:
+    return benchmark_npu_us(
+        warmup,
+        repeats,
+        lambda i: run_copy_iteration(
+            copy_func,
+            pool_item(x_list, i),
+            pool_item(y_list, i),
+            block_dim=block_dim,
+        ),
+    )
+
+
 def benchmark_quantize_us(
     quantize_func,
     x_list,
@@ -346,6 +371,18 @@ def benchmark_torch_quantize_us(
         warmup,
         repeats,
         lambda i: torch_quantize_fn(pool_item(x_list, i), scale_tensor),
+    )
+
+
+def benchmark_torch_clone_us(x_list, *, warmup, repeats) -> float:
+    outputs = [None] * len(x_list)
+    return benchmark_npu_us(
+        warmup,
+        repeats,
+        lambda i: outputs.__setitem__(
+            i % len(outputs),
+            pool_item(x_list, i).clone(),
+        ),
     )
 
 

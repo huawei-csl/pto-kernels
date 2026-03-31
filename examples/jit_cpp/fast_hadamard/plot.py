@@ -5,6 +5,7 @@ import sys
 
 CORE_TARGET_MODULES = {
     "standard": "standard.plot_hadamard",
+    "copy_vs_hadamard": "copy_vs_hadamard.plot_copy_vs_hadamard",
     "quantize_int8": "fuse_int8_quant.plot_quantize",
     "hadamard_quant_int8": "fuse_int8_quant.plot_hadamard_quant",
     "quantize_int4": "fuse_int4_quant.plot_quantize",

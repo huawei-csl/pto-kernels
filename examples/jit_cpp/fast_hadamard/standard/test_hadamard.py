@@ -8,6 +8,7 @@ TEST_HIDDEN_DIMS = [128, 256, 512, 1024, 2048, 4096, 8192, 16384]
 TEST_SEEDS = [0, 1]
 DTYPE = torch.float16
 MAX_HADAMARD_N = 16 * 1024
+ELEMENTS_PER_TILE = 32 * 1024
 
 
 def hadamard_ref_inplace(x):
@@ -101,7 +102,7 @@ def test_batch_partition_boundaries(hadamard_kernel, npu_device):
 
 @pytest.mark.parametrize("n", [128, 1024, 16384])
 def test_samples_per_load_boundaries(hadamard_kernel, npu_device, n):
-    samples_per_load = MAX_HADAMARD_N // n
+    samples_per_load = ELEMENTS_PER_TILE // n
     batches = sorted(
         {1, max(0, samples_per_load - 1), samples_per_load, samples_per_load + 1}
     )
