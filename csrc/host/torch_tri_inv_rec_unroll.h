@@ -68,6 +68,6 @@ at::Tensor run_tri_inv_rec_unroll(const at::Tensor& M,
                     matrix_size, total_tiles, num_bsnd_heads);
   }
 
-  return M_inv.to(at::kHalf);
+  return M_inv.to(dtype);
 }
 }  // namespace pto_isa_ops
