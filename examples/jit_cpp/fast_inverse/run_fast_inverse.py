@@ -104,8 +104,33 @@ def _run_kernel(tri_inv_func, U_fp16: torch.Tensor):
     return tensor_out.cpu().to(torch.float64)
 
 
+def _run_kernel_bsnd(tri_inv_func, U_bsnd_fp16: torch.Tensor):
+    """
+    Run the kernel in BSND mode and return fp64 CPU result.
+
+    U_bsnd_fp16 : (B, S, N, D) half tensor on NPU where each (D, D) block
+                  along the S dimension is one matrix to invert.
+    """
+    matrix_size = U_bsnd_fp16.shape[-1]       # D
+    num_bsnd_heads = U_bsnd_fp16.shape[-2]    # N
+    num_matrices = U_bsnd_fp16.numel() // (matrix_size * matrix_size)
+    device = U_bsnd_fp16.device
+
+    tensor_out = torch.zeros_like(U_bsnd_fp16, dtype=torch.float32)
+    I_neg = _make_minus_identity(matrix_size, str(device))
+
+    torch.npu.synchronize()
+    tri_inv_func(
+        tensor_out, U_bsnd_fp16, I_neg,
+        matrix_size, num_matrices, num_bsnd_heads,
+    )
+    torch.npu.synchronize()
+
+    return tensor_out.cpu().to(torch.float64)
+
+
 # ---------------------------------------------------------------------------
-# Single test
+# Single test – standard layout
 # ---------------------------------------------------------------------------
 
 def _test_case(tri_inv_func, U: torch.Tensor, atol: float, rtol: float, ftol: float,
@@ -128,6 +153,39 @@ def _test_case(tri_inv_func, U: torch.Tensor, atol: float, rtol: float, ftol: fl
 
 
 # ---------------------------------------------------------------------------
+# Single test – BSND layout
+# ---------------------------------------------------------------------------
+
+def _test_case_bsnd(tri_inv_func, U: torch.Tensor, B: int, S: int, N: int, D: int,
+                    atol: float, rtol: float, ftol: float, label: str):
+    """
+    U has shape (B*S//D, N, D, D) – the raw generator output.
+    It is converted to (B, S, N, D) before being fed to the kernel, mirroring
+    the original pytest test_tri_inv_rec_unroll_bsnd helper.
+    """
+    U_fp16 = U.to(torch.half)
+    # Compute reference in (B*S//D, N, D, D) space, then reshape to (B, S, N, D)
+    golden = linalg_inv_ref(U_fp16)
+    golden = golden.transpose(1, 2).contiguous().reshape(B, S, N, D)
+
+    # Transform input to BSND layout: (B*S//D, N, D, D) → (B, S, N, D)
+    U_bsnd = U_fp16.transpose(1, 2).contiguous().reshape(B, S, N, D)
+
+    actual = _run_kernel_bsnd(tri_inv_func, U_bsnd.npu())
+
+    frob = torch.sqrt(
+        torch.sum((golden - actual) ** 2) / torch.sum(golden ** 2)
+    ).item()
+
+    assert np.allclose(
+        actual.numpy(), golden.numpy(), atol=atol, rtol=rtol
+    ), f"[{label}] allclose failed — shape {U_bsnd.shape}, rtol={rtol}"
+    assert frob <= ftol, f"[{label}] Frobenius error {frob:.2e} > {ftol:.2e}"
+
+    print(f"  PASS  {label}  frob={frob:.2e}")
+
+
+# ---------------------------------------------------------------------------
 # Test suite
 # ---------------------------------------------------------------------------
 
@@ -138,11 +196,15 @@ def run_tests(tri_inv_func):
         ("block_random", block_random_triu_matrix,  5e-5, 0.1,  1e-4),
         ("random",       random_triu_matrix,        5e-5, 0.1,  1e-4),
     ]
-    sizes   = [16, 32, 64, 128]
-    x_dims  = [1, 2, 4]
-    y_dims  = [2, 4]
 
     total = passed = 0
+
+    # -- Standard layout tests -----------------------------------------------
+    print("=== Standard layout ===")
+    sizes  = [16, 32, 64, 128]
+    x_dims = [1, 2, 4]
+    y_dims = [2, 4]
+
     for n in sizes:
         for bdx in x_dims:
             for bdy in y_dims:
@@ -155,6 +217,29 @@ def run_tests(tri_inv_func):
                         passed += 1
                     except AssertionError as err:
                         print(f"  FAIL  {label}: {err}")
+
+    # -- BSND layout tests ---------------------------------------------------
+    print("\n=== BSND layout ===")
+    # Keep a representative subset: S must be a multiple of D
+    bsnd_configs = [
+        (B, S, N, D)
+        for B in [1, 4]
+        for S in [128, 256]
+        for N in [4, 8]
+        for D in [16, 32, 64, 128]
+        if S % D == 0
+    ]
+
+    for B, S, N, D in bsnd_configs:
+        for name, gen, atol, rtol, ftol in cases:
+            total += 1
+            label = f"B={B} S={S} N={N} D={D} [{name}]"
+            try:
+                U = gen(D, B * S // D, N)
+                _test_case_bsnd(tri_inv_func, U, B, S, N, D, atol, rtol, ftol, label)
+                passed += 1
+            except AssertionError as err:
+                print(f"  FAIL  {label}: {err}")
 
     print(f"\n{passed}/{total} tests passed.")
     return passed == total
