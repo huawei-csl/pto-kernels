@@ -32,10 +32,10 @@ at::Tensor run_tri_inv_rec_unroll(const at::Tensor& M,
   const at::Device device = M.options().device();
   const auto dtype = M.options().dtype();
   const auto dtype_out = at::kFloat;
-  if (!(dtype == at::kHalf)) {
+  if (dtype != at::kHalf || dtype != at::kBFloat16) {
     throw std::runtime_error(
         "Unsupported dtype for tri_inv_rec_unroll kernel. Supports only "
-        "fp16");
+        "fp16 and bf16.");
   }
 
   const uint32_t matrix_size = static_cast<uint32_t>(M.size(-1));
@@ -56,14 +56,18 @@ at::Tensor run_tri_inv_rec_unroll(const at::Tensor& M,
 
   const at::Tensor I_neg =
       at::zeros({matrix_size, matrix_size},
-                at::TensorOptions().dtype(dtype).device(device));
+                at::TensorOptions().dtype(at::kHalf).device(device));
   I_neg.fill_diagonal_(-1);
 
-  if (dtype == at::kHalf) {
+  if (dtype == at::kBFloat16) {
+    const at::Tensor M_half = M.to(at::kHalf);
+    EXEC_KERNEL_CMD(tri_inv_rec_unroll_fp16, block_dim, M_inv, M_half, I_neg,
+                    matrix_size, total_tiles, num_bsnd_heads);
+  } else if (dtype == at::kHalf) {
     EXEC_KERNEL_CMD(tri_inv_rec_unroll_fp16, block_dim, M_inv, M, I_neg,
                     matrix_size, total_tiles, num_bsnd_heads);
   }
 
-  return M_inv;
+  return M_inv.to(dtype);
 }
 }  // namespace pto_isa_ops

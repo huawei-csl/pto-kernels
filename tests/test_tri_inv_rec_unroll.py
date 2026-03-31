@@ -67,9 +67,15 @@ def linalg_inv(U: torch.tensor) -> torch.tensor:
     return torch.from_numpy(golden_numpy)
 
 
-def _test_tri_inv_rec_unroll(U: torch.tensor, atol: float, rtol: float, ftol: float):
+def _test_tri_inv_rec_unroll(
+    U: torch.tensor,
+    atol: float,
+    rtol: float,
+    ftol: float,
+    dtype: torch.dtype = torch.float16,
+):
 
-    U = U.to(torch.half)
+    U = U.to(dtype)
     golden_cpu = linalg_inv(U)
 
     U_npu = U.npu()
@@ -102,9 +108,10 @@ def _test_tri_inv_rec_unroll_bsnd(
     atol: float,
     rtol: float,
     ftol: float,
+    dtype: torch.dtype = torch.float16,
 ):
 
-    U = U.to(torch.half)
+    U = U.to(dtype)
     golden_cpu = linalg_inv(U)
 
     # Transform to bsnd layout
@@ -133,6 +140,7 @@ def _test_tri_inv_rec_unroll_bsnd(
     assert frob_error <= ftol, f"frob_error: {frob_error}"
 
 
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 @pytest.mark.parametrize("n", [16, 32, 64, 128])
 @pytest.mark.parametrize("block_dim_x", [1, 2, 3, 4])
 @pytest.mark.parametrize("block_dim_y", [2, 4, 8])
@@ -153,11 +161,13 @@ def test_tri_inv_rec_unroll(
     atol: float,
     rtol: float,
     ftol: float,
+    dtype: torch.dtype,
 ):
     U = matrix_gen(n, block_dim_x, block_dim_y)
-    _test_tri_inv_rec_unroll(U, atol, rtol, ftol)
+    _test_tri_inv_rec_unroll(U, atol, rtol, ftol, dtype)
 
 
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 @pytest.mark.parametrize("B", [1, 4])
 @pytest.mark.parametrize("S", [128, 256, 1024])
 @pytest.mark.parametrize("N", [4, 8])
@@ -180,9 +190,10 @@ def test_tri_inv_rec_unroll_bsnd(
     atol: float,
     rtol: float,
     ftol: float,
+    dtype: torch.dtype,
 ):
     # only test cases where the sequence length is a multiple of the chunk size are accepted
     if S % D != 0:
         pytest.skip("Sequence length must be a multiple of chunk size D.")
     U = matrix_gen(D, B * S // D, N)
-    _test_tri_inv_rec_unroll_bsnd(U, B, S, N, D, atol, rtol, ftol)
+    _test_tri_inv_rec_unroll_bsnd(U, B, S, N, D, atol, rtol, ftol, dtype)
