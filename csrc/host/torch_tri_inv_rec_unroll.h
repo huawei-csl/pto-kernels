@@ -32,7 +32,7 @@ at::Tensor run_tri_inv_rec_unroll(const at::Tensor& M,
   const at::Device device = M.options().device();
   const auto dtype = M.options().dtype();
   const auto dtype_out = at::kFloat;
-  if (dtype != at::kHalf || dtype != at::kBFloat16) {
+  if ((dtype != at::kHalf) and (dtype != at::kBFloat16)) {
     throw std::runtime_error(
         "Unsupported dtype for tri_inv_rec_unroll kernel. Supports only "
         "fp16 and bf16.");
@@ -68,6 +68,6 @@ at::Tensor run_tri_inv_rec_unroll(const at::Tensor& M,
                     matrix_size, total_tiles, num_bsnd_heads);
   }
 
-  return M_inv.to(dtype);
+  return M_inv.to(at::kHalf);
 }
 }  // namespace pto_isa_ops
