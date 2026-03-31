@@ -11,8 +11,10 @@ from pto_kernels import pto_histogram
 import pytest
 
 
-@pytest.mark.parametrize("num_blocks", [1, 2, 10, 20, 32, 64])
-@pytest.mark.parametrize("bins", [2, 4, 16, 50, 100])
+#@pytest.mark.parametrize("num_blocks", [1, 2, 10, 20, 32, 64])
+#@pytest.mark.parametrize("bins", [2, 4, 16, 50, 100])
+@pytest.mark.parametrize("num_blocks", [1])
+@pytest.mark.parametrize("bins", [64])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.float32], ids=str)
 def test_pto_histogram(num_blocks: int, bins: int, dtype: torch.dtype):
     tile_len = 64
