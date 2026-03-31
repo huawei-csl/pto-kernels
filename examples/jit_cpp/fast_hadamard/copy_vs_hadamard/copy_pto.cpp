@@ -18,6 +18,10 @@ struct TileWork {
   uint32_t gm_offset, sample_count, elements;
 };
 
+inline uint32_t min_u32(uint32_t lhs, uint32_t rhs) {
+  return lhs < rhs ? lhs : rhs;
+}
+
 template <typename InputT>
 AICORE void issueTLoad(__gm__ InputT *x, const TileWork &tile, unsigned x_base,
                        event_t ev) {
@@ -33,9 +37,9 @@ AICORE void issueTLoad(__gm__ InputT *x, const TileWork &tile, unsigned x_base,
   InGlobal xGlobal(x + tile.gm_offset);
   TASSIGN(xGlobal, (x + tile.gm_offset));
 
-  wait_flag(PIPE_V, PIPE_MTE2, ev);
+  wait_flag(PIPE_MTE3, PIPE_MTE2, ev);
   TLOAD(xBulkTile, xGlobal);
-  set_flag(PIPE_MTE2, PIPE_V, ev);
+  set_flag(PIPE_MTE2, PIPE_MTE3, ev);
 }
 
 AICORE bool nextTile(uint32_t &sample_done, uint32_t gm_offset_base,
@@ -88,10 +92,8 @@ AICORE void runTPtoCopy(__gm__ T *x, __gm__ T *y, uint32_t batch, uint32_t n) {
   const uint32_t samples_per_load =
       (n < ELEMENTS_PER_TILE) ? ELEMENTS_PER_TILE / n : 1;
 
-  set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
-  set_flag(PIPE_V, PIPE_MTE2, EVENT_ID1);
-  set_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
-  set_flag(PIPE_MTE3, PIPE_V, EVENT_ID1);
+  set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID0);
+  set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID1);
 
   uint32_t sample_done = 0;
   const uint32_t gm_offset_base = sample_offset * n;
@@ -108,7 +110,7 @@ AICORE void runTPtoCopy(__gm__ T *x, __gm__ T *y, uint32_t batch, uint32_t n) {
     const event_t current_ev = ping ? (event_t)EVENT_ID0 : (event_t)EVENT_ID1;
     const unsigned x_base = ping ? X_PING : X_PONG;
 
-    wait_flag(PIPE_MTE2, PIPE_V, current_ev);
+    wait_flag(PIPE_MTE2, PIPE_MTE3, current_ev);
 
     TileWork next_tile;
     const bool has_next =
@@ -126,13 +128,8 @@ AICORE void runTPtoCopy(__gm__ T *x, __gm__ T *y, uint32_t batch, uint32_t n) {
     GlobalData yGlobal(y + current_tile.gm_offset);
     TASSIGN(yGlobal, (y + current_tile.gm_offset));
 
-    wait_flag(PIPE_MTE3, PIPE_V, current_ev);
-    set_flag(PIPE_V, PIPE_MTE3, current_ev);
-    wait_flag(PIPE_V, PIPE_MTE3, current_ev);
     TSTORE(yGlobal, xBulkTile);
-
-    set_flag(PIPE_MTE3, PIPE_V, current_ev);
-    set_flag(PIPE_V, PIPE_MTE2, current_ev);
+    set_flag(PIPE_MTE3, PIPE_MTE2, current_ev);
 
     if (!has_next) {
       break;
@@ -142,10 +139,8 @@ AICORE void runTPtoCopy(__gm__ T *x, __gm__ T *y, uint32_t batch, uint32_t n) {
     ping = !ping;
   }
 
-  wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
-  wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID1);
-  wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
-  wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID1);
+  wait_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID0);
+  wait_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID1);
 #endif
 }
 
@@ -158,5 +153,9 @@ extern "C" __global__ AICORE void pto_copy_fp16(__gm__ void *x, __gm__ void *y,
 
 extern "C" void call_kernel(uint32_t blockDim, void *stream, uint8_t *x,
                             uint8_t *y, uint32_t batch, uint32_t n) {
-  pto_copy_fp16<<<blockDim * 2, nullptr, stream>>>(x, y, batch, n);
+  const uint32_t max_blocks = blockDim * 2;
+  const uint32_t total_elements = batch * n;
+  const uint32_t tiles = DIV_ROUNDUP(total_elements, ELEMENTS_PER_TILE);
+  const uint32_t launch_blocks = min_u32(max_blocks, tiles == 0 ? 1 : tiles);
+  pto_copy_fp16<<<launch_blocks, nullptr, stream>>>(x, y, batch, n);
 }

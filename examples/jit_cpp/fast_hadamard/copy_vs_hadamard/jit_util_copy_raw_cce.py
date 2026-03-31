@@ -40,7 +40,7 @@ def compile_cpp(
         "-fPIC",
         "-shared",
         "-xcce",
-        "-O2",
+        "-O3",
         "-std=c++17",
         "--cce-aicore-arch=dav-c220-vec",
     ]

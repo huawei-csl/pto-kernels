@@ -49,6 +49,24 @@ def load_copy_lib(lib_path, block_dim=BLOCK_DIM):
         ],
     )
 
+    def launch_copy(
+        x,
+        y,
+        batch,
+        n,
+        *,
+        block_dim=resolved_block_dim,
+        stream_ptr=None,
+    ):
+        kernel(
+            resolve_launch_block_dim(block_dim, resolved_block_dim),
+            resolve_stream_ptr(stream_ptr),
+            torch_to_ctypes(x),
+            torch_to_ctypes(y),
+            int(batch),
+            int(n),
+        )
+
     def copy_func(
         x,
         y,
@@ -58,16 +76,10 @@ def load_copy_lib(lib_path, block_dim=BLOCK_DIM):
         stream_ptr=None,
     ):
         batch, n = validate_copy_tensors(x, y, batch=batch, n=n)
-        kernel(
-            resolve_launch_block_dim(block_dim, resolved_block_dim),
-            resolve_stream_ptr(stream_ptr),
-            torch_to_ctypes(x),
-            torch_to_ctypes(y),
-            batch,
-            n,
-        )
+        launch_copy(x, y, batch, n, block_dim=block_dim, stream_ptr=stream_ptr)
 
     copy_func.block_dim = resolved_block_dim
+    copy_func.fast = launch_copy
     return copy_func
 
 

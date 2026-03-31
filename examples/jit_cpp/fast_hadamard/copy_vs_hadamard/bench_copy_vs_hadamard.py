@@ -29,10 +29,11 @@ from standard.jit_util_hadamard import jit_compile as jit_compile_hadamard
 
 DEFAULT_WARMUP = 2
 DEFAULT_REPEATS = 20
-DEFAULT_MAX_POOL_ITEMS = 32
+DEFAULT_MAX_POOL_ITEMS = 256
 DEFAULT_POOL_ROLE_BYTES_MB = 1024
-DEFAULT_BATCHES = [1 << exponent for exponent in range(15)]
-DEFAULT_HIDDEN_DIMS = [1 << exponent for exponent in range(15)]
+DEFAULT_TORCH_CLONE_LIVE_OUTPUTS = 2
+DEFAULT_BATCHES = [1 << exponent for exponent in range(7, 13)]
+DEFAULT_HIDDEN_DIMS = [1 << exponent for exponent in range(7, 15)]
 DEFAULT_OUTPUT_STEM = "copy_vs_hadamard"
 BYTES_PER_FP16 = torch.finfo(DTYPE).bits // 8
 POOL_KINDS = {
@@ -59,8 +60,9 @@ def _parse_args():
         type=int,
         default=DEFAULT_MAX_POOL_ITEMS,
         help=(
-            "Upper bound for the per-shape rotating input/output pool size used to "
-            "limit data reuse (default: %(default)s)."
+            "Upper bound for the per-shape rotating input/output pool size. Small "
+            "shapes can use up to warmup+repeats distinct tensors per trial; large "
+            "shapes are reduced by the per-pool byte budget (default: %(default)s)."
         ),
     )
     parser.add_argument(
@@ -70,6 +72,17 @@ def _parse_args():
         help=(
             "Per-pool memory budget in MiB used to choose how many distinct tensors "
             "to rotate through for a shape (default: %(default)s)."
+        ),
+    )
+    parser.add_argument(
+        "--torch-clone-live-outputs",
+        type=int,
+        default=DEFAULT_TORCH_CLONE_LIVE_OUTPUTS,
+        help=(
+            "Number of cloned outputs kept live during timing. This is capped "
+            "independently from the input pool so torch.clone is not distorted by "
+            "allocator pressure from many simultaneously-live outputs "
+            "(default: %(default)s)."
         ),
     )
     return parser.parse_args()
@@ -83,10 +96,15 @@ def benchmark_hidden_dims(args):
     return args.hidden_dims if args.hidden_dims else DEFAULT_HIDDEN_DIMS
 
 
+def _no_reuse_items_per_trial(warmup, repeats):
+    return max(1, warmup + repeats)
+
+
 def _pool_items_for_shape(batch, n, *, warmup, repeats, max_pool_items, pool_role_bytes):
+    no_reuse_items = _no_reuse_items_per_trial(warmup, repeats)
     shape_bytes = batch * n * BYTES_PER_FP16
-    by_bytes = max(1, pool_role_bytes // max(shape_bytes, 1))
-    return max(1, min(max_pool_items, warmup + repeats, by_bytes))
+    budget_limited_items = max(1, pool_role_bytes // max(shape_bytes, 1))
+    return max(1, min(max_pool_items, no_reuse_items, budget_limited_items))
 
 
 def _build_shape_pools(
@@ -162,6 +180,7 @@ def benchmark(
     hidden_dims,
     max_pool_items: int,
     pool_role_bytes: int,
+    torch_clone_live_outputs: int,
 ):
     ensure_output_dir(output_dir)
     block_dim = hadamard_func.block_dim
@@ -172,6 +191,10 @@ def benchmark(
     print(
         f"Note: fast_hadamard measurements are left blank for N < {MIN_SAFE_HADAMARD_N} "
         "because the current kernel is only validated on aligned widths from that point up."
+    )
+    print(
+        f"Note: torch.clone keeps {torch_clone_live_outputs} live output slot(s) during "
+        "timing to avoid allocator-pressure artifacts from the larger input pool."
     )
     header = (
         f"{'batch':>6s}  {'N':>6s}"
@@ -232,13 +255,14 @@ def benchmark(
                     pool_items=pool_items,
                 ),
             )
-            clone_stats = benchmark_trials_us(
+            torch_clone_stats = benchmark_trials_us(
                 trials,
                 lambda: _benchmark_candidate(
                     lambda pools: benchmark_torch_clone_us(
                         pools["copy_x"],
                         warmup=warmup,
                         repeats=repeats,
+                        live_output_slots=torch_clone_live_outputs,
                     ),
                     batch=batch,
                     n=n,
@@ -293,7 +317,7 @@ def benchmark(
 
             copy_pto_us = copy_pto_stats["median_us"]
             copy_raw_cce_us = copy_raw_cce_stats["median_us"]
-            clone_us = clone_stats["median_us"]
+            torch_clone_us = torch_clone_stats["median_us"]
             hadamard_us = (
                 None if hadamard_stats is None else hadamard_stats["median_us"]
             )
@@ -302,7 +326,7 @@ def benchmark(
             print(
                 f"{batch:>6d}  {n:>6d}"
                 f"  {pool_items:>6d}  {copy_pto_us:>12.2f}  {copy_raw_cce_us:>12.2f}"
-                f"  {_format_optional(static_us):>16s}  {clone_us:>15.2f}  {_format_optional(hadamard_us):>12s}"
+                f"  {_format_optional(static_us):>16s}  {torch_clone_us:>15.2f}  {_format_optional(hadamard_us):>12s}"
             )
 
             records.append(
@@ -314,7 +338,7 @@ def benchmark(
                         f"{copy_pto_us:.4f}",
                         f"{copy_raw_cce_us:.4f}",
                         _format_optional(static_us),
-                        f"{clone_us:.4f}",
+                        f"{torch_clone_us:.4f}",
                         _format_optional(hadamard_us),
                         f"{_copy_bandwidth(batch, n, copy_pto_us):.4f}",
                         f"{_copy_bandwidth(batch, n, copy_raw_cce_us):.4f}",
@@ -323,7 +347,7 @@ def benchmark(
                             if static_us is None
                             else _copy_bandwidth(batch, n, static_us)
                         ),
-                        f"{_copy_bandwidth(batch, n, clone_us):.4f}",
+                        f"{_copy_bandwidth(batch, n, torch_clone_us):.4f}",
                         _format_optional(_optional_bandwidth(batch, n, hadamard_us)),
                         str(trials),
                         f"{copy_pto_stats['mean_us']:.4f}",
@@ -351,11 +375,11 @@ def benchmark(
                         _format_optional(
                             None if static_stats is None else static_stats["cv_pct"]
                         ),
-                        f"{clone_stats['mean_us']:.4f}",
-                        f"{clone_stats['std_us']:.4f}",
-                        f"{clone_stats['min_us']:.4f}",
-                        f"{clone_stats['max_us']:.4f}",
-                        f"{clone_stats['cv_pct']:.4f}",
+                        f"{torch_clone_stats['mean_us']:.4f}",
+                        f"{torch_clone_stats['std_us']:.4f}",
+                        f"{torch_clone_stats['min_us']:.4f}",
+                        f"{torch_clone_stats['max_us']:.4f}",
+                        f"{torch_clone_stats['cv_pct']:.4f}",
                         _format_optional(
                             None if hadamard_stats is None else hadamard_stats["mean_us"]
                         ),
@@ -401,6 +425,8 @@ def main():
         raise ValueError("--max-pool-items must be > 0")
     if args.pool_role_bytes_mb <= 0:
         raise ValueError("--pool-role-bytes-mb must be > 0")
+    if args.torch_clone_live_outputs <= 0:
+        raise ValueError("--torch-clone-live-outputs must be > 0")
 
     torch.npu.set_device(args.npu)
     base = Path(__file__).resolve().parent
@@ -449,6 +475,7 @@ def main():
         hidden_dims=benchmark_hidden_dims(args),
         max_pool_items=args.max_pool_items,
         pool_role_bytes=args.pool_role_bytes_mb * 1024 * 1024,
+        torch_clone_live_outputs=args.torch_clone_live_outputs,
     )
 
 

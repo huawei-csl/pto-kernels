@@ -13,12 +13,18 @@ from plot_common import (
 
 DEFAULT_PLOT_NAME_TEMPLATE = "copy_vs_hadamard_duration_us_bd{block_dim}.png"
 SERIES = [
-    ("copy_pto_us", "PTO copy", "#1f77b4"),
-    ("copy_raw_cce_us", "Raw CCE copy", "#ff7f0e"),
-    ("copy_raw_cce_static_4096_us", "Raw CCE copy static 4096x4096", "#2ca02c"),
-    ("torch_clone_us", "torch.clone", "#7f7f7f"),
     ("hadamard_us", "fast_hadamard", "#d62728"),
+    ("torch_clone_us", "torch.clone", "#7f7f7f"),
+    ("copy_pto_us", "PTO-ISA copy", "#1f77b4"),
+    ("copy_raw_cce_us", "CCE copy", "#ff7f0e"),
+    ("copy_raw_cce_static_4096_us", "CCE static copy 4096x4096", "#2ca02c"),
 ]
+
+
+def _selected_series(*, omit_hadamard: bool):
+    if not omit_hadamard:
+        return SERIES
+    return [series for series in SERIES if series[0] != "hadamard_us"]
 
 
 def _parse_args():
@@ -26,6 +32,17 @@ def _parse_args():
         description="Plot grouped duration bars for copy-vs-Hadamard benchmark CSV files."
     )
     parser = add_common_plot_args(parser)
+    parser.add_argument(
+        "--max-hidden-dim",
+        type=int,
+        default=4096,
+        help="Maximum hidden dim to include in the plot (default: %(default)s).",
+    )
+    parser.add_argument(
+        "--omit-hadamard",
+        action="store_true",
+        help="Omit the fast_hadamard series from the plot.",
+    )
     parser.add_argument(
         "--plot-name",
         type=str,
@@ -41,49 +58,64 @@ def _parse_optional_float(value):
     return float(value)
 
 
-def _group_rows(rows):
+def _group_rows(rows, series):
     grouped = {}
     for row in rows:
         batch = int(row["batch"])
         n = int(row["N"])
         grouped.setdefault(batch, {})[n] = {
-            key: _parse_optional_float(row[key]) for key, _, _ in SERIES
+            key: _parse_optional_float(row[key]) for key, _, _ in series
         }
     return grouped
 
 
-def plot_copy_vs_hadamard(csv_path: Path, output_path: Path):
+def plot_copy_vs_hadamard(
+    csv_path: Path,
+    output_path: Path,
+    *,
+    max_hidden_dim: int,
+    omit_hadamard: bool,
+):
     if not ensure_matplotlib():
         return
 
     rows = load_nonempty_rows(csv_path)
     if rows is None:
         return
+    rows = [row for row in rows if int(row["N"]) <= max_hidden_dim]
+    if not rows:
+        print(
+            f"Skipped {csv_path.name}: no rows at or below hidden dim {max_hidden_dim}"
+        )
+        return
 
     import matplotlib.pyplot as plt
 
-    grouped = _group_rows(rows)
+    series = _selected_series(omit_hadamard=omit_hadamard)
+    grouped = _group_rows(rows, series)
     batches = sorted(grouped)
     ns = sorted({int(row["N"]) for row in rows})
-    ncols = 3
+    ncols = 1 if len(batches) == 1 else 3
     nrows = math.ceil(len(batches) / ncols)
+    fig_width = 10.5 if len(batches) == 1 else 8.6 * ncols
+    fig_height = 5.2 if len(batches) == 1 else 4.4 * nrows
     fig, axes = plt.subplots(
         nrows,
         ncols,
-        figsize=(8.6 * ncols, 4.4 * nrows),
+        figsize=(fig_width, fig_height),
         squeeze=False,
     )
     axes = axes.flatten()
 
-    width = 0.15
+    width = 0.8 / max(len(series), 1)
     x_positions = list(range(len(ns)))
-    offset_center = (len(SERIES) - 1) / 2.0
+    offset_center = (len(series) - 1) / 2.0
 
     for axis_idx, batch in enumerate(batches):
         ax = axes[axis_idx]
         values_by_n = grouped[batch]
 
-        for series_idx, (key, label, color) in enumerate(SERIES):
+        for series_idx, (key, label, color) in enumerate(series):
             heights = [
                 (
                     math.nan
@@ -111,17 +143,22 @@ def plot_copy_vs_hadamard(csv_path: Path, output_path: Path):
         ax.set_ylim(bottom=0)
         ax.grid(True, axis="y", alpha=0.3)
         if axis_idx == 0:
-            ax.legend(fontsize=8)
+            legend_ncols = 3 if len(batches) == 1 else 1
+            ax.legend(fontsize=8, ncols=legend_ncols)
 
     for axis_idx in range(len(batches), len(axes)):
         axes[axis_idx].set_visible(False)
 
     fig.suptitle(
-        "Copy vs fast_hadamard duration by batch and hidden dim",
+        (
+            "torch.clone vs PTO-ISA and CCE copies"
+            if omit_hadamard
+            else "fast_hadamard vs torch.clone vs PTO-ISA and CCE copies"
+        ),
         fontsize=15,
         fontweight="bold",
     )
-    fig.tight_layout()
+    fig.tight_layout(rect=(0, 0, 1, 0.96))
     save_figure(fig, output_path)
     plt.close(fig)
     print(f"Plotted {csv_path.name}")
@@ -149,7 +186,12 @@ def main():
             if args.plot_name is not None
             else DEFAULT_PLOT_NAME_TEMPLATE.format(block_dim=block_dim)
         )
-        plot_copy_vs_hadamard(csv_path, plot_dir / plot_name)
+        plot_copy_vs_hadamard(
+            csv_path,
+            plot_dir / plot_name,
+            max_hidden_dim=args.max_hidden_dim,
+            omit_hadamard=args.omit_hadamard,
+        )
 
 
 if __name__ == "__main__":

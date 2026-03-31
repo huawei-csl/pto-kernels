@@ -230,6 +230,17 @@ def run_hadamard_iteration(hadamard_func, x, *, block_dim=None):
 
 
 def run_copy_iteration(copy_func, x, y, *, block_dim=None):
+    fast_copy = getattr(copy_func, "fast", None)
+    if fast_copy is not None:
+        fast_copy(
+            x,
+            y,
+            tensor_batch(x),
+            tensor_n(x),
+            block_dim=block_dim,
+        )
+        return
+
     copy_func(
         x,
         y,
@@ -374,8 +385,23 @@ def benchmark_torch_quantize_us(
     )
 
 
-def benchmark_torch_clone_us(x_list, *, warmup, repeats) -> float:
-    outputs = [None] * len(x_list)
+def benchmark_torch_copy_us(x_list, y_list, *, warmup, repeats) -> float:
+    return benchmark_npu_us(
+        warmup,
+        repeats,
+        lambda i: pool_item(y_list, i).copy_(pool_item(x_list, i)),
+    )
+
+
+def benchmark_torch_clone_us(
+    x_list,
+    *,
+    warmup,
+    repeats,
+    live_output_slots=2,
+) -> float:
+    output_slots = max(1, min(live_output_slots, len(x_list)))
+    outputs = [None] * output_slots
     return benchmark_npu_us(
         warmup,
         repeats,
