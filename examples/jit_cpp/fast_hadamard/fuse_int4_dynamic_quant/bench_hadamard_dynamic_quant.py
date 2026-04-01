@@ -125,7 +125,9 @@ def main():
             traffic_us = benchmark_npu_us(
                 warmup,
                 repeats,
-                lambda i: traffic_func(traffic_src, traffic_dst),
+                lambda i, traffic_src=traffic_src, traffic_dst=traffic_dst: traffic_func(
+                    traffic_src, traffic_dst
+                ),
             )
             traffic_bw = bandwidth_gbs(eff, traffic_us)
 
@@ -136,7 +138,9 @@ def main():
             st_us = benchmark_npu_us(
                 warmup,
                 repeats,
-                lambda i: static_func(sx, sy, st_batch, hn, log2_hn, 9.0),
+                lambda i, sx=sx, sy=sy, st_batch=st_batch, hn=hn, log2_hn=log2_hn: static_func(
+                    sx, sy, st_batch, hn, log2_hn, 9.0
+                ),
             )
             st_bw = bandwidth_gbs(eff, st_us)
 
@@ -148,7 +152,9 @@ def main():
             dy_us = benchmark_npu_us(
                 warmup,
                 repeats,
-                lambda i: dynamic_func(dx_scratch, dy, ds, batch, n, hn),
+                lambda i, dx_scratch=dx_scratch, dy=dy, ds=ds, batch=batch, n=n, hn=hn: dynamic_func(
+                    dx_scratch, dy, ds, batch, n, hn
+                ),
             )
             dy_bw = bandwidth_gbs(eff, dy_us)
 
