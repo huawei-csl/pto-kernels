@@ -10,7 +10,8 @@
 """
 Benchmark the standalone BSND fast-inverse kernel.
 
-This script only benchmarks the PTO-ISA BSND kernel in two modes:
+This script benchmarks the PTO-ISA BSND kernel in two modes using Triton-unit-
+test-like inputs:
 
 1. `bsnd-fixed`:
    Original aligned BSND layout with shape `(B, T, H, D)`.
@@ -18,9 +19,12 @@ This script only benchmarks the PTO-ISA BSND kernel in two modes:
    The new varlen path using packed shape `(1, B*T, H, D)` with uniform
    `cu_seqlens = [0, T, 2T, ...]`.
 
-The two modes use the same total token count and the same underlying chunk data,
-so their latency / effective bandwidth can be compared directly. The script also
-checks that both modes produce numerically matching results.
+The two modes use the same total token count and the same underlying `k` / `beta`
+inputs. `A` is generated in eager PyTorch with an emulation of
+`chunk_scaled_dot_kkt_fwd`, then each valid chunk is transposed before launch so
+the PTO kernel still sees its expected upper-triangular layout. The script also
+checks that both modes produce numerically matching results after transposing
+outputs back to the lower-triangular convention used by the Triton tests.
 """
 
 from __future__ import annotations
@@ -34,6 +38,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+import torch.nn.functional as F
 import torch_npu  # noqa: F401
 
 from jit_util_fast_inverse import jit_compile
@@ -41,6 +46,7 @@ from jit_util_fast_inverse import jit_compile
 
 DEFAULT_SEQLENS = (512, 1024, 2048, 4096, 8192, 16384)
 DEFAULT_CACHE_SIZE = 256 * 1024 * 1024
+DEFAULT_FEATURE_DIM = 64
 NPU_DEVICE = os.getenv("GDN_TRI_INVERSE_NPU_DEVICE", "npu:0")
 THIS_DIR = Path(__file__).resolve().parent
 RESULTS_DIR = THIS_DIR / "benchmark_results"
@@ -79,35 +85,77 @@ def count_varlen_chunks(
     )
 
 
-def random_chunk_mats(
-    total_chunks: int,
-    num_heads: int,
+def chunk_scaled_dot_kkt_fwd_emulated(
+    k: torch.Tensor,
+    beta: torch.Tensor,
+    cu_seqlens: torch.Tensor,
     chunk_size: int,
-    scale: float,
-    device: str,
 ) -> torch.Tensor:
-    return scale * torch.triu(
-        torch.rand(
-            (total_chunks, num_heads, chunk_size, chunk_size),
-            dtype=torch.half,
-            device=device,
-        ),
-        diagonal=1,
-    )
+    total_tokens = int(cu_seqlens[-1].item())
+    num_heads = k.shape[2]
+    A = torch.zeros((1, total_tokens, num_heads, chunk_size), dtype=k.dtype, device=k.device)
+
+    for bos, eos in zip(cu_seqlens[:-1].tolist(), cu_seqlens[1:].tolist(), strict=False):
+        for chunk_start in range(bos, eos, chunk_size):
+            chunk_end = min(chunk_start + chunk_size, eos)
+            actual_size = chunk_end - chunk_start
+            k_chunk = k[:, chunk_start:chunk_end].transpose(1, 2).to(torch.float32)
+            beta_chunk = (
+                beta[:, chunk_start:chunk_end]
+                .transpose(1, 2)
+                .unsqueeze(-1)
+                .to(torch.float32)
+            )
+            scores = torch.matmul(k_chunk, k_chunk.transpose(-1, -2))
+            scores = torch.tril(scores * beta_chunk, diagonal=-1).to(k.dtype)
+            A[:, chunk_start:chunk_end, :, :actual_size] = scores.transpose(1, 2)
+
+    return A
+
+
+def transpose_valid_chunks(
+    A: torch.Tensor,
+    cu_seqlens: torch.Tensor,
+    chunk_size: int,
+) -> torch.Tensor:
+    transposed = torch.zeros_like(A)
+    for bos, eos in zip(cu_seqlens[:-1].tolist(), cu_seqlens[1:].tolist(), strict=False):
+        for chunk_start in range(bos, eos, chunk_size):
+            actual_size = min(chunk_size, eos - chunk_start)
+            chunk = A[:, chunk_start : chunk_start + actual_size, :, :actual_size]
+            transposed[:, chunk_start : chunk_start + actual_size, :, :actual_size] = chunk.transpose(
+                1, 3
+            )
+    return transposed
 
 
 def build_fixed_bsnd_input(
-    chunk_mats: torch.Tensor,
     batch_size: int,
     seqlen: int,
     num_heads: int,
     chunk_size: int,
-) -> torch.Tensor:
-    return (
-        chunk_mats.transpose(1, 2)
-        .contiguous()
-        .reshape(batch_size, seqlen, num_heads, chunk_size)
+    feature_dim: int,
+    device: str,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    total_tokens = batch_size * seqlen
+    cu_seqlens = torch.arange(
+        0,
+        total_tokens + 1,
+        seqlen,
+        dtype=torch.int32,
+        device=device,
     )
+    k = F.normalize(
+        torch.randn((1, total_tokens, num_heads, feature_dim), dtype=torch.float16, device=device),
+        dim=-1,
+    )
+    beta = torch.randn((1, total_tokens, num_heads), dtype=torch.float16, device=device).sigmoid()
+    A = transpose_valid_chunks(
+        chunk_scaled_dot_kkt_fwd_emulated(k, beta, cu_seqlens, chunk_size),
+        cu_seqlens,
+        chunk_size,
+    )
+    return A.reshape(batch_size, seqlen, num_heads, chunk_size).contiguous(), cu_seqlens
 
 
 def build_uniform_varlen_input(
@@ -152,45 +200,23 @@ def build_true_varlen_input(
     seq_lens: list[int],
     num_heads: int,
     chunk_size: int,
-    scale: float,
+    feature_dim: int,
     device: str,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     cu_seqlens = np.cumsum([0, *seq_lens], dtype=np.int64)
-    num_chunks = sum((seq_len + chunk_size - 1) // chunk_size for seq_len in seq_lens)
-    chunk_mats = random_chunk_mats(
-        total_chunks=num_chunks,
-        num_heads=num_heads,
-        chunk_size=chunk_size,
-        scale=scale,
-        device=device,
+    cu_seqlens_tensor = torch.tensor(cu_seqlens.tolist(), dtype=torch.int32, device=device)
+    total_tokens = int(cu_seqlens[-1])
+    k = F.normalize(
+        torch.randn((1, total_tokens, num_heads, feature_dim), dtype=torch.float16, device=device),
+        dim=-1,
     )
-
-    packed_input = torch.zeros(
-        (1, int(cu_seqlens[-1]), num_heads, chunk_size),
-        dtype=torch.half,
-        device=device,
+    beta = torch.randn((1, total_tokens, num_heads), dtype=torch.float16, device=device).sigmoid()
+    packed_input = transpose_valid_chunks(
+        chunk_scaled_dot_kkt_fwd_emulated(k, beta, cu_seqlens_tensor, chunk_size),
+        cu_seqlens_tensor,
+        chunk_size,
     )
-    chunk_idx = 0
-    token_row = 0
-
-    for seq_len in seq_lens:
-        for local_chunk_start in range(0, seq_len, chunk_size):
-            actual_size = min(chunk_size, seq_len - local_chunk_start)
-            chunk = chunk_mats[chunk_idx]
-            for head_idx in range(num_heads):
-                packed_input[
-                    0,
-                    token_row : token_row + actual_size,
-                    head_idx,
-                    :actual_size,
-                ] = chunk[head_idx, :actual_size, :actual_size]
-            token_row += actual_size
-            chunk_idx += 1
-
-    return (
-        packed_input.contiguous(),
-        torch.tensor(cu_seqlens.tolist(), dtype=torch.int32, device=device),
-    )
+    return packed_input.contiguous(), cu_seqlens_tensor
 
 
 def make_fixed_runner(
@@ -383,6 +409,12 @@ def main() -> None:
     parser.add_argument("--H", type=int, default=4, help="Number of BSND heads.")
     parser.add_argument("--chunk-size", type=int, default=64)
     parser.add_argument(
+        "--feature-dim",
+        type=int,
+        default=DEFAULT_FEATURE_DIM,
+        help="Feature dimension used to generate Triton-like `k` inputs.",
+    )
+    parser.add_argument(
         "--seqlens",
         type=parse_int_list,
         default=DEFAULT_SEQLENS,
@@ -392,7 +424,6 @@ def main() -> None:
             f"(default: {','.join(map(str, DEFAULT_SEQLENS))})"
         ),
     )
-    parser.add_argument("--scale", type=float, default=0.1)
     parser.add_argument(
         "--csv",
         type=str,
@@ -466,26 +497,19 @@ def main() -> None:
             )
             continue
 
-        total_chunks = args.B * seqlen // args.chunk_size
         total_tokens = args.B * seqlen
         print(
             f"Profiling T={seqlen}, total_tokens={total_tokens}, "
-            f"B={args.B}, H={args.H}, chunk_size={args.chunk_size}"
+            f"B={args.B}, H={args.H}, chunk_size={args.chunk_size}, feature_dim={args.feature_dim}"
         )
 
-        chunk_mats = random_chunk_mats(
-            total_chunks=total_chunks,
-            num_heads=args.H,
-            chunk_size=args.chunk_size,
-            scale=args.scale,
-            device=NPU_DEVICE,
-        )
-        fixed_input = build_fixed_bsnd_input(
-            chunk_mats,
+        fixed_input, uniform_cu_seqlens = build_fixed_bsnd_input(
             batch_size=args.B,
             seqlen=seqlen,
             num_heads=args.H,
             chunk_size=args.chunk_size,
+            feature_dim=args.feature_dim,
+            device=NPU_DEVICE,
         )
         varlen_input, cu_seqlens = build_uniform_varlen_input(
             fixed_input,
@@ -507,8 +531,13 @@ def main() -> None:
         varlen_run()
         torch.npu.synchronize()
 
-        packed_fixed_out = fixed_out.reshape(1, total_tokens, args.H, args.chunk_size)
-        max_abs_diff, rel_frob_diff = accuracy_metrics(packed_fixed_out, varlen_out)
+        packed_fixed_out = transpose_valid_chunks(
+            fixed_out.reshape(1, total_tokens, args.H, args.chunk_size),
+            uniform_cu_seqlens,
+            args.chunk_size,
+        )
+        packed_varlen_out = transpose_valid_chunks(varlen_out, cu_seqlens, args.chunk_size)
+        max_abs_diff, rel_frob_diff = accuracy_metrics(packed_fixed_out, packed_varlen_out)
         print(
             f"  accuracy vs fixed: max_abs_diff={max_abs_diff:.3e}, "
             f"rel_frob_diff={rel_frob_diff:.3e}"
@@ -577,7 +606,7 @@ def main() -> None:
                 seq_lens=seq_lens,
                 num_heads=args.H,
                 chunk_size=args.chunk_size,
-                scale=args.scale,
+                feature_dim=args.feature_dim,
                 device=NPU_DEVICE,
             )
             varlen_run_true, _ = make_varlen_runner(
