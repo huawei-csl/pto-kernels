@@ -1,4 +1,5 @@
 """Benchmark fused Hadamard + dynamic int4 quant vs static fused and a traffic-matched copy baseline."""
+
 import math
 from pathlib import Path
 
@@ -38,6 +39,7 @@ CSV_HEADER = (
 
 def _parse_args():
     import argparse
+
     parser = argparse.ArgumentParser(
         description=(
             "Benchmark fused Hadamard+dynamic_quant against static fused "
@@ -80,17 +82,20 @@ def main():
     print("Compiling fast_hadamard_dynamic_quant.cpp ...")
     dynamic_func = jit_compile_dynamic(
         str(base / "fast_hadamard_dynamic_quant.cpp"),
-        verbose=True, device=args.npu,
+        verbose=True,
+        device=args.npu,
     )
     print("Compiling traffic_copy.cpp (copy baseline) ...")
     traffic_func = jit_compile_traffic_copy(
         str(base / "traffic_copy.cpp"),
-        verbose=True, device=args.npu,
+        verbose=True,
+        device=args.npu,
     )
     print("Compiling fast_hadamard_quant.cpp (static reference) ...")
     static_func = jit_compile_static(
         str(base.parent / "fuse_int4_quant" / "fast_hadamard_quant.cpp"),
-        verbose=True, device=args.npu,
+        verbose=True,
+        device=args.npu,
     )
 
     warmup = args.warmup
@@ -131,7 +136,8 @@ def main():
             sx = torch.randn(st_batch, hn, device=args.npu, dtype=torch.float16)
             sy = torch.empty(st_batch, hn // 2, device=args.npu, dtype=torch.int8)
             st_us = benchmark_npu_us(
-                warmup, repeats,
+                warmup,
+                repeats,
                 lambda i: static_func(sx, sy, st_batch, hn, log2_hn, 9.0),
             )
             st_bw = bandwidth_gbs(eff, st_us)
@@ -142,7 +148,8 @@ def main():
             ds = torch.empty(batch, dtype=torch.float32, device=args.npu)
             dx_scratch = dx.clone()
             dy_us = benchmark_npu_us(
-                warmup, repeats,
+                warmup,
+                repeats,
                 lambda i: dynamic_func(dx_scratch, dy, ds, batch, n, hn),
             )
             dy_bw = bandwidth_gbs(eff, dy_us)
@@ -164,7 +171,9 @@ def main():
             )
 
     if csv_dir is not None:
-        write_csv_records(csv_dir / "hadamard_dynamic_quant_int4.csv", CSV_HEADER, records)
+        write_csv_records(
+            csv_dir / "hadamard_dynamic_quant_int4.csv", CSV_HEADER, records
+        )
 
 
 if __name__ == "__main__":

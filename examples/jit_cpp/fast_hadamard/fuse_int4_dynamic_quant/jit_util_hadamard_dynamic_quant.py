@@ -22,7 +22,7 @@ DYNAMIC_QUANT_ARGTYPES = [
     ctypes.c_uint32,  # full_n
     ctypes.c_uint32,  # hadamard_n
     ctypes.c_uint32,  # log2_hadamard_n
-    ctypes.c_float,   # inv_sqrt_hadamard_n
+    ctypes.c_float,  # inv_sqrt_hadamard_n
 ]
 
 DEFAULT_BLOCK_DIM = 4
@@ -71,7 +71,9 @@ def load_lib(lib_path, block_dim=DEFAULT_BLOCK_DIM):
         if hadamard_n & (hadamard_n - 1) != 0:
             raise ValueError(f"hadamard_n must be a power of two, got {hadamard_n}")
         if full_n % hadamard_n != 0:
-            raise ValueError(f"full_n ({full_n}) must be divisible by hadamard_n ({hadamard_n})")
+            raise ValueError(
+                f"full_n ({full_n}) must be divisible by hadamard_n ({hadamard_n})"
+            )
 
         kernel(
             max(1, int(block_dim)),

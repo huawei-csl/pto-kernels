@@ -23,15 +23,15 @@ constexpr unsigned Y_PONG = X_PONG + X_BUFFER_BYTES + 0x100;
 constexpr unsigned EVEN_BASE = Y_PONG + Y_BUFFER_BYTES + 0x100;
 constexpr unsigned ODD_BASE = EVEN_BASE + UB_HALF_BYTES + 0x100;
 constexpr unsigned SCALE_BASE = ODD_BASE + UB_HALF_BYTES + 0x100;
-constexpr unsigned REDUCE_TMP_BASE = SCALE_BASE + MAX_DYNAMIC_SAMPLES_PER_LOAD * sizeof(float) + 0x100;
+constexpr unsigned REDUCE_TMP_BASE =
+    SCALE_BASE + MAX_DYNAMIC_SAMPLES_PER_LOAD * sizeof(float) + 0x100;
 constexpr unsigned ROWMAX_BASE = REDUCE_TMP_BASE + X_BUFFER_BYTES + 0x100;
 constexpr unsigned ROWMIN_BASE =
     ROWMAX_BASE + MAX_DYNAMIC_SAMPLES_PER_LOAD * sizeof(half) + 0x100;
 static_assert(ODD_BASE + UB_HALF_BYTES <= UB_USABLE_BYTES,
               "Fused Hadamard+quantize UB layout exceeds usable UB.");
-static_assert(SCALE_BASE +
-                  MAX_DYNAMIC_SAMPLES_PER_LOAD * sizeof(float) <=
-              UB_USABLE_BYTES,
+static_assert(SCALE_BASE + MAX_DYNAMIC_SAMPLES_PER_LOAD * sizeof(float) <=
+                  UB_USABLE_BYTES,
               "Dynamic quant scale UB layout exceeds usable UB.");
 static_assert(REDUCE_TMP_BASE + X_BUFFER_BYTES <= UB_USABLE_BYTES,
               "Dynamic quant reduce-temp UB layout exceeds usable UB.");
@@ -485,8 +485,7 @@ AICORE void runTFastHadamardDynamicQuant(__gm__ InputT *x, __gm__ OutputT *y,
   }
 
   using OutShapeDim5 = pto::Shape<1, 1, 1, 1, ELEMENTS_PER_TILE / 2>;
-  using ScaleShapeDim5 =
-      pto::Shape<1, 1, 1, 1, MAX_DYNAMIC_SAMPLES_PER_LOAD>;
+  using ScaleShapeDim5 = pto::Shape<1, 1, 1, 1, MAX_DYNAMIC_SAMPLES_PER_LOAD>;
   using StridDim5 = pto::Stride<1, 1, 1, 1, 1>;
   using OutGlobal = pto::GlobalTensor<OutputT, OutShapeDim5, StridDim5>;
   using ScaleGlobal = pto::GlobalTensor<float, ScaleShapeDim5, StridDim5>;
@@ -541,14 +540,11 @@ AICORE void runTFastHadamardDynamicQuant(__gm__ InputT *x, __gm__ OutputT *y,
     TASSIGN(yGlobal, (y + (current_tile.gm_offset >> 1)));
 
     const uint32_t row_index_base = current_tile.gm_offset / full_n;
-    using BulkTile =
-        Tile<TileType::Vec, InputT, MAX_DYNAMIC_SAMPLES_PER_LOAD,
-             ELEMENTS_PER_TILE,
-             BLayout::RowMajor, -1, -1>;
+    using BulkTile = Tile<TileType::Vec, InputT, MAX_DYNAMIC_SAMPLES_PER_LOAD,
+                          ELEMENTS_PER_TILE, BLayout::RowMajor, -1, -1>;
     using BulkQuantTile =
         Tile<TileType::Vec, OutputT, MAX_DYNAMIC_SAMPLES_PER_LOAD,
-             ELEMENTS_PER_TILE / 2,
-             BLayout::RowMajor, -1, -1>;
+             ELEMENTS_PER_TILE / 2, BLayout::RowMajor, -1, -1>;
     using ReduceTmpTile =
         Tile<TileType::Vec, InputT, MAX_DYNAMIC_SAMPLES_PER_LOAD,
              ELEMENTS_PER_TILE, BLayout::RowMajor, -1, -1>;
@@ -605,8 +601,7 @@ AICORE void runTFastHadamardDynamicQuant(__gm__ InputT *x, __gm__ OutputT *y,
 
     TCVT(scaleTile, rowMaxTileRm, RoundMode::CAST_RINT);
     pipe_barrier(PIPE_V);
-    TMULS(scaleTile, scaleTile,
-          inv_sqrt_hadamard_n / scale_divisor);
+    TMULS(scaleTile, scaleTile, inv_sqrt_hadamard_n / scale_divisor);
     pipe_barrier(PIPE_V);
 
     TMULS(rowMinTileRm, rowMaxTileRm, (InputT)0.0f);
@@ -694,8 +689,7 @@ __global__ AICORE void fast_hadamard_dynamic_quant_fp16_to_int4(
   const uint32_t vid = get_block_idx() * get_subblockdim() + get_subblockid();
   runTFastHadamardDynamicQuant<half, int8_t>(
       (__gm__ half *)x, (__gm__ int8_t *)y, (__gm__ float *)row_scales, batch,
-      full_n, hadamard_n, log2_hadamard_n, inv_sqrt_hadamard_n, num_cores,
-      vid);
+      full_n, hadamard_n, log2_hadamard_n, inv_sqrt_hadamard_n, num_cores, vid);
 #else
   (void)x;
   (void)y;
@@ -724,8 +718,7 @@ extern "C" void call_fused_kernel(uint32_t blockDim, void *stream, uint8_t *x,
 extern "C" void call_dynamic_quant_kernel(uint32_t blockDim, void *stream,
                                           uint8_t *x, uint8_t *y,
                                           float *row_scales, uint32_t batch,
-                                          uint32_t full_n,
-                                          uint32_t hadamard_n,
+                                          uint32_t full_n, uint32_t hadamard_n,
                                           uint32_t log2_hadamard_n,
                                           float inv_sqrt_hadamard_n) {
   blockDim = blockDim * 2;

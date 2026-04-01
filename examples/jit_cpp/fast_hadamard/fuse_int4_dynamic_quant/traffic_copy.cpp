@@ -36,8 +36,8 @@ AICORE void runTFlatCopy(__gm__ T *dst, __gm__ T *src, uint32_t count,
   using ShapeDim5 = pto::Shape<1, 1, 1, 1, kElementsPerTile>;
   using StridDim5 = pto::Stride<1, 1, 1, 1, 1>;
   using GlobalData = pto::GlobalTensor<T, ShapeDim5, StridDim5>;
-  using CopyTile = Tile<TileType::Vec, T, 1, kElementsPerTile, BLayout::RowMajor,
-                        -1, -1>;
+  using CopyTile =
+      Tile<TileType::Vec, T, 1, kElementsPerTile, BLayout::RowMajor, -1, -1>;
 
   set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
   set_flag(PIPE_V, PIPE_MTE2, EVENT_ID1);
@@ -94,9 +94,8 @@ __global__ AICORE void traffic_copy_bytes(__gm__ void *src, __gm__ void *dst,
 
   const uint32_t num_cores = get_block_num() * get_subblockdim();
   const uint32_t vid = get_block_idx() * get_subblockdim() + get_subblockid();
-  runTFlatCopy<int8_t, COPY_TILE_BYTES>((__gm__ int8_t *)dst,
-                                        (__gm__ int8_t *)src, byte_count,
-                                        num_cores, vid);
+  runTFlatCopy<int8_t, COPY_TILE_BYTES>(
+      (__gm__ int8_t *)dst, (__gm__ int8_t *)src, byte_count, num_cores, vid);
 #else
   (void)src;
   (void)dst;

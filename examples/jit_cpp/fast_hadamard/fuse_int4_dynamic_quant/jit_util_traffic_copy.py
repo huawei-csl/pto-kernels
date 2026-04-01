@@ -27,8 +27,9 @@ def load_lib(lib_path, block_dim=1):
         TRAFFIC_COPY_ARGTYPES,
     )
 
-    def traffic_copy_func(src, dst, byte_count=None, *, block_dim=resolved_block_dim,
-                          stream_ptr=None):
+    def traffic_copy_func(
+        src, dst, byte_count=None, *, block_dim=resolved_block_dim, stream_ptr=None
+    ):
         if src.dtype != dst.dtype:
             raise TypeError("src and dst must have the same dtype.")
         if src.device != dst.device:

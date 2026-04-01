@@ -1,4 +1,5 @@
 """Test fused Hadamard + dynamic symmetric int4 quantization kernel."""
+
 import math
 from pathlib import Path
 
@@ -10,9 +11,7 @@ from fuse_int4_dynamic_quant.jit_util_hadamard_dynamic_quant import (
     jit_compile,
 )
 
-KERNEL_CPP = str(
-    Path(__file__).resolve().parent / "fast_hadamard_dynamic_quant.cpp"
-)
+KERNEL_CPP = str(Path(__file__).resolve().parent / "fast_hadamard_dynamic_quant.cpp")
 DEVICE = "npu:0"
 
 
