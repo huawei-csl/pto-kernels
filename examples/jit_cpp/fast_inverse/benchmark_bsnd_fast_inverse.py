@@ -68,6 +68,39 @@ def make_minus_identity(matrix_size: int, device: str) -> torch.Tensor:
     return minus_identity
 
 
+def chunk_metadata_from_cu_seqlens(
+    cu_seqlens: torch.Tensor,
+    chunk_size: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    cu_seqlens_np = cu_seqlens.detach().cpu().numpy().astype(np.int64, copy=False)
+    seq_starts = cu_seqlens_np[:-1]
+    seq_lens = cu_seqlens_np[1:] - seq_starts
+    seq_num_chunks = (seq_lens + chunk_size - 1) // chunk_size
+    total_chunks = int(seq_num_chunks.sum())
+
+    chunk_indices = np.empty(total_chunks, dtype=np.int32)
+    chunk_valid_sizes = np.empty(total_chunks, dtype=np.int32)
+    cursor = 0
+    for seq_start, seq_len, num_chunks in zip(seq_starts, seq_lens, seq_num_chunks):
+        num_chunks_int = int(num_chunks)
+        local_offsets = np.arange(num_chunks_int, dtype=np.int64) * chunk_size
+        next_cursor = cursor + num_chunks_int
+        chunk_indices[cursor:next_cursor] = (seq_start + local_offsets).astype(
+            np.int32,
+            copy=False,
+        )
+        chunk_valid_sizes[cursor:next_cursor] = np.minimum(
+            chunk_size,
+            seq_len - local_offsets,
+        ).astype(np.int32, copy=False)
+        cursor = next_cursor
+
+    return (
+        torch.from_numpy(chunk_indices).to(device=cu_seqlens.device),
+        torch.from_numpy(chunk_valid_sizes).to(device=cu_seqlens.device),
+    )
+
+
 def random_chunk_mats(
     total_chunks: int,
     num_heads: int,
@@ -104,7 +137,7 @@ def build_uniform_varlen_input(
     batch_size: int,
     seqlen: int,
     chunk_size: int,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     total_tokens = batch_size * seqlen
     packed_input = fixed_input.reshape(1, total_tokens, fixed_input.shape[2], chunk_size).contiguous()
     cu_seqlens = torch.arange(
@@ -114,15 +147,7 @@ def build_uniform_varlen_input(
         dtype=torch.int32,
         device=fixed_input.device,
     )
-    chunk_indices = torch.arange(
-        0,
-        total_tokens,
-        chunk_size,
-        dtype=torch.int32,
-        device=fixed_input.device,
-    )
-    chunk_valid_sizes = torch.full_like(chunk_indices, chunk_size)
-    return packed_input, cu_seqlens, chunk_indices, chunk_valid_sizes
+    return packed_input, cu_seqlens
 
 
 def sample_true_varlen_lengths(
@@ -151,7 +176,7 @@ def build_true_varlen_input(
     chunk_size: int,
     scale: float,
     device: str,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     cu_seqlens = np.cumsum([0, *seq_lens], dtype=np.int64)
     num_chunks = sum((seq_len + chunk_size - 1) // chunk_size for seq_len in seq_lens)
     chunk_mats = random_chunk_mats(
@@ -167,8 +192,6 @@ def build_true_varlen_input(
         dtype=torch.half,
         device=device,
     )
-    chunk_indices: list[int] = []
-    chunk_valid_sizes: list[int] = []
     chunk_idx = 0
     token_row = 0
 
@@ -183,16 +206,12 @@ def build_true_varlen_input(
                     head_idx,
                     :actual_size,
                 ] = chunk[head_idx, :actual_size, :actual_size]
-            chunk_indices.append(token_row)
-            chunk_valid_sizes.append(actual_size)
             token_row += actual_size
             chunk_idx += 1
 
     return (
         packed_input.contiguous(),
         torch.tensor(cu_seqlens.tolist(), dtype=torch.int32, device=device),
-        torch.tensor(chunk_indices, dtype=torch.int32, device=device),
-        torch.tensor(chunk_valid_sizes, dtype=torch.int32, device=device),
     )
 
 
@@ -222,14 +241,19 @@ def make_fixed_runner(
 def make_varlen_runner(
     tri_inv_func,
     tensor_in: torch.Tensor,
-    chunk_indices: torch.Tensor,
-    chunk_valid_sizes: torch.Tensor,
+    cu_seqlens: torch.Tensor,
 ) -> tuple[callable, torch.Tensor]:
     matrix_size = tensor_in.shape[-1]
     num_bsnd_heads = tensor_in.shape[-2]
-    num_matrices = chunk_indices.numel() * num_bsnd_heads
+    seq_lens = cu_seqlens[1:].to(torch.int64) - cu_seqlens[:-1].to(torch.int64)
+    num_chunks = ((seq_lens + matrix_size - 1) // matrix_size).sum().item()
+    num_matrices = int(num_chunks) * num_bsnd_heads
     tensor_out = torch.empty_like(tensor_in, dtype=torch.float32)
     minus_identity = make_minus_identity(matrix_size, str(tensor_in.device))
+    chunk_indices, chunk_valid_sizes = chunk_metadata_from_cu_seqlens(
+        cu_seqlens,
+        matrix_size,
+    )
 
     def run():
         tri_inv_func(
@@ -492,7 +516,7 @@ def main() -> None:
             num_heads=args.H,
             chunk_size=args.chunk_size,
         )
-        varlen_input, cu_seqlens, chunk_indices, chunk_valid_sizes = build_uniform_varlen_input(
+        varlen_input, cu_seqlens = build_uniform_varlen_input(
             fixed_input,
             batch_size=args.B,
             seqlen=seqlen,
@@ -505,8 +529,7 @@ def main() -> None:
         varlen_run, varlen_out = make_varlen_runner(
             tri_inv_func,
             varlen_input,
-            chunk_indices,
-            chunk_valid_sizes,
+            cu_seqlens,
         )
 
         fixed_run()
@@ -579,7 +602,7 @@ def main() -> None:
 
         for sample_idx in range(args.true_varlen_samples):
             seq_lens = sample_true_varlen_lengths(args.B, total_tokens, rng)
-            packed_input, cu_seqlens, chunk_indices, chunk_valid_sizes = build_true_varlen_input(
+            packed_input, cu_seqlens = build_true_varlen_input(
                 seq_lens=seq_lens,
                 num_heads=args.H,
                 chunk_size=args.chunk_size,
@@ -589,8 +612,7 @@ def main() -> None:
             varlen_run_true, _ = make_varlen_runner(
                 tri_inv_func,
                 packed_input,
-                chunk_indices,
-                chunk_valid_sizes,
+                cu_seqlens,
             )
             times_ms = benchmark_ms(
                 varlen_run_true,

@@ -93,6 +93,40 @@ def _make_minus_identity(matrix_size: int, device: str) -> torch.Tensor:
     return I_neg
 
 
+def _chunk_metadata_from_cu_seqlens(
+    cu_seqlens: torch.Tensor | list[int],
+    chunk_size: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    if isinstance(cu_seqlens, torch.Tensor):
+        cu_seqlens_np = cu_seqlens.detach().cpu().numpy().astype(np.int64, copy=False)
+    else:
+        cu_seqlens_np = np.asarray(cu_seqlens, dtype=np.int64)
+
+    seq_starts = cu_seqlens_np[:-1]
+    seq_lens = cu_seqlens_np[1:] - seq_starts
+    seq_num_chunks = (seq_lens + chunk_size - 1) // chunk_size
+    total_chunks = int(seq_num_chunks.sum())
+
+    chunk_indices = np.empty(total_chunks, dtype=np.int32)
+    chunk_valid_sizes = np.empty(total_chunks, dtype=np.int32)
+    cursor = 0
+    for seq_start, seq_len, num_chunks in zip(seq_starts, seq_lens, seq_num_chunks):
+        num_chunks_int = int(num_chunks)
+        local_offsets = np.arange(num_chunks_int, dtype=np.int64) * chunk_size
+        next_cursor = cursor + num_chunks_int
+        chunk_indices[cursor:next_cursor] = (seq_start + local_offsets).astype(
+            np.int32,
+            copy=False,
+        )
+        chunk_valid_sizes[cursor:next_cursor] = np.minimum(
+            chunk_size,
+            seq_len - local_offsets,
+        ).astype(np.int32, copy=False)
+        cursor = next_cursor
+
+    return torch.from_numpy(chunk_indices), torch.from_numpy(chunk_valid_sizes)
+
+
 def _run_kernel(tri_inv_func, U_fp16: torch.Tensor):
     """
     Allocate output, build -I, run kernel, return fp64 CPU result.
@@ -116,36 +150,39 @@ def _run_kernel(tri_inv_func, U_fp16: torch.Tensor):
 def _run_kernel_bsnd(
     tri_inv_func,
     U_bsnd_fp16: torch.Tensor,
-    chunk_indices: torch.Tensor | None = None,
-    chunk_valid_sizes: torch.Tensor | None = None,
+    cu_seqlens: torch.Tensor | None = None,
 ):
     """
     Run the kernel in BSND mode and return fp64 CPU result.
 
     U_bsnd_fp16 : (B, S, N, D) half tensor on NPU where each (D, D) block
                   along the S dimension is one matrix to invert.
-    chunk_indices : optional int32 tensor containing the unpadded row start of
-                    each valid chunk for varlen BSND inputs.
-    chunk_valid_sizes : optional int32 tensor containing the runtime size of
-                        each chunk for varlen BSND inputs.
+    cu_seqlens : optional int32 tensor containing cumulative sequence lengths
+                 for varlen BSND inputs.
     """
     matrix_size = U_bsnd_fp16.shape[-1]
     num_bsnd_heads = U_bsnd_fp16.shape[-2]
-    if chunk_indices is not None and chunk_valid_sizes is not None:
-        num_matrices = chunk_indices.numel() * num_bsnd_heads
+    if cu_seqlens is not None:
+        seq_lens = cu_seqlens[1:].to(torch.int64) - cu_seqlens[:-1].to(torch.int64)
+        num_chunks = ((seq_lens + matrix_size - 1) // matrix_size).sum().item()
+        num_matrices = int(num_chunks) * num_bsnd_heads
     else:
         num_matrices = U_bsnd_fp16.numel() // (matrix_size * matrix_size)
     device = U_bsnd_fp16.device
 
     tensor_out = torch.zeros_like(U_bsnd_fp16, dtype=torch.float32)
     I_neg = _make_minus_identity(matrix_size, str(device))
-    if chunk_indices is not None:
-        chunk_indices = chunk_indices.to(device=device, dtype=torch.int32).contiguous()
-    if chunk_valid_sizes is not None:
-        chunk_valid_sizes = chunk_valid_sizes.to(
-            device=device,
-            dtype=torch.int32,
-        ).contiguous()
+    if cu_seqlens is not None:
+        cu_seqlens = cu_seqlens.to(device=device, dtype=torch.int32).contiguous()
+        chunk_indices, chunk_valid_sizes = _chunk_metadata_from_cu_seqlens(
+            cu_seqlens,
+            matrix_size,
+        )
+        chunk_indices = chunk_indices.to(device=device).contiguous()
+        chunk_valid_sizes = chunk_valid_sizes.to(device=device).contiguous()
+    else:
+        chunk_indices = None
+        chunk_valid_sizes = None
 
     torch.npu.synchronize()
     tri_inv_func(
@@ -173,8 +210,6 @@ def _build_varlen_bsnd_case(
     Build an unpadded BSND tensor plus reference output for varlen testing.
 
     Each sequence contributes only its true rows in the packed BSND tensor.
-    chunk_indices records the unpadded row offset of every valid chunk and
-    chunk_valid_sizes stores each chunk's runtime size.
     """
     seq_lens = [
         cu_seqlens[i + 1] - cu_seqlens[i]
@@ -195,9 +230,6 @@ def _build_varlen_bsnd_case(
     U = torch.zeros((1, total_tokens, num_heads, chunk_size), dtype=torch.float64)
     golden = torch.zeros((1, total_tokens, num_heads, chunk_size), dtype=torch.float64)
 
-    chunk_indices: list[int] = []
-    chunk_valid_sizes: list[int] = []
-    chunk_infos: list[tuple[int, int, int]] = []
     chunk_idx = 0
 
     for seq_idx in range(len(cu_seqlens) - 1):
@@ -221,17 +253,12 @@ def _build_varlen_bsnd_case(
                     :actual_size,
                 ] = invert_single_chunk_ref(U_valid)
 
-            chunk_indices.append(chunk_start)
-            chunk_valid_sizes.append(actual_size)
-            chunk_infos.append((chunk_start, chunk_start, actual_size))
             chunk_idx += 1
 
     return (
         U,
         golden,
-        chunk_infos,
-        torch.tensor(chunk_indices, dtype=torch.int32),
-        torch.tensor(chunk_valid_sizes, dtype=torch.int32),
+        torch.tensor(cu_seqlens, dtype=torch.int32),
     )
 
 
@@ -318,7 +345,7 @@ def _test_case_bsnd_varlen(
     ftol: float,
     label: str,
 ):
-    U_varlen, golden, chunk_infos, chunk_indices, chunk_valid_sizes = _build_varlen_bsnd_case(
+    U_varlen, golden, cu_seqlens_tensor = _build_varlen_bsnd_case(
         gen,
         cu_seqlens,
         N,
@@ -327,23 +354,9 @@ def _test_case_bsnd_varlen(
     actual_varlen = _run_kernel_bsnd(
         tri_inv_func,
         U_varlen.to(torch.half).npu(),
-        chunk_indices=chunk_indices.npu(),
-        chunk_valid_sizes=chunk_valid_sizes.npu(),
+        cu_seqlens=cu_seqlens_tensor.npu(),
     )
-
-    actual = torch.zeros_like(golden)
-    for input_row, token_row, actual_size in chunk_infos:
-        actual[
-            :,
-            token_row : token_row + actual_size,
-            :,
-            :actual_size,
-        ] = actual_varlen[
-            :,
-            input_row : input_row + actual_size,
-            :,
-            :actual_size,
-        ]
+    actual = actual_varlen
 
     frob = torch.sqrt(
         torch.sum((golden - actual) ** 2) / torch.sum(golden ** 2)
