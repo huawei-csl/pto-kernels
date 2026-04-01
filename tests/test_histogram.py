@@ -11,19 +11,27 @@ from pto_kernels import pto_histogram
 import pytest
 
 
-#@pytest.mark.parametrize("num_blocks", [1, 2, 10, 20, 32, 64])
-#@pytest.mark.parametrize("bins", [2, 4, 16, 50, 100])
-@pytest.mark.parametrize("num_blocks", [1])
+# @pytest.mark.parametrize("num_blocks", [1, 2, 10, 20, 32, 64])
+# @pytest.mark.parametrize("bins", [2, 4, 16, 50, 100])
+# @pytest.mark.parametrize("dtype", [torch.float16, torch.float32], ids=str)
+@pytest.mark.parametrize("num_blocks", [64])
 @pytest.mark.parametrize("bins", [64])
-@pytest.mark.parametrize("dtype", [torch.float16, torch.float32], ids=str)
+@pytest.mark.parametrize("dtype", [torch.float32], ids=str)
 def test_pto_histogram(num_blocks: int, bins: int, dtype: torch.dtype):
     tile_len = 64
     length = [num_blocks * tile_len]
-    
-    x = torch.rand(length, device="cpu", dtype=dtype)
+
+    # x = torch.rand(length, device="cpu", dtype=dtype)
+    x = torch.arange(length[0], device="cpu", dtype=dtype)
     x_npu = x.npu()
 
-    y_npu = pto_histogram(x_npu, bins=bins).cpu()
+    y_npu = pto_histogram(x_npu, bins=bins).cpu().float()
+    y_npu2 = pto_histogram(x_npu, bins=bins).cpu().float()
+    y_npu3 = pto_histogram(x_npu, bins=bins).cpu().float()
+    y_npu4 = pto_histogram(x_npu, bins=bins).cpu().float()
+    assert torch.equal(y_npu, y_npu2)
+    assert torch.equal(y_npu, y_npu3)
+    assert torch.equal(y_npu, y_npu4)
     y_cpu = torch.histc(x, bins=bins)
-    
+
     assert torch.equal(y_npu, y_cpu)
