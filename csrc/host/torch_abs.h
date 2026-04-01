@@ -9,11 +9,16 @@ for the full License text.
 #pragma once
 
 #include <ATen/ATen.h>
+#include <acl/acl.h>
 #include <torch/library.h>
 
-#include "aclrtlaunch_vabs_fp16.h"
-#include "aclrtlaunch_vabs_fp32.h"
 #include "utils.h"
+
+extern "C" aclError aclrtlaunch_vabs_fp16(uint32_t blockDim, aclrtStream stream,
+                                          void* x, void* z, uint32_t in_length);
+
+extern "C" aclError aclrtlaunch_vabs_fp32(uint32_t blockDim, aclrtStream stream,
+                                          void* x, void* z, uint32_t in_length);
 
 namespace pto_isa_ops {
 

@@ -11,9 +11,16 @@ for the full License text.
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
-#include "aclrtlaunch_simple_matmul_fp16.h"
-#include "aclrtlaunch_simple_matmul_fp32.h"
 #include "utils.h"
+
+extern "C" aclError aclrtlaunch_simple_matmul_fp16(uint32_t blockDim,
+                                                   aclrtStream stream, void* a,
+                                                   void* b, void* c,
+                                                   uint32_t matrix_size);
+extern "C" aclError aclrtlaunch_simple_matmul_fp32(uint32_t blockDim,
+                                                   aclrtStream stream, void* a,
+                                                   void* b, void* c,
+                                                   uint32_t matrix_size);
 
 namespace pto_isa_ops {
 

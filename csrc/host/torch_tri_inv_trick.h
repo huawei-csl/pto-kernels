@@ -11,8 +11,11 @@ for the full License text.
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
-#include "aclrtlaunch_tri_inv_trick_fp16.h"
 #include "utils.h"
+
+extern "C" aclError aclrtlaunch_tri_inv_trick_fp16(
+    uint32_t blockDim, aclrtStream stream, void* M_inv, void* M, void* I_neg,
+    uint32_t matrix_size, uint32_t max_block_size);
 
 namespace pto_isa_ops {
 

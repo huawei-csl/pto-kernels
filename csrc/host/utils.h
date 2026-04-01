@@ -25,6 +25,8 @@ namespace pto_isa_ops {
 // Copied from tools/build/asc_rt/ascendc_runtime.h to avoid dependency on the
 // header file. See
 // https://gitcode.com/cann/asc-devkit/blob/v8.5.0/tools/build/asc_rt/ascendc_runtime.h
+#define ACLRT_LAUNCH_KERNEL(kernel_name) aclrtlaunch_##kernel_name
+
 #define ASSERT_RETVAL(exp, ret)         \
   do {                                  \
     if (!(exp)) {                       \
