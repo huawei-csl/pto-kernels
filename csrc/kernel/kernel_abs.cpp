@@ -26,22 +26,21 @@ using namespace pto;
  * @param z Output tensor
  * @param total_length Number of elements
  */
-template <typename T, unsigned TILE_LEN>
+template <typename T, unsigned TILE_SIZE>
 AICORE void runTAbs(__gm__ T* x, __gm__ T* z, uint32_t total_length) {
   // define GlobalData on global memory with shape and stride
-  using ShapeDim5 = pto::Shape<1, 1, 1, TILE_LEN, TILE_LEN>;
-  using StrideDim5 = pto::Stride<1, 1, 1, TILE_LEN, 1>;
+  using ShapeDim5 = pto::Shape<1, 1, 1, 1, TILE_SIZE>;
+  using StrideDim5 = pto::Stride<1, 1, 1, 1, 1>;
   using GlobalData = pto::GlobalTensor<T, ShapeDim5, StrideDim5>;
 
   // Define TileData on UB buffer with static shape and dynamic mask
   using TileData =
-      Tile<TileType::Vec, T, TILE_LEN, TILE_LEN, BLayout::RowMajor>;
+      Tile<TileType::Vec, T, 1, TILE_SIZE, BLayout::RowMajor>;
 
   set_mask_norm();
   set_vector_mask(-1, -1);
 
   constexpr unsigned UB_ZERO_ADDR = 0;
-  constexpr unsigned TILE_SIZE = TILE_LEN * TILE_LEN;
   constexpr unsigned TILE_SIZE_IN_BYTES = TILE_SIZE * sizeof(T);
   const uint32_t num_tiles = total_length / TILE_SIZE;
   const uint32_t max_num_tiles_per_block_ = num_tiles / get_block_num();
@@ -106,19 +105,18 @@ AICORE void runTAbs(__gm__ T* x, __gm__ T* z, uint32_t total_length) {
   const int32_t remaining_elements = total_length % TILE_SIZE;
   if (remaining_elements && block_idx == get_block_num() - 1) {
     // Handle the remaining elements
-    const int32_t remaining_cols = remaining_elements / TILE_LEN;
 
     // Define global data for the tail tile
-    using TailShapeDim5 = pto::Shape<1, 1, 1, -1, TILE_LEN>;
+    using TailShapeDim5 = pto::Shape<1, 1, 1, 1, -1>;
     using TailGlobalData = pto::GlobalTensor<T, TailShapeDim5, StrideDim5>;
-    TailGlobalData xTailGlobal(x + num_tiles * TILE_SIZE, {remaining_cols});
-    TailGlobalData zTailGlobal(z + num_tiles * TILE_SIZE, {remaining_cols});
+    TailGlobalData xTailGlobal(x + num_tiles * TILE_SIZE, {remaining_elements});
+    TailGlobalData zTailGlobal(z + num_tiles * TILE_SIZE, {remaining_elements});
 
     // Define tail tile UB buffers
-    using TailTileData = Tile<TileType::Vec, T, TILE_LEN, TILE_LEN,
-                              BLayout::RowMajor, -1, TILE_LEN>;
-    TailTileData xTailTile(remaining_cols);
-    TailTileData zTailTile(remaining_cols);
+    using TailTileData = Tile<TileType::Vec, T, 1, TILE_SIZE,
+                              BLayout::RowMajor, 1, -1>;
+    TailTileData xTailTile(remaining_elements);
+    TailTileData zTailTile(remaining_elements);
 
     // Assign the UB address for tail tile
     TASSIGN(xTailTile, UB_ZERO_ADDR);
