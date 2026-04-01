@@ -144,7 +144,7 @@ if(PIP_INSTALL)
                LINK_FLAGS "-Wl,-rpath,\${ORIGIN}/lib")
 
   # install dynamic libraries under site-packages/pto_kernels/libs
-  install(TARGETS no_workspace_kernel LIBRARY DESTINATION pto_kernels/lib)
+  install(FILES ${NO_WORKSPACE_KERNEL_LIB} DESTINATION pto_kernels/lib)
 else()
   message(STATUS ">>>======================================================")
   message(STATUS ">>> Ignoring dynamic libraries COPY inside Python wheel.")
