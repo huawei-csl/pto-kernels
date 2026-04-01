@@ -23,6 +23,7 @@ The implementation uses a two-phase recursive approach on Ascend cube cores:
 | `fast_inverse.cpp` | Thin JIT wrapper: includes the kernel and exposes `call_kernel` |
 | `jit_util_fast_inverse.py` | Compiles the kernel with `bisheng` and loads it via `ctypes` |
 | `run_fast_inverse.py` | Correctness test suite, including aligned and varlen BSND coverage |
+| `run_fast_inverse_varlen_like_triton.py` | Standalone varlen runner that mirrors the Triton `test_solve_tril_varlen` input generation in pure PyTorch |
 | `benchmark_bsnd_fast_inverse.py` | Benchmarks fixed BSND vs varlen-uniform BSND and plots effective bandwidth |
 
 ### Usage
@@ -37,6 +38,23 @@ python run_fast_inverse.py
 The script compiles `fast_inverse.cpp` on first run (takes ~60 s), then
 executes correctness checks across a range of matrix sizes (16, 32, 64, 128)
 and batch configurations.
+
+To run the standalone Triton-like varlen coverage:
+
+```bash
+export PTO_LIB_PATH=/sources/pto-isa/
+
+cd examples/jit_cpp/fast_inverse
+python run_fast_inverse_varlen_like_triton.py
+```
+
+That script:
+
+- uses the same varlen case list and input-generation structure as
+  `flash-linear-attention/tests/ops/test_solve_tril.py::test_solve_tril_varlen`
+- keeps PTO inputs in `float16`
+- emulates `chunk_scaled_dot_kkt_fwd` in PyTorch because Triton is not available
+- prints a simple pytest-like `PASS` / `FAIL` report plus a final summary
 
 ### Supported matrix sizes
 
