@@ -100,8 +100,6 @@ def main():
 
     warmup = args.warmup
     repeats = args.repeats
-    trials = getattr(args, "trials", 1)
-
     header = (
         f"{'batch':>6s}  {'N':>6s}  {'had_n':>5s}"
         f"  {'traffic':>8s}  {'static':>8s}  {'dynamic':>8s}"
