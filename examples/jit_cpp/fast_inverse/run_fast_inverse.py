@@ -93,38 +93,18 @@ def _make_minus_identity(matrix_size: int, device: str) -> torch.Tensor:
     return I_neg
 
 
-def _chunk_metadata_from_cu_seqlens(
+def _count_varlen_chunks(
     cu_seqlens: torch.Tensor | list[int],
     chunk_size: int,
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> int:
     if isinstance(cu_seqlens, torch.Tensor):
-        cu_seqlens_np = cu_seqlens.detach().cpu().numpy().astype(np.int64, copy=False)
+        cu_seqlens_list = [int(x) for x in cu_seqlens.detach().cpu().tolist()]
     else:
-        cu_seqlens_np = np.asarray(cu_seqlens, dtype=np.int64)
-
-    seq_starts = cu_seqlens_np[:-1]
-    seq_lens = cu_seqlens_np[1:] - seq_starts
-    seq_num_chunks = (seq_lens + chunk_size - 1) // chunk_size
-    total_chunks = int(seq_num_chunks.sum())
-
-    chunk_indices = np.empty(total_chunks, dtype=np.int32)
-    chunk_valid_sizes = np.empty(total_chunks, dtype=np.int32)
-    cursor = 0
-    for seq_start, seq_len, num_chunks in zip(seq_starts, seq_lens, seq_num_chunks):
-        num_chunks_int = int(num_chunks)
-        local_offsets = np.arange(num_chunks_int, dtype=np.int64) * chunk_size
-        next_cursor = cursor + num_chunks_int
-        chunk_indices[cursor:next_cursor] = (seq_start + local_offsets).astype(
-            np.int32,
-            copy=False,
-        )
-        chunk_valid_sizes[cursor:next_cursor] = np.minimum(
-            chunk_size,
-            seq_len - local_offsets,
-        ).astype(np.int32, copy=False)
-        cursor = next_cursor
-
-    return torch.from_numpy(chunk_indices), torch.from_numpy(chunk_valid_sizes)
+        cu_seqlens_list = [int(x) for x in cu_seqlens]
+    return sum(
+        (cu_seqlens_list[i + 1] - cu_seqlens_list[i] + chunk_size - 1) // chunk_size
+        for i in range(len(cu_seqlens_list) - 1)
+    )
 
 
 def _run_kernel(tri_inv_func, U_fp16: torch.Tensor):
@@ -163,9 +143,7 @@ def _run_kernel_bsnd(
     matrix_size = U_bsnd_fp16.shape[-1]
     num_bsnd_heads = U_bsnd_fp16.shape[-2]
     if cu_seqlens is not None:
-        seq_lens = cu_seqlens[1:].to(torch.int64) - cu_seqlens[:-1].to(torch.int64)
-        num_chunks = ((seq_lens + matrix_size - 1) // matrix_size).sum().item()
-        num_matrices = int(num_chunks) * num_bsnd_heads
+        num_matrices = _count_varlen_chunks(cu_seqlens, matrix_size) * num_bsnd_heads
     else:
         num_matrices = U_bsnd_fp16.numel() // (matrix_size * matrix_size)
     device = U_bsnd_fp16.device
@@ -174,15 +152,6 @@ def _run_kernel_bsnd(
     I_neg = _make_minus_identity(matrix_size, str(device))
     if cu_seqlens is not None:
         cu_seqlens = cu_seqlens.to(device=device, dtype=torch.int32).contiguous()
-        chunk_indices, chunk_valid_sizes = _chunk_metadata_from_cu_seqlens(
-            cu_seqlens,
-            matrix_size,
-        )
-        chunk_indices = chunk_indices.to(device=device).contiguous()
-        chunk_valid_sizes = chunk_valid_sizes.to(device=device).contiguous()
-    else:
-        chunk_indices = None
-        chunk_valid_sizes = None
 
     torch.npu.synchronize()
     tri_inv_func(
@@ -192,8 +161,7 @@ def _run_kernel_bsnd(
         matrix_size,
         num_matrices,
         num_bsnd_heads,
-        chunk_indices=chunk_indices,
-        chunk_valid_sizes=chunk_valid_sizes,
+        cu_seqlens=cu_seqlens,
     )
     torch.npu.synchronize()
 

@@ -68,36 +68,14 @@ def make_minus_identity(matrix_size: int, device: str) -> torch.Tensor:
     return minus_identity
 
 
-def chunk_metadata_from_cu_seqlens(
+def count_varlen_chunks(
     cu_seqlens: torch.Tensor,
     chunk_size: int,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    cu_seqlens_np = cu_seqlens.detach().cpu().numpy().astype(np.int64, copy=False)
-    seq_starts = cu_seqlens_np[:-1]
-    seq_lens = cu_seqlens_np[1:] - seq_starts
-    seq_num_chunks = (seq_lens + chunk_size - 1) // chunk_size
-    total_chunks = int(seq_num_chunks.sum())
-
-    chunk_indices = np.empty(total_chunks, dtype=np.int32)
-    chunk_valid_sizes = np.empty(total_chunks, dtype=np.int32)
-    cursor = 0
-    for seq_start, seq_len, num_chunks in zip(seq_starts, seq_lens, seq_num_chunks):
-        num_chunks_int = int(num_chunks)
-        local_offsets = np.arange(num_chunks_int, dtype=np.int64) * chunk_size
-        next_cursor = cursor + num_chunks_int
-        chunk_indices[cursor:next_cursor] = (seq_start + local_offsets).astype(
-            np.int32,
-            copy=False,
-        )
-        chunk_valid_sizes[cursor:next_cursor] = np.minimum(
-            chunk_size,
-            seq_len - local_offsets,
-        ).astype(np.int32, copy=False)
-        cursor = next_cursor
-
-    return (
-        torch.from_numpy(chunk_indices).to(device=cu_seqlens.device),
-        torch.from_numpy(chunk_valid_sizes).to(device=cu_seqlens.device),
+) -> int:
+    cu_seqlens_list = [int(x) for x in cu_seqlens.detach().cpu().tolist()]
+    return sum(
+        (cu_seqlens_list[i + 1] - cu_seqlens_list[i] + chunk_size - 1) // chunk_size
+        for i in range(len(cu_seqlens_list) - 1)
     )
 
 
@@ -245,15 +223,9 @@ def make_varlen_runner(
 ) -> tuple[callable, torch.Tensor]:
     matrix_size = tensor_in.shape[-1]
     num_bsnd_heads = tensor_in.shape[-2]
-    seq_lens = cu_seqlens[1:].to(torch.int64) - cu_seqlens[:-1].to(torch.int64)
-    num_chunks = ((seq_lens + matrix_size - 1) // matrix_size).sum().item()
-    num_matrices = int(num_chunks) * num_bsnd_heads
+    num_matrices = count_varlen_chunks(cu_seqlens, matrix_size) * num_bsnd_heads
     tensor_out = torch.empty_like(tensor_in, dtype=torch.float32)
     minus_identity = make_minus_identity(matrix_size, str(tensor_in.device))
-    chunk_indices, chunk_valid_sizes = chunk_metadata_from_cu_seqlens(
-        cu_seqlens,
-        matrix_size,
-    )
 
     def run():
         tri_inv_func(
@@ -263,8 +235,7 @@ def make_varlen_runner(
             matrix_size,
             num_matrices,
             num_bsnd_heads,
-            chunk_indices=chunk_indices,
-            chunk_valid_sizes=chunk_valid_sizes,
+            cu_seqlens=cu_seqlens,
         )
 
     return run, tensor_out

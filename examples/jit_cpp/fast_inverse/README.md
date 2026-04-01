@@ -52,12 +52,11 @@ and batch configurations.
 
 ### Varlen BSND mode
 
-The standalone example also supports variable-length BSND inputs by padding each
-sequence to the next multiple of `D` and passing a `chunk_indices` tensor to the
-kernel. Each entry in `chunk_indices` is the padded row-start of one valid
-chunk. The kernel still inverts dense `D x D` tiles; the Python harness pads
-inputs before launch and slices the padded rows back away when validating the
-result.
+The standalone example also supports variable-length BSND inputs with the same
+external signature as the Triton reference path: callers provide packed BSND
+data plus `cu_seqlens`, and the PTO kernel derives each chunk row-start and
+tail size internally on NPU. The kernel still inverts dense `D x D` tiles, but
+tail chunks load/store only their valid prefix.
 
 ### Benchmark
 

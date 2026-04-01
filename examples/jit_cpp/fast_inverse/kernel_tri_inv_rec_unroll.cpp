@@ -31,21 +31,39 @@ AICORE inline uint32_t GetBSNDFixedTileOffset(uint32_t tile_id,
   return BSND_OFFSET(tile_id, num_bsnd_heads, matrix_size, matrix_size);
 }
 
+struct BSNDVarlenTileInfo {
+  uint32_t bsnd_offset;
+  uint32_t valid_size;
+};
+
 /*
- * For varlen BSND, chunk_indices stores the absolute row offset of each chunk
- * inside the unpadded BSND tensor. Each tile_id still enumerates chunk-major,
- * then head-major.
+ * For cu_seqlens-based varlen BSND, tile_id still enumerates chunk-major then
+ * head-major. We recover the owning sequence by scanning cu_seqlens and
+ * counting chunks per sequence.
  */
-AICORE inline uint32_t GetBSNDVarlenTileOffset(uint32_t tile_id,
-                                               uint32_t num_bsnd_heads,
-                                               uint32_t matrix_size,
-                                               __gm__ int32_t* chunk_indices) {
+AICORE inline BSNDVarlenTileInfo GetBSNDVarlenTileInfoFromCuSeqlens(
+    uint32_t tile_id, uint32_t num_bsnd_heads, uint32_t matrix_size,
+    __gm__ int32_t* cu_seqlens) {
   const uint32_t head_idx = tile_id % num_bsnd_heads;
   const uint32_t chunk_idx = tile_id / num_bsnd_heads;
-  const uint32_t chunk_row_start =
-      static_cast<uint32_t>(chunk_indices[chunk_idx]);
-  return chunk_row_start * num_bsnd_heads * matrix_size +
-         head_idx * matrix_size;
+
+  uint32_t seq_start = static_cast<uint32_t>(cu_seqlens[0]);
+  uint32_t accumulated_chunks = 0;
+  for (uint32_t seq_idx = 0;; ++seq_idx) {
+    const uint32_t seq_end = static_cast<uint32_t>(cu_seqlens[seq_idx + 1]);
+    const uint32_t seq_len = seq_end - seq_start;
+    const uint32_t seq_num_chunks = CeilDiv(seq_len, matrix_size);
+    if (chunk_idx < accumulated_chunks + seq_num_chunks) {
+      const uint32_t local_chunk_idx = chunk_idx - accumulated_chunks;
+      const uint32_t row_start = seq_start + local_chunk_idx * matrix_size;
+      const uint32_t valid_size =
+          min(static_cast<uint32_t>(seq_end - row_start), matrix_size);
+      return {row_start * num_bsnd_heads * matrix_size + head_idx * matrix_size,
+              valid_size};
+    }
+    accumulated_chunks += seq_num_chunks;
+    seq_start = seq_end;
+  }
 }
 
 /*
@@ -399,10 +417,7 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
                                          __gm__ InputT* M, __gm__ InputT* I_neg,
                                          uint32_t total_tiles,
                                          uint32_t num_bsnd_heads = 0,
-                                         __gm__ int32_t* chunk_indices =
-                                             nullptr,
-                                         __gm__ int32_t* chunk_valid_sizes =
-                                             nullptr) {
+                                         __gm__ int32_t* cu_seqlens = nullptr) {
   constexpr uint32_t TileLen = MatrixSize * MatrixSize;
   constexpr uint32_t FractalSize = 16;
   constexpr uint32_t NumL0Buffers = 2;
@@ -489,6 +504,9 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
   const uint32_t max_iters_per_aic =
       CeilDiv(total_tiles, (uint32_t)(NumTilesPerCubeIter * get_block_num()));
 
+  uint32_t bsnd_tile_offsets[NumTilesPerCubeIter] = {0};
+  uint32_t bsnd_tile_valid_sizes[NumTilesPerCubeIter] = {0};
+
   uint32_t next_tile_id_that_waits_for_pipe_fix_pipe_m = 0;
   set_flag(PIPE_FIX, PIPE_M,
            static_cast<event_t>(next_tile_id_that_waits_for_pipe_fix_pipe_m));
@@ -506,33 +524,32 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
          ++tile_id) {
       if constexpr (IsBSND) {
         const uint32_t global_tile_id = global_index + tile_id;
-        const uint32_t bsnd_offset =
-            chunk_indices != nullptr
-                ? GetBSNDVarlenTileOffset(global_tile_id, num_bsnd_heads,
-                                          MatrixSize, chunk_indices)
-                : GetBSNDFixedTileOffset(global_tile_id, num_bsnd_heads,
-                                         MatrixSize);
+        if (cu_seqlens != nullptr) {
+          const BSNDVarlenTileInfo tile_info = GetBSNDVarlenTileInfoFromCuSeqlens(
+              global_tile_id, num_bsnd_heads, MatrixSize, cu_seqlens);
+          bsnd_tile_offsets[tile_id] = tile_info.bsnd_offset;
+          bsnd_tile_valid_sizes[tile_id] = tile_info.valid_size;
+        } else {
+          bsnd_tile_offsets[tile_id] =
+              GetBSNDFixedTileOffset(global_tile_id, num_bsnd_heads, MatrixSize);
+          bsnd_tile_valid_sizes[tile_id] = MatrixSize;
+        }
+        const uint32_t bsnd_offset = bsnd_tile_offsets[tile_id];
+        const uint32_t valid_size = bsnd_tile_valid_sizes[tile_id];
         const int row_stride = static_cast<int>(MatrixSize * num_bsnd_heads);
         wait_flag(PIPE_M, PIPE_MTE2, static_cast<event_t>(tile_id));
-        if (chunk_valid_sizes != nullptr) {
-          const uint32_t chunk_idx = global_tile_id / num_bsnd_heads;
-          const uint32_t valid_size =
-              static_cast<uint32_t>(chunk_valid_sizes[chunk_idx]);
-          if (valid_size < MatrixSize) {
-            TileL1ABDyn Y_dyn_l1_tile(valid_size, valid_size);
-            TASSIGN(Y_dyn_l1_tile,
-                    0x0 + (5 + tile_id) * TileLen * sizeof(InputT));
-            GlobalTileInDyn M_global_in_dyn(
-                M + bsnd_offset, {1, 1, 1, valid_size, valid_size},
-                {1, 1, 1, row_stride, 1});
-            TLOAD(Y_dyn_l1_tile, M_global_in_dyn);
-            set_flag(PIPE_MTE2, PIPE_MTE1, static_cast<event_t>(tile_id));
-            wait_flag(PIPE_MTE2, PIPE_MTE1, static_cast<event_t>(tile_id));
-            TFILLPAD(Y_dyn_l1_tile, Y_dyn_l1_tile);
-          } else {
-            GlobalTileIn M_global_in(M + bsnd_offset, {}, {row_stride});
-            TLOAD(Y_l1_tile[tile_id], M_global_in);
-          }
+        if (valid_size < MatrixSize) {
+          TileL1ABDyn Y_dyn_l1_tile(valid_size, valid_size);
+          TASSIGN(Y_dyn_l1_tile,
+                  0x0 + (5 + tile_id) * TileLen * sizeof(InputT));
+          GlobalTileInDyn M_global_in_dyn(
+              M + bsnd_offset,
+              {1, 1, 1, static_cast<int>(valid_size), static_cast<int>(valid_size)},
+              {1, 1, 1, row_stride, 1});
+          TLOAD(Y_dyn_l1_tile, M_global_in_dyn);
+          set_flag(PIPE_MTE2, PIPE_MTE1, static_cast<event_t>(tile_id));
+          wait_flag(PIPE_MTE2, PIPE_MTE1, static_cast<event_t>(tile_id));
+          TFILLPAD(Y_dyn_l1_tile, Y_dyn_l1_tile);
         } else {
           GlobalTileIn M_global_in(M + bsnd_offset, {}, {row_stride});
           TLOAD(Y_l1_tile[tile_id], M_global_in);
@@ -560,43 +577,30 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
       set_flag(PIPE_M, PIPE_MTE2, static_cast<event_t>(tile_id));
 
       if constexpr (IsBSND) {
-        const uint32_t global_tile_id = global_index + tile_id;
-        const uint32_t bsnd_offset =
-            chunk_indices != nullptr
-                ? GetBSNDVarlenTileOffset(global_tile_id, num_bsnd_heads,
-                                          MatrixSize, chunk_indices)
-                : GetBSNDFixedTileOffset(global_tile_id, num_bsnd_heads,
-                                         MatrixSize);
+        const uint32_t bsnd_offset = bsnd_tile_offsets[tile_id];
+        const uint32_t valid_size = bsnd_tile_valid_sizes[tile_id];
         const int row_stride = static_cast<int>(MatrixSize * num_bsnd_heads);
-        if (chunk_valid_sizes != nullptr) {
-          const uint32_t chunk_idx = global_tile_id / num_bsnd_heads;
-          const uint32_t valid_size =
-              static_cast<uint32_t>(chunk_valid_sizes[chunk_idx]);
-          if (valid_size < MatrixSize) {
-            const event_t event_0 = static_cast<event_t>(tile_id);
-            const event_t event_1 =
-                static_cast<event_t>(tile_id + NumTilesPerCubeIter);
-            TileL0CDyn c_l0_tail_tile(valid_size, valid_size);
-            TASSIGN(c_l0_tail_tile,
-                    0x0 + final_c_buffer_index * TileLen * sizeof(OutputT));
-            if constexpr (final_c_buffer_index == 1) {
-              set_flag(PIPE_M, PIPE_FIX, event_1);
-              wait_flag(PIPE_M, PIPE_FIX, event_1);
-            } else {
-              set_flag(PIPE_M, PIPE_FIX, event_0);
-              wait_flag(PIPE_M, PIPE_FIX, event_0);
-            }
-            set_flag(PIPE_FIX, PIPE_MTE3, static_cast<event_t>(tile_id));
-            wait_flag(PIPE_FIX, PIPE_MTE3, static_cast<event_t>(tile_id));
-            GlobalTileOutDyn M_inv_global_out_dyn(
-                M_inv + bsnd_offset, {1, 1, 1, valid_size, valid_size},
-                {1, 1, 1, row_stride, 1});
-            TSTORE(M_inv_global_out_dyn, c_l0_tail_tile);
+        if (valid_size < MatrixSize) {
+          const event_t event_0 = static_cast<event_t>(tile_id);
+          const event_t event_1 =
+              static_cast<event_t>(tile_id + NumTilesPerCubeIter);
+          TileL0CDyn c_l0_tail_tile(valid_size, valid_size);
+          TASSIGN(c_l0_tail_tile,
+                  0x0 + final_c_buffer_index * TileLen * sizeof(OutputT));
+          if constexpr (final_c_buffer_index == 1) {
+            set_flag(PIPE_M, PIPE_FIX, event_1);
+            wait_flag(PIPE_M, PIPE_FIX, event_1);
           } else {
-            GlobalTileOut M_inv_global_out(M_inv + bsnd_offset, {},
-                                           {row_stride});
-            TSTORE(M_inv_global_out, c_l0_tile[final_c_buffer_index]);
+            set_flag(PIPE_M, PIPE_FIX, event_0);
+            wait_flag(PIPE_M, PIPE_FIX, event_0);
           }
+          set_flag(PIPE_FIX, PIPE_MTE3, static_cast<event_t>(tile_id));
+          wait_flag(PIPE_FIX, PIPE_MTE3, static_cast<event_t>(tile_id));
+          GlobalTileOutDyn M_inv_global_out_dyn(
+              M_inv + bsnd_offset,
+              {1, 1, 1, static_cast<int>(valid_size), static_cast<int>(valid_size)},
+              {1, 1, 1, row_stride, 1});
+          TSTORE(M_inv_global_out_dyn, c_l0_tail_tile);
         } else {
           GlobalTileOut M_inv_global_out(M_inv + bsnd_offset, {},
                                          {row_stride});
@@ -626,17 +630,17 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
  *
  * The input/output tensors stay unpadded. For tail chunks with size
  * `actual_size < MatrixSize`, the kernel:
- * 1. loads only the valid `actual_size x actual_size` prefix via dynamic TLOAD
- * 2. zero-fills the remaining rows/cols in-place via TFILLPAD_INPLACE
- * 3. runs the original dense recursive inverse on the materialized full tile
- * 4. stores only the valid `actual_size x actual_size` prefix back to GM
+ * 1. derives the chunk row-start and runtime size from `cu_seqlens`
+ * 2. loads only the valid `actual_size x actual_size` prefix via dynamic TLOAD
+ * 3. zero-fills the remaining rows/cols in-place via TFILLPAD_INPLACE
+ * 4. runs the original dense recursive inverse on the materialized full tile
+ * 5. stores only the valid `actual_size x actual_size` prefix back to GM
  */
 template <typename InputT, typename OutputT, uint32_t MatrixSize,
           uint32_t NumTilesPerCubeIter>
 AICORE inline void TriInvRecUnrollKernelBSNDVarlen(
     __gm__ OutputT* M_inv, __gm__ InputT* M, __gm__ InputT* I_neg,
-    uint32_t total_tiles, uint32_t num_bsnd_heads, __gm__ int32_t* chunk_indices,
-    __gm__ int32_t* chunk_valid_sizes) {
+    uint32_t total_tiles, uint32_t num_bsnd_heads, __gm__ int32_t* cu_seqlens) {
   constexpr uint32_t TileLen = MatrixSize * MatrixSize;
   constexpr uint32_t FractalSize = 16;
   constexpr uint32_t NumL0Buffers = 2;
@@ -732,11 +736,10 @@ AICORE inline void TriInvRecUnrollKernelBSNDVarlen(
                                (global_index + tile_id < total_tiles);
          ++tile_id) {
       const uint32_t global_tile_id = global_index + tile_id;
-      const uint32_t chunk_idx = global_tile_id / num_bsnd_heads;
-      const uint32_t valid_size =
-          static_cast<uint32_t>(chunk_valid_sizes[chunk_idx]);
-      const uint32_t bsnd_offset = GetBSNDVarlenTileOffset(
-          global_tile_id, num_bsnd_heads, MatrixSize, chunk_indices);
+      const BSNDVarlenTileInfo tile_info = GetBSNDVarlenTileInfoFromCuSeqlens(
+          global_tile_id, num_bsnd_heads, MatrixSize, cu_seqlens);
+      const uint32_t valid_size = tile_info.valid_size;
+      const uint32_t bsnd_offset = tile_info.bsnd_offset;
       const int row_stride = static_cast<int>(MatrixSize * num_bsnd_heads);
 
       if (valid_size == MatrixSize) {
@@ -794,14 +797,12 @@ template <typename InputT, typename OutputT, uint32_t MatrixSize,
 AICORE void runKernelTriInvRecUnroll(__gm__ OutputT* M_inv, __gm__ InputT* M,
                                      __gm__ InputT* I_neg, uint32_t total_tiles,
                                      uint32_t num_bsnd_heads = 0,
-                                     __gm__ int32_t* chunk_indices = nullptr,
-                                     __gm__ int32_t* chunk_valid_sizes =
-                                         nullptr) {
+                                     __gm__ int32_t* cu_seqlens = nullptr) {
 #if (__CHECK_FEATURE_AT_PRECOMPILE) || \
     (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))
   TriInvRecUnrollKernel<InputT, OutputT, MatrixSize, NumTilesPerCubeIter,
                         IsBSND>(M_inv, M, I_neg, total_tiles, num_bsnd_heads,
-                                chunk_indices, chunk_valid_sizes);
+                                cu_seqlens);
 #else
 // Nothing to do on AIV
 #endif
@@ -813,30 +814,29 @@ AICORE void run_tri_inv_rec_unroll(__gm__ float* tensor_out,
                                    __gm__ InputT* minus_identity_in,
                                    uint32_t matrix_size, uint32_t num_matrices,
                                    uint32_t num_bsnd_heads,
-                                   __gm__ int32_t* chunk_indices,
-                                   __gm__ int32_t* chunk_valid_sizes) {
+                                   __gm__ int32_t* cu_seqlens) {
   static_assert(std::is_same_v<InputT, half>,
                 "tri_inv_rec_unroll supports only fp16.");
   switch (matrix_size) {
     case 16:
       runKernelTriInvRecUnroll<InputT, float, 16, NumTilesPerCubeIter, IsBSND>(
-          tensor_out, tensor_in, minus_identity_in, num_matrices,
-          num_bsnd_heads, chunk_indices, chunk_valid_sizes);
+          tensor_out, tensor_in, minus_identity_in, num_matrices, num_bsnd_heads,
+          cu_seqlens);
       break;
     case 32:
       runKernelTriInvRecUnroll<InputT, float, 32, NumTilesPerCubeIter, IsBSND>(
-          tensor_out, tensor_in, minus_identity_in, num_matrices,
-          num_bsnd_heads, chunk_indices, chunk_valid_sizes);
+          tensor_out, tensor_in, minus_identity_in, num_matrices, num_bsnd_heads,
+          cu_seqlens);
       break;
     case 64:
       runKernelTriInvRecUnroll<InputT, float, 64, NumTilesPerCubeIter, IsBSND>(
-          tensor_out, tensor_in, minus_identity_in, num_matrices,
-          num_bsnd_heads, chunk_indices, chunk_valid_sizes);
+          tensor_out, tensor_in, minus_identity_in, num_matrices, num_bsnd_heads,
+          cu_seqlens);
       break;
     case 128:
       runKernelTriInvRecUnroll<InputT, float, 128, NumTilesPerCubeIter, IsBSND>(
-          tensor_out, tensor_in, minus_identity_in, num_matrices,
-          num_bsnd_heads, chunk_indices, chunk_valid_sizes);
+          tensor_out, tensor_in, minus_identity_in, num_matrices, num_bsnd_heads,
+          cu_seqlens);
       break;
   }
 }
@@ -844,47 +844,40 @@ AICORE void run_tri_inv_rec_unroll(__gm__ float* tensor_out,
 extern "C" __global__ AICORE void tri_inv_rec_unroll_fp16(
     __gm__ void* tensor_out, __gm__ void* tensor_in,
     __gm__ void* minus_identity_in, uint32_t matrix_size, uint32_t num_matrices,
-    uint32_t num_bsnd_heads, __gm__ void* chunk_indices,
-    __gm__ void* chunk_valid_sizes) {
+    uint32_t num_bsnd_heads, __gm__ void* cu_seqlens) {
   if (num_bsnd_heads == 0) {
     if (num_matrices <= get_block_num()) {
       run_tri_inv_rec_unroll<half, 1, false>(
           (__gm__ float*)tensor_out, (__gm__ half*)tensor_in,
           (__gm__ half*)minus_identity_in, matrix_size, num_matrices,
-          num_bsnd_heads, (__gm__ int32_t*)chunk_indices,
-          (__gm__ int32_t*)chunk_valid_sizes);
+          num_bsnd_heads, (__gm__ int32_t*)cu_seqlens);
     } else if (num_matrices <= 2 * get_block_num()) {
       run_tri_inv_rec_unroll<half, 2, false>(
           (__gm__ float*)tensor_out, (__gm__ half*)tensor_in,
           (__gm__ half*)minus_identity_in, matrix_size, num_matrices,
-          num_bsnd_heads, (__gm__ int32_t*)chunk_indices,
-          (__gm__ int32_t*)chunk_valid_sizes);
+          num_bsnd_heads, (__gm__ int32_t*)cu_seqlens);
     } else {
       run_tri_inv_rec_unroll<half, 4, false>(
           (__gm__ float*)tensor_out, (__gm__ half*)tensor_in,
           (__gm__ half*)minus_identity_in, matrix_size, num_matrices,
-          num_bsnd_heads, (__gm__ int32_t*)chunk_indices,
-          (__gm__ int32_t*)chunk_valid_sizes);
+          num_bsnd_heads, (__gm__ int32_t*)cu_seqlens);
     }
   } else {
     if (num_matrices <= get_block_num()) {
       run_tri_inv_rec_unroll<half, 1, true>(
           (__gm__ float*)tensor_out, (__gm__ half*)tensor_in,
           (__gm__ half*)minus_identity_in, matrix_size, num_matrices,
-          num_bsnd_heads, (__gm__ int32_t*)chunk_indices,
-          (__gm__ int32_t*)chunk_valid_sizes);
+          num_bsnd_heads, (__gm__ int32_t*)cu_seqlens);
     } else if (num_matrices <= 2 * get_block_num()) {
       run_tri_inv_rec_unroll<half, 2, true>(
           (__gm__ float*)tensor_out, (__gm__ half*)tensor_in,
           (__gm__ half*)minus_identity_in, matrix_size, num_matrices,
-          num_bsnd_heads, (__gm__ int32_t*)chunk_indices,
-          (__gm__ int32_t*)chunk_valid_sizes);
+          num_bsnd_heads, (__gm__ int32_t*)cu_seqlens);
     } else {
       run_tri_inv_rec_unroll<half, 4, true>(
           (__gm__ float*)tensor_out, (__gm__ half*)tensor_in,
           (__gm__ half*)minus_identity_in, matrix_size, num_matrices,
-          num_bsnd_heads, (__gm__ int32_t*)chunk_indices,
-          (__gm__ int32_t*)chunk_valid_sizes);
+          num_bsnd_heads, (__gm__ int32_t*)cu_seqlens);
     }
   }
 }
