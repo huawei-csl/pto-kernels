@@ -65,6 +65,13 @@ def load_host_metadata_lib():
         ctypes.c_void_p,
     ]
     lib.build_varlen_chunk_metadata_host_cpp.restype = None
+    lib.build_chunk_sequence_prefix_host_cpp.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+    ]
+    lib.build_chunk_sequence_prefix_host_cpp.restype = None
     _HOST_LIB = lib
     return lib
 
@@ -100,3 +107,27 @@ def build_varlen_chunk_metadata_cpp(
         _torch_to_ctypes(chunk_valid_sizes),
     )
     return chunk_indices, chunk_valid_sizes
+
+
+def build_chunk_sequence_prefix_cpp(
+    cu_seqlens: torch.Tensor | list[int],
+    chunk_size: int,
+) -> torch.Tensor:
+    lib = load_host_metadata_lib()
+    if isinstance(cu_seqlens, torch.Tensor):
+        cu_seqlens_cpu = cu_seqlens.detach().to(device="cpu", dtype=torch.int32).contiguous()
+    else:
+        cu_seqlens_cpu = torch.tensor(cu_seqlens, dtype=torch.int32)
+
+    if cu_seqlens_cpu.numel() < 2:
+        raise ValueError("cu_seqlens must contain at least 2 entries.")
+
+    num_sequences = cu_seqlens_cpu.numel() - 1
+    chunk_sequence_prefix = torch.empty(num_sequences + 2, dtype=torch.int32)
+    lib.build_chunk_sequence_prefix_host_cpp(
+        _torch_to_ctypes(cu_seqlens_cpu),
+        num_sequences,
+        chunk_size,
+        _torch_to_ctypes(chunk_sequence_prefix),
+    )
+    return chunk_sequence_prefix

@@ -42,7 +42,10 @@ import torch
 import torch.nn.functional as F
 import torch_npu  # noqa: F401
 
-from host_metadata_util import build_varlen_chunk_metadata_cpp
+from host_metadata_util import (
+    build_chunk_sequence_prefix_cpp,
+    build_varlen_chunk_metadata_cpp,
+)
 from jit_util_fast_inverse import jit_compile
 
 
@@ -296,6 +299,33 @@ def make_varlen_runner_host_metadata(
     return run, tensor_out
 
 
+def make_varlen_runner_prefix_metadata(
+    tri_inv_func,
+    tensor_in: torch.Tensor,
+    cu_seqlens: torch.Tensor,
+    chunk_sequence_prefix: torch.Tensor,
+) -> tuple[callable, torch.Tensor]:
+    matrix_size = tensor_in.shape[-1]
+    num_bsnd_heads = tensor_in.shape[-2]
+    num_matrices = count_varlen_chunks(cu_seqlens, matrix_size) * num_bsnd_heads
+    tensor_out = torch.empty_like(tensor_in, dtype=torch.float32)
+    minus_identity = make_minus_identity(matrix_size, str(tensor_in.device))
+
+    def run():
+        tri_inv_func(
+            tensor_out,
+            tensor_in,
+            minus_identity,
+            matrix_size,
+            num_matrices,
+            num_bsnd_heads,
+            cu_seqlens=cu_seqlens,
+            chunk_sequence_prefix=chunk_sequence_prefix,
+        )
+
+    return run, tensor_out
+
+
 def benchmark_ms(
     fn,
     warmup_iters: int,
@@ -338,6 +368,16 @@ def build_host_metadata_on_npu(
     )
 
 
+def build_prefix_metadata_on_npu(
+    cu_seqlens: torch.Tensor,
+    chunk_size: int,
+    device: str,
+) -> torch.Tensor:
+    return build_chunk_sequence_prefix_cpp(cu_seqlens, chunk_size).to(
+        device=device
+    ).contiguous()
+
+
 def benchmark_host_metadata_prep_ms(
     cu_seqlens: torch.Tensor,
     chunk_size: int,
@@ -351,6 +391,24 @@ def benchmark_host_metadata_prep_ms(
         torch.npu.synchronize()
         start = time.perf_counter()
         build_host_metadata_on_npu(cu_seqlens, chunk_size, device)
+        torch.npu.synchronize()
+        times_ms.append((time.perf_counter() - start) * 1000.0)
+    return times_ms
+
+
+def benchmark_prefix_metadata_prep_ms(
+    cu_seqlens: torch.Tensor,
+    chunk_size: int,
+    benchmark_iters: int,
+    device: str,
+) -> list[float]:
+    times_ms: list[float] = []
+    cache = torch.ones(DEFAULT_CACHE_SIZE, dtype=torch.int8, device=device)
+    for _ in range(benchmark_iters):
+        cache.zero_()
+        torch.npu.synchronize()
+        start = time.perf_counter()
+        build_prefix_metadata_on_npu(cu_seqlens, chunk_size, device)
         torch.npu.synchronize()
         times_ms.append((time.perf_counter() - start) * 1000.0)
     return times_ms
@@ -419,6 +477,12 @@ def plot_bandwidth(plot_path: Path, rows: list[dict[str, float | int | str]], ba
         if row["inverse_type"] == "bsnd-varlen-uniform"
         and row["metadata_strategy"] == "host-cpp"
     ]
+    varlen_prefix_rows = [
+        row
+        for row in rows
+        if row["inverse_type"] == "bsnd-varlen-uniform"
+        and row["metadata_strategy"] == "device-chunk-prefix"
+    ]
 
     fig, ax = plt.subplots(figsize=(7.5, 5.0))
     ax.plot(
@@ -441,6 +505,13 @@ def plot_bandwidth(plot_path: Path, rows: list[dict[str, float | int | str]], ba
         marker="^",
         linewidth=2,
         label="BSND varlen host metadata",
+    )
+    ax.plot(
+        [int(row["T"]) / 1000.0 for row in varlen_prefix_rows],
+        [float(row["bw_gbs"]) for row in varlen_prefix_rows],
+        marker="d",
+        linewidth=2,
+        label="BSND varlen prefix metadata",
     )
     ax.set_xlabel("Sequence length T (K)")
     ax.set_ylabel("Effective bandwidth (GB/s)")
@@ -610,6 +681,17 @@ def main() -> None:
             varlen_input,
             cu_seqlens,
         )
+        chunk_sequence_prefix = build_prefix_metadata_on_npu(
+            cu_seqlens_cpu,
+            args.chunk_size,
+            NPU_DEVICE,
+        )
+        varlen_run_prefix, varlen_out_prefix = make_varlen_runner_prefix_metadata(
+            tri_inv_func,
+            varlen_input,
+            cu_seqlens,
+            chunk_sequence_prefix,
+        )
         chunk_indices, chunk_valid_sizes = build_host_metadata_on_npu(
             cu_seqlens_cpu,
             args.chunk_size,
@@ -624,6 +706,7 @@ def main() -> None:
 
         fixed_run()
         varlen_run_device()
+        varlen_run_prefix()
         varlen_run_host()
         torch.npu.synchronize()
 
@@ -634,6 +717,11 @@ def main() -> None:
         )
         packed_varlen_out_device = transpose_valid_chunks(
             varlen_out_device,
+            cu_seqlens,
+            args.chunk_size,
+        )
+        packed_varlen_out_prefix = transpose_valid_chunks(
+            varlen_out_prefix,
             cu_seqlens,
             args.chunk_size,
         )
@@ -650,9 +738,15 @@ def main() -> None:
             packed_fixed_out,
             packed_varlen_out_host,
         )
+        max_abs_diff_prefix, rel_frob_diff_prefix = accuracy_metrics(
+            packed_fixed_out,
+            packed_varlen_out_prefix,
+        )
         print(
             f"  accuracy vs fixed: device max_abs_diff={max_abs_diff_device:.3e}, "
             f"device rel_frob_diff={rel_frob_diff_device:.3e}, "
+            f"prefix max_abs_diff={max_abs_diff_prefix:.3e}, "
+            f"prefix rel_frob_diff={rel_frob_diff_prefix:.3e}, "
             f"host max_abs_diff={max_abs_diff_host:.3e}, "
             f"host rel_frob_diff={rel_frob_diff_host:.3e}"
         )
@@ -665,6 +759,18 @@ def main() -> None:
         )
         varlen_device_times_ms = benchmark_ms(
             varlen_run_device,
+            warmup_iters=args.warmup,
+            benchmark_iters=args.repeats,
+            device=NPU_DEVICE,
+        )
+        prefix_metadata_times_ms = benchmark_prefix_metadata_prep_ms(
+            cu_seqlens_cpu,
+            args.chunk_size,
+            benchmark_iters=args.repeats,
+            device=NPU_DEVICE,
+        )
+        varlen_prefix_kernel_times_ms = benchmark_ms(
+            varlen_run_prefix,
             warmup_iters=args.warmup,
             benchmark_iters=args.repeats,
             device=NPU_DEVICE,
@@ -726,6 +832,30 @@ def main() -> None:
         }
         add_bandwidth_fields(varlen_device_row)
 
+        avg_prefix_metadata_us = int(round(np.mean(prefix_metadata_times_ms) * 1000.0))
+        avg_prefix_kernel_us = int(round(np.mean(varlen_prefix_kernel_times_ms) * 1000.0))
+        varlen_prefix_row = {
+            "inverse_type": "bsnd-varlen-uniform",
+            "metadata_strategy": "device-chunk-prefix",
+            "dtype": "fp16",
+            "B": args.B,
+            "T": seqlen,
+            "aggregated_T": total_tokens,
+            "padded_T": total_tokens,
+            "H": args.H,
+            "numel": varlen_input.numel(),
+            "valid_numel": total_tokens * args.H * args.chunk_size,
+            "chunk_size": args.chunk_size,
+            "time_us": avg_prefix_metadata_us + avg_prefix_kernel_us,
+            "kernel_time_us": avg_prefix_kernel_us,
+            "metadata_time_us": avg_prefix_metadata_us,
+            "max_abs_diff_to_fixed": max_abs_diff_prefix,
+            "rel_frob_diff_to_fixed": rel_frob_diff_prefix,
+            "sample_id": "",
+            "seq_lens": ",".join([str(seqlen)] * args.B),
+        }
+        add_bandwidth_fields(varlen_prefix_row)
+
         avg_host_metadata_us = int(round(np.mean(host_metadata_times_ms) * 1000.0))
         avg_host_kernel_us = int(round(np.mean(varlen_host_kernel_times_ms) * 1000.0))
         varlen_host_row = {
@@ -750,11 +880,14 @@ def main() -> None:
         }
         add_bandwidth_fields(varlen_host_row)
 
-        rows.extend([fixed_row, varlen_device_row, varlen_host_row])
+        rows.extend([fixed_row, varlen_device_row, varlen_prefix_row, varlen_host_row])
         print(
             f"  fixed: time_us={fixed_row['time_us']}, bw_gbs={fixed_row['bw_gbs']:.2f} | "
             f"varlen-device: time_us={varlen_device_row['time_us']}, "
             f"bw_gbs={varlen_device_row['bw_gbs']:.2f} | "
+            f"varlen-prefix: time_us={varlen_prefix_row['time_us']} "
+            f"(meta={varlen_prefix_row['metadata_time_us']}, kernel={varlen_prefix_row['kernel_time_us']}), "
+            f"bw_gbs={varlen_prefix_row['bw_gbs']:.2f} | "
             f"varlen-host: time_us={varlen_host_row['time_us']} "
             f"(meta={varlen_host_row['metadata_time_us']}, kernel={varlen_host_row['kernel_time_us']}), "
             f"bw_gbs={varlen_host_row['bw_gbs']:.2f}"
@@ -762,8 +895,13 @@ def main() -> None:
         device_metadata_overhead_us = (
             varlen_device_row["kernel_time_us"] - varlen_host_row["kernel_time_us"]
         )
+        prefix_metadata_overhead_us = (
+            varlen_device_row["kernel_time_us"] - varlen_prefix_row["kernel_time_us"]
+        )
         print(
-            f"  metadata overhead comparison: device_in_kernel_delta_us={device_metadata_overhead_us}, "
+            f"  metadata overhead comparison: device_vs_host_kernel_delta_us={device_metadata_overhead_us}, "
+            f"device_vs_prefix_kernel_delta_us={prefix_metadata_overhead_us}, "
+            f"prefix_metadata_us={varlen_prefix_row['metadata_time_us']}, "
             f"host_cpp_metadata_us={varlen_host_row['metadata_time_us']}"
         )
 

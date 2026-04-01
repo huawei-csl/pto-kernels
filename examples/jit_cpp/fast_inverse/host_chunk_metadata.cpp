@@ -40,3 +40,19 @@ extern "C" void build_varlen_chunk_metadata_host_cpp(
     }
   }
 }
+
+extern "C" void build_chunk_sequence_prefix_host_cpp(
+    const int32_t* cu_seqlens, uint32_t num_sequences, uint32_t chunk_size,
+    int32_t* chunk_sequence_prefix) {
+  chunk_sequence_prefix[0] = static_cast<int32_t>(num_sequences);
+  chunk_sequence_prefix[1] = 0;
+
+  uint32_t total_chunks = 0;
+  for (uint32_t seq_idx = 0; seq_idx < num_sequences; ++seq_idx) {
+    const uint32_t seq_start = static_cast<uint32_t>(cu_seqlens[seq_idx]);
+    const uint32_t seq_end = static_cast<uint32_t>(cu_seqlens[seq_idx + 1]);
+    const uint32_t seq_len = seq_end - seq_start;
+    total_chunks += (seq_len + chunk_size - 1) / chunk_size;
+    chunk_sequence_prefix[seq_idx + 2] = static_cast<int32_t>(total_chunks);
+  }
+}

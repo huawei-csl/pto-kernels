@@ -28,6 +28,8 @@ for the full License text.
  *                        N (number of heads) for BSND layout.
  * @param cu_seqlens  Optional int32 pointer used only for varlen BSND when the
  *                    device kernel derives chunk metadata itself.
+ * @param chunk_sequence_prefix Optional int32 pointer containing a compact
+ *                              per-sequence cumulative chunk-count prefix.
  * @param chunk_indices Optional int32 pointer containing per-chunk row starts
  *                      for the host-precomputed varlen path.
  * @param chunk_valid_sizes Optional int32 pointer containing each chunk's
@@ -37,8 +39,10 @@ extern "C" void call_kernel(uint32_t blockDim, void* stream, void* tensor_out,
                              void* tensor_in, void* minus_identity_in,
                              uint32_t matrix_size, uint32_t num_matrices,
                              uint32_t num_bsnd_heads, void* cu_seqlens,
+                             void* chunk_sequence_prefix,
                              void* chunk_indices, void* chunk_valid_sizes) {
   tri_inv_rec_unroll_fp16<<<blockDim, nullptr, stream>>>(
       tensor_out, tensor_in, minus_identity_in, matrix_size, num_matrices,
-      num_bsnd_heads, cu_seqlens, chunk_indices, chunk_valid_sizes);
+      num_bsnd_heads, cu_seqlens, chunk_sequence_prefix, chunk_indices,
+      chunk_valid_sizes);
 }
