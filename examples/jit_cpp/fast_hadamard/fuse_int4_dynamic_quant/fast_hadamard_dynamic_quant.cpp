@@ -231,24 +231,6 @@ AICORE void runTileBlockwiseHadamardInPlace(unsigned tile_base,
   }
 }
 
-template <typename TileDataS>
-AICORE float computeRowMaxAbsScalar(TileDataS &src, uint32_t n) {
-  float max_abs = 0.0f;
-  for (uint32_t col = 0; col < n; ++col) {
-    const float value = (float)src.GetValue(col);
-    const float abs_value = value >= 0.0f ? value : -value;
-    if (abs_value > max_abs) {
-      max_abs = abs_value;
-    }
-  }
-  return max_abs;
-}
-
-template <typename TileDataS>
-AICORE float computeRowMaxAbs(TileDataS &src, uint32_t n) {
-  return computeRowMaxAbsScalar<TileDataS>(src, n);
-}
-
 template <typename InputT, typename OutputT>
 AICORE void runTFastHadamardQuant(__gm__ InputT *x, __gm__ OutputT *y,
                                   __gm__ InputT *group_scales,
