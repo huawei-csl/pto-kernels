@@ -22,11 +22,6 @@ namespace pto_isa_ops {
 
 #define DEVICE_TYPE c10::DeviceType::PrivateUse1
 
-// Copied from tools/build/asc_rt/ascendc_runtime.h to avoid dependency on the
-// header file. See
-// https://gitcode.com/cann/asc-devkit/blob/v8.5.0/tools/build/asc_rt/ascendc_runtime.h
-#define ACLRT_LAUNCH_KERNEL(kernel_name) aclrtlaunch_##kernel_name
-
 #define ASSERT_RETVAL(exp, ret)         \
   do {                                  \
     if (!(exp)) {                       \
@@ -134,18 +129,18 @@ constexpr auto ConvertTypes(Ts&... args) {
   return std::make_tuple(ConvertType(args)...);
 }
 
-#define EXEC_KERNEL_CMD(kernel_name, blockdim, ...)                            \
-  do {                                                                         \
-    auto acl_stream = c10_npu::getCurrentNPUStream().stream(false);            \
-    auto converted_params = pto_isa_ops::ConvertTypes(__VA_ARGS__);            \
-    auto acl_call = [acl_stream, blockdim, converted_params]() -> int {        \
-      std::apply(                                                              \
-          [&](auto&&... params) {                                              \
-            ACLRT_LAUNCH_KERNEL(kernel_name)(blockdim, acl_stream, params...); \
-          },                                                                   \
-          converted_params);                                                   \
-      return 0;                                                                \
-    };                                                                         \
-    at_npu::native::OpCommand::RunOpApi(#kernel_name, acl_call);               \
+#define EXEC_KERNEL_CMD(kernel_name, blockdim, ...)                     \
+  do {                                                                  \
+    auto acl_stream = c10_npu::getCurrentNPUStream().stream(false);     \
+    auto converted_params = pto_isa_ops::ConvertTypes(__VA_ARGS__);     \
+    auto acl_call = [acl_stream, blockdim, converted_params]() -> int { \
+      std::apply(                                                       \
+          [&](auto&&... params) {                                       \
+            kernel_name(blockdim, acl_stream, params...);               \
+          },                                                            \
+          converted_params);                                            \
+      return 0;                                                         \
+    };                                                                  \
+    at_npu::native::OpCommand::RunOpApi(#kernel_name, acl_call);        \
   } while (false)
 }  // namespace pto_isa_ops

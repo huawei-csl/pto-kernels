@@ -14,10 +14,10 @@ for the full License text.
 
 #include "utils.h"
 
-extern "C" aclError aclrtlaunch_tri_inv_rec_unroll_fp16(
+extern "C" aclError tri_inv_rec_unroll_fp16(
     uint32_t blockDim, aclrtStream stream, void* M_inv, void* M, void* I_neg,
     uint32_t matrix_size, uint32_t num_matrices, uint32_t num_bsnd_heads);
-extern "C" aclError aclrtlaunch_tri_inv_rec_unroll_fp32(
+extern "C" aclError tri_inv_rec_unroll_fp32(
     uint32_t blockDim, aclrtStream stream, void* M_inv, void* M, void* I_neg,
     uint32_t matrix_size, uint32_t num_matrices, uint32_t num_bsnd_heads);
 

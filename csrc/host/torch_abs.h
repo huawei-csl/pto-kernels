@@ -14,11 +14,11 @@ for the full License text.
 
 #include "utils.h"
 
-extern "C" aclError aclrtlaunch_vabs_fp16(uint32_t blockDim, aclrtStream stream,
-                                          void* x, void* z, uint32_t in_length);
+extern "C" aclError vabs_fp16(uint32_t blockDim, aclrtStream stream, void* x,
+                              void* z, uint32_t in_length);
 
-extern "C" aclError aclrtlaunch_vabs_fp32(uint32_t blockDim, aclrtStream stream,
-                                          void* x, void* z, uint32_t in_length);
+extern "C" aclError vabs_fp32(uint32_t blockDim, aclrtStream stream, void* x,
+                              void* z, uint32_t in_length);
 
 namespace pto_isa_ops {
 

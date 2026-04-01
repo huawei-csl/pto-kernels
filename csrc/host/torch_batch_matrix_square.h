@@ -14,14 +14,12 @@ for the full License text.
 
 #include "utils.h"
 
-extern "C" aclError aclrtlaunch_batch_matrix_square_fp16(uint32_t blockDim,
-                                                         aclrtStream stream,
-                                                         void* z, void* x,
-                                                         uint32_t matrix_size);
-extern "C" aclError aclrtlaunch_batch_matrix_square_fp32(uint32_t blockDim,
-                                                         aclrtStream stream,
-                                                         void* z, void* x,
-                                                         uint32_t matrix_size);
+extern "C" aclError batch_matrix_square_fp16(uint32_t blockDim,
+                                             aclrtStream stream, void* z,
+                                             void* x, uint32_t matrix_size);
+extern "C" aclError batch_matrix_square_fp32(uint32_t blockDim,
+                                             aclrtStream stream, void* z,
+                                             void* x, uint32_t matrix_size);
 
 namespace pto_isa_ops {
 
