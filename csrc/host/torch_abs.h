@@ -31,7 +31,8 @@ at::Tensor run_abs(const at::Tensor& x) {
   const uint32_t total_len = x.numel();
   // FIXME: tile length is fixed to 64 for now
   constexpr uint32_t TILE_SIZE = 64;
-  const uint32_t block_dim = (total_len + TILE_SIZE - 1) / TILE_SIZE;
+  uint32_t block_dim = total_len / TILE_SIZE;
+  block_dim = block_dim == 0 ? 1 : block_dim;
 
   // FIXME: re-implement with persistent kernel logic
   if (block_dim > 2 << 16) {

@@ -26,7 +26,7 @@ using namespace pto;
  * @param z Output tensor
  * @param total_length Number of elements
  */
-template <typename T, unsigned TILE_SIZE>
+template <typename T, uint32_t TILE_SIZE>
 AICORE void runTAbs(__gm__ T* x, __gm__ T* z, uint32_t total_length) {
   // define GlobalData on global memory with shape and stride
   using ShapeDim5 = pto::Shape<1, 1, 1, 1, TILE_SIZE>;
@@ -40,8 +40,8 @@ AICORE void runTAbs(__gm__ T* x, __gm__ T* z, uint32_t total_length) {
   set_mask_norm();
   set_vector_mask(-1, -1);
 
-  constexpr unsigned UB_ZERO_ADDR = 0;
-  constexpr unsigned TILE_SIZE_IN_BYTES = TILE_SIZE * sizeof(T);
+  constexpr uint32_t UB_ZERO_ADDR = 0;
+  constexpr uint32_t TILE_SIZE_IN_BYTES = TILE_SIZE * sizeof(T);
   const uint32_t num_tiles = total_length / TILE_SIZE;
   const uint32_t max_num_tiles_per_block_ = num_tiles / get_block_num();
   const uint32_t global_offset =
@@ -64,7 +64,7 @@ AICORE void runTAbs(__gm__ T* x, __gm__ T* z, uint32_t total_length) {
 
   // Loop for full size tiles
   for (uint32_t i = 0; i < max_num_tiles_per_block_; i++) {
-    const unsigned inner_offset = global_offset + i * TILE_SIZE;
+    const uint32_t inner_offset = global_offset + i * TILE_SIZE;
     // Prepare read GM offset
     TASSIGN(xGlobal, x + inner_offset);
     TASSIGN(zGlobal, z + inner_offset);
@@ -107,20 +107,20 @@ AICORE void runTAbs(__gm__ T* x, __gm__ T* z, uint32_t total_length) {
     // Handle the remaining elements
 
     // Define global data for the tail tile
-    using TailShapeDim5 = pto::Shape<1, 1, 1, 1, -1>;
+    using TailShapeDim5 = pto::Shape<1, 1, 1, 1, DYNAMIC>;
     using TailGlobalData = pto::GlobalTensor<T, TailShapeDim5, StrideDim5>;
     TailGlobalData xTailGlobal(x + num_tiles * TILE_SIZE, {remaining_elements});
     TailGlobalData zTailGlobal(z + num_tiles * TILE_SIZE, {remaining_elements});
 
     // Define tail tile UB buffers
     using TailTileData = Tile<TileType::Vec, T, 1, TILE_SIZE,
-                              BLayout::RowMajor, 1, -1>;
+                              BLayout::RowMajor, 1, DYNAMIC>;
     TailTileData xTailTile(remaining_elements);
     TailTileData zTailTile(remaining_elements);
 
     // Assign the UB address for tail tile
     TASSIGN(xTailTile, UB_ZERO_ADDR);
-    TASSIGN(zTailTile, UB_ZERO_ADDR + TILE_SIZE_IN_BYTES);
+    TASSIGN(zTailTile, UB_ZERO_ADDR + 3*TILE_SIZE_IN_BYTES);
 
     // MTE2 (load) wait for vector core to be done
     // (previous iteration's computation)
@@ -161,13 +161,13 @@ AICORE void runTAbs(__gm__ T* x, __gm__ T* z, uint32_t total_length) {
 
 extern "C" __global__ AICORE void vabs_fp16(GM_ADDR x, GM_ADDR z,
                                             uint32_t in_length) {
-  constexpr unsigned TILE_LEN = 64;
+  constexpr uint32_t TILE_LEN = 64;
   runTAbs<half, TILE_LEN>((__gm__ half*)x, (__gm__ half*)z, in_length);
 }
 
 extern "C" __global__ AICORE void vabs_fp32(GM_ADDR x, GM_ADDR z,
                                             uint32_t in_length) {
-  constexpr unsigned TILE_LEN = 64;
+  constexpr uint32_t TILE_LEN = 64;
   runTAbs<float, TILE_LEN>((__gm__ float*)x, (__gm__ float*)z, in_length);
 }
 

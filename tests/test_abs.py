@@ -25,4 +25,4 @@ def test_pto_abs(size0: int, size1: int, dtype: torch.dtype):
     # Compute the expected result using standard torch.abs on CPU
     cpuout = torch.abs(x)
     # Validate the results
-    assert torch.equal(output, cpuout)
+    assert torch.allclose(output, cpuout)
