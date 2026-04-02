@@ -100,3 +100,8 @@ extern "C" void call_vabs_fp16(uint32_t blockDim, void* stream, uint8_t* x,
                                uint8_t* y, uint32_t num_elements) {
   vabs_fp16<<<blockDim, nullptr, stream>>>(x, y, num_elements);
 }
+
+extern "C" void call_vabs_fp32(uint32_t blockDim, void* stream, uint8_t* x,
+                               uint8_t* y, uint32_t num_elements) {
+  vabs_fp32<<<blockDim, nullptr, stream>>>(x, y, num_elements);
+}
