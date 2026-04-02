@@ -58,7 +58,7 @@ at::Tensor run_tri_inv(const at::Tensor& x) {
 
   const at::Tensor z = at::empty_like(x);
 
-  auto acl_stream = c10_npu::getCurrentNPUStream().stream(false);
+  auto acl_stream = c10_npu::getCurrentNPUStream().stream(true);
   if (dtype == at::kHalf) {
     call_triv_inv_col_sweep_fp16(block_dim, acl_stream, ConvertType(z),
                                  ConvertType(x), num_elems, matrix_size);

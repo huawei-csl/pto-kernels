@@ -50,7 +50,7 @@ at::Tensor run_simple_matmul(const at::Tensor& a, const at::Tensor& b) {
       at::ones({matrix_size, matrix_size},
                at::TensorOptions().dtype(dtype_out).device(device));
 
-  auto acl_stream = c10_npu::getCurrentNPUStream().stream(false);
+  auto acl_stream = c10_npu::getCurrentNPUStream().stream(true);
   if (dtype == at::kHalf) {
     call_simple_matmul_fp16(block_dim, acl_stream, ConvertType(a),
                             ConvertType(b), ConvertType(c), matrix_size);

@@ -53,7 +53,7 @@ at::Tensor run_tri_inv_trick(const at::Tensor& M) {
                 at::TensorOptions().dtype(dtype).device(device));
   I_neg.fill_diagonal_(-1);
 
-  auto acl_stream = c10_npu::getCurrentNPUStream().stream(false);
+  auto acl_stream = c10_npu::getCurrentNPUStream().stream(true);
   if (dtype == at::kHalf) {
     call_tri_inv_trick_fp16(block_dim, acl_stream, ConvertType(M_inv),
                             ConvertType(M), ConvertType(I_neg), matrix_size,

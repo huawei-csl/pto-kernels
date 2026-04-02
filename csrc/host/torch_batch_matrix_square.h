@@ -52,7 +52,7 @@ at::Tensor run_batch_matrix_square(const at::Tensor& x) {
       at::zeros({block_dim, matrix_size, matrix_size},
                 at::TensorOptions().dtype(dtype_out).device(device));
 
-  auto acl_stream = c10_npu::getCurrentNPUStream().stream(false);
+  auto acl_stream = c10_npu::getCurrentNPUStream().stream(true);
   if (dtype == at::kHalf) {
     call_batch_matrix_square_fp16(block_dim, acl_stream, ConvertType(z),
                                   ConvertType(x), matrix_size);
