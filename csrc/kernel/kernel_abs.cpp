@@ -34,8 +34,7 @@ AICORE void runTAbs(__gm__ T* x, __gm__ T* z, uint32_t total_length) {
   using GlobalData = pto::GlobalTensor<T, ShapeDim5, StrideDim5>;
 
   // Define TileData on UB buffer with static shape and dynamic mask
-  using TileData =
-      Tile<TileType::Vec, T, 1, TILE_SIZE, BLayout::RowMajor>;
+  using TileData = Tile<TileType::Vec, T, 1, TILE_SIZE, BLayout::RowMajor>;
 
   set_mask_norm();
   set_vector_mask(-1, -1);
@@ -113,14 +112,14 @@ AICORE void runTAbs(__gm__ T* x, __gm__ T* z, uint32_t total_length) {
     TailGlobalData zTailGlobal(z + num_tiles * TILE_SIZE, {remaining_elements});
 
     // Define tail tile UB buffers
-    using TailTileData = Tile<TileType::Vec, T, 1, TILE_SIZE,
-                              BLayout::RowMajor, 1, DYNAMIC>;
+    using TailTileData =
+        Tile<TileType::Vec, T, 1, TILE_SIZE, BLayout::RowMajor, 1, DYNAMIC>;
     TailTileData xTailTile(remaining_elements);
     TailTileData zTailTile(remaining_elements);
 
     // Assign the UB address for tail tile
     TASSIGN(xTailTile, UB_ZERO_ADDR);
-    TASSIGN(zTailTile, UB_ZERO_ADDR + 3*TILE_SIZE_IN_BYTES);
+    TASSIGN(zTailTile, UB_ZERO_ADDR + 3 * TILE_SIZE_IN_BYTES);
 
     // MTE2 (load) wait for vector core to be done
     // (previous iteration's computation)
