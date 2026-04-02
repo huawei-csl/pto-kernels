@@ -28,23 +28,29 @@ at::Tensor run_abs(const at::Tensor& x) {
   const auto dtype = x.options().dtype();
   at::Tensor z = at::empty_like(x);
   // Define the number of blocks of vector core
-  const uint32_t total_len = x.numel();
+  const uint32_t total_size = x.numel();
   // FIXME: tile length is fixed to 64 for now
   constexpr uint32_t TILE_SIZE = 64;
-  uint32_t block_dim = total_len / TILE_SIZE;
-  block_dim = block_dim == 0 ? 1 : block_dim;
 
-  // FIXME: re-implement with persistent kernel logic
-  if (block_dim > 2 << 16) {
-    throw std::runtime_error(
-        "pto_abs supports only inputs size that is smaller than [2^22, 64].");
+  // Persistent kernel launch parameter
+  uint32_t total_tiles = (total_size + TILE_SIZE - 1) / TILE_SIZE;
+  uint32_t block_dim = GetNumVectorCores();
+
+  std::cout << "Num vec cores: " << block_dim << std::endl;
+  if (total_tiles < block_dim) {
+    block_dim = total_tiles;
   }
 
+  block_dim = 2; // debug
+
+  std::cout << "Launching vabs kernel with block_dim: " << block_dim
+            << ", total_tiles: " << total_tiles << std::endl;
+
   if (dtype == at::kHalf) {
-    EXEC_KERNEL_CMD(vabs_fp16, block_dim, x, z, total_len);
+    EXEC_KERNEL_CMD(vabs_fp16, block_dim, x, z, total_size);
 
   } else if (dtype == at::kFloat) {
-    EXEC_KERNEL_CMD(vabs_fp32, block_dim, x, z, total_len);
+    EXEC_KERNEL_CMD(vabs_fp32, block_dim, x, z, total_size);
 
   } else {
     throw std::runtime_error("Unsupported dtype for `pto_abs` kernel");
