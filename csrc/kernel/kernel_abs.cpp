@@ -30,7 +30,7 @@ template <typename T, uint32_t TILE_SIZE>
 AICORE void runTAbs(__gm__ T* x, __gm__ T* z, uint32_t total_size) {
   // Define GM tile type
   using ShapeDim5 = pto::Shape<1, 1, 1, 1, DYNAMIC>;
-  using StrideDim5 = pto::Stride<1, 1, 1, 1, 1>;
+  using StrideDim5 = pto::Stride<-1, -1, -1, -1, 1>;
   using GlobalData = pto::GlobalTensor<T, ShapeDim5, StrideDim5>;
 
   // Define UB tile type
@@ -66,35 +66,35 @@ AICORE void runTAbs(__gm__ T* x, __gm__ T* z, uint32_t total_size) {
     const uint32_t remainder_size = total_size - inner_offset;
     const int32_t remaining_elements = remainder_size > TILE_SIZE ? TILE_SIZE : remainder_size;
 
-    // MTE2 (load) wait for vector core to be done
-    // (previous iteration's computation)
-    wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
-    wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
-
+    
     // Define tile on GM
-    GlobalData xGlobal(x + inner_offset, {remaining_elements});
-    GlobalData zGlobal(z + inner_offset, {remaining_elements});
-    TASSIGN(xGlobal, x + inner_offset);
-    TASSIGN(zGlobal, z + inner_offset);
-
+    GlobalData xGlobal(x + inner_offset, {remaining_elements}, 
+      {remaining_elements, remaining_elements, remaining_elements, remaining_elements});
+    GlobalData zGlobal(z + inner_offset, {remaining_elements}, 
+      {remaining_elements, remaining_elements, remaining_elements, remaining_elements});
     
     // Define tile UB buffer
     TileData xTiles(remaining_elements);
     TileData zTiles(remaining_elements);
-
+    
     // Assign the UB address for each tile
     TASSIGN(xTiles, UB_ZERO_ADDR);
     TASSIGN(zTiles, UB_ZERO_ADDR + TILE_SIZE_IN_BYTES);
-
+    
+    // MTE2 (load) wait for vector core to be done
+    // (previous iteration's computation)
+    wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+    
     // Load data from global memory to UB buffer
     TLOAD(xTiles, xGlobal);
-
+    
     // Signal end of current load to vector core
     set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
-
+    
     // Vector core wait for MTE2 (current load)
     // and MTE3 (previous store) to be done
     wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+    wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
 
     // Perform elementwise absolute value
     TABS(zTiles, xTiles);
@@ -105,7 +105,7 @@ AICORE void runTAbs(__gm__ T* x, __gm__ T* z, uint32_t total_size) {
 
     // MTE3 (store) wait for vector core to be done
     wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
-
+    pipe_barrier(PIPE_MTE3);
     // Store data from UB buffer to global memory
     TSTORE(zGlobal, zTiles);
 
