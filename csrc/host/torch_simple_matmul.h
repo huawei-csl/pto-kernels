@@ -13,12 +13,12 @@ for the full License text.
 
 #include "utils.h"
 
-extern "C" aclError simple_matmul_fp16(uint32_t blockDim, aclrtStream stream,
-                                       void* a, void* b, void* c,
-                                       uint32_t matrix_size);
-extern "C" aclError simple_matmul_fp32(uint32_t blockDim, aclrtStream stream,
-                                       void* a, void* b, void* c,
-                                       uint32_t matrix_size);
+extern "C" void call_simple_matmul_fp16(uint32_t blockDim, aclrtStream stream,
+                                        void* a, void* b, void* c,
+                                        uint32_t matrix_size);
+extern "C" void call_simple_matmul_fp32(uint32_t blockDim, aclrtStream stream,
+                                        void* a, void* b, void* c,
+                                        uint32_t matrix_size);
 
 namespace pto_isa_ops {
 

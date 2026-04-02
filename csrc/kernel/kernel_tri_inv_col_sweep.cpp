@@ -181,10 +181,10 @@ extern "C" void triv_inv_col_sweep_fp16(uint32_t block_dim, void* stream,
                                                           matrix_size);
 }
 
-extern "C" void triv_inv_col_sweep_fp32(uint32_t block_dim, void* stream,
-                                        uint8_t* x, uint8_t* y,
-                                        uint32_t in_length,
-                                        uint32_t matrix_size) {
+extern "C" void call_triv_inv_col_sweep_fp32(uint32_t block_dim, void* stream,
+                                             uint8_t* x, uint8_t* y,
+                                             uint32_t in_length,
+                                             uint32_t matrix_size) {
   triv_inv_col_sweep_fp32<<<block_dim, nullptr, stream>>>(x, y, in_length,
                                                           matrix_size);
 }

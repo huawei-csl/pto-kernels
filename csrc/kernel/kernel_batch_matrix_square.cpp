@@ -122,11 +122,11 @@ __global__ AICORE void batch_matrix_square_fp32(__gm__ void* z, __gm__ void* x,
 extern "C" void call_batch_matrix_square_fp16(uint32_t block_dim, void* stream,
                                               uint8_t* z, uint8_t* x,
                                               uint32_t matrix_size) {
-  batch_matrix_square_fp16<<<block_dim, nullptr, stream>>>(z, x, num_elements);
+  batch_matrix_square_fp16<<<block_dim, nullptr, stream>>>(z, x, matrix_size);
 }
 
 extern "C" void call_batch_matrix_square_fp32(uint32_t block_dim, void* stream,
                                               uint8_t* z, uint8_t* x,
                                               uint32_t matrix_size) {
-  batch_matrix_square_fp32<<<block_dim, nullptr, stream>>>(z, x, num_elements);
+  batch_matrix_square_fp32<<<block_dim, nullptr, stream>>>(z, x, matrix_size);
 }

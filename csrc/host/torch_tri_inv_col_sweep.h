@@ -13,15 +13,17 @@ for the full License text.
 
 #include "utils.h"
 
-extern "C" aclError triv_inv_col_sweep_fp16(uint32_t blockDim,
-                                            aclrtStream stream, void* M_inv,
-                                            void* M, uint32_t num_elems,
-                                            uint32_t matrix_size);
+extern "C" aclError call_triv_inv_col_sweep_fp16(uint32_t blockDim,
+                                                 aclrtStream stream,
+                                                 void* M_inv, void* M,
+                                                 uint32_t num_elems,
+                                                 uint32_t matrix_size);
 
-extern "C" aclError triv_inv_col_sweep_fp32(uint32_t blockDim,
-                                            aclrtStream stream, void* M_inv,
-                                            void* M, uint32_t num_elems,
-                                            uint32_t matrix_size);
+extern "C" aclError call_triv_inv_col_sweep_fp32(uint32_t blockDim,
+                                                 aclrtStream stream,
+                                                 void* M_inv, void* M,
+                                                 uint32_t num_elems,
+                                                 uint32_t matrix_size);
 
 namespace pto_isa_ops {
 
