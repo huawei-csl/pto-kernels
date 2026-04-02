@@ -52,9 +52,12 @@ at::Tensor run_tri_inv_trick(const at::Tensor& M) {
       at::zeros({matrix_size, matrix_size},
                 at::TensorOptions().dtype(dtype).device(device));
   I_neg.fill_diagonal_(-1);
+
+  auto acl_stream = c10_npu::getCurrentNPUStream().stream(false);
   if (dtype == at::kHalf) {
-    EXEC_KERNEL_CMD(tri_inv_trick_fp16, block_dim, M_inv, M, I_neg, matrix_size,
-                    max_block_size);
+    call_tri_inv_trick_fp16(block_dim, acl_stream, ConvertType(M_inv),
+                            ConvertType(M), ConvertType(I_neg), matrix_size,
+                            max_block_size);
   }
 
   return M_inv;

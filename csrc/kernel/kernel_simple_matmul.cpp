@@ -129,18 +129,28 @@ AICORE void run_simple_matmul(__gm__ T* a, __gm__ T* b, __gm__ float* c,
 #endif
 }
 
-extern "C" __global__ AICORE void simple_matmul_fp16(__gm__ void* a,
-                                                     __gm__ void* b,
-                                                     __gm__ void* c,
-                                                     uint32_t matrix_size) {
+__global__ AICORE void simple_matmul_fp16(__gm__ void* a, __gm__ void* b,
+                                          __gm__ void* c,
+                                          uint32_t matrix_size) {
   run_simple_matmul<half>((__gm__ half*)a, (__gm__ half*)b, (__gm__ float*)c,
                           matrix_size);
 }
 
-extern "C" __global__ AICORE void simple_matmul_fp32(__gm__ void* a,
-                                                     __gm__ void* b,
-                                                     __gm__ void* c,
-                                                     uint32_t matrix_size) {
+__global__ AICORE void simple_matmul_fp32(__gm__ void* a, __gm__ void* b,
+                                          __gm__ void* c,
+                                          uint32_t matrix_size) {
   run_simple_matmul<float>((__gm__ float*)a, (__gm__ float*)b, (__gm__ float*)c,
                            matrix_size);
+}
+
+extern "C" void call_simple_matmul_fp16(uint32_t block_dim, void* stream,
+                                        uint8_t* a, uint8_t* b, uint8_t* c,
+                                        uint32_t matrix_size) {
+  simple_matmul_fp16<<<block_dim, nullptr, stream>>>(a, b, c, matrix_size);
+}
+
+extern "C" void call_simple_matmul_fp32(uint32_t block_dim, void* stream,
+                                        uint8_t* a, uint8_t* b, uint8_t* c,
+                                        uint32_t matrix_size) {
+  simple_matmul_fp32<<<block_dim, nullptr, stream>>>(a, b, c, matrix_size);
 }

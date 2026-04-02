@@ -666,10 +666,12 @@ AICORE void run_tri_inv_rec_unroll(__gm__ float* tensor_out,
  * strided accesses. If each tile is stored consecutively (and row-wise) in
  * memory, then num_bsnd_heads=0.
  */
-extern "C" __global__ AICORE void tri_inv_rec_unroll_fp16(
-    __gm__ void* tensor_out, __gm__ void* tensor_in,
-    __gm__ void* minus_identity_in, uint32_t matrix_size, uint32_t num_matrices,
-    uint32_t num_bsnd_heads) {
+__global__ AICORE void tri_inv_rec_unroll_fp16(__gm__ void* tensor_out,
+                                               __gm__ void* tensor_in,
+                                               __gm__ void* minus_identity_in,
+                                               uint32_t matrix_size,
+                                               uint32_t num_matrices,
+                                               uint32_t num_bsnd_heads) {
   if (num_bsnd_heads == 0) {
     if (num_matrices <= get_block_num()) {
       run_tri_inv_rec_unroll<half, 1 /* NumTilesPerCubeIter */,
@@ -711,4 +713,13 @@ extern "C" __global__ AICORE void tri_inv_rec_unroll_fp16(
           num_bsnd_heads);
     }
   }
+}
+
+extern "C" void call_tri_inv_rec_unroll_fp16(
+    uint32_t block_dim, void* stream, uint8_t* tensor_in, uint8_t* tensor_out,
+    uint8_t* minus_identity_in, uint32_t matrix_size, uint32_t num_matrices,
+    uint32_t num_bsnd_heads) {
+  tri_inv_rec_unroll_fp16<<<block_dim, nullptr, stream>>>(
+      tensor_out, tensor_in, minus_identity_in, matrix_size, num_matrices,
+      num_bsnd_heads);
 }

@@ -96,12 +96,12 @@ __global__ AICORE void vabs_fp32(GM_ADDR x, GM_ADDR z, uint32_t in_length) {
   runTAbs<float, TILE_LEN>((__gm__ float*)x, (__gm__ float*)z, in_length);
 }
 
-extern "C" void call_vabs_fp16(uint32_t blockDim, void* stream, uint8_t* x,
+extern "C" void call_vabs_fp16(uint32_t block_dim, void* stream, uint8_t* x,
                                uint8_t* y, uint32_t num_elements) {
-  vabs_fp16<<<blockDim, nullptr, stream>>>(x, y, num_elements);
+  vabs_fp16<<<block_dim, nullptr, stream>>>(x, y, num_elements);
 }
 
-extern "C" void call_vabs_fp32(uint32_t blockDim, void* stream, uint8_t* x,
+extern "C" void call_vabs_fp32(uint32_t block_dim, void* stream, uint8_t* x,
                                uint8_t* y, uint32_t num_elements) {
-  vabs_fp32<<<blockDim, nullptr, stream>>>(x, y, num_elements);
+  vabs_fp32<<<block_dim, nullptr, stream>>>(x, y, num_elements);
 }

@@ -43,11 +43,9 @@ at::Tensor run_abs(const at::Tensor& x) {
   }
 
   auto acl_stream = c10_npu::getCurrentNPUStream().stream(false);
-
   if (dtype == at::kHalf) {
     call_vabs_fp16(block_dim, acl_stream, ConvertType(x), ConvertType(z),
                    total_len);
-
   } else if (dtype == at::kFloat) {
     call_vabs_fp32(block_dim, acl_stream, ConvertType(x), ConvertType(z),
                    total_len);

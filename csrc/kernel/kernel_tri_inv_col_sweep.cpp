@@ -145,8 +145,9 @@ AICORE void runTTriInv(__gm__ T* vec_in, __gm__ T* vec_out,
 #endif
 }
 
-extern "C" __global__ AICORE void triv_inv_col_sweep_fp16(
-    GM_ADDR x, GM_ADDR z, uint32_t in_length, uint32_t matrix_size) {
+__global__ AICORE void triv_inv_col_sweep_fp16(GM_ADDR x, GM_ADDR z,
+                                               uint32_t in_length,
+                                               uint32_t matrix_size) {
   if (matrix_size == 16) {
     runTTriInv<half, 16>((__gm__ half*)x, (__gm__ half*)z, in_length);
   } else if (matrix_size == 32) {
@@ -158,8 +159,9 @@ extern "C" __global__ AICORE void triv_inv_col_sweep_fp16(
   }
 }
 
-extern "C" __global__ AICORE void triv_inv_col_sweep_fp32(
-    GM_ADDR x, GM_ADDR z, uint32_t in_length, uint32_t matrix_size) {
+__global__ AICORE void triv_inv_col_sweep_fp32(GM_ADDR x, GM_ADDR z,
+                                               uint32_t in_length,
+                                               uint32_t matrix_size) {
   if (matrix_size == 16) {
     runTTriInv<float, 16>((__gm__ float*)x, (__gm__ float*)z, in_length);
   } else if (matrix_size == 32) {
@@ -169,4 +171,20 @@ extern "C" __global__ AICORE void triv_inv_col_sweep_fp32(
   } else if (matrix_size == 128) {
     runTTriInv<float, 128>((__gm__ float*)x, (__gm__ float*)z, in_length);
   }
+}
+
+extern "C" void triv_inv_col_sweep_fp16(uint32_t block_dim, void* stream,
+                                        uint8_t* x, uint8_t* y,
+                                        uint32_t in_length,
+                                        uint32_t matrix_size) {
+  triv_inv_col_sweep_fp16<<<block_dim, nullptr, stream>>>(x, y, in_length,
+                                                          matrix_size);
+}
+
+extern "C" void triv_inv_col_sweep_fp32(uint32_t block_dim, void* stream,
+                                        uint8_t* x, uint8_t* y,
+                                        uint32_t in_length,
+                                        uint32_t matrix_size) {
+  triv_inv_col_sweep_fp32<<<block_dim, nullptr, stream>>>(x, y, in_length,
+                                                          matrix_size);
 }

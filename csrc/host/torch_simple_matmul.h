@@ -50,10 +50,13 @@ at::Tensor run_simple_matmul(const at::Tensor& a, const at::Tensor& b) {
       at::ones({matrix_size, matrix_size},
                at::TensorOptions().dtype(dtype_out).device(device));
 
+  auto acl_stream = c10_npu::getCurrentNPUStream().stream(false);
   if (dtype == at::kHalf) {
-    EXEC_KERNEL_CMD(simple_matmul_fp16, block_dim, a, b, c, matrix_size);
+    call_simple_matmul_fp16(block_dim, acl_stream, ConvertType(a),
+                            ConvertType(b), ConvertType(c), matrix_size);
   } else if (dtype == at::kFloat) {
-    EXEC_KERNEL_CMD(simple_matmul_fp32, block_dim, a, b, c, matrix_size);
+    call_simple_matmul_fp32(block_dim, acl_stream, ConvertType(a),
+                            ConvertType(b), ConvertType(c), matrix_size);
   }
 
   return c;
