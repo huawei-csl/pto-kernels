@@ -2,7 +2,6 @@ default:
   tags: [cpu]
 
 stages:
-   - linter
    - build_in_docker
    - test
    - test_aarch64_910B2_py3.11
