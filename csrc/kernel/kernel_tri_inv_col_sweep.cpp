@@ -7,15 +7,7 @@ https://github.com/huawei-csl/pto-kernels/
 for the full License text.
 */
 
-#if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
-
-#define MEMORY_BASE
-
-#include <pto/pto-inst.hpp>
-
 #include "kernel_utils.h"
-
-#define GM_ADDR __gm__ uint8_t*  // To avoid #include "kernel_operator.h"
 
 using namespace pto;
 
@@ -32,6 +24,8 @@ using namespace pto;
 template <typename T, unsigned S /* Matrix Size */>
 AICORE void runTTriInv(__gm__ T* vec_in, __gm__ T* vec_out,
                        uint32_t total_length) {
+#if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
+
   set_mask_norm();
   set_vector_mask(-1, -1);
 
@@ -143,6 +137,7 @@ AICORE void runTTriInv(__gm__ T* vec_in, __gm__ T* vec_out,
   }
   wait_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID0);
   wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
+#endif
 }
 
 extern "C" __global__ AICORE void triv_inv_col_sweep_fp16(
@@ -170,5 +165,3 @@ extern "C" __global__ AICORE void triv_inv_col_sweep_fp32(
     runTTriInv<float, 128>((__gm__ float*)x, (__gm__ float*)z, in_length);
   }
 }
-
-#endif

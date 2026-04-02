@@ -90,6 +90,7 @@ inline at::Tensor CopyTensorHostToDevice(const at::Tensor& cpu_tensor) {
  * @param [in] scalar_data_type Data type of scalar
  * @return at::Tensor Tensor on NPU containing the `cpu_scalar`.
  */
+[[maybe_unused]]
 inline at::Tensor CopyScalarToDevice(const c10::Scalar& cpu_scalar,
                                      at::ScalarType scalar_data_type) {
   return CopyTensorHostToDevice(
