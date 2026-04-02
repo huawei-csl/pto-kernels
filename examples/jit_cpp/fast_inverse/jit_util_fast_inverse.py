@@ -86,6 +86,9 @@ def load_lib(lib_path: str):
         ctypes.c_uint32,  # num_matrices
         ctypes.c_uint32,  # num_bsnd_heads
         ctypes.c_void_p,  # cu_seqlens (optional int32 metadata)
+        ctypes.c_void_p,  # chunk_sequence_prefix (optional int32 metadata)
+        ctypes.c_void_p,  # chunk_indices (optional int32 metadata)
+        ctypes.c_void_p,  # chunk_valid_sizes (optional int32 metadata)
     ]
     lib.call_kernel.restype = None
 
@@ -97,6 +100,9 @@ def load_lib(lib_path: str):
         num_matrices: int,
         num_bsnd_heads: int = 0,
         cu_seqlens: torch.Tensor | None = None,
+        chunk_sequence_prefix: torch.Tensor | None = None,
+        chunk_indices: torch.Tensor | None = None,
+        chunk_valid_sizes: torch.Tensor | None = None,
         block_dim: int = BLOCK_DIM,
         stream_ptr=None,
     ):
@@ -107,6 +113,23 @@ def load_lib(lib_path: str):
                 raise TypeError("cu_seqlens must be int32.")
             if not cu_seqlens.is_contiguous():
                 raise ValueError("cu_seqlens must be contiguous.")
+        if chunk_sequence_prefix is not None:
+            if chunk_sequence_prefix.dtype != torch.int32:
+                raise TypeError("chunk_sequence_prefix must be int32.")
+            if not chunk_sequence_prefix.is_contiguous():
+                raise ValueError("chunk_sequence_prefix must be contiguous.")
+        if chunk_indices is not None:
+            if chunk_indices.dtype != torch.int32:
+                raise TypeError("chunk_indices must be int32.")
+            if not chunk_indices.is_contiguous():
+                raise ValueError("chunk_indices must be contiguous.")
+        if chunk_valid_sizes is not None:
+            if chunk_valid_sizes.dtype != torch.int32:
+                raise TypeError("chunk_valid_sizes must be int32.")
+            if not chunk_valid_sizes.is_contiguous():
+                raise ValueError("chunk_valid_sizes must be contiguous.")
+        if (chunk_indices is None) != (chunk_valid_sizes is None):
+            raise ValueError("chunk_indices and chunk_valid_sizes must be provided together.")
         effective_block_dim = min(block_dim, num_matrices)
         lib.call_kernel(
             effective_block_dim,
@@ -119,6 +142,15 @@ def load_lib(lib_path: str):
             num_bsnd_heads,
             _torch_to_ctypes(cu_seqlens)
             if cu_seqlens is not None
+            else ctypes.c_void_p(),
+            _torch_to_ctypes(chunk_sequence_prefix)
+            if chunk_sequence_prefix is not None
+            else ctypes.c_void_p(),
+            _torch_to_ctypes(chunk_indices)
+            if chunk_indices is not None
+            else ctypes.c_void_p(),
+            _torch_to_ctypes(chunk_valid_sizes)
+            if chunk_valid_sizes is not None
             else ctypes.c_void_p(),
         )
 

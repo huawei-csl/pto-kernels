@@ -66,6 +66,52 @@ AICORE inline BSNDVarlenTileInfo GetBSNDVarlenTileInfoFromCuSeqlens(
   }
 }
 
+AICORE inline BSNDVarlenTileInfo GetBSNDVarlenTileInfoFromChunkMetadata(
+    uint32_t tile_id, uint32_t num_bsnd_heads, uint32_t matrix_size,
+    __gm__ int32_t* chunk_indices, __gm__ int32_t* chunk_valid_sizes) {
+  const uint32_t head_idx = tile_id % num_bsnd_heads;
+  const uint32_t chunk_idx = tile_id / num_bsnd_heads;
+  const uint32_t row_start = static_cast<uint32_t>(chunk_indices[chunk_idx]);
+  const uint32_t valid_size =
+      static_cast<uint32_t>(chunk_valid_sizes[chunk_idx]);
+  return {row_start * num_bsnd_heads * matrix_size + head_idx * matrix_size,
+          valid_size};
+}
+
+AICORE inline BSNDVarlenTileInfo GetBSNDVarlenTileInfoFromChunkPrefix(
+    uint32_t tile_id, uint32_t num_bsnd_heads, uint32_t matrix_size,
+    __gm__ int32_t* cu_seqlens, __gm__ int32_t* chunk_sequence_prefix) {
+  const uint32_t head_idx = tile_id % num_bsnd_heads;
+  const uint32_t chunk_idx = tile_id / num_bsnd_heads;
+  const uint32_t num_sequences =
+      static_cast<uint32_t>(chunk_sequence_prefix[0]);
+
+  uint32_t left = 0;
+  uint32_t right = num_sequences;
+  while (left < right) {
+    const uint32_t mid = (left + right) / 2;
+    const uint32_t chunk_end =
+        static_cast<uint32_t>(chunk_sequence_prefix[mid + 2]);
+    if (chunk_idx < chunk_end) {
+      right = mid;
+    } else {
+      left = mid + 1;
+    }
+  }
+
+  const uint32_t seq_idx = left;
+  const uint32_t chunk_base =
+      static_cast<uint32_t>(chunk_sequence_prefix[seq_idx + 1]);
+  const uint32_t local_chunk_idx = chunk_idx - chunk_base;
+  const uint32_t seq_start = static_cast<uint32_t>(cu_seqlens[seq_idx]);
+  const uint32_t seq_end = static_cast<uint32_t>(cu_seqlens[seq_idx + 1]);
+  const uint32_t row_start = seq_start + local_chunk_idx * matrix_size;
+  const uint32_t valid_size =
+      min(static_cast<uint32_t>(seq_end - row_start), matrix_size);
+  return {row_start * num_bsnd_heads * matrix_size + head_idx * matrix_size,
+          valid_size};
+}
+
 /*
  * @brief: Takes as input two matrices of size MatrixSize * MatrixSize each.
  * The src matrix lies in L1, while the dst matrix lies either in L0A or L0B.
@@ -417,7 +463,12 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
                                          __gm__ InputT* M, __gm__ InputT* I_neg,
                                          uint32_t total_tiles,
                                          uint32_t num_bsnd_heads = 0,
-                                         __gm__ int32_t* cu_seqlens = nullptr) {
+                                         __gm__ int32_t* cu_seqlens = nullptr,
+                                         __gm__ int32_t* chunk_sequence_prefix =
+                                             nullptr,
+                                         __gm__ int32_t* chunk_indices = nullptr,
+                                         __gm__ int32_t* chunk_valid_sizes =
+                                             nullptr) {
   constexpr uint32_t TileLen = MatrixSize * MatrixSize;
   constexpr uint32_t FractalSize = 16;
   constexpr uint32_t NumL0Buffers = 2;
@@ -524,7 +575,21 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
          ++tile_id) {
       if constexpr (IsBSND) {
         const uint32_t global_tile_id = global_index + tile_id;
-        if (cu_seqlens != nullptr) {
+        if (chunk_indices != nullptr && chunk_valid_sizes != nullptr) {
+          const BSNDVarlenTileInfo tile_info =
+              GetBSNDVarlenTileInfoFromChunkMetadata(
+                  global_tile_id, num_bsnd_heads, MatrixSize, chunk_indices,
+                  chunk_valid_sizes);
+          bsnd_tile_offsets[tile_id] = tile_info.bsnd_offset;
+          bsnd_tile_valid_sizes[tile_id] = tile_info.valid_size;
+        } else if (chunk_sequence_prefix != nullptr && cu_seqlens != nullptr) {
+          const BSNDVarlenTileInfo tile_info =
+              GetBSNDVarlenTileInfoFromChunkPrefix(
+                  global_tile_id, num_bsnd_heads, MatrixSize, cu_seqlens,
+                  chunk_sequence_prefix);
+          bsnd_tile_offsets[tile_id] = tile_info.bsnd_offset;
+          bsnd_tile_valid_sizes[tile_id] = tile_info.valid_size;
+        } else if (cu_seqlens != nullptr) {
           const BSNDVarlenTileInfo tile_info = GetBSNDVarlenTileInfoFromCuSeqlens(
               global_tile_id, num_bsnd_heads, MatrixSize, cu_seqlens);
           bsnd_tile_offsets[tile_id] = tile_info.bsnd_offset;
@@ -797,12 +862,19 @@ template <typename InputT, typename OutputT, uint32_t MatrixSize,
 AICORE void runKernelTriInvRecUnroll(__gm__ OutputT* M_inv, __gm__ InputT* M,
                                      __gm__ InputT* I_neg, uint32_t total_tiles,
                                      uint32_t num_bsnd_heads = 0,
-                                     __gm__ int32_t* cu_seqlens = nullptr) {
+                                     __gm__ int32_t* cu_seqlens = nullptr,
+                                     __gm__ int32_t* chunk_sequence_prefix =
+                                         nullptr,
+                                     __gm__ int32_t* chunk_indices = nullptr,
+                                     __gm__ int32_t* chunk_valid_sizes =
+                                         nullptr) {
 #if (__CHECK_FEATURE_AT_PRECOMPILE) || \
     (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))
   TriInvRecUnrollKernel<InputT, OutputT, MatrixSize, NumTilesPerCubeIter,
                         IsBSND>(M_inv, M, I_neg, total_tiles, num_bsnd_heads,
-                                cu_seqlens);
+                                cu_seqlens, chunk_sequence_prefix,
+                                chunk_indices,
+                                chunk_valid_sizes);
 #else
 // Nothing to do on AIV
 #endif
@@ -814,29 +886,36 @@ AICORE void run_tri_inv_rec_unroll(__gm__ float* tensor_out,
                                    __gm__ InputT* minus_identity_in,
                                    uint32_t matrix_size, uint32_t num_matrices,
                                    uint32_t num_bsnd_heads,
-                                   __gm__ int32_t* cu_seqlens) {
+                                   __gm__ int32_t* cu_seqlens,
+                                   __gm__ int32_t* chunk_sequence_prefix,
+                                   __gm__ int32_t* chunk_indices,
+                                   __gm__ int32_t* chunk_valid_sizes) {
   static_assert(std::is_same_v<InputT, half>,
                 "tri_inv_rec_unroll supports only fp16.");
   switch (matrix_size) {
     case 16:
       runKernelTriInvRecUnroll<InputT, float, 16, NumTilesPerCubeIter, IsBSND>(
           tensor_out, tensor_in, minus_identity_in, num_matrices, num_bsnd_heads,
-          cu_seqlens);
+          cu_seqlens, chunk_sequence_prefix, chunk_indices,
+          chunk_valid_sizes);
       break;
     case 32:
       runKernelTriInvRecUnroll<InputT, float, 32, NumTilesPerCubeIter, IsBSND>(
           tensor_out, tensor_in, minus_identity_in, num_matrices, num_bsnd_heads,
-          cu_seqlens);
+          cu_seqlens, chunk_sequence_prefix, chunk_indices,
+          chunk_valid_sizes);
       break;
     case 64:
       runKernelTriInvRecUnroll<InputT, float, 64, NumTilesPerCubeIter, IsBSND>(
           tensor_out, tensor_in, minus_identity_in, num_matrices, num_bsnd_heads,
-          cu_seqlens);
+          cu_seqlens, chunk_sequence_prefix, chunk_indices,
+          chunk_valid_sizes);
       break;
     case 128:
       runKernelTriInvRecUnroll<InputT, float, 128, NumTilesPerCubeIter, IsBSND>(
           tensor_out, tensor_in, minus_identity_in, num_matrices, num_bsnd_heads,
-          cu_seqlens);
+          cu_seqlens, chunk_sequence_prefix, chunk_indices,
+          chunk_valid_sizes);
       break;
   }
 }
@@ -844,40 +923,54 @@ AICORE void run_tri_inv_rec_unroll(__gm__ float* tensor_out,
 extern "C" __global__ AICORE void tri_inv_rec_unroll_fp16(
     __gm__ void* tensor_out, __gm__ void* tensor_in,
     __gm__ void* minus_identity_in, uint32_t matrix_size, uint32_t num_matrices,
-    uint32_t num_bsnd_heads, __gm__ void* cu_seqlens) {
+    uint32_t num_bsnd_heads, __gm__ void* cu_seqlens,
+    __gm__ void* chunk_sequence_prefix,
+    __gm__ void* chunk_indices, __gm__ void* chunk_valid_sizes) {
   if (num_bsnd_heads == 0) {
     if (num_matrices <= get_block_num()) {
       run_tri_inv_rec_unroll<half, 1, false>(
           (__gm__ float*)tensor_out, (__gm__ half*)tensor_in,
           (__gm__ half*)minus_identity_in, matrix_size, num_matrices,
-          num_bsnd_heads, (__gm__ int32_t*)cu_seqlens);
+          num_bsnd_heads, (__gm__ int32_t*)cu_seqlens,
+          (__gm__ int32_t*)chunk_sequence_prefix,
+          (__gm__ int32_t*)chunk_indices, (__gm__ int32_t*)chunk_valid_sizes);
     } else if (num_matrices <= 2 * get_block_num()) {
       run_tri_inv_rec_unroll<half, 2, false>(
           (__gm__ float*)tensor_out, (__gm__ half*)tensor_in,
           (__gm__ half*)minus_identity_in, matrix_size, num_matrices,
-          num_bsnd_heads, (__gm__ int32_t*)cu_seqlens);
+          num_bsnd_heads, (__gm__ int32_t*)cu_seqlens,
+          (__gm__ int32_t*)chunk_sequence_prefix,
+          (__gm__ int32_t*)chunk_indices, (__gm__ int32_t*)chunk_valid_sizes);
     } else {
       run_tri_inv_rec_unroll<half, 4, false>(
           (__gm__ float*)tensor_out, (__gm__ half*)tensor_in,
           (__gm__ half*)minus_identity_in, matrix_size, num_matrices,
-          num_bsnd_heads, (__gm__ int32_t*)cu_seqlens);
+          num_bsnd_heads, (__gm__ int32_t*)cu_seqlens,
+          (__gm__ int32_t*)chunk_sequence_prefix,
+          (__gm__ int32_t*)chunk_indices, (__gm__ int32_t*)chunk_valid_sizes);
     }
   } else {
     if (num_matrices <= get_block_num()) {
       run_tri_inv_rec_unroll<half, 1, true>(
           (__gm__ float*)tensor_out, (__gm__ half*)tensor_in,
           (__gm__ half*)minus_identity_in, matrix_size, num_matrices,
-          num_bsnd_heads, (__gm__ int32_t*)cu_seqlens);
+          num_bsnd_heads, (__gm__ int32_t*)cu_seqlens,
+          (__gm__ int32_t*)chunk_sequence_prefix,
+          (__gm__ int32_t*)chunk_indices, (__gm__ int32_t*)chunk_valid_sizes);
     } else if (num_matrices <= 2 * get_block_num()) {
       run_tri_inv_rec_unroll<half, 2, true>(
           (__gm__ float*)tensor_out, (__gm__ half*)tensor_in,
           (__gm__ half*)minus_identity_in, matrix_size, num_matrices,
-          num_bsnd_heads, (__gm__ int32_t*)cu_seqlens);
+          num_bsnd_heads, (__gm__ int32_t*)cu_seqlens,
+          (__gm__ int32_t*)chunk_sequence_prefix,
+          (__gm__ int32_t*)chunk_indices, (__gm__ int32_t*)chunk_valid_sizes);
     } else {
       run_tri_inv_rec_unroll<half, 4, true>(
           (__gm__ float*)tensor_out, (__gm__ half*)tensor_in,
           (__gm__ half*)minus_identity_in, matrix_size, num_matrices,
-          num_bsnd_heads, (__gm__ int32_t*)cu_seqlens);
+          num_bsnd_heads, (__gm__ int32_t*)cu_seqlens,
+          (__gm__ int32_t*)chunk_sequence_prefix,
+          (__gm__ int32_t*)chunk_indices, (__gm__ int32_t*)chunk_valid_sizes);
     }
   }
 }
