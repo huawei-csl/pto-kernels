@@ -63,10 +63,21 @@ That script:
 
 ### Layout conventions
 
+In general, the input to the `fast_inverse` kernels is a set of `D × D` sized triangular matrices. Depending on how these matrices are stored in memory, we might have `contiguous` layout, or the so-called `BSND` layout. The main input is a batch of sequences, and each sequence is then split in "chunks" of length `chunk_size`. This `chunk_size` is the same as the matrix size `D`.
+
+Both layouts depend on the following parameters:
+- The parameter `B` denotes the batch-size (or batch-dimension). This is always the first dimension of the input tensor.
+- The parameter `N` or `H` (used interchangeably) is the number of heads.
+- `D` is equal to the `chunk_size`.
+- `S` is the total sum of all sequence lengths combined.
+`BSND` can be thought of as the "raw" input tensor. The `contiguous` layout can be obtained, for example, by transposing the `N` and `S` dimensions, and by "chunking" the `S` dimension to chunks of size `S`. The final tensor will be transformed from shape `(B,S,N,D)` to `->(B,N,S/D,D)`, where we assumed that `D` divides `S` for simplicity.
+
+The actual kernel can verify if the input is in `BSND` layout or in `contiguous` layout by specifying the input argument `num_bsnd_heads`. If it is equal to zero, then the format is assumed to be `contiguous`
+
 | `num_bsnd_heads` | Memory layout |
 |-----------------|---------------|
-| `0` (default) | Each matrix stored consecutively in row-major order (`B × … × N × D × D`) |
-| `> 0` | BSND layout: `(B, S, N, D)` where S is chunked into tiles of size D and N heads are interleaved |
+| `0` (default) | Each matrix stored consecutively in row-major order (`B × … × D × D`) |
+| `> 0` | BSND layout: `(B, S, N, D)` where `S` is chunked into tiles of size D and N heads are interleaved |
 
 ### Varlen BSND mode
 
