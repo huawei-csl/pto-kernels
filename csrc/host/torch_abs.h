@@ -42,7 +42,7 @@ at::Tensor run_abs(const at::Tensor& x) {
         "pto_abs supports only inputs with length that is multiple of 64.");
   }
 
-  auto acl_stream = c10_npu::getCurrentNPUStream().stream(false);
+  auto acl_stream = c10_npu::getCurrentNPUStream().stream(true);
   if (dtype == at::kHalf) {
     call_vabs_fp16(block_dim, acl_stream, ConvertType(x), ConvertType(z),
                    total_len);
