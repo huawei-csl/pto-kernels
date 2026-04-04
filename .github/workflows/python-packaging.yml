@@ -22,18 +22,18 @@ jobs:
             python_version: py3.11
             py_ver: "311"
           - os: ubuntu-22.04-arm
-            arch: arm64
+            arch: aarch64
             python_version: py3.10
             py_ver: "310"
           - os: ubuntu-22.04-arm
-            arch: arm64
+            arch: aarch64
             python_version: py3.11
             py_ver: "311"
 
     runs-on: ${{ matrix.os }}
 
     container:
-      image: quay.io/ascend/manylinux:8.5.0-910b-manylinux_2_28-${{ matrix.python_version }}
+      image: quay.io/ascend/manylinux:8.5.1-910b-manylinux_2_28-${{ matrix.python_version }}
 
     steps:
       - name: Checkout
