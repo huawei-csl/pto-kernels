@@ -4,6 +4,10 @@
 
 using namespace pto;
 
+// Step 05 keeps the step-04 outer schedule, but upgrades the cube microkernel.
+// When K=128, the cube core now alternates between two L0 buffers so that the
+// next 64-wide slice can be extracted while the current slice is being used.
+
 #ifndef LINEAR_ATTN_H
 #define LINEAR_ATTN_H 2
 #endif
@@ -54,6 +58,9 @@ AICORE inline void MatmulL1(
     std::conditional_t<TransposeB, L1Mat<half, N, K>, L1Mat<half, K, N>> &b_l1,
     bool init) {
   if constexpr ((K % 64 == 0) && (K > 64)) {
+    // New in step 05: split the K dimension into 64-wide pieces and ping-pong
+    // between two L0 buffers. This is the first "real" pipeline inside a
+    // helper function, but the mathematical result is still one GEMM.
     constexpr int KStep = 64;
     constexpr int Parts = K / KStep;
     constexpr uintptr_t AStepBytes = M * KStep * sizeof(half);
@@ -66,6 +73,8 @@ AICORE inline void MatmulL1(
     TASSIGN(b_l0[0], static_cast<uintptr_t>(0));
     TASSIGN(b_l0[1], BStepBytes);
 
+    // These flags hand ownership of each L0 buffer back and forth between the
+    // extractor (MTE1) and the cube compute pipeline (M).
     SetFlag<PIPE_M, PIPE_MTE1>(0);
     SetFlag<PIPE_M, PIPE_MTE1>(1);
 
@@ -105,6 +114,7 @@ AICORE inline void MatmulL1(
     WaitFlag<PIPE_M, PIPE_MTE1>(1);
     pipe_barrier(PIPE_ALL);
   } else {
+    // Small-K fallback: keep the simpler one-shot path for readability.
     TileLeft<half, M, K, M, K> a_l0;
     TileRight<half, K, N, K, N> b_l0;
     TASSIGN(a_l0, 0x0);
@@ -283,6 +293,8 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
       TLOAD(h_l1, h_global);
       pipe_barrier(PIPE_ALL);
 
+      // Compared with step 04, the surrounding code barely changes. The speedup
+      // mainly comes from the improved MatmulL1 helper above.
       MatmulL1<ChunkSize, ChunkSize, HiddenSize, false, true>(acc_l0, q_l1, k_l1,
                                                               true);
       AccGlobal acc_global(workspace_1 + workspace1_base);

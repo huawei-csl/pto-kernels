@@ -4,6 +4,10 @@
 
 using namespace pto;
 
+// Step 03 keeps the naive overall schedule from step 02, but replaces the
+// scalar triangular-mask loop with a precomputed mask tensor from PyTorch.
+// That lets the vector core apply causality with one tile-wise multiply.
+
 #ifndef LINEAR_ATTN_H
 #define LINEAR_ATTN_H 2
 #endif
@@ -43,6 +47,8 @@ AICORE inline void MatmulL1(
     std::conditional_t<TransposeA, L1Mat<half, K, M>, L1Mat<half, M, K>> &a_l1,
     std::conditional_t<TransposeB, L1Mat<half, N, K>, L1Mat<half, K, N>> &b_l1,
     bool init) {
+  // For these early steps we use a single, easy-to-follow "load to L0 then
+  // matmul" helper. Later steps optimize the internals of this helper.
   TileLeft<half, M, K, M, K> a_l0;
   TileRight<half, K, N, K, N> b_l0;
   TASSIGN(a_l0, 0x0);
@@ -200,6 +206,9 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
       TLOAD(h_l1, h_global);
       pipe_barrier(PIPE_ALL);
 
+      // Cube computes two intermediates for this chunk:
+      // 1) chunk-local scores Q K^T
+      // 2) hidden-state update K^T V
       MatmulL1<ChunkSize, ChunkSize, HiddenSize, false, true>(acc_l0, q_l1, k_l1,
                                                               true);
       AccGlobal acc_global(workspace_1 + workspace1_base);
@@ -213,6 +222,8 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
       pipe_barrier(PIPE_ALL);
       SetCrossFlag<PIPE_FIX>(0, 2);
 
+      // Vector core overwrites workspace_1 with the masked scores, then cube
+      // finishes O = masked_scores @ V + Q @ prefix_state.
       WaitCrossFlag(1);
       AccGlobal masked_acc_global(workspace_1 + workspace1_base);
       TLOAD(acc_l1, masked_acc_global);
@@ -233,6 +244,8 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
 #if defined(__DAV_C220_VEC__)
   set_mask_norm();
   set_vector_mask(-1, -1);
+  // This is the key change in step 03: each vector sub-core loads its own half
+  // of the triangular mask once, outside the chunk loop, and reuses it.
   HalfMaskGlobal mask_global(causal_mask + vid * HalfChunk * ChunkSize);
   TLOAD(mask_ub, mask_global);
   pipe_barrier(PIPE_ALL);
@@ -264,6 +277,8 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
       TLOAD(acc_ub, acc_global);
       TLOAD(h_ub, h_global);
       pipe_barrier(PIPE_ALL);
+      // Elementwise multiply is much cheaper than the scalar if-statements from
+      // step 02, but the numerical effect is identical.
       TMUL(masked_acc_ub, acc_ub, mask_ub);
 
       TADD(hsum_ub, hsum_ub, h_ub);

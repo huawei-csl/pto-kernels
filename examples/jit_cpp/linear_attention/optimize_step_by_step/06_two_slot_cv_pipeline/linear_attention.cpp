@@ -4,6 +4,10 @@
 
 using namespace pto;
 
+// Step 06 keeps the step-05 cube microkernel and adds a larger structural
+// pipeline: cube works on chunk i+1 while vector finishes chunk i. The two
+// workspace "slots" below are the staging area that makes this overlap safe.
+
 #ifndef LINEAR_ATTN_H
 #define LINEAR_ATTN_H 2
 #endif
@@ -142,6 +146,8 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
                         __gm__ half *causal_mask, __gm__ half *o,
                         int64_t batch_size, int64_t seq_len,
                         uint64_t ffts_addr) {
+  // Two slots are enough for a producer/consumer pipeline:
+  // one slot is owned by cube, the other by vector.
   constexpr int32_t StageCount = 2;
   constexpr bool UseTwoStagePipeline = (ChunkSize >= 128);
   constexpr int32_t VecNum = 2;
@@ -272,6 +278,8 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
     const int64_t workspace2_base = cid * Workspace2Elems;
 
     if constexpr (UseTwoStagePipeline) {
+      // Each in-flight work item gets its own small ring of cross-core flags so
+      // different logical jobs do not accidentally wake each other up.
       const int32_t flag_base = static_cast<int32_t>((work_idx & 3) * 6);
       WaitCrossFlag(flag_base + 4);
       HiddenGlobal zero_h_global(workspace_2 + workspace2_base + Workspace2SlotElems);
@@ -279,6 +287,8 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
       pipe_barrier(PIPE_ALL);
 
       {
+        // Prefill slot 0 so the sliding-window pipeline has an initial chunk to
+        // consume before it starts looking one chunk ahead.
         const int64_t chunk_base = qkv_base;
         ChunkGlobal q_global(q + chunk_base);
         ChunkGlobal k_global(k + chunk_base);
@@ -308,6 +318,8 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
         const int64_t chunk_base = qkv_base + i * ChunkElems;
 
         if (i + 1 < chunk_num) {
+          // Producer side: cube prepares chunk i+1 in the other slot while
+          // vector is still busy with slot "slot".
           const int64_t next_chunk_base = qkv_base + (i + 1) * ChunkElems;
           const int64_t next_workspace1_base =
               workspace1_base + next_slot * Workspace1SlotElems;
@@ -336,6 +348,8 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
           SetCrossFlag<PIPE_FIX>(flag_base + next_slot, 2);
         }
 
+        // Consumer hand-off: do not reuse this slot until vector reports that
+        // masking and state accumulation for the slot are finished.
         WaitCrossFlag(flag_base + 2 + slot);
         AccGlobal masked_acc_global(workspace_1 + workspace1_base +
                                     slot * Workspace1SlotElems);
@@ -356,6 +370,8 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
         pipe_barrier(PIPE_ALL);
 
         if (i + 1 < chunk_num) {
+          // Load the next prefix state after vector has written it back for this
+          // slot; that state will be needed when chunk i+1 reaches output stage.
           HiddenGlobal next_h_global(workspace_2 + workspace2_base +
                                      slot * Workspace2SlotElems);
           TLOAD(h_l1, next_h_global);
@@ -460,6 +476,8 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
         TLOAD(h_ub, h_global);
         pipe_barrier(PIPE_ALL);
 
+        // Vector consumes whichever slot cube just produced, updates the running
+        // hidden state, and then releases that slot back to cube.
         TADD(hsum_ub, hsum_ub, h_ub);
         pipe_barrier(PIPE_ALL);
         if constexpr (!PreloadMask) {

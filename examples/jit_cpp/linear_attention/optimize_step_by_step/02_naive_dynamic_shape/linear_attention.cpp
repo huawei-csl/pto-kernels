@@ -121,6 +121,13 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
                    BaseShape2D<half, kHalfHidden, HiddenSize, Layout::ND>,
                    Layout::ND>;
 
+  // Step 02 is the first dynamic-shape kernel:
+  // - H, D, and C are still compile-time constants
+  // - B and L now arrive at runtime
+  // The important consequence is that we can no longer launch exactly one core
+  // per logical (batch, head) job like step 01. Instead, Python launches a
+  // fixed block_dim equal to the device core count, and the kernel itself
+  // loops over as many logical jobs as needed.
   const int64_t total_work = batch_size * NumHeads;
   const int64_t chunk_count = seq_len / ChunkSize;
   const int64_t core_id = get_block_idx();
@@ -155,6 +162,21 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
   TASSIGN(zero_score_ub, kZeroScoreUbAddr);
 
 #if defined(__DAV_C220_CUBE__)
+  // In step 01, the launch is static: core_id directly identifies one fixed
+  // (batch, head) pair because B and H are baked into the program.
+  //
+  // In step 02, the launch stays fixed even when B changes. We therefore build
+  // a small "grid-stride loop" inside the kernel:
+  //   work_idx = which round of jobs this core is handling
+  //   work_id  = the logical (batch, head) job assigned in that round
+  //
+  // Example:
+  //   total_work = 100 logical jobs, block_num = 24 physical cores
+  //   round 0 handles jobs  0..23
+  //   round 1 handles jobs 24..47
+  //   ...
+  //   round 4 handles jobs 96..99, and the extra cores simply skip via
+  //   "if (work_id >= total_work) continue".
   for (int64_t work_idx = 0; work_idx < (total_work + block_num - 1) / block_num;
        ++work_idx) {
     const int64_t work_id = work_idx * block_num + core_id;
@@ -164,6 +186,8 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
 
     const int64_t head_id = work_id % NumHeads;
     const int64_t batch_id = work_id / NumHeads;
+    // Once we have a flat logical work_id, convert it back to the mathematical
+    // indices used by the algorithm: first choose the head, then the batch.
     const int64_t qkv_base = ((batch_id * NumHeads + head_id) * seq_len) * HiddenSize;
     const int64_t score_workspace_base = core_id * kScoreElems;
     const int64_t state_workspace_base = core_id * kStateElems;
@@ -221,6 +245,9 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
   set_vector_mask(-1, -1);
   for (int64_t work_idx = 0; work_idx < (total_work + block_num - 1) / block_num;
        ++work_idx) {
+    // Vector cores use the same logical work assignment as cube cores so both
+    // sides stay synchronized on which (batch, head) job is currently in the
+    // shared workspace for this physical core.
     const int64_t work_id = work_idx * block_num + core_id;
     if (work_id >= total_work) {
       continue;

@@ -4,6 +4,10 @@
 
 using namespace pto;
 
+// Step 07 keeps the two-slot cube/vector pipeline from step 06 and adds one
+// more overlap opportunity: while the current output is being formed, cube also
+// starts loading the next hidden-state tile into a second L1 buffer.
+
 #ifndef LINEAR_ATTN_H
 #define LINEAR_ATTN_H 2
 #endif
@@ -144,6 +148,8 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
                         uint64_t ffts_addr) {
   constexpr int32_t StageCount = 2;
   constexpr bool UseTwoStagePipeline = (ChunkSize >= 128);
+  // Retained optimization from the main kernel: when the chunk is large enough,
+  // reuse acc_ub as the destination of the mask multiply to save UB space.
   constexpr bool InplaceMaskApply = (ChunkSize >= 128);
   constexpr int32_t VecNum = 2;
   constexpr int32_t HalfChunk = ChunkSize / VecNum;
@@ -159,6 +165,8 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
   constexpr int32_t VL1Addr = KL1Addr + ChunkElems * sizeof(half);
   constexpr int32_t HL1Addr = VL1Addr + ChunkElems * sizeof(half);
   constexpr int32_t AccL1Addr = HL1Addr + Workspace2SlotElems * sizeof(half);
+  // New in step 07: reserve a second L1 buffer for the hidden state so the next
+  // prefix-state tile can be prefetched before it is needed.
   constexpr int32_t HNextL1Addr = AccL1Addr + Workspace1SlotElems * sizeof(half);
 
   constexpr int32_t SharedL0Addr = 0;
@@ -283,6 +291,8 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
 
     if constexpr (UseTwoStagePipeline) {
       const int32_t flag_base = static_cast<int32_t>((work_idx & 3) * 6);
+      // h_buf tells us which L1 buffer currently holds the "ready to use"
+      // prefix state for the output matmul.
       int32_t h_buf = 0;
       WaitCrossFlag(flag_base + 4);
       HiddenGlobal zero_h_global(workspace_2 + workspace2_base + Workspace2SlotElems);
@@ -319,6 +329,7 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
         const int64_t chunk_base = qkv_base + i * ChunkElems;
 
         if (i + 1 < chunk_num) {
+          // As in step 06, cube keeps one chunk ahead in the opposite slot.
           const int64_t next_chunk_base = qkv_base + (i + 1) * ChunkElems;
           const int64_t next_workspace1_base =
               workspace1_base + next_slot * Workspace1SlotElems;
@@ -356,6 +367,9 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
         TLOAD(q_l1, q_global);
         TLOAD(v_l1, v_global);
         if (i + 1 < chunk_num) {
+          // Step-07-specific optimization: overlap the next prefix-state load
+          // with the current chunk's Q/V reload. One of h_l1 / h_next_l1 is
+          // being consumed now, while the other becomes the "next" buffer.
           HiddenGlobal next_h_global(workspace_2 + workspace2_base +
                                      slot * Workspace2SlotElems);
           if (h_buf == 0) {
@@ -382,6 +396,8 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
         pipe_barrier(PIPE_ALL);
 
         if (i + 1 < chunk_num) {
+          // Swap roles: the buffer we just prefetched becomes the current one
+          // for the next loop iteration.
           h_buf ^= 1;
         }
       }
@@ -490,6 +506,7 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
           pipe_barrier(PIPE_ALL);
         }
         if constexpr (InplaceMaskApply) {
+          // Reusing acc_ub avoids one extra temporary tile in UB.
           TMUL(acc_ub, acc_ub, mask_ub);
         } else {
           TMUL(masked_acc_ub, acc_ub, mask_ub);

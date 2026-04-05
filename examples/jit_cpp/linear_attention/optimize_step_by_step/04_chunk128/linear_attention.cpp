@@ -4,6 +4,10 @@
 
 using namespace pto;
 
+// Step 04 keeps the cached-mask idea from step 03, but moves from C=64 to
+// C=128. The bigger chunk increases arithmetic intensity, so the matmuls do
+// more useful work per load/store.
+
 #ifndef LINEAR_ATTN_H
 #define LINEAR_ATTN_H 2
 #endif
@@ -43,6 +47,8 @@ AICORE inline void MatmulL1(
     std::conditional_t<TransposeA, L1Mat<half, K, M>, L1Mat<half, M, K>> &a_l1,
     std::conditional_t<TransposeB, L1Mat<half, N, K>, L1Mat<half, K, N>> &b_l1,
     bool init) {
+  // Still the simple single-stage helper: later steps will optimize this
+  // internal load/compute sequence without changing the outer algorithm.
   TileLeft<half, M, K, M, K> a_l0;
   TileRight<half, K, N, K, N> b_l0;
   TASSIGN(a_l0, 0x0);
@@ -92,6 +98,8 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
   constexpr int32_t HL1Addr = VL1Addr + ChunkElems * sizeof(half);
   constexpr int32_t AccL1Addr = HL1Addr + Workspace2Elems * sizeof(half);
 
+  // With C=128 the score tile, state tile, and output tile no longer all fit in
+  // L0C at the same time. This step reuses one shared L0C address range.
   constexpr int32_t SharedL0Addr = 0;
 
   constexpr int32_t HsumUbAddr = 0;
@@ -102,6 +110,8 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
       (HalfHidden * HiddenSize + HalfChunk * ChunkSize + HalfHidden * HiddenSize +
        HalfChunk * ChunkSize + HalfChunk * ChunkSize) *
       sizeof(half);
+  // A larger chunk also pressures UB more. If the mask fits, preload it once;
+  // otherwise alias it onto the H buffer and reload when needed.
   constexpr bool PreloadMask = RawUBBytes <= 72 * 1024;
   constexpr bool AliasMaskIntoH =
       !PreloadMask && (HalfHidden * HiddenSize >= HalfChunk * ChunkSize);
@@ -220,6 +230,8 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
       TLOAD(h_l1, h_global);
       pipe_barrier(PIPE_ALL);
 
+      // The math is unchanged from step 03; the gain here comes from the larger
+      // 128x128 score tile and the memory layout changes above.
       MatmulL1<ChunkSize, ChunkSize, HiddenSize, false, true>(acc_l0, q_l1, k_l1,
                                                               true);
       AccGlobal acc_global(workspace_1 + workspace1_base);
@@ -255,6 +267,7 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
   set_vector_mask(-1, -1);
   HalfMaskGlobal mask_global(causal_mask + vid * HalfChunk * ChunkSize);
   if constexpr (PreloadMask) {
+    // Best case: the whole mask slice stays resident in UB across all chunks.
     TLOAD(mask_ub, mask_global);
     pipe_barrier(PIPE_ALL);
   }
@@ -290,6 +303,7 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
       TADD(hsum_ub, hsum_ub, h_ub);
       pipe_barrier(PIPE_ALL);
       if constexpr (!PreloadMask) {
+        // Fallback for tighter UB budgets at larger chunk sizes.
         TLOAD(mask_ub, mask_global);
         pipe_barrier(PIPE_ALL);
       }
