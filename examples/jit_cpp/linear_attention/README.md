@@ -1,15 +1,35 @@
-Standalone linear attention PTO-ISA example.
+# PTO-ISA Linear Attention
 
-Run:
+This directory contains a self-contained PTO-ISA linear attention example and a local step-by-step optimization tutorial.
+
+## What Is Here
+
+- `linear_attention.cpp`: the current optimized kernel
+- `run_linear_attention.py`: correctness sweep against a PyTorch reference
+- `benchmark_linear_attention.py`: throughput and bandwidth benchmark
+- `optimization_lession.md`: reusable optimization notes for future PTO-ISA kernels
+- `optimize_step_by_step/`: a tutorial ladder from naive fixed-shape code to the current fast path
+
+## Main Example
+
+The main example:
+- compiles `linear_attention.cpp` with `bisheng`
+- loads the generated `.so` via `ctypes`
+- runs the kernel from PyTorch on NPU
+- builds the triangular causal mask once in PyTorch and passes it into the kernel
+- checks numerical correctness with `torch.testing.assert_close`
+- reports effective TFLOP/s and GiB/s on larger shapes
+
+Run correctness:
 
 ```bash
 python run_linear_attention.py
 ```
 
-Benchmark:
+Run the default benchmark table:
 
 ```bash
-python benchmark_linear_attention.py
+python benchmark_linear_attention.py --warmup 2 --repeats 5
 ```
 
 Quick smoke benchmark:
@@ -24,28 +44,49 @@ Throughput hunt:
 python benchmark_linear_attention.py --throughput-hunt --warmup 2 --repeats 5
 ```
 
-The example:
-- compiles `linear_attention.cpp` with `bisheng`
-- loads the generated `.so` via `ctypes`
-- runs the kernel from PyTorch on NPU
-- builds the triangular causal mask in PyTorch once and passes it as an extra kernel argument
-- checks correctness against a PyTorch reference with `assert_close`
-- reports effective TFLOP/s and GiB/s for larger benchmark shapes
+## Current Kernel Shape
 
-Performance notes:
-- the JIT compile path keeps the proven stack sizing, overflow recording, and scalar DCCI settings, but the local flag sweep showed this kernel is faster without `addr-transform` and without `L2_CACHE_HINT`
-- the current minimum direct-`pto::` kernel applies the causal mask with a precomputed GM mask tensor plus UB vector multiply, avoiding the old scalar per-element masking loop
-- the current minimum direct-`pto::` kernel now reuses one shared L0C accumulator region across the serialized cube stages, which allows a valid `C=128, D=128` configuration without changing the algorithm
-- the cube matmul helper now uses a real L0 double-buffered `K=128 -> 2 x 64` ping-pong path, overlapping `TEXTRACT` with cube compute via `MTE1 <-> M` events
-- the current `C=128` fast path uses a correctness-validated 2-slot workspace pipeline between cube and vector, with an explicit end-of-work-item acknowledgment so staged buffers are not recycled too early when `B * H` exceeds the core count
-- the `C=128` fast path now applies the causal mask in-place on `acc_ub`, which removes the extra masked-output UB tile and makes the mask preloadable again without per-chunk GM reloads
-- the current `C=128` fast path also keeps two `H`-state L1 buffers on the cube side so the next accumulated hidden-state tile can be prefetched while the current chunk's output path is already loading `Q`, `V`, and masked attention
-- the current bandwidth estimate excludes workspace traffic so the reported GiB/s reflects only the external tensors plus the causal mask, not the temporary per-core scratch buffers
-- `C=128, D=128` is currently the best measured point on this machine and the combined cube L0 ping-pong plus cube↔vec staged pipeline lifts throughput into the high-`70 TFLOP/s` range on large enough shapes while keeping the same numerical result
+The current kernel keeps:
+- dynamic `B` and `L`
+- compile-time `H`, `D`, and `C`
+- fixed `block_dim = num_cores`
+- an explicit in-kernel loop over logical work items
 
-Measured results:
-- command: `python benchmark_linear_attention.py --warmup 2 --repeats 5`
-- device-local results will vary, but the current measured table on this machine is:
+The current fast path is `C=128, D=128`.
+
+The main performance ideas now present in `linear_attention.cpp` are:
+- precomputed causal mask passed from PyTorch and applied with vector tile ops
+- shared L0C reuse so larger tiles fit without changing the math
+- cube-side `K=128 -> 2 x 64` L0 ping-pong inside the GEMM helper
+- 2-slot cube/vector workspace pipeline for chunk overlap
+- in-place mask application on `acc_ub` to reduce UB pressure
+- two L1 hidden-state buffers so the next prefix-state tile can be prefetched early
+
+## Step-By-Step Tutorial
+
+`optimize_step_by_step/` mirrors the optimization path as runnable local examples:
+
+1. `01_naive_static_shape`
+2. `02_naive_dynamic_shape`
+3. `03_cached_mask`
+4. `04_chunk128`
+5. `05_l0_double_buffer`
+6. `06_two_slot_cv_pipeline`
+7. `07_l1_prefetching`
+
+The tutorial keeps each kernel source self-contained, but now shares common Python compile / test / benchmark helpers through `optimize_step_by_step/common/`.
+
+Start there if you want to understand how the kernel evolved, or if you want a smaller teaching version before reading the main optimized kernel.
+
+## Measured Results
+
+Command used:
+
+```bash
+python benchmark_linear_attention.py --warmup 2 --repeats 5
+```
+
+Current measured table on this machine:
 
 | Shape `(B,H,L,D,C)` | Median ms | TFLOP/s | GiB/s |
 | --- | ---: | ---: | ---: |
@@ -54,6 +95,17 @@ Measured results:
 | `(12, 20, 8192, 128, 128)` | `3.327` | `77.45` | `563.54` |
 | `(24, 20, 6144, 128, 128)` | `5.063` | `76.35` | `555.55` |
 
-- for reference, the same kernel family at `C=64, D=128` currently measures roughly `28-31 TFLOP/s` on the same benchmark shapes
-- best measured throughput in the default table: `77.45 TFLOP/s` and `563.54 GiB/s` at shape `(12, 20, 8192, 128, 128)`
-- nearby large-shape probes also reached `76.64 TFLOP/s` at `(24, 20, 4096, 128, 128)` and `76.35 TFLOP/s` at `(24, 20, 6144, 128, 128)` with the same correctness-validated kernel
+Notes:
+- device-local results will vary
+- bandwidth here excludes workspace traffic, so it reflects external tensor movement plus the mask tensor
+- the same kernel family at `C=64, D=128` is roughly in the `28-31 TFLOP/s` range on large shapes
+- the best measured default-table point here is `77.45 TFLOP/s` at `(12, 20, 8192, 128, 128)`
+
+## Reading Order
+
+If you are new to this directory:
+
+1. Read `optimize_step_by_step/README.md`
+2. Run `01` and `02`, including their `numpy_sim.py`
+3. Read the current `linear_attention.cpp`
+4. Use `optimization_lession.md` as the checklist for future optimization work

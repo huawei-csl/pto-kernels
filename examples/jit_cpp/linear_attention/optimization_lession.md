@@ -1,427 +1,334 @@
 # Linear Attention Optimization Lessons
 
-This note records the optimization practices learned while improving the standalone PTO-ISA `linear_attention` kernel, and lists the next promising directions inspired by higher-performance kernels such as `flash_atten`-style examples and `mla_prefill_cce`.
+This note records the optimization lessons learned from the self-contained PTO-ISA examples in this directory. It is meant to be a practical reference for future work on other PTO-ISA kernels, not just for `linear_attention`.
 
 The file name intentionally matches the requested spelling: `optimization_lession.md`.
 
-## Current Status
+## How To Use This Note
 
-- The current kernel is a minimal direct-`pto::` implementation in `linear_attention.cpp`.
-- It keeps dynamic `B` and `L`, while `H`, `D`, and `C` stay compile-time parameters.
-- It passes the full correctness sweep in `run_linear_attention.py`.
-- The current fast path is `C=128, D=128`, with a true cube-side L0 double buffer plus a correctness-validated 2-slot cube<->vec workspace pipeline.
-- The current measured default-table performance is in the `73-76 TFLOP/s` range on large enough shapes, with the latest validated default-table throughput at `76.11 TFLOP/s`.
+Use this file as:
+- a checklist before starting a new kernel optimization task
+- a reminder of which changes gave real speedups here
+- a warning list of common correctness failures and deadlock traps
+- a template for planning and recording future experiments
 
-## Practices That Already Helped
+If you want the concrete runnable history behind these lessons, read `optimize_step_by_step/README.md` and the numbered tutorial directories beside it.
 
-### 1. Remove unnecessary abstraction on the hot path
+## Current Reference Point
 
-- Rewriting the kernel to use direct `pto::` APIs instead of many wrapper helpers improved both readability and performance.
-- The main hot-path operations are now easy to see: `TLOAD`, `TEXTRACT`, `TRESHAPE`, `TMATMUL`, `TMATMUL_ACC`, `TSTORE`, `TMUL`, and `TADD`.
-- Keeping only the used full-tile path helped the compiler generate better code and reduced control-flow noise.
+The current directory gives you two complementary references:
+- `linear_attention.cpp`: the current optimized kernel
+- `optimize_step_by_step/`: the local optimization ladder from naive code to the current fast path
 
-### 2. Keep the kernel compile-time specialized where it matters
+Current kernel shape:
+- dynamic `B` and `L`
+- compile-time `H`, `D`, and `C`
+- fixed `block_dim = num_cores`
+- persistent-kernel style work loop inside the kernel
 
-- Fixing `H`, `D`, and `C` as compile-time parameters is important.
-- This removes dynamic branches from the inner loops.
-- It also lets the compiler better optimize tile shapes, on-chip allocation, and instruction scheduling.
+Current fast configuration:
+- `C=128, D=128`
+- precomputed causal mask
+- shared L0C reuse
+- cube-side L0 ping-pong
+- 2-slot cube/vector staging
+- in-place mask apply
+- dual `H`-state L1 buffers
 
-### 3. Use a fixed launch shape and loop over dynamic work in-kernel
+Current validated performance class in this directory:
+- roughly `77 TFLOP/s` on large enough benchmark shapes
 
-- Using `block_dim = num_cores` and mapping dynamic work items with:
-  `pid = work_idx * block_num + cid`
-  is the right persistent-kernel structure.
-- This avoids host-side launch variability and keeps work distribution simple.
+## Core Lessons
 
-### 4. Respect on-chip memory limits aggressively
+### 1. Start With The Simplest Correct Structure
 
-- Explicit byte-level budgeting for L1, L0C, and UB is critical.
-- A compile-time `static_assert` on the L0C footprint catches invalid tile choices early.
-- This is especially important when trying larger `C` or `D`.
+The early tutorial steps were useful because they made the dataflow obvious:
+- load `Q`, `K`, `V`
+- form `QK^T`
+- form `K^T V`
+- apply the causal rule
+- accumulate the running hidden state
+- finish `O = masked_scores @ V + Q @ H`
 
-### 5. Avoid scalar loops on the vector path
+That simple structure is the right starting point even when it is slow. Optimization was much easier once the kernel had a clear baseline and a matching NumPy/PyTorch explanation.
 
-- The scalar causal-mask loop on `acc_ub` was a major bottleneck.
-- Precomputing the triangular mask in PyTorch once, passing it as an extra tensor, and applying it with UB `TMUL` gave a large speedup.
-- This follows the same general advice from flash-attention docs: replace scalar loops with tile/vector operations.
+Rule for future kernels:
+- get one small, readable, correctness-checked version working first
+- only then start adding buffering, staging, and flag choreography
 
-### 6. Match the compiler flags that actually help this kernel
+### 2. Keep Hot Dimensions Compile-Time Specialized
 
-- Compiler/codegen choices mattered a lot, but not every "stronger-looking" flag was actually beneficial here.
-- The current best configuration keeps:
-  stack sizing flags
-  overflow-record flags
-  `-cce-aicore-dcci-insert-for-scalar=false`
-- The local sweep showed this kernel is faster without:
-  `-cce-aicore-addr-transform`
-  `-DL2_CACHE_HINT`
+The biggest stability and codegen wins came from keeping the inner tile shape fixed at compile time.
 
-### 7. Separate cube and vector responsibilities clearly
+In this kernel that meant:
+- `H`, `D`, and `C` as compile-time constants
+- `B` and `L` as runtime dimensions
 
-- The kernel follows a clean cube/vector split:
-  cube side computes `QK^T`, `K^T V`, `acc @ V`, and `Q @ H`
-  vector side applies the causal mask and accumulates the running `H`
-- This maps well onto the underlying machine model.
+Why it helped:
+- fewer dynamic branches in inner loops
+- simpler on-chip allocation
+- more predictable tile lowering and instruction scheduling
 
-### 8. Keep correctness handshakes explicit
+Rule for future kernels:
+- keep the dimensions that determine tile shape and on-chip layout compile-time if you can
+- push only outer problem-size dimensions to runtime
 
-- Cross-core synchronization around workspace handoff is essential.
-- The vector side must initialize or update workspace state before cube consumes it.
-- Reducing barriers is tempting, but correctness breaks easily if producer/consumer edges are not exact.
-- After adding the 2-slot pipeline, an explicit end-of-work-item acknowledgment was required before vector could safely recycle staged buffers for the next `pid` when `B * H > block_dim`.
+### 3. Fixed Launch Shape Plus In-Kernel Work Loop Is A Good Default
 
-## Main Lessons From High-Performance Examples
+Switching to:
+- fixed `block_dim = num_cores`
+- logical work mapping inside the kernel
 
-From `flash_attention` optimization docs and `mla_prefill_cce`, the repeated themes are:
+was the right dynamic-shape structure.
 
-- use larger-granularity compute and data movement
-- keep data resident in L1/L0 when reuse is high
-- overlap MTE, cube, vector, and FIX as much as possible
-- double buffer aggressively
-- reduce scalar dispatch and synchronization frequency
-- tune toward a single dominant bound instead of many small bubbles
+The key pattern is:
+- `work_id = work_idx * block_num + cid`
+- skip when `work_id >= total_work`
 
-The current kernel has improved vectorization, but it is still structurally much more serial than those high-performance kernels.
+Why it helped:
+- host launch stays stable
+- runtime shape changes do not require changing launch geometry
+- the kernel becomes more like a persistent worker loop
 
-## Next Potential Optimizations To Try
+Rule for future kernels:
+- if the logical workload varies but the per-core kernel structure stays the same, prefer a fixed launch plus in-kernel work assignment
 
-Below is a broad list of experiments worth trying next.
+### 4. Budget L1, L0C, And UB Explicitly
 
-## A. Cube-Side Data Reuse And Tiling
+The kernel only became robust once memory use was treated as a first-class design constraint.
 
-- Keep `Q` resident in L1 across more work instead of reloading it every time.
-- Explore whether `V` can also stay in L1 longer for the `acc @ V` stage.
-- Introduce explicit K-splitting inside the `ChunkSize x HiddenSize` matmuls instead of relying on a single full-tile extraction path.
-- Try alternate valid `(C, D)` pairs that still satisfy the L0C budget but improve arithmetic intensity.
-- Consider splitting `D` into smaller inner tiles if that enables better overlap and higher cube utilization.
-- Explore 2D tile decomposition for the `H` update and output path rather than treating each chunk as one monolithic tile.
+Practices that helped:
+- explicit byte accounting for L1, L0C, and UB
+- `static_assert` guards for invalid tile choices
+- separating "one-slot" and "two-slot" workspace footprints
+- designing tile sizes around real on-chip budget, not just around the math
 
-Why this might help:
-- `mla_prefill_cce` heavily exploits tiled inner loops and explicit fragment-level movement.
-- High-performance FA kernels usually increase reuse per GM byte rather than only optimizing single-tile execution.
+Rule for future kernels:
+- write the memory budget down in bytes
+- fail early at compile time when a tile choice cannot fit
+- treat on-chip memory planning as part of the algorithm design
 
-Risks:
-- More tiling increases indexing complexity.
-- Accumulation order and workspace semantics can change subtly.
+### 5. Remove Scalar Work From The Vector Path Early
 
-## B. L1 <-> L0 Double Buffering
-
-- Add ping-pong buffering for L1-to-L0A and L1-to-L0B movement.
-- While one tile is being consumed by cube, preload the next tile into the alternate buffer.
-- Apply the same idea separately to the two cube phases:
-  `QK^T`
-  `K^T V`
-  `acc @ V`
-  `Q @ H`
-
-Why this might help:
-- Flash-attention docs explicitly call out L1->L0 double buffering as a key intra-core optimization.
-- The current cube path still has visible serialization between load, compute, and store.
+One of the biggest speedups came from deleting the scalar causal-mask loop and replacing it with:
+- a precomputed triangular mask tensor
+- a vector `TMUL`
 
-Risks:
-- Easy to introduce hazards by reusing a buffer before the previous pipe finishes.
+Why it helped:
+- removed per-element scalar control flow
+- let the vector unit handle masking as a tile operation
+- made the vector side much simpler to pipeline later
 
-## C. Vector-Side Double Buffering
-
-- Double buffer the vector path for:
-  loading masked-acc tiles
-  loading `H` tiles
-  applying `TMUL`
-  running `TADD`
-  storing updated workspace
-- Overlap `MTE2 -> VEC -> MTE3` between successive chunks.
-
-Why this might help:
-- Flash-attention tuning docs explicitly recommend vector-path double buffering.
-- The vector side currently became much faster after mask vectorization, but it still executes in a mostly serial chunk loop.
+Rule for future kernels:
+- whenever you see elementwise scalar loops on the vector side, first ask whether they can become tile-vector operations
 
-Risks:
-- More buffers increase UB pressure.
-- Cross-core synchronization logic becomes more delicate.
+### 6. Reuse On-Chip Storage Aggressively
 
-## D. Inter-Core Pipeline / Multi-Stage Workspace
+Another important step was changing the L0C layout from:
+- separate regions for score, state, and output
 
-- Replace the single workspace slot per core with 2-stage or 3-stage workspace ping-pong.
-- Let cube produce chunk `i + 1` while vector is still consuming chunk `i`.
-- Tune a `num_stages` style pipeline similar to the inter-core pipeline ideas in flash-attention docs.
-- Try separate workspace slots per stage for `workspace_1` and `workspace_2`.
+to:
+- one shared region reused across serialized cube stages
 
-Why this might help:
-- Current cube/vector handoff is still mostly chunk-by-chunk serial.
-- High-performance CV-fusion style kernels reduce bubbles by letting stages run ahead.
+Why it helped:
+- larger tile choices became legal
+- `C=128, D=128` fit without changing the math
+- arithmetic intensity improved
 
-Risks:
-- This is one of the easiest places to deadlock or consume stale data.
-- Memory footprint grows with the number of stages.
+Rule for future kernels:
+- if two stages never need the same buffer live at the same time, consider aliasing them onto the same on-chip region
 
-## E. Reduce Synchronization Frequency
+### 7. Optimize The Cube Microkernel Before Redesigning The Whole Kernel
 
-- Check whether multiple chunks can be processed before one cross-core sync, instead of syncing every chunk.
-- Batch some vector-side updates before signaling back to cube.
-- Replace broad `pipe_barrier(PIPE_ALL)` use with narrower event dependencies where safe.
+The first major structural speedup came from improving the local cube helper:
+- split `K=128` into `2 x 64`
+- ping-pong two L0 buffers
+- overlap extract with cube compute
 
-Why this might help:
-- Flash-attention docs explicitly call out excessive synchronization as a scalar-bound problem.
-- `mla_prefill_cce` uses very fine-grained flags rather than global drain-like barriers everywhere.
+Why it helped:
+- the inner GEMM path stopped looking like a single serial block
+- the outer algorithm stayed unchanged
 
-Risks:
-- Wrong dependency pruning can silently corrupt results.
-- Some per-chunk dependencies are real because `H` is recurrent.
+Rule for future kernels:
+- before rewriting the whole kernel, inspect the most repeated GEMM-like helper and see whether load/compute overlap can be introduced there first
 
-## F. Fuse Or Simplify Vector Operations Further
+### 8. Inter-Core Producer/Consumer Pipelines Give Large Wins
 
-- Check whether mask application and running-sum update can be fused more tightly.
-- Try using fewer vector instructions per chunk.
-- Explore whether the mask can be stored in a more compact or more hardware-friendly layout.
-- Consider generating the triangular mask in-kernel with vector primitives if that removes GM reads without reintroducing scalar overhead.
-- Try a permanent UB-resident mask if the same tile can be reused safely across all work on a core.
+The next big jump came from moving from:
+- one chunk of cube work, then one chunk of vector work
 
-Why this might help:
-- The current precomputed-mask change already proved scalar dispatch was very expensive.
-- Further reduction in vector instruction count may still be available.
+to:
+- cube producing chunk `i + 1` while vector consumes chunk `i`
 
-Risks:
-- Fused math may change rounding behavior.
+The working version used:
+- two workspace slots
+- stage-aware cross-core flags
+- an explicit end-of-work-item acknowledgment
 
-## G. Improve Workspace Layout And Memory Format
+Why it helped:
+- reduced chunk-to-chunk bubbles between cube and vector
+- let both sides stay busier on long sequences
 
-- Revisit `workspace_1` and `workspace_2` layout for better GM burst efficiency.
-- Check whether ND is the best format for all transfers or whether some paths want NZ-like organization.
-- Add explicit alignment or padding between workspace regions if that reduces bank conflicts or improves bursts.
-- Explore storing only the needed half-tiles per vector sub-block instead of full dense tiles in some stages.
+Rule for future kernels:
+- if cube and vector naturally form a producer/consumer pair, a small staged workspace is often worth more than another tiny local instruction tweak
 
-Why this might help:
-- `mla_prefill_cce` uses more specialized GM->L1 and L0C->GM movement patterns.
-- The current kernel is still using a very straightforward layout.
+### 9. Reduce Temporary Tiles When UB Is Tight
 
-Risks:
-- Layout changes are correctness-sensitive and easy to mismatch with host tensor assumptions.
+Applying the mask in-place on `acc_ub` removed one extra UB tile.
 
-## H. Make The Cube Path More Like A Real GEMM Pipeline
+Why it helped:
+- lowered UB pressure
+- made mask preload possible again
+- cut some unnecessary data motion
 
-- Introduce a dedicated GEMM micro-kernel structure closer to optimized `matmul` examples.
-- Explicitly separate:
-  TLOAD panels
-  TEXTRACT fragments
-  TMATMUL / TMATMUL_ACC
-  TSTORE
-- Let each stage overlap with the next through ping-pong and event ordering.
-- Treat the cube path as a proper steady-state pipeline instead of repeating a simple serial sequence.
+Rule for future kernels:
+- once the functional structure is stable, inspect temporary tiles and ask which ones can safely become in-place updates
 
-Why this might help:
-- High-performance examples do not leave cube work as isolated, barrier-heavy single-shot matmuls.
-- A more pipeline-friendly cube path is likely necessary to move toward ~100 TFLOP/s.
+### 10. Prefetch The Next Recurrent State Early
 
-Risks:
-- Code size and complexity increase significantly.
+The final major improvement here was adding a second `H`-state L1 buffer so the next prefix-state tile could be loaded while the current chunk still had work left.
 
-## I. Tune Toward A Single Dominant Bound
+Why it helped:
+- hid part of the recurrent-state load cost
+- reduced bubbles in the output stage
 
-- Use profiling to determine whether the kernel is now:
-  vector bound
-  cube bound
-  MTE bound
-  FIX bound
-  sync/scalar bound
-- Then optimize so the longest useful stage hides the others.
-- Prefer one clean dominant pipeline over many partially idle stages.
+Rule for future kernels:
+- in recurrent or iterative kernels, the next state load is often a good prefetch target once the main pipeline exists
 
-Why this might help:
-- The flash-attention doc explicitly recommends optimizing toward a single bound.
+### 11. Compiler Flags Matter, But Only Measured Ones Count
 
-Risks:
-- Optimizing blindly without stage-level timing can waste time.
+This directory also showed that not every seemingly stronger compiler option helps.
 
-## J. Try Larger Benchmark Shapes That Improve Steady-State Utilization
+The currently proven settings keep:
+- stack sizing flags
+- overflow-record flags
+- `-cce-aicore-dcci-insert-for-scalar=false`
 
-- Benchmark more shapes with larger `B * H` and longer `L`.
-- Try shape sets that improve persistent-kernel occupancy and reduce warm-up/drain distortion.
-- Add a second benchmark preset specifically for throughput hunting.
+The local sweep showed this kernel was faster without:
+- `-cce-aicore-addr-transform`
+- `-DL2_CACHE_HINT`
 
-Why this might help:
-- Larger shapes often hide fixed overhead better.
-- The current best result already improved at larger total work.
+Rule for future kernels:
+- treat compiler flags as experiments, not assumptions
+- keep only settings that survive correctness and benchmark comparison
 
-Risks:
-- Bigger shapes do not fix structural inefficiency by themselves.
+## Common Failure Modes
 
-## K. Compiler / Codegen Experiments
+These were recurring problems during the work here:
 
-- Sweep a small set of compiler flags around the currently good Bisheng configuration.
-- Compare whether any flag changes help the vectorized-mask kernel differently from the scalar-mask version.
-- Recheck newer PTO headers once the API mismatch is resolved, because codegen behavior may improve.
+### Deadlocks
 
-Why this might help:
-- Compiler/codegen choices already showed real performance impact in this project.
+Typical causes:
+- reusing a staged buffer before the peer core released it
+- narrowing dependencies too aggressively
+- forgetting an end-of-work-item handshake when the same physical core later serves a different logical job
 
-Risks:
-- Hard to generalize across toolchain versions.
+Guardrail:
+- if you add or change a pipeline stage, re-check all producer/consumer ownership transitions explicitly
 
-## L. Borrow More Structure From `mla_prefill_cce`
+### Silent Numerical Regressions
 
-Specific ideas to copy conceptually from `mla_prefill_cce`:
+Typical causes:
+- wrong byte offsets
+- wrong aliasing assumptions in L0C or UB
+- reordered accumulation without checking tolerance impact
 
-- ping-pong flags for multiple stages
-- separate ping-pong control for KV-style loads
-- launch delay / staggered pipeline structure
-- multiple L0C buffers to overlap compute and store
-- more deliberate event choreography between MTE1, MTE2, M, and FIX
+Guardrail:
+- keep full correctness sweeps, not just one smoke shape
 
-Why this might help:
-- `mla_prefill_cce` is much closer to the class of kernels that actually reach the ~100 TFLOP/s range.
+### Overfitting To Benchmark Noise
 
-Risks:
-- It is much more complex and may require a partial redesign rather than a local patch.
+Typical cause:
+- keeping a change because one run was slightly faster
 
-## Suggested Optimization Order
+Guardrail:
+- compare repeated measurements on the same shape set
+- revert marginal gains if they do not repeat cleanly
 
-If continuing from the current ~30 TFLOP/s kernel, a practical order is:
+### Complexity Without Throughput Gain
 
-1. Add vector-side double buffering.
-2. Add cube-side L1/L0 ping-pong.
-3. Introduce 2-stage workspace pipeline between cube and vector.
-4. Reduce synchronization frequency where dependencies allow.
-5. Revisit `(C, D)` and K-splitting under the explicit pipeline.
-6. Profile and tune toward one dominant bound.
+Typical cause:
+- adding a pipeline or microkernel that looks more advanced but does not improve the dominant bottleneck
 
-## Experiment Tracking Plan
+Guardrail:
+- only keep structural complexity when the measured benefit is clear
 
-Use the following lightweight tracking format for each optimization attempt:
+## Practical Optimization Order
 
-- `ID`: short experiment ID
-- `Goal`: what performance bottleneck it is trying to reduce
-- `Hypothesis`: why it should help
-- `Change`: what code or benchmark setup to modify
-- `Check`: how to validate correctness and performance
-- `Status`: `todo`, `doing`, `done`, `dropped`
-- `Result`: measured outcome and brief notes
+For a new PTO-ISA kernel, a good order is:
 
-Suggested workflow:
+1. Get a small, direct, correctness-checked baseline.
+2. Move runtime variability out of the hot inner tile logic.
+3. Remove scalar work from vector code.
+4. Revisit tile shape and on-chip memory reuse.
+5. Improve the local cube microkernel.
+6. Add staged producer/consumer overlap between pipelines.
+7. Reduce temporary buffers and prefetch recurrent state.
+8. Sweep compiler flags only after the kernel structure is stable.
+9. Tune benchmark shapes to expose steady-state throughput.
+
+## What To Measure
+
+For each experiment, keep the same checklist:
+
+- correctness on a full shape sweep
+- at least one small smoke benchmark
+- at least one larger steady-state benchmark
+- best TFLOP/s shape
+- best GiB/s shape
+- whether bandwidth includes or excludes workspace traffic
+
+If possible, keep:
+- one fixed quick shape set for iteration
+- one fixed large-shape table for decisions
+
+## Experiment Template
+
+Record each attempt with:
+
+- `ID`: short experiment name
+- `Goal`: the bottleneck being targeted
+- `Hypothesis`: why it might help
+- `Change`: exact implementation change
+- `Check`: correctness and benchmark commands
+- `Status`: `todo`, `doing`, `done`, `reverted`, `dropped`
+- `Result`: measured outcome and short conclusion
+
+Recommended workflow:
 
 1. Pick one experiment only.
-2. Record the exact benchmark shape set before changing code.
+2. Record the benchmark shapes before editing.
 3. Run correctness first.
-4. Run the same benchmark table before and after.
-5. Keep or drop the change based on measured evidence.
+4. Run the same benchmark set before and after.
+5. Keep or drop the change based on repeated evidence.
 
-### Backlog
+## Local Progression Summary
 
-#### `exp01` Vector Double Buffer
+The local tutorial ladder in `optimize_step_by_step/` also captures the high-level progression:
 
-- `Goal`: overlap vector `MTE2 -> VEC -> MTE3` across chunks
-- `Hypothesis`: the vector side still has serial bubbles after the mask-vectorization improvement
-- `Change`: ping-pong `acc_ub`, `h_ub`, and masked output UB tiles
-- `Check`: full `run_linear_attention.py` plus default benchmark table
-- `Status`: `done (reverted)`
-- `Result`: first implementation compiled and passed a smoke test but deadlocked during the full sweep; reverted to the known-good baseline and noted that future vector double-buffer attempts need a stricter event plan and careful cleanup of orphaned hung processes before re-measuring
+1. naive static shape
+2. dynamic work mapping
+3. cached causal mask
+4. larger chunk size
+5. cube L0 ping-pong
+6. two-slot cube/vector pipeline
+7. L1 hidden-state prefetch
 
-#### `exp02` Cube L1/L0 Ping-Pong
-
-- `Goal`: overlap cube-side load, extract, and matmul work
-- `Hypothesis`: current cube stages still serialize `TLOAD`, `TEXTRACT`, `TMATMUL`, and `TSTORE`
-- `Change`: introduce double buffering for L1/L0A/L0B tiles in the cube path
-- `Check`: correctness sweep plus benchmark table, compare against current ~30 TFLOP/s baseline
-- `Status`: `done`
-- `Result`: rewrote the cube `MatmulL1` helper into a true L0 ping-pong path for `K=128`, splitting each matmul into `2 x 64` phases with `MTE1 <-> M` event handoff; the full correctness sweep still passed, the default `C=128` table improved from `47.79-53.07 TFLOP/s` to `50.64-57.59 TFLOP/s`, and the throughput-hunt best improved to `58.48 TFLOP/s` at `(12, 20, 8192, 128, 128)`
-
-#### `exp03` Two-Stage Workspace Pipeline
-
-- `Goal`: let cube and vector work on adjacent chunks concurrently
-- `Hypothesis`: chunk-by-chunk cube/vector handoff is causing avoidable inter-core bubbles
-- `Change`: add 2 workspace slots per core and a stage-aware cross-core handshake
-- `Check`: correctness sweep, deadlock check, benchmark table
-- `Status`: `done`
-- `Result`: added a correctness-validated 2-slot workspace pipeline for the `C=128` fast path so cube can compute raw chunk `i + 1` while vector processes chunk `i`; the final working version needed an explicit end-of-work-item acknowledgment before vector could recycle the staged workspace when `B * H > block_dim`; after this landed, the full correctness sweep still passed and large-shape performance moved from the high-`50 TFLOP/s` range to roughly `73-75 TFLOP/s`, with the latest validated default-table best at `(24, 20, 6144, 128, 128)` running at `74.54 TFLOP/s`
-
-#### `exp04` Reduced Sync Frequency
-
-- `Goal`: lower scalar/synchronization overhead
-- `Hypothesis`: syncing every chunk may be too expensive
-- `Change`: batch some work before cross-core signaling where data dependencies permit
-- `Check`: correctness sweep with long `L` and large `B*H`, benchmark table
-- `Status`: `done (reverted)`
-- `Result`: a direct "sync every other chunk" change was not legal with the existing 2-slot dependency chain, so the only viable test expanded the `C=128` fast path from `2` staged workspace slots to `3`. That variant stayed correct and occasionally showed slightly higher long-sequence numbers, but follow-up reruns did not show a stable enough advantage over the simpler 2-slot kernel. It was treated as benchmark noise and reverted, so the current baseline remains the 2-slot staged pipeline.
-
-#### `exp05` Narrower Pipe Dependencies
-
-- `Goal`: reduce over-barriering
-- `Hypothesis`: some `pipe_barrier(PIPE_ALL)` calls can be replaced by narrower event dependencies
-- `Change`: replace selected full barriers with more precise waits/flags
-- `Check`: correctness sweep and repeated benchmark runs to catch unstable behavior
-- `Status`: `done (reverted)`
-- `Result`: a first focused attempt narrowed a few vector-side `PIPE_ALL` barriers to `PIPE_V`, but even the smallest `C=64` correctness case failed immediately; this confirms that the current vector-store path still depends on stronger ordering than it first appears, so the change was reverted and the stable pipelined baseline was kept
-
-#### `exp06` K-Split Cube Microkernel
-
-- `Goal`: improve overlap and on-chip utilization inside large matmuls
-- `Hypothesis`: explicit K-splitting can outperform the current single full-tile extract path
-- `Change`: rewrite `MatmulL1` into a K-part microkernel with accumulation across parts
-- `Check`: correctness sweep and benchmark table
-- `Status`: `done (retested, reverted)`
-- `Result`: the first steady-state rewrite was blocked because Bisheng treated the lambda-style helper as host context inside `AICORE` code. A later fully inline retry compiled and stayed correct, but when tested on top of the newer staged pipeline it regressed the long-sequence throughput probes back into the `76-77 TFLOP/s` range, so it was reverted again. The current conclusion is that this specific hot `K=128` special-case does not beat the simpler `MatmulL1` loop once the larger pipeline changes are in place.
-
-#### `exp07` Workspace Layout / Padding
-
-- `Goal`: improve memory-system efficiency for workspace traffic
-- `Hypothesis`: padding or alternate workspace layout may improve burst behavior or reduce conflicts
-- `Change`: try aligned/padded workspace layout and matching indexing changes
-- `Check`: correctness sweep and benchmark table
-- `Status`: `done (reverted)`
-- `Result`: added per-slot padding to both staged workspaces and switched the Python runners to allocate wider scratch buffers. Full correctness still passed, but the performance impact was flat to slightly negative: the large-shape check at `(24, 20, 6144, 128, 128)` measured `76.06 TFLOP/s` versus the prior `76.11 TFLOP/s` best, so the layout change was reverted to keep the cleaner baseline.
-
-#### `exp08` Alternate `(C, D)` Search
-
-- `Goal`: find a better arithmetic-intensity point within L0C budget
-- `Hypothesis`: some valid `(C, D)` combinations may use the machine better than the current one
-- `Change`: benchmark additional compile-time shape families that still satisfy the current memory budget
-- `Check`: compile success, correctness, benchmark table
-- `Status`: `done`
-- `Result`: reworked the minimum kernel to reuse one shared L0C accumulator region across the serialized cube stages and kept the vector mask path adaptive to the UB budget; this enabled `C=128, D=128` to compile and pass correctness, and the benchmark improved from the `~30 TFLOP/s` class at `C=64` to `47.79-53.07 TFLOP/s` on the default large-shape table, with the current best at `(32, 20, 1024, 128, 128)`
-
-#### `exp09` Larger Throughput Shapes
-
-- `Goal`: identify shapes that push utilization higher without changing the kernel
-- `Hypothesis`: larger `B * H` and longer `L` may reduce fixed overhead impact further
-- `Change`: add a second benchmark preset specifically for throughput hunting
-- `Check`: benchmark-only experiment, keep same correctness-tested kernel
-- `Status`: `done`
-- `Result`: added a `--throughput-hunt` preset to `benchmark_linear_attention.py` and then promoted larger high-utilization shapes into the default benchmark table; with the staged cube↔vec pipeline in place, the current large-shape measurements sit in the `72-75 TFLOP/s` range, with the latest validated table entry at `74.54 TFLOP/s` / `542.38 GiB/s` for `(24, 20, 6144, 128, 128)`
-
-#### `exp10` Compiler Flag Sweep
-
-- `Goal`: extract more performance from codegen without changing semantics
-- `Hypothesis`: some Bisheng/AICore flags may interact differently with the new vectorized mask path
-- `Change`: sweep a small set of compile flags around the current known-good configuration
-- `Check`: correctness on at least one small and one large shape, benchmark table on one reference shape
-- `Status`: `done`
-- `Result`: on the reference shape `(16, 20, 2048, 128, 64)`, `baseline` measured `30.77 TFLOP/s`, dropping `L2_CACHE_HINT` measured `31.22 TFLOP/s`, and dropping both `L2_CACHE_HINT` plus `addr-transform` measured `31.70 TFLOP/s`; the default JIT flags were updated accordingly, the full correctness sweep still passed, and the default benchmark table improved to `31.17 TFLOP/s` / `1062.92 GiB/s`
-
-#### `exp11` Mask Residency Experiment
-
-- `Goal`: reduce even the small remaining cost of mask loading
-- `Hypothesis`: keeping the mask resident or regenerating it cheaply in-core may beat GM mask load
-- `Change`: test persistent UB-resident mask or vector-generated mask forms
-- `Check`: correctness sweep and benchmark table
-- `Status`: `done`
-- `Result`: instead of synthesizing the mask in-core, the working win was to remove the extra `masked_acc_ub` tile on the `C=128` fast path and apply `TMUL` in-place on `acc_ub`; that reduced UB pressure enough to make the mask preloadable again, removed the per-chunk mask GM reload, passed the full correctness sweep, and improved the large-shape table into the `73-76 TFLOP/s` range before the later `exp12` and `exp04` pipeline updates lifted the combined kernel further
-
-#### `exp12` MLA-Style Pipeline Borrowing
-
-- `Goal`: move toward the structural style used by ~100 TFLOP/s kernels
-- `Hypothesis`: MLA-style staged ping-pong plus delayed launch and multi-buffer orchestration is needed for the next major jump
-- `Change`: selectively port one structural idea from `mla_prefill_cce`, starting with ping-pong L0C or staggered stage scheduling
-- `Check`: correctness sweep, deadlock check, benchmark table
-- `Status`: `done`
-- `Result`: borrowed one MLA-style idea by adding a second `H`-state L1 tile on the cube side and prefetching the next accumulated hidden-state chunk while the current chunk was already loading `Q`, `V`, and masked attention for the output matmuls. The full correctness sweep still passed, and after reverting the noisy 3-slot `exp04` variant this remains the current baseline. The latest post-revert default table peaks at `77.45 TFLOP/s` / `563.54 GiB/s` for `(12, 20, 8192, 128, 128)`.
+That sequence is a useful default mental model for future optimization tasks:
+- first remove obvious scalar waste
+- then improve tile size and memory reuse
+- then overlap local stages
+- then overlap whole pipelines
 
 ## Closing Thought
 
-The big lesson so far is that the largest gains did not come from changing the math. They came from:
+The biggest gains in this directory did not come from changing the algorithm. They came from:
 
 - reducing scalar work
-- improving specialization
-- simplifying the hot path
-- matching good codegen flags
-- using vector instructions for masking
+- specializing the hot path
+- planning on-chip memory explicitly
+- reusing buffers aggressively
+- overlapping cube, vector, and memory movement
+- keeping only measured improvements
 
-To go from ~30 TFLOP/s to the ~100 TFLOP/s class, the next leap will likely require deeper pipeline overlap and buffering, not just another small local micro-optimization.
+For future PTO-ISA kernels, the main takeaway is simple: start from a clear baseline, optimize one bottleneck at a time, and only keep structural complexity that earns its place in the benchmark table.
