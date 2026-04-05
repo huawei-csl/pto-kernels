@@ -1,6 +1,7 @@
 import ctypes
 import os
 import subprocess
+from functools import lru_cache
 
 import torch
 
@@ -9,8 +10,18 @@ PTO_LIB_PATH = os.environ.get("PTO_LIB_PATH", ASCEND_TOOLKIT_HOME)
 BLOCK_DIM = int(getattr(torch.npu.get_device_properties("npu:0"), "cube_core_num", 20))
 
 
-def compile_cpp(kernel_cpp: str, verbose: bool = False, timeout: int = 180) -> str:
-    lib_path = os.path.join(os.path.dirname(kernel_cpp), "linear_attention_jit.so")
+def compile_cpp(
+    kernel_cpp: str,
+    num_heads: int,
+    hidden_size: int,
+    chunk_size: int,
+    verbose: bool = False,
+    timeout: int = 180,
+) -> str:
+    lib_path = os.path.join(
+        os.path.dirname(kernel_cpp),
+        f"linear_attention_H{num_heads}_D{hidden_size}_C{chunk_size}_jit.so",
+    )
 
     flags = [
         "-fPIC",
@@ -25,6 +36,9 @@ def compile_cpp(kernel_cpp: str, verbose: bool = False, timeout: int = 180) -> s
         f"-I{ASCEND_TOOLKIT_HOME}/pkg_inc",
         f"-I{ASCEND_TOOLKIT_HOME}/pkg_inc/runtime",
         f"-I{ASCEND_TOOLKIT_HOME}/pkg_inc/profiling",
+        f"-DLINEAR_ATTN_H={num_heads}",
+        f"-DLINEAR_ATTN_D={hidden_size}",
+        f"-DLINEAR_ATTN_C={chunk_size}",
     ]
 
     command = ["bisheng", *flags, kernel_cpp, "-o", lib_path]
@@ -57,6 +71,8 @@ def load_lib(lib_path: str):
         ctypes.c_void_p,
         ctypes.c_void_p,
         ctypes.c_void_p,
+        ctypes.c_int64,
+        ctypes.c_int64,
     ]
     lib.call_kernel.restype = None
 
@@ -71,7 +87,7 @@ def load_lib(lib_path: str):
         stream_ptr=None,
     ):
         if block_dim is None:
-            block_dim = q.shape[0] * q.shape[1]
+            block_dim = BLOCK_DIM
         if stream_ptr is None:
             stream_ptr = torch.npu.current_stream()._as_parameter_
 
@@ -84,13 +100,29 @@ def load_lib(lib_path: str):
             torch_to_ctypes(workspace_1),
             torch_to_ctypes(workspace_2),
             torch_to_ctypes(o),
+            q.shape[0],
+            q.shape[2],
         )
 
     return linear_attention_func
 
 
-def jit_compile(src_path: str, verbose: bool = True, clean_up: bool = False):
-    lib_path = compile_cpp(src_path, verbose=verbose)
+@lru_cache(maxsize=None)
+def jit_compile(
+    src_path: str,
+    num_heads: int,
+    hidden_size: int,
+    chunk_size: int,
+    verbose: bool = True,
+    clean_up: bool = False,
+):
+    lib_path = compile_cpp(
+        src_path,
+        num_heads=num_heads,
+        hidden_size=hidden_size,
+        chunk_size=chunk_size,
+        verbose=verbose,
+    )
     func = load_lib(lib_path)
     if clean_up:
         os.remove(lib_path)

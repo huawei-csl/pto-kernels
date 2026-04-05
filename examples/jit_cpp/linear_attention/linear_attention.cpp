@@ -4,6 +4,18 @@
 
 using namespace pto;
 
+#ifndef LINEAR_ATTN_H
+#define LINEAR_ATTN_H 2
+#endif
+
+#ifndef LINEAR_ATTN_D
+#define LINEAR_ATTN_D 128
+#endif
+
+#ifndef LINEAR_ATTN_C
+#define LINEAR_ATTN_C 64
+#endif
+
 namespace linear_attention_pto {
 
 template <typename T, int Rows, int Cols, int RowValid = Rows,
@@ -340,96 +352,198 @@ AICORE PTO_INLINE void wait_cross_flag(int32_t flag) { wait_flag_dev(flag); }
 
 }  // namespace linear_attention_pto
 
+template <int32_t NumHeads, int32_t HiddenSize, int32_t ChunkSize>
 AICORE void main_kernel(__gm__ half *Q_handle, __gm__ half *K_handle,
                         __gm__ half *V_handle, __gm__ half *workspace_1_handle,
                         __gm__ half *workspace_2_handle, __gm__ half *O_handle,
+                        int64_t batch_size, int64_t seq_len,
                         uint64_t ffts_addr) {
-  auto cid = get_block_idx();
+  constexpr int32_t VecNum = 2;
+  constexpr int32_t Workspace1Elems = ChunkSize * ChunkSize;
+  constexpr int32_t Workspace2Elems = HiddenSize * HiddenSize;
+  constexpr int32_t ChunkElems = ChunkSize * HiddenSize;
+  constexpr int32_t HalfHidden = HiddenSize / VecNum;
+  constexpr int32_t HalfChunk = ChunkSize / VecNum;
+  constexpr int32_t QL1Addr = 0;
+  constexpr int32_t KL1Addr = ChunkElems * sizeof(half);
+  constexpr int32_t VL1Addr = 2 * ChunkElems * sizeof(half);
+  constexpr int32_t HL1Addr = 3 * ChunkElems * sizeof(half);
+  constexpr int32_t AccL0Addr = 0;
+  constexpr int32_t HL0Addr = Workspace1Elems * sizeof(float);
+  constexpr int32_t AccL1Addr =
+      (3 * ChunkElems + Workspace2Elems) * sizeof(half);
+  constexpr int32_t OL0Addr =
+      Workspace1Elems * sizeof(float) + Workspace2Elems * sizeof(float);
+  constexpr int32_t HsumUbAddr = 0;
+  constexpr int32_t ZeroUbAddr = HalfHidden * HiddenSize * sizeof(half);
+  constexpr int32_t AccUbAddr =
+      HsumUbAddr + HalfHidden * HiddenSize * sizeof(half) +
+      HalfChunk * ChunkSize * sizeof(half);
+  constexpr int32_t HUbAddr =
+      HsumUbAddr + HalfHidden * HiddenSize * sizeof(half) +
+      2 * HalfChunk * ChunkSize * sizeof(half);
+
+  const int64_t total_work = batch_size * NumHeads;
+  const int64_t chunk_num = (seq_len + ChunkSize - 1) / ChunkSize;
+  const int64_t cid = get_block_idx();
+  const int64_t vid = get_subblockid();
   set_ffts_base_addr(ffts_addr);
 
-  linear_attention_pto::TileMatL1<half, 64, 128, 64, 128> q_l1;
-  TASSIGN(q_l1, 0);
-  linear_attention_pto::TileMatL1<half, 64, 128, 64, 128> k_l1;
-  TASSIGN(k_l1, 16384);
-  linear_attention_pto::TileMatL1<half, 64, 128, 64, 128> v_l1;
-  TASSIGN(v_l1, 32768);
-  linear_attention_pto::TileMatL1<half, 128, 128, 128, 128> h_l1;
-  TASSIGN(h_l1, 49152);
-  TileAcc<float, 64, 64, 64, 64> acc_l0;
-  TASSIGN(acc_l0, 0);
-  TileAcc<float, 128, 128, 128, 128> h_l0;
-  TASSIGN(h_l0, 16384);
-  linear_attention_pto::TileMatL1<half, 64, 64, 64, 64> acc_l1;
-  TASSIGN(acc_l1, 81920);
-  TileAcc<float, 64, 128, 64, 128> o_l0;
-  TASSIGN(o_l0, 81920);
-  linear_attention_pto::TileUbDataND<half, 64, 128, 64, 128> hsum_ub;
-  TASSIGN(hsum_ub, 0);
-  linear_attention_pto::TileUbDataND<half, 32, 64, 32, 64> zero_ub;
-  TASSIGN(zero_ub, 16384);
-  linear_attention_pto::TileUbDataND<half, 32, 64, 32, 64> acc_ub;
-  TASSIGN(acc_ub, 20480);
-  linear_attention_pto::TileUbDataND<half, 64, 128, 64, 128> h_ub;
-  TASSIGN(h_ub, 24576);
-  auto vid = get_subblockid();
+  linear_attention_pto::TileMatL1<half, ChunkSize, HiddenSize, ChunkSize,
+                                  HiddenSize>
+      q_l1;
+  TASSIGN(q_l1, QL1Addr);
+  linear_attention_pto::TileMatL1<half, ChunkSize, HiddenSize, ChunkSize,
+                                  HiddenSize>
+      k_l1;
+  TASSIGN(k_l1, KL1Addr);
+  linear_attention_pto::TileMatL1<half, ChunkSize, HiddenSize, ChunkSize,
+                                  HiddenSize>
+      v_l1;
+  TASSIGN(v_l1, VL1Addr);
+  linear_attention_pto::TileMatL1<half, HiddenSize, HiddenSize, HiddenSize,
+                                  HiddenSize>
+      h_l1;
+  TASSIGN(h_l1, HL1Addr);
+  TileAcc<float, ChunkSize, ChunkSize, ChunkSize, ChunkSize> acc_l0;
+  TASSIGN(acc_l0, AccL0Addr);
+  TileAcc<float, HiddenSize, HiddenSize, HiddenSize, HiddenSize> h_l0;
+  TASSIGN(h_l0, HL0Addr);
+  linear_attention_pto::TileMatL1<half, ChunkSize, ChunkSize, ChunkSize,
+                                  ChunkSize>
+      acc_l1;
+  TASSIGN(acc_l1, AccL1Addr);
+  TileAcc<float, ChunkSize, HiddenSize, ChunkSize, HiddenSize> o_l0;
+  TASSIGN(o_l0, OL0Addr);
+  linear_attention_pto::TileUbDataND<half, HalfHidden, HiddenSize, HalfHidden,
+                                     HiddenSize>
+      hsum_ub;
+  TASSIGN(hsum_ub, HsumUbAddr);
+  linear_attention_pto::TileUbDataND<half, HalfChunk, ChunkSize, HalfChunk,
+                                     ChunkSize>
+      zero_ub;
+  TASSIGN(zero_ub, ZeroUbAddr);
+  linear_attention_pto::TileUbDataND<half, HalfChunk, ChunkSize, HalfChunk,
+                                     ChunkSize>
+      acc_ub;
+  TASSIGN(acc_ub, AccUbAddr);
+  linear_attention_pto::TileUbDataND<half, HalfHidden, HiddenSize, HalfHidden,
+                                     HiddenSize>
+      h_ub;
+  TASSIGN(h_ub, HUbAddr);
 
 #if defined(__DAV_C220_CUBE__)
-  for (int32_t i = 0; i < 8; ++i) {
-    set_flag(PIPE_FIX, PIPE_MTE2, EVENT_ID1);
-    wait_flag(PIPE_FIX, PIPE_MTE2, EVENT_ID1);
-    linear_attention_pto::copy_gm_to_l1<half, half, 1, 1, 1, 64, 128, 262144,
-                                        131072, 65536, 128, 1, 64, 128>(
-        Q_handle + ((cid * 65536) + (i * 8192)), 0, 0, 64, 128);
-    linear_attention_pto::copy_gm_to_l1<half, half, 1, 1, 1, 64, 128, 262144,
-                                        131072, 65536, 128, 1, 64, 128>(
-        K_handle + ((cid * 65536) + (i * 8192)), 16384, 0, 64, 128);
-    linear_attention_pto::copy_gm_to_l1<half, half, 1, 1, 1, 64, 128, 262144,
-                                        131072, 65536, 128, 1, 64, 128>(
-        V_handle + ((cid * 65536) + (i * 8192)), 32768, 0, 64, 128);
-    linear_attention_pto::copy_gm_to_l1<half, half, 1, 1, 1, 128, 128, 65536,
-                                        32768, 16384, 128, 1, 128, 128>(
-        workspace_2_handle + (cid * 16384), 49152, 0, 128, 128);
-    set_flag(PIPE_MTE2, PIPE_M, EVENT_ID1);
-    wait_flag(PIPE_MTE2, PIPE_M, EVENT_ID1);
-    linear_attention_pto::gemm_v0<half, float, 64, 64, 128, 64, 64, 128, 128,
-                                  false, true>(q_l1, k_l1, acc_l0, true);
-    set_flag(PIPE_M, PIPE_FIX, EVENT_ID2);
-    wait_flag(PIPE_M, PIPE_FIX, EVENT_ID2);
-    linear_attention_pto::copy_l0c_to_gm<half, float, 1, 1, 1, 64, 64, 16384,
-                                         8192, 4096, 64, 1, 64, 64>(
-        workspace_1_handle + (cid * 4096), 0, 0, 64, 64);
-    set_flag(PIPE_MTE2, PIPE_M, EVENT_ID3);
-    wait_flag(PIPE_MTE2, PIPE_M, EVENT_ID3);
-    pipe_barrier(PIPE_M);
-    linear_attention_pto::gemm_v0<half, float, 128, 128, 64, 128, 128, 64, 64,
-                                  true, false>(k_l1, v_l1, h_l0, true);
-    set_flag(PIPE_MTE2, PIPE_FIX, EVENT_ID4);
-    wait_flag(PIPE_MTE2, PIPE_FIX, EVENT_ID4);
-    set_flag(PIPE_M, PIPE_FIX, EVENT_ID5);
-    wait_flag(PIPE_M, PIPE_FIX, EVENT_ID5);
-    linear_attention_pto::copy_l0c_to_gm<half, float, 1, 1, 1, 128, 128, 65536,
-                                         32768, 16384, 128, 1, 128, 128>(
-        workspace_2_handle + (cid * 16384), 16384, 0, 128, 128);
-    linear_attention_pto::set_cross_flag<PIPE_FIX>(0, 2);
+  for (int64_t work_idx = 0; work_idx < (total_work + block_num - 1) / block_num;
+       ++work_idx) {
+    const int64_t pid = work_idx * block_num + cid;
+    if (pid >= total_work) {
+      continue;
+    }
+    const int64_t by = pid % NumHeads;
+    const int64_t bz = pid / NumHeads;
+    const int64_t qkv_base = ((bz * NumHeads + by) * seq_len) * HiddenSize;
+    const int64_t out_base = qkv_base;
+    const int64_t workspace1_base = cid * Workspace1Elems;
+    const int64_t workspace2_base = cid * Workspace2Elems;
+
     linear_attention_pto::wait_cross_flag(1);
-    set_flag(PIPE_FIX, PIPE_MTE2, EVENT_ID6);
-    wait_flag(PIPE_FIX, PIPE_MTE2, EVENT_ID6);
-    linear_attention_pto::copy_gm_to_l1<half, half, 1, 1, 1, 64, 64, 16384,
-                                        8192, 4096, 64, 1, 64, 64>(
-        workspace_1_handle + (cid * 4096), 81920, 0, 64, 64);
-    set_flag(PIPE_MTE2, PIPE_M, EVENT_ID7);
-    wait_flag(PIPE_MTE2, PIPE_M, EVENT_ID7);
-    linear_attention_pto::gemm_v0<half, float, 64, 128, 64, 64, 128, 64, 64,
-                                  false, false>(acc_l1, v_l1, o_l0, true);
-    pipe_barrier(PIPE_M);
-    linear_attention_pto::gemm_v0<half, float, 64, 128, 128, 64, 128, 128, 128,
-                                  false, false>(q_l1, h_l1, o_l0, false);
-    set_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
-    wait_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
-    pipe_barrier(PIPE_FIX);
-    linear_attention_pto::copy_l0c_to_gm<half, float, 1, 1, 1, 64, 128, 262144,
-                                         131072, 65536, 128, 1, 64, 128>(
-        O_handle + ((cid * 65536) + (i * 8192)), 81920, 0, 64, 128);
+
+    for (int64_t i = 0; i < chunk_num; ++i) {
+      const int64_t chunk_base = qkv_base + i * ChunkElems;
+
+      set_flag(PIPE_FIX, PIPE_MTE2, EVENT_ID1);
+      wait_flag(PIPE_FIX, PIPE_MTE2, EVENT_ID1);
+      linear_attention_pto::copy_gm_to_l1<half, half, 1, 1, 1, ChunkSize,
+                                          HiddenSize, ChunkElems, ChunkElems,
+                                          ChunkElems, HiddenSize, 1, ChunkSize,
+                                          HiddenSize>(Q_handle + chunk_base, 0,
+                                                      0, ChunkSize, HiddenSize);
+      linear_attention_pto::copy_gm_to_l1<half, half, 1, 1, 1, ChunkSize,
+                                          HiddenSize, ChunkElems, ChunkElems,
+                                          ChunkElems, HiddenSize, 1, ChunkSize,
+                                          HiddenSize>(K_handle + chunk_base,
+                                                      KL1Addr, 0, ChunkSize,
+                                                      HiddenSize);
+      linear_attention_pto::copy_gm_to_l1<half, half, 1, 1, 1, ChunkSize,
+                                          HiddenSize, ChunkElems, ChunkElems,
+                                          ChunkElems, HiddenSize, 1, ChunkSize,
+                                          HiddenSize>(V_handle + chunk_base,
+                                                      VL1Addr, 0,
+                                                      ChunkSize, HiddenSize);
+      linear_attention_pto::copy_gm_to_l1<half, half, 1, 1, 1, HiddenSize,
+                                          HiddenSize, Workspace2Elems,
+                                          Workspace2Elems, Workspace2Elems,
+                                          HiddenSize, 1, HiddenSize,
+                                          HiddenSize>(workspace_2_handle +
+                                                          workspace2_base,
+                                                      HL1Addr, 0,
+                                                      HiddenSize, HiddenSize);
+      set_flag(PIPE_MTE2, PIPE_M, EVENT_ID1);
+      wait_flag(PIPE_MTE2, PIPE_M, EVENT_ID1);
+      linear_attention_pto::gemm_v0<half, float, ChunkSize, ChunkSize,
+                                    HiddenSize, ChunkSize, ChunkSize,
+                                    HiddenSize, HiddenSize, false, true>(
+          q_l1, k_l1, acc_l0, true);
+      set_flag(PIPE_M, PIPE_FIX, EVENT_ID2);
+      wait_flag(PIPE_M, PIPE_FIX, EVENT_ID2);
+      linear_attention_pto::copy_l0c_to_gm<half, float, 1, 1, 1, ChunkSize,
+                                           ChunkSize, Workspace1Elems,
+                                           Workspace1Elems, Workspace1Elems,
+                                           ChunkSize, 1, ChunkSize, ChunkSize>(
+          workspace_1_handle + workspace1_base, 0, 0, ChunkSize, ChunkSize);
+      set_flag(PIPE_MTE2, PIPE_M, EVENT_ID3);
+      wait_flag(PIPE_MTE2, PIPE_M, EVENT_ID3);
+      pipe_barrier(PIPE_M);
+      linear_attention_pto::gemm_v0<half, float, HiddenSize, HiddenSize,
+                                    ChunkSize, HiddenSize, HiddenSize,
+                                    ChunkSize, ChunkSize, true, false>(
+          k_l1, v_l1, h_l0, true);
+      set_flag(PIPE_MTE2, PIPE_FIX, EVENT_ID4);
+      wait_flag(PIPE_MTE2, PIPE_FIX, EVENT_ID4);
+      set_flag(PIPE_M, PIPE_FIX, EVENT_ID5);
+      wait_flag(PIPE_M, PIPE_FIX, EVENT_ID5);
+      linear_attention_pto::copy_l0c_to_gm<half, float, 1, 1, 1, HiddenSize,
+                                           HiddenSize, Workspace2Elems,
+                                           Workspace2Elems, Workspace2Elems,
+                                           HiddenSize, 1, HiddenSize,
+                                           HiddenSize>(workspace_2_handle +
+                                                           workspace2_base,
+                                                       HL0Addr, 0,
+                                                       HiddenSize, HiddenSize);
+      linear_attention_pto::set_cross_flag<PIPE_FIX>(0, 2);
+
+      linear_attention_pto::wait_cross_flag(1);
+      set_flag(PIPE_FIX, PIPE_MTE2, EVENT_ID6);
+      wait_flag(PIPE_FIX, PIPE_MTE2, EVENT_ID6);
+      linear_attention_pto::copy_gm_to_l1<half, half, 1, 1, 1, ChunkSize,
+                                          ChunkSize, Workspace1Elems,
+                                          Workspace1Elems, Workspace1Elems,
+                                          ChunkSize, 1, ChunkSize, ChunkSize>(
+          workspace_1_handle + workspace1_base,
+          AccL1Addr, 0, ChunkSize, ChunkSize);
+      set_flag(PIPE_MTE2, PIPE_M, EVENT_ID7);
+      wait_flag(PIPE_MTE2, PIPE_M, EVENT_ID7);
+      linear_attention_pto::gemm_v0<half, float, ChunkSize, HiddenSize,
+                                    ChunkSize, ChunkSize, HiddenSize,
+                                    ChunkSize, ChunkSize, false, false>(
+          acc_l1, v_l1, o_l0, true);
+      pipe_barrier(PIPE_M);
+      linear_attention_pto::gemm_v0<half, float, ChunkSize, HiddenSize,
+                                    HiddenSize, ChunkSize, HiddenSize,
+                                    HiddenSize, HiddenSize, false, false>(
+          q_l1, h_l1, o_l0, false);
+      set_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
+      wait_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
+      pipe_barrier(PIPE_FIX);
+      linear_attention_pto::copy_l0c_to_gm<half, float, 1, 1, 1, ChunkSize,
+                                           HiddenSize, ChunkElems, ChunkElems,
+                                           ChunkElems, HiddenSize, 1, ChunkSize,
+                                           HiddenSize>(O_handle + out_base +
+                                                           i * ChunkElems,
+                                                       OL0Addr,
+                                                       0, ChunkSize,
+                                                       HiddenSize);
+    }
   }
 #endif
 
@@ -438,46 +552,86 @@ AICORE void main_kernel(__gm__ half *Q_handle, __gm__ half *K_handle,
   set_vector_mask(-1, -1);
   set_flag(PIPE_V, PIPE_S, EVENT_ID0);
   wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-  TEXPANDS(hsum_ub, 0.0f);
-  set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-  wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
   TEXPANDS(zero_ub, 0.0f);
 
-  for (int32_t i = 0; i < 8; ++i) {
-    linear_attention_pto::wait_cross_flag(0);
-    set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID2);
-    wait_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID2);
-    linear_attention_pto::copy_gm_to_ub<half, half, 1, 1, 1, 32, 64, 16384,
-                                        8192, 4096, 64, 1, 32, 64,
-                                        pto::PadValue::Zero>(
-        workspace_1_handle + ((cid * 4096) + (vid * 2048)), 20480, 0, 32, 64);
-    linear_attention_pto::copy_gm_to_ub<half, half, 1, 1, 1, 64, 128, 65536,
-                                        32768, 16384, 128, 1, 64, 128,
-                                        pto::PadValue::Zero>(
-        workspace_2_handle + ((cid * 16384) + (vid * 8192)), 24576, 0, 64,
-        128);
-
-    for (int32_t j = 0; j < 32; ++j) {
-      for (int32_t k = 0; k < 64; ++k) {
-        pipe_barrier(PIPE_ALL);
-        if (((vid * 32) + j) < k) {
-          acc_ub.SetValue((j * 64) + k, zero_ub.GetValue((j * 64) + k));
-        }
-        pipe_barrier(PIPE_ALL);
-        pipe_barrier(PIPE_ALL);
-      }
+  for (int64_t work_idx = 0; work_idx < (total_work + block_num - 1) / block_num;
+       ++work_idx) {
+    const int64_t pid = work_idx * block_num + cid;
+    if (pid >= total_work) {
+      continue;
     }
 
-    TADD(hsum_ub, hsum_ub, h_ub);
-    linear_attention_pto::copy_ub_to_gm<half, half, 1, 1, 1, 32, 64, 16384,
-                                        8192, 4096, 64, 1, 32, 64>(
-        workspace_1_handle + ((cid * 4096) + (vid * 2048)), 20480, 0, 32, 64);
+    const int64_t workspace1_base =
+        cid * Workspace1Elems + vid * HalfChunk * ChunkSize;
+    const int64_t workspace2_base =
+        cid * Workspace2Elems + vid * HalfHidden * HiddenSize;
+
+    set_flag(PIPE_V, PIPE_S, EVENT_ID0);
+    wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
+    TEXPANDS(hsum_ub, 0.0f);
     set_flag(PIPE_V, PIPE_MTE3, EVENT_ID1);
     wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID1);
-    linear_attention_pto::copy_ub_to_gm<half, half, 1, 1, 1, 64, 128, 65536,
-                                        32768, 16384, 128, 1, 64, 128>(
-        workspace_2_handle + ((cid * 16384) + (vid * 8192)), 0, 0, 64, 128);
+    linear_attention_pto::copy_ub_to_gm<half, half, 1, 1, 1, HalfHidden,
+                                        HiddenSize, HalfHidden * HiddenSize,
+                                        HalfHidden * HiddenSize,
+                                        HalfHidden * HiddenSize, HiddenSize, 1,
+                                        HalfHidden, HiddenSize>(
+        workspace_2_handle + workspace2_base, HsumUbAddr, 0, HalfHidden,
+        HiddenSize);
     linear_attention_pto::set_cross_flag<PIPE_MTE3>(1, 2);
+
+    for (int64_t i = 0; i < chunk_num; ++i) {
+      linear_attention_pto::wait_cross_flag(0);
+      set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID2);
+      wait_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID2);
+      linear_attention_pto::copy_gm_to_ub<half, half, 1, 1, 1, HalfChunk,
+                                          ChunkSize, HalfChunk * ChunkSize,
+                                          HalfChunk * ChunkSize,
+                                          HalfChunk * ChunkSize, ChunkSize, 1,
+                                          HalfChunk, ChunkSize,
+                                          pto::PadValue::Zero>(
+          workspace_1_handle + workspace1_base, AccUbAddr, 0, HalfChunk,
+          ChunkSize);
+      linear_attention_pto::copy_gm_to_ub<half, half, 1, 1, 1, HalfHidden,
+                                          HiddenSize, HalfHidden * HiddenSize,
+                                          HalfHidden * HiddenSize,
+                                          HalfHidden * HiddenSize, HiddenSize, 1,
+                                          HalfHidden, HiddenSize,
+                                          pto::PadValue::Zero>(
+          workspace_2_handle + workspace2_base, HUbAddr, 0, HalfHidden,
+          HiddenSize);
+
+      for (int32_t j = 0; j < HalfChunk; ++j) {
+        for (int32_t k = 0; k < ChunkSize; ++k) {
+          pipe_barrier(PIPE_ALL);
+          if ((vid * HalfChunk + j) < k) {
+            acc_ub.SetValue(j * ChunkSize + k,
+                            zero_ub.GetValue(j * ChunkSize + k));
+          }
+          pipe_barrier(PIPE_ALL);
+          pipe_barrier(PIPE_ALL);
+        }
+      }
+
+      TADD(hsum_ub, hsum_ub, h_ub);
+      linear_attention_pto::copy_ub_to_gm<half, half, 1, 1, 1, HalfChunk,
+                                          ChunkSize, HalfChunk * ChunkSize,
+                                          HalfChunk * ChunkSize,
+                                          HalfChunk * ChunkSize, ChunkSize, 1,
+                                          HalfChunk, ChunkSize>(
+          workspace_1_handle + workspace1_base, AccUbAddr, 0, HalfChunk,
+          ChunkSize);
+      set_flag(PIPE_V, PIPE_MTE3, EVENT_ID1);
+      wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID1);
+      linear_attention_pto::copy_ub_to_gm<half, half, 1, 1, 1, HalfHidden,
+                                          HiddenSize, HalfHidden * HiddenSize,
+                                          HalfHidden * HiddenSize,
+                                          HalfHidden * HiddenSize, HiddenSize, 1,
+                                          HalfHidden, HiddenSize>(
+          workspace_2_handle + workspace2_base, HsumUbAddr, 0, HalfHidden,
+          HiddenSize);
+      linear_attention_pto::set_cross_flag<PIPE_MTE3>(1, 2);
+    }
   }
 #endif
 }
@@ -485,23 +639,26 @@ AICORE void main_kernel(__gm__ half *Q_handle, __gm__ half *K_handle,
 extern "C" __global__ AICORE void launch_linear_attention(
     __gm__ uint8_t *Q_handle, __gm__ uint8_t *K_handle, __gm__ uint8_t *V_handle,
     __gm__ uint8_t *workspace_1_handle, __gm__ uint8_t *workspace_2_handle,
-    __gm__ uint8_t *O_handle, uint64_t ffts_addr) {
-  main_kernel(reinterpret_cast<__gm__ half *>(Q_handle),
-              reinterpret_cast<__gm__ half *>(K_handle),
-              reinterpret_cast<__gm__ half *>(V_handle),
-              reinterpret_cast<__gm__ half *>(workspace_1_handle),
-              reinterpret_cast<__gm__ half *>(workspace_2_handle),
-              reinterpret_cast<__gm__ half *>(O_handle), ffts_addr);
+    __gm__ uint8_t *O_handle, int64_t batch_size, int64_t seq_len,
+    uint64_t ffts_addr) {
+  main_kernel<LINEAR_ATTN_H, LINEAR_ATTN_D, LINEAR_ATTN_C>(
+      reinterpret_cast<__gm__ half *>(Q_handle),
+      reinterpret_cast<__gm__ half *>(K_handle),
+      reinterpret_cast<__gm__ half *>(V_handle),
+      reinterpret_cast<__gm__ half *>(workspace_1_handle),
+      reinterpret_cast<__gm__ half *>(workspace_2_handle),
+      reinterpret_cast<__gm__ half *>(O_handle), batch_size, seq_len, ffts_addr);
 }
 
 extern "C" void call_kernel(uint32_t blockDim, void *stream, uint8_t *Q_handle,
                             uint8_t *K_handle, uint8_t *V_handle,
                             uint8_t *workspace_1_handle,
-                            uint8_t *workspace_2_handle, uint8_t *O_handle) {
+                            uint8_t *workspace_2_handle, uint8_t *O_handle,
+                            int64_t batch_size, int64_t seq_len) {
   uint32_t ffts_len = 0;
   uint64_t ffts_addr = 0;
   rtGetC2cCtrlAddr(&ffts_addr, &ffts_len);
   launch_linear_attention<<<blockDim, nullptr, stream>>>(
       Q_handle, K_handle, V_handle, workspace_1_handle, workspace_2_handle,
-      O_handle, ffts_addr);
+      O_handle, batch_size, seq_len, ffts_addr);
 }
