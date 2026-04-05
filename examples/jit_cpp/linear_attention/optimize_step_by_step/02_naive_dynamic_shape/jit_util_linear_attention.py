@@ -1,13 +1,14 @@
-import ctypes
-import os
-import subprocess
+from pathlib import Path
+import sys
+
+COMMON_DIR = Path(__file__).resolve().parents[1] / "common"
+if str(COMMON_DIR) not in sys.path:
+    sys.path.insert(0, str(COMMON_DIR))
+
 from functools import lru_cache
 
-import torch
-
-ASCEND_TOOLKIT_HOME = os.environ["ASCEND_TOOLKIT_HOME"]
-PTO_LIB_PATH = os.environ.get("PTO_LIB_PATH", ASCEND_TOOLKIT_HOME)
-BLOCK_DIM = int(getattr(torch.npu.get_device_properties("npu:0"), "cube_core_num", 20))
+from jit_shared import BLOCK_DIM, compile_cpp as shared_compile_cpp
+from jit_shared import load_dynamic_nomask_lib
 
 
 def compile_cpp(
@@ -18,95 +19,22 @@ def compile_cpp(
     verbose: bool = False,
     timeout: int = 180,
 ) -> str:
-    lib_dir = os.path.join(os.path.dirname(kernel_cpp), "compiled_lib")
-    os.makedirs(lib_dir, exist_ok=True)
-    lib_path = os.path.join(
-        lib_dir,
-        f"linear_attention_H{num_heads}_D{hidden_size}_C{chunk_size}_jit.so",
+    return shared_compile_cpp(
+        kernel_cpp,
+        output_name=f"linear_attention_H{num_heads}_D{hidden_size}_C{chunk_size}_jit.so",
+        std="c++17",
+        defines=[
+            f"-DLINEAR_ATTN_H={num_heads}",
+            f"-DLINEAR_ATTN_D={hidden_size}",
+            f"-DLINEAR_ATTN_C={chunk_size}",
+        ],
+        verbose=verbose,
+        timeout=timeout,
     )
-
-    flags = [
-        "-fPIC",
-        "-shared",
-        "-xcce",
-        "-DMEMORY_BASE",
-        "-O2",
-        "-std=c++17",
-        "--cce-aicore-arch=dav-c220",
-        f"-I{PTO_LIB_PATH}/include",
-        f"-I{ASCEND_TOOLKIT_HOME}/include",
-        f"-I{ASCEND_TOOLKIT_HOME}/pkg_inc",
-        f"-I{ASCEND_TOOLKIT_HOME}/pkg_inc/runtime",
-        f"-I{ASCEND_TOOLKIT_HOME}/pkg_inc/profiling",
-        f"-DLINEAR_ATTN_H={num_heads}",
-        f"-DLINEAR_ATTN_D={hidden_size}",
-        f"-DLINEAR_ATTN_C={chunk_size}",
-    ]
-
-    command = ["bisheng", *flags, kernel_cpp, "-o", lib_path]
-    if verbose:
-        print("compile command:", " ".join(command))
-
-    try:
-        subprocess.run(command, timeout=timeout, check=True)
-    except Exception as exc:
-        raise RuntimeError(f"Compile failed: {exc}") from exc
-
-    if verbose:
-        print(f"generated {lib_path}")
-    return lib_path
-
-
-def torch_to_ctypes(tensor: torch.Tensor) -> ctypes.c_void_p:
-    return ctypes.c_void_p(tensor.data_ptr())
 
 
 def load_lib(lib_path: str):
-    lib = ctypes.CDLL(os.path.abspath(lib_path))
-
-    lib.call_kernel.argtypes = [
-        ctypes.c_uint32,
-        ctypes.c_void_p,
-        ctypes.c_void_p,
-        ctypes.c_void_p,
-        ctypes.c_void_p,
-        ctypes.c_void_p,
-        ctypes.c_void_p,
-        ctypes.c_void_p,
-        ctypes.c_int64,
-        ctypes.c_int64,
-    ]
-    lib.call_kernel.restype = None
-
-    def linear_attention_func(
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
-        workspace_1: torch.Tensor,
-        workspace_2: torch.Tensor,
-        o: torch.Tensor,
-        block_dim: int | None = None,
-        stream_ptr=None,
-    ):
-        if block_dim is None:
-            block_dim = BLOCK_DIM
-        if stream_ptr is None:
-            stream_ptr = torch.npu.current_stream()._as_parameter_
-
-        lib.call_kernel(
-            block_dim,
-            stream_ptr,
-            torch_to_ctypes(q),
-            torch_to_ctypes(k),
-            torch_to_ctypes(v),
-            torch_to_ctypes(workspace_1),
-            torch_to_ctypes(workspace_2),
-            torch_to_ctypes(o),
-            q.shape[0],
-            q.shape[2],
-        )
-
-    return linear_attention_func
+    return load_dynamic_nomask_lib(lib_path)
 
 
 @lru_cache(maxsize=None)
@@ -127,5 +55,5 @@ def jit_compile(
     )
     func = load_lib(lib_path)
     if clean_up:
-        os.remove(lib_path)
+        Path(lib_path).unlink(missing_ok=True)
     return func
