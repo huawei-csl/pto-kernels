@@ -339,8 +339,8 @@ Suggested workflow:
 - `Hypothesis`: syncing every chunk may be too expensive
 - `Change`: batch some work before cross-core signaling where data dependencies permit
 - `Check`: correctness sweep with long `L` and large `B*H`, benchmark table
-- `Status`: `todo`
-- `Result`: not started
+- `Status`: `done (reverted)`
+- `Result`: a direct "sync every other chunk" change was not legal with the existing 2-slot dependency chain, so the only viable test expanded the `C=128` fast path from `2` staged workspace slots to `3`. That variant stayed correct and occasionally showed slightly higher long-sequence numbers, but follow-up reruns did not show a stable enough advantage over the simpler 2-slot kernel. It was treated as benchmark noise and reverted, so the current baseline remains the 2-slot staged pipeline.
 
 #### `exp05` Narrower Pipe Dependencies
 
@@ -357,8 +357,8 @@ Suggested workflow:
 - `Hypothesis`: explicit K-splitting can outperform the current single full-tile extract path
 - `Change`: rewrite `MatmulL1` into a K-part microkernel with accumulation across parts
 - `Check`: correctness sweep and benchmark table
-- `Status`: `todo (first attempt blocked)`
-- `Result`: a first steady-state rewrite tried to queue the next `TEXTRACT` while cube computed the current K-slice, but the obvious formulation used local lambda-style structure that Bisheng treated as host context inside `AICORE` code (`WaitFlag`/`SetFlag`/`TEXTRACT` became illegal from host). The change was reverted before runtime validation. A follow-up attempt must stay fully inline and AICORE-safe.
+- `Status`: `done (retested, reverted)`
+- `Result`: the first steady-state rewrite was blocked because Bisheng treated the lambda-style helper as host context inside `AICORE` code. A later fully inline retry compiled and stayed correct, but when tested on top of the newer staged pipeline it regressed the long-sequence throughput probes back into the `76-77 TFLOP/s` range, so it was reverted again. The current conclusion is that this specific hot `K=128` special-case does not beat the simpler `MatmulL1` loop once the larger pipeline changes are in place.
 
 #### `exp07` Workspace Layout / Padding
 
@@ -403,7 +403,7 @@ Suggested workflow:
 - `Change`: test persistent UB-resident mask or vector-generated mask forms
 - `Check`: correctness sweep and benchmark table
 - `Status`: `done`
-- `Result`: instead of synthesizing the mask in-core, the working win was to remove the extra `masked_acc_ub` tile on the `C=128` fast path and apply `TMUL` in-place on `acc_ub`; that reduced UB pressure enough to make the mask preloadable again, removed the per-chunk mask GM reload, passed the full correctness sweep, and improved the large-shape table into the `73-76 TFLOP/s` range before the later `exp12` cube-side state-prefetch lifted the combined kernel further
+- `Result`: instead of synthesizing the mask in-core, the working win was to remove the extra `masked_acc_ub` tile on the `C=128` fast path and apply `TMUL` in-place on `acc_ub`; that reduced UB pressure enough to make the mask preloadable again, removed the per-chunk mask GM reload, passed the full correctness sweep, and improved the large-shape table into the `73-76 TFLOP/s` range before the later `exp12` and `exp04` pipeline updates lifted the combined kernel further
 
 #### `exp12` MLA-Style Pipeline Borrowing
 
@@ -412,7 +412,7 @@ Suggested workflow:
 - `Change`: selectively port one structural idea from `mla_prefill_cce`, starting with ping-pong L0C or staggered stage scheduling
 - `Check`: correctness sweep, deadlock check, benchmark table
 - `Status`: `done`
-- `Result`: borrowed one MLA-style idea by adding a second `H`-state L1 tile on the cube side and prefetching the next accumulated hidden-state chunk while the current chunk was already loading `Q`, `V`, and masked attention for the output matmuls. The full correctness sweep still passed, and after isolating this change from the non-winning `exp06` retry the default benchmark table improved from the previous `76.11 TFLOP/s` best to `77.78 TFLOP/s` / `565.90 GiB/s` at `(24, 20, 4096, 128, 128)`, with nearby shapes `(12, 20, 8192, 128, 128)` and `(24, 20, 6144, 128, 128)` also validating in the `77.5-77.6 TFLOP/s` range
+- `Result`: borrowed one MLA-style idea by adding a second `H`-state L1 tile on the cube side and prefetching the next accumulated hidden-state chunk while the current chunk was already loading `Q`, `V`, and masked attention for the output matmuls. The full correctness sweep still passed, and after reverting the noisy 3-slot `exp04` variant this remains the current baseline. The latest post-revert default table peaks at `77.45 TFLOP/s` / `563.54 GiB/s` for `(12, 20, 8192, 128, 128)`.
 
 ## Closing Thought
 

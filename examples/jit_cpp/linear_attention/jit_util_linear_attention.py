@@ -18,8 +18,10 @@ def compile_cpp(
     verbose: bool = False,
     timeout: int = 180,
 ) -> str:
+    lib_dir = os.path.join(os.path.dirname(kernel_cpp), "compiled_lib")
+    os.makedirs(lib_dir, exist_ok=True)
     lib_path = os.path.join(
-        os.path.dirname(kernel_cpp),
+        lib_dir,
         f"linear_attention_H{num_heads}_D{hidden_size}_C{chunk_size}_jit.so",
     )
 

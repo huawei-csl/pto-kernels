@@ -37,7 +37,7 @@ Performance notes:
 - the current minimum direct-`pto::` kernel applies the causal mask with a precomputed GM mask tensor plus UB vector multiply, avoiding the old scalar per-element masking loop
 - the current minimum direct-`pto::` kernel now reuses one shared L0C accumulator region across the serialized cube stages, which allows a valid `C=128, D=128` configuration without changing the algorithm
 - the cube matmul helper now uses a real L0 double-buffered `K=128 -> 2 x 64` ping-pong path, overlapping `TEXTRACT` with cube compute via `MTE1 <-> M` events
-- the current `C=128` fast path also uses a correctness-validated 2-slot workspace pipeline between cube and vector, with an explicit end-of-work-item acknowledgment so staged buffers are not recycled too early when `B * H` exceeds the core count
+- the current `C=128` fast path uses a correctness-validated 2-slot workspace pipeline between cube and vector, with an explicit end-of-work-item acknowledgment so staged buffers are not recycled too early when `B * H` exceeds the core count
 - the `C=128` fast path now applies the causal mask in-place on `acc_ub`, which removes the extra masked-output UB tile and makes the mask preloadable again without per-chunk GM reloads
 - the current `C=128` fast path also keeps two `H`-state L1 buffers on the cube side so the next accumulated hidden-state tile can be prefetched while the current chunk's output path is already loading `Q`, `V`, and masked attention
 - the current bandwidth estimate excludes workspace traffic so the reported GiB/s reflects only the external tensors plus the causal mask, not the temporary per-core scratch buffers
@@ -49,11 +49,11 @@ Measured results:
 
 | Shape `(B,H,L,D,C)` | Median ms | TFLOP/s | GiB/s |
 | --- | ---: | ---: | ---: |
-| `(32, 20, 2048, 128, 128)` | `2.296` | `74.83` | `544.50` |
-| `(24, 20, 4096, 128, 128)` | `3.313` | `77.78` | `565.90` |
-| `(12, 20, 8192, 128, 128)` | `3.321` | `77.61` | `564.67` |
-| `(24, 20, 6144, 128, 128)` | `4.988` | `77.50` | `563.87` |
+| `(32, 20, 2048, 128, 128)` | `2.282` | `75.28` | `547.76` |
+| `(24, 20, 4096, 128, 128)` | `3.362` | `76.64` | `557.64` |
+| `(12, 20, 8192, 128, 128)` | `3.327` | `77.45` | `563.54` |
+| `(24, 20, 6144, 128, 128)` | `5.063` | `76.35` | `555.55` |
 
 - for reference, the same kernel family at `C=64, D=128` currently measures roughly `28-31 TFLOP/s` on the same benchmark shapes
-- best measured throughput in the default table: `77.78 TFLOP/s` and `565.90 GiB/s` at shape `(24, 20, 4096, 128, 128)`
-- nearby large-shape probes also reached `77.61 TFLOP/s` at `(12, 20, 8192, 128, 128)` and `77.50 TFLOP/s` at `(24, 20, 6144, 128, 128)` with the same correctness-validated kernel
+- best measured throughput in the default table: `77.45 TFLOP/s` and `563.54 GiB/s` at shape `(12, 20, 8192, 128, 128)`
+- nearby large-shape probes also reached `76.64 TFLOP/s` at `(24, 20, 4096, 128, 128)` and `76.35 TFLOP/s` at `(24, 20, 6144, 128, 128)` with the same correctness-validated kernel
