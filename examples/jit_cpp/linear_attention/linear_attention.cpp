@@ -142,18 +142,22 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
                         __gm__ half *causal_mask, __gm__ half *o,
                         int64_t batch_size, int64_t seq_len,
                         uint64_t ffts_addr) {
+  constexpr int32_t StageCount = 2;
+  constexpr bool UseTwoStagePipeline = (ChunkSize >= 128);
   constexpr int32_t VecNum = 2;
   constexpr int32_t HalfChunk = ChunkSize / VecNum;
   constexpr int32_t HalfHidden = HiddenSize / VecNum;
   constexpr int32_t ChunkElems = ChunkSize * HiddenSize;
-  constexpr int32_t Workspace1Elems = ChunkSize * ChunkSize;
-  constexpr int32_t Workspace2Elems = HiddenSize * HiddenSize;
+  constexpr int32_t Workspace1SlotElems = ChunkSize * ChunkSize;
+  constexpr int32_t Workspace2SlotElems = HiddenSize * HiddenSize;
+  constexpr int32_t Workspace1Elems = StageCount * Workspace1SlotElems;
+  constexpr int32_t Workspace2Elems = StageCount * Workspace2SlotElems;
 
   constexpr int32_t QL1Addr = 0;
   constexpr int32_t KL1Addr = QL1Addr + ChunkElems * sizeof(half);
   constexpr int32_t VL1Addr = KL1Addr + ChunkElems * sizeof(half);
   constexpr int32_t HL1Addr = VL1Addr + ChunkElems * sizeof(half);
-  constexpr int32_t AccL1Addr = HL1Addr + Workspace2Elems * sizeof(half);
+  constexpr int32_t AccL1Addr = HL1Addr + Workspace2SlotElems * sizeof(half);
 
   constexpr int32_t SharedL0Addr = 0;
 
@@ -174,9 +178,9 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
       MaskUbAddr + HalfChunk * ChunkSize * sizeof(half);
 
   constexpr int32_t L0CBytes =
-      (Workspace2Elems > Workspace1Elems
-           ? (Workspace2Elems > ChunkElems ? Workspace2Elems : ChunkElems)
-           : (Workspace1Elems > ChunkElems ? Workspace1Elems : ChunkElems)) *
+      (Workspace2SlotElems > Workspace1SlotElems
+           ? (Workspace2SlotElems > ChunkElems ? Workspace2SlotElems : ChunkElems)
+           : (Workspace1SlotElems > ChunkElems ? Workspace1SlotElems : ChunkElems)) *
       sizeof(float);
   constexpr int32_t UBBytes =
       (HalfHidden * HiddenSize + HalfChunk * ChunkSize +
@@ -267,48 +271,142 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
     const int64_t workspace1_base = cid * Workspace1Elems;
     const int64_t workspace2_base = cid * Workspace2Elems;
 
-    WaitCrossFlag(1);
-
-    for (int64_t i = 0; i < chunk_num; ++i) {
-      const int64_t chunk_base = qkv_base + i * ChunkElems;
-
-      ChunkGlobal q_global(q + chunk_base);
-      ChunkGlobal k_global(k + chunk_base);
-      ChunkGlobal v_global(v + chunk_base);
-      HiddenGlobal h_global(workspace_2 + workspace2_base);
-
-      TLOAD(q_l1, q_global);
-      TLOAD(k_l1, k_global);
-      TLOAD(v_l1, v_global);
-      TLOAD(h_l1, h_global);
+    if constexpr (UseTwoStagePipeline) {
+      const int32_t flag_base = static_cast<int32_t>((work_idx & 3) * 6);
+      WaitCrossFlag(flag_base + 4);
+      HiddenGlobal zero_h_global(workspace_2 + workspace2_base + Workspace2SlotElems);
+      TLOAD(h_l1, zero_h_global);
       pipe_barrier(PIPE_ALL);
 
-      MatmulL1<ChunkSize, ChunkSize, HiddenSize, false, true>(acc_l0, q_l1, k_l1,
-                                                              true);
-      AccGlobal acc_global(workspace_1 + workspace1_base);
-      TSTORE(acc_global, acc_l0);
-      pipe_barrier(PIPE_ALL);
+      {
+        const int64_t chunk_base = qkv_base;
+        ChunkGlobal q_global(q + chunk_base);
+        ChunkGlobal k_global(k + chunk_base);
+        ChunkGlobal v_global(v + chunk_base);
+        TLOAD(q_l1, q_global);
+        TLOAD(k_l1, k_global);
+        TLOAD(v_l1, v_global);
+        pipe_barrier(PIPE_ALL);
 
-      MatmulL1<HiddenSize, HiddenSize, ChunkSize, true, false>(h_l0, k_l1, v_l1,
-                                                               true);
-      HiddenGlobal h_out_global(workspace_2 + workspace2_base);
-      TSTORE(h_out_global, h_l0);
-      pipe_barrier(PIPE_ALL);
-      SetCrossFlag<PIPE_FIX>(0, 2);
+        MatmulL1<ChunkSize, ChunkSize, HiddenSize, false, true>(acc_l0, q_l1, k_l1,
+                                                                true);
+        AccGlobal acc_global(workspace_1 + workspace1_base);
+        TSTORE(acc_global, acc_l0);
+        pipe_barrier(PIPE_ALL);
 
+        MatmulL1<HiddenSize, HiddenSize, ChunkSize, true, false>(h_l0, k_l1, v_l1,
+                                                                 true);
+        HiddenGlobal h_out_global(workspace_2 + workspace2_base);
+        TSTORE(h_out_global, h_l0);
+        pipe_barrier(PIPE_ALL);
+        SetCrossFlag<PIPE_FIX>(flag_base, 2);
+      }
+
+      for (int64_t i = 0; i < chunk_num; ++i) {
+        const int32_t slot = static_cast<int32_t>(i & 1);
+        const int32_t next_slot = slot ^ 1;
+        const int64_t chunk_base = qkv_base + i * ChunkElems;
+
+        if (i + 1 < chunk_num) {
+          const int64_t next_chunk_base = qkv_base + (i + 1) * ChunkElems;
+          const int64_t next_workspace1_base =
+              workspace1_base + next_slot * Workspace1SlotElems;
+          const int64_t next_workspace2_base =
+              workspace2_base + next_slot * Workspace2SlotElems;
+
+          ChunkGlobal q_global(q + next_chunk_base);
+          ChunkGlobal k_global(k + next_chunk_base);
+          ChunkGlobal v_global(v + next_chunk_base);
+          TLOAD(q_l1, q_global);
+          TLOAD(k_l1, k_global);
+          TLOAD(v_l1, v_global);
+          pipe_barrier(PIPE_ALL);
+
+          MatmulL1<ChunkSize, ChunkSize, HiddenSize, false, true>(
+              acc_l0, q_l1, k_l1, true);
+          AccGlobal acc_global(workspace_1 + next_workspace1_base);
+          TSTORE(acc_global, acc_l0);
+          pipe_barrier(PIPE_ALL);
+
+          MatmulL1<HiddenSize, HiddenSize, ChunkSize, true, false>(h_l0, k_l1,
+                                                                   v_l1, true);
+          HiddenGlobal h_out_global(workspace_2 + next_workspace2_base);
+          TSTORE(h_out_global, h_l0);
+          pipe_barrier(PIPE_ALL);
+          SetCrossFlag<PIPE_FIX>(flag_base + next_slot, 2);
+        }
+
+        WaitCrossFlag(flag_base + 2 + slot);
+        AccGlobal masked_acc_global(workspace_1 + workspace1_base +
+                                    slot * Workspace1SlotElems);
+        TLOAD(acc_l1, masked_acc_global);
+        ChunkGlobal q_global(q + chunk_base);
+        ChunkGlobal v_global(v + chunk_base);
+        TLOAD(q_l1, q_global);
+        TLOAD(v_l1, v_global);
+        pipe_barrier(PIPE_ALL);
+
+        MatmulL1<ChunkSize, HiddenSize, ChunkSize, false, false>(o_l0, acc_l1,
+                                                                 v_l1, true);
+        MatmulL1<ChunkSize, HiddenSize, HiddenSize, false, false>(o_l0, q_l1, h_l1,
+                                                                  false);
+
+        ChunkGlobal o_global(o + chunk_base);
+        TSTORE(o_global, o_l0);
+        pipe_barrier(PIPE_ALL);
+
+        if (i + 1 < chunk_num) {
+          HiddenGlobal next_h_global(workspace_2 + workspace2_base +
+                                     slot * Workspace2SlotElems);
+          TLOAD(h_l1, next_h_global);
+          pipe_barrier(PIPE_ALL);
+        }
+      }
+      SetCrossFlag<PIPE_FIX>(flag_base + 5, 2);
+    } else {
       WaitCrossFlag(1);
-      AccGlobal masked_acc_global(workspace_1 + workspace1_base);
-      TLOAD(acc_l1, masked_acc_global);
-      pipe_barrier(PIPE_ALL);
 
-      MatmulL1<ChunkSize, HiddenSize, ChunkSize, false, false>(o_l0, acc_l1,
-                                                               v_l1, true);
-      MatmulL1<ChunkSize, HiddenSize, HiddenSize, false, false>(o_l0, q_l1,
-                                                                h_l1, false);
+      for (int64_t i = 0; i < chunk_num; ++i) {
+        const int64_t chunk_base = qkv_base + i * ChunkElems;
 
-      ChunkGlobal o_global(o + chunk_base);
-      TSTORE(o_global, o_l0);
-      pipe_barrier(PIPE_ALL);
+        ChunkGlobal q_global(q + chunk_base);
+        ChunkGlobal k_global(k + chunk_base);
+        ChunkGlobal v_global(v + chunk_base);
+        HiddenGlobal h_global(workspace_2 + workspace2_base);
+
+        TLOAD(q_l1, q_global);
+        TLOAD(k_l1, k_global);
+        TLOAD(v_l1, v_global);
+        TLOAD(h_l1, h_global);
+        pipe_barrier(PIPE_ALL);
+
+        MatmulL1<ChunkSize, ChunkSize, HiddenSize, false, true>(acc_l0, q_l1, k_l1,
+                                                                true);
+        AccGlobal acc_global(workspace_1 + workspace1_base);
+        TSTORE(acc_global, acc_l0);
+        pipe_barrier(PIPE_ALL);
+
+        MatmulL1<HiddenSize, HiddenSize, ChunkSize, true, false>(h_l0, k_l1, v_l1,
+                                                                 true);
+        HiddenGlobal h_out_global(workspace_2 + workspace2_base);
+        TSTORE(h_out_global, h_l0);
+        pipe_barrier(PIPE_ALL);
+        SetCrossFlag<PIPE_FIX>(0, 2);
+
+        WaitCrossFlag(1);
+        AccGlobal masked_acc_global(workspace_1 + workspace1_base);
+        TLOAD(acc_l1, masked_acc_global);
+        pipe_barrier(PIPE_ALL);
+
+        MatmulL1<ChunkSize, HiddenSize, ChunkSize, false, false>(o_l0, acc_l1,
+                                                                 v_l1, true);
+        MatmulL1<ChunkSize, HiddenSize, HiddenSize, false, false>(o_l0, q_l1, h_l1,
+                                                                  false);
+
+        ChunkGlobal o_global(o + chunk_base);
+        TSTORE(o_global, o_l0);
+        pipe_barrier(PIPE_ALL);
+      }
     }
   }
 #endif
@@ -329,39 +427,84 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
       continue;
     }
 
-    const int64_t workspace1_base =
-        cid * Workspace1Elems + vid * HalfChunk * ChunkSize;
-    const int64_t workspace2_base =
-        cid * Workspace2Elems + vid * HalfHidden * HiddenSize;
+    const int64_t workspace1_base = cid * Workspace1Elems;
+    const int64_t workspace2_base = cid * Workspace2Elems;
 
     TEXPANDS(hsum_ub, 0.0f);
     pipe_barrier(PIPE_ALL);
-    HalfHiddenGlobal init_h_global(workspace_2 + workspace2_base);
-    TSTORE(init_h_global, hsum_ub);
-    pipe_barrier(PIPE_ALL);
-    SetCrossFlag<PIPE_MTE3>(1, 2);
-
-    for (int64_t i = 0; i < chunk_num; ++i) {
-      WaitCrossFlag(0);
-
-      HalfAccGlobal acc_global(workspace_1 + workspace1_base);
-      HalfHiddenGlobal h_global(workspace_2 + workspace2_base);
-      TLOAD(acc_ub, acc_global);
-      TLOAD(h_ub, h_global);
+    if constexpr (UseTwoStagePipeline) {
+      const int32_t flag_base = static_cast<int32_t>((work_idx & 3) * 6);
+      HalfHiddenGlobal init_h_global_0(workspace_2 + workspace2_base +
+                                       vid * HalfHidden * HiddenSize);
+      HalfHiddenGlobal init_h_global_1(workspace_2 + workspace2_base +
+                                       Workspace2SlotElems +
+                                       vid * HalfHidden * HiddenSize);
+      TSTORE(init_h_global_0, hsum_ub);
+      TSTORE(init_h_global_1, hsum_ub);
       pipe_barrier(PIPE_ALL);
+      SetCrossFlag<PIPE_MTE3>(flag_base + 4, 2);
 
-      TADD(hsum_ub, hsum_ub, h_ub);
-      pipe_barrier(PIPE_ALL);
-      if constexpr (!PreloadMask) {
-        TLOAD(mask_ub, mask_global);
+      for (int64_t i = 0; i < chunk_num; ++i) {
+        const int32_t slot = static_cast<int32_t>(i & 1);
+        WaitCrossFlag(flag_base + slot);
+
+        const int64_t slot_workspace1_base =
+            workspace1_base + slot * Workspace1SlotElems;
+        const int64_t slot_workspace2_base =
+            workspace2_base + slot * Workspace2SlotElems;
+        HalfAccGlobal acc_global(workspace_1 + slot_workspace1_base +
+                                 vid * HalfChunk * ChunkSize);
+        HalfHiddenGlobal h_global(workspace_2 + slot_workspace2_base +
+                                  vid * HalfHidden * HiddenSize);
+        TLOAD(acc_ub, acc_global);
+        TLOAD(h_ub, h_global);
         pipe_barrier(PIPE_ALL);
+
+        TADD(hsum_ub, hsum_ub, h_ub);
+        pipe_barrier(PIPE_ALL);
+        if constexpr (!PreloadMask) {
+          TLOAD(mask_ub, mask_global);
+          pipe_barrier(PIPE_ALL);
+        }
+        TMUL(masked_acc_ub, acc_ub, mask_ub);
+        pipe_barrier(PIPE_ALL);
+        TSTORE(acc_global, masked_acc_ub);
+        TSTORE(h_global, hsum_ub);
+        pipe_barrier(PIPE_ALL);
+        SetCrossFlag<PIPE_MTE3>(flag_base + 2 + slot, 2);
       }
-      TMUL(masked_acc_ub, acc_ub, mask_ub);
-      pipe_barrier(PIPE_ALL);
-      TSTORE(acc_global, masked_acc_ub);
-      TSTORE(h_global, hsum_ub);
+      WaitCrossFlag(flag_base + 5);
+    } else {
+      HalfHiddenGlobal init_h_global(workspace_2 + workspace2_base +
+                                     vid * HalfHidden * HiddenSize);
+      TSTORE(init_h_global, hsum_ub);
       pipe_barrier(PIPE_ALL);
       SetCrossFlag<PIPE_MTE3>(1, 2);
+
+      for (int64_t i = 0; i < chunk_num; ++i) {
+        WaitCrossFlag(0);
+
+        HalfAccGlobal acc_global(workspace_1 + workspace1_base +
+                                 vid * HalfChunk * ChunkSize);
+        HalfHiddenGlobal h_global(workspace_2 + workspace2_base +
+                                  vid * HalfHidden * HiddenSize);
+        TLOAD(acc_ub, acc_global);
+        TLOAD(h_ub, h_global);
+        pipe_barrier(PIPE_ALL);
+
+        TADD(hsum_ub, hsum_ub, h_ub);
+        pipe_barrier(PIPE_ALL);
+        if constexpr (!PreloadMask) {
+          TLOAD(mask_ub, mask_global);
+          pipe_barrier(PIPE_ALL);
+        }
+        TMUL(masked_acc_ub, acc_ub, mask_ub);
+        pipe_barrier(PIPE_ALL);
+        TSTORE(acc_global, masked_acc_ub);
+        TSTORE(h_global, hsum_ub);
+        pipe_barrier(PIPE_ALL);
+        SetCrossFlag<PIPE_MTE3>(1, 2);
+      }
     }
   }
 #endif

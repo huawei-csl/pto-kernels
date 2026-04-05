@@ -42,8 +42,10 @@ def run_kernel(
         raise ValueError("This PTO-ISA example currently requires L to be a multiple of C.")
 
     linear_attention_func = _compiled_kernel(src, h, d, chunk_size)
-    workspace_1 = torch.zeros((BLOCK_DIM, chunk_size, chunk_size), device=q.device, dtype=DTYPE)
-    workspace_2 = torch.zeros((BLOCK_DIM, d, d), device=q.device, dtype=DTYPE)
+    workspace_1 = torch.zeros(
+        (BLOCK_DIM, 2, chunk_size, chunk_size), device=q.device, dtype=DTYPE
+    )
+    workspace_2 = torch.zeros((BLOCK_DIM, 2, d, d), device=q.device, dtype=DTYPE)
     causal_mask = get_causal_mask(chunk_size, DTYPE, q.device.index or 0)
     o = torch.zeros((b, h, l, d), device=q.device, dtype=DTYPE)
 

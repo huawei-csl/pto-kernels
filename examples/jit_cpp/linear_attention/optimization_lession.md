@@ -327,8 +327,8 @@ Suggested workflow:
 - `Hypothesis`: chunk-by-chunk cube/vector handoff is causing avoidable inter-core bubbles
 - `Change`: add 2 workspace slots per core and a stage-aware cross-core handshake
 - `Check`: correctness sweep, deadlock check, benchmark table
-- `Status`: `todo`
-- `Result`: not started
+- `Status`: `done`
+- `Result`: added a correctness-validated 2-slot workspace pipeline for the `C=128` fast path so cube can compute raw chunk `i + 1` while vector processes chunk `i`; the final working version needed an explicit end-of-work-item acknowledgment before vector could recycle the staged workspace when `B * H > block_dim`; after this landed, the full correctness sweep still passed and large-shape performance moved from the high-`50 TFLOP/s` range to roughly `73-75 TFLOP/s`, with the current default-table best at `(24, 20, 6144, 128, 128)`
 
 #### `exp04` Reduced Sync Frequency
 
@@ -382,7 +382,7 @@ Suggested workflow:
 - `Change`: add a second benchmark preset specifically for throughput hunting
 - `Check`: benchmark-only experiment, keep same correctness-tested kernel
 - `Status`: `done`
-- `Result`: added a `--throughput-hunt` preset to `benchmark_linear_attention.py` and measured larger `C=128, D=128` shapes; after the cube double-buffer landed, the same correctness-validated kernel reached `58.48 TFLOP/s` / `425.53 GiB/s` at `(12, 20, 8192, 128, 128)`, above the default-table best of `57.59 TFLOP/s`
+- `Result`: added a `--throughput-hunt` preset to `benchmark_linear_attention.py` and then promoted larger high-utilization shapes into the default benchmark table; with the staged cube↔vec pipeline in place, the current large-shape measurements sit in the `72-75 TFLOP/s` range, with the best validated table entry at `75.19 TFLOP/s` / `547.12 GiB/s` for `(24, 20, 6144, 128, 128)`
 
 #### `exp10` Compiler Flag Sweep
 

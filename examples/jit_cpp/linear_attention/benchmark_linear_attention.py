@@ -12,10 +12,10 @@ DTYPE = torch.float16
 # Larger presets intended to drive better utilization while keeping H/D/C static
 # within each compiled kernel.
 DEFAULT_SHAPES = [
-    (16, 20, 1024, 128, 128),
-    (16, 20, 2048, 128, 128),
-    (32, 20, 1024, 128, 128),
-    (8, 20, 4096, 128, 128),
+    (32, 20, 2048, 128, 128),
+    (24, 20, 4096, 128, 128),
+    (12, 20, 8192, 128, 128),
+    (24, 20, 6144, 128, 128),
 ]
 
 QUICK_SHAPES = [
@@ -84,8 +84,8 @@ def benchmark_shape(
 ):
     kernel = jit_compile(src, num_heads=heads, hidden_size=hidden, chunk_size=chunk)
     q, k, v = make_inputs(batch, heads, seq, hidden)
-    workspace_1 = torch.zeros((BLOCK_DIM, chunk, chunk), device="npu", dtype=DTYPE)
-    workspace_2 = torch.zeros((BLOCK_DIM, hidden, hidden), device="npu", dtype=DTYPE)
+    workspace_1 = torch.zeros((BLOCK_DIM, 2, chunk, chunk), device="npu", dtype=DTYPE)
+    workspace_2 = torch.zeros((BLOCK_DIM, 2, hidden, hidden), device="npu", dtype=DTYPE)
     causal_mask = get_causal_mask(chunk, DTYPE, 0)
     out = torch.zeros((batch, heads, seq, hidden), device="npu", dtype=DTYPE)
 
