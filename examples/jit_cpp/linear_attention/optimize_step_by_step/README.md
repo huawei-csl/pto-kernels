@@ -26,12 +26,12 @@ Suggested reading order:
 
 ## Quick Validated Progression
 
-These are the short smoke-test numbers produced while verifying the intermediate tutorial samples on this machine. They use the small `--quick` benchmark shapes so the whole ladder can be checked end to end in a reasonable amount of time.
+These are the short smoke-test numbers produced while verifying the intermediate tutorial samples on this machine. They use the small `--quick` benchmark shapes so the whole ladder can be checked end to end in a reasonable amount of time. The first two rows below are from the newly simplified beginner kernels.
 
 | Step | Quick validated result |
 | --- | --- |
-| `01_naive_static_shape` | fixed-shape smoke benchmark: `(2, 2, 512, 128, 64)` in `0.785 ms` |
-| `02_naive_dynamic_shape` | `1.58 TFLOP/s` at `(16, 20, 1024, 128, 64)` |
+| `01_naive_static_shape` | fixed-shape smoke benchmark: `(2, 2, 512, 128, 64)` in `0.275 ms` |
+| `02_naive_dynamic_shape` | `5.21 TFLOP/s` at `(16, 20, 1024, 128, 64)` |
 | `03_cached_mask` | `30.02 TFLOP/s` at `(16, 20, 1024, 128, 64)` |
 | `04_chunk128` | `49.73 TFLOP/s` at `(16, 20, 1024, 128, 128)` |
 | `05_l0_double_buffer` | `52.57 TFLOP/s` at `(16, 20, 1024, 128, 128)` |
@@ -54,8 +54,9 @@ Those two results were measured sequentially with the same command. The small ga
 
 ## Notes
 - `01` and `02` also include NumPy simulations that explain the tensor indexing and workspace layout without the real PTO synchronization details.
-- Historical kernels are copied from the listed commits, but their JIT outputs are redirected into a local `compiled_lib/` subdirectory so the tutorial folders stay tidy.
-- The later steps intentionally keep the code close to the original working snapshots, while the step README files explain the key optimization idea.
+- The early steps were rewritten into smaller teaching kernels so they stay close to the NumPy emulation and avoid distracting helper boilerplate.
+- JIT outputs are redirected into a local `compiled_lib/` subdirectory so the tutorial folders stay tidy.
+- The later steps intentionally keep the code close to the optimized working snapshots, while the step README files explain the key optimization idea.
 - Benchmark large-shape steps one process at a time. Running multiple heavy NPU benchmarks concurrently can lower measured TFLOP/s and make the step-to-step comparison misleading.
 
 ## Suggested Validation Order

@@ -1,10 +1,11 @@
 # Step 01: Naive Static Shape
 
-This is the original fixed-shape starting point from commit `c226f0a`.
+This is the beginner-friendly fixed-shape starting point.
 
 What it teaches:
 - the smallest end-to-end PTO-ISA linear attention example
 - how workspace buffers are laid out for one fixed `(B, H, L, D, C)` configuration
+- how the kernel maps almost one-to-one to the `numpy_sim.py` logic
 - why static-shape kernels are simple but inflexible
 
 Files:

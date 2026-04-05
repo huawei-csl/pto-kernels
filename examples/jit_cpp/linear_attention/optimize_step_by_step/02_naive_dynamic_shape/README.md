@@ -1,14 +1,15 @@
 # Step 02: Naive Dynamic Shape
 
-This step uses the first dynamic-shape version (based on commit `41aeecc`, which already includes the earlier dynamic `B/L` support).
+This step is the beginner-friendly dynamic-shape version.
 
 What it teaches:
 - how `B` and `L` move from compile time to runtime
 - why the launch `block_dim` becomes fixed to the device core count
 - how the kernel loops internally over work items when `B * H` is larger than the number of cores
+- how the dynamic kernel still stays close to the simple NumPy dataflow
 
 Files:
-- `linear_attention.cpp`: early dynamic PTO kernel
+- `linear_attention.cpp`: minimal dynamic PTO kernel
 - `jit_util_linear_attention.py`: dynamic-shape JIT helper
 - `run_linear_attention.py`: correctness sweep
 - `benchmark_linear_attention.py`: early benchmark script
