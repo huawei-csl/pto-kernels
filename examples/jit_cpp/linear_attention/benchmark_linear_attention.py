@@ -5,7 +5,7 @@ from statistics import median
 import torch
 import torch_npu  # noqa: F401
 
-from jit_util_linear_attention import BLOCK_DIM, jit_compile
+from jit_util_linear_attention import BLOCK_DIM, get_causal_mask, jit_compile
 
 DTYPE = torch.float16
 
@@ -79,10 +79,13 @@ def benchmark_shape(
     q, k, v = make_inputs(batch, heads, seq, hidden)
     workspace_1 = torch.zeros((BLOCK_DIM, chunk, chunk), device="npu", dtype=DTYPE)
     workspace_2 = torch.zeros((BLOCK_DIM, hidden, hidden), device="npu", dtype=DTYPE)
+    causal_mask = get_causal_mask(chunk, DTYPE, 0)
     out = torch.zeros((batch, heads, seq, hidden), device="npu", dtype=DTYPE)
 
     for _ in range(warmup):
-        kernel(q, k, v, workspace_1, workspace_2, out, block_dim=BLOCK_DIM)
+        kernel(
+            q, k, v, workspace_1, workspace_2, causal_mask, out, block_dim=BLOCK_DIM
+        )
     torch.npu.synchronize()
 
     samples_ms = []
@@ -90,7 +93,9 @@ def benchmark_shape(
         start = torch.npu.Event(enable_timing=True)
         end = torch.npu.Event(enable_timing=True)
         start.record()
-        kernel(q, k, v, workspace_1, workspace_2, out, block_dim=BLOCK_DIM)
+        kernel(
+            q, k, v, workspace_1, workspace_2, causal_mask, out, block_dim=BLOCK_DIM
+        )
         end.record()
         torch.npu.synchronize()
         samples_ms.append(start.elapsed_time(end))

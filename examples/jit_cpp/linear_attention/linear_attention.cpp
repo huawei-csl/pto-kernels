@@ -76,7 +76,8 @@ AICORE inline void MatmulL1(
 template <int32_t NumHeads, int32_t HiddenSize, int32_t ChunkSize>
 AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
                         __gm__ half *workspace_1, __gm__ half *workspace_2,
-                        __gm__ half *o, int64_t batch_size, int64_t seq_len,
+                        __gm__ half *causal_mask, __gm__ half *o,
+                        int64_t batch_size, int64_t seq_len,
                         uint64_t ffts_addr) {
   constexpr int32_t VecNum = 2;
   constexpr int32_t HalfChunk = ChunkSize / VecNum;
@@ -96,9 +97,11 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
   constexpr int32_t OL0Addr = HL0Addr + Workspace2Elems * sizeof(float);
 
   constexpr int32_t HsumUbAddr = 0;
-  constexpr int32_t ZeroUbAddr = HsumUbAddr + HalfHidden * HiddenSize * sizeof(half);
-  constexpr int32_t AccUbAddr = ZeroUbAddr + HalfChunk * ChunkSize * sizeof(half);
+  constexpr int32_t AccUbAddr = HsumUbAddr + HalfHidden * HiddenSize * sizeof(half);
   constexpr int32_t HUbAddr = AccUbAddr + HalfChunk * ChunkSize * sizeof(half);
+  constexpr int32_t MaskUbAddr = HUbAddr + HalfHidden * HiddenSize * sizeof(half);
+  constexpr int32_t MaskedAccUbAddr =
+      MaskUbAddr + HalfChunk * ChunkSize * sizeof(half);
 
   constexpr int32_t L0CBytes =
       (Workspace1Elems + Workspace2Elems + ChunkElems) * sizeof(float);
@@ -127,6 +130,10 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
       GlobalTensor<half, TileShape2D<half, HalfHidden, HiddenSize, Layout::ND>,
                    BaseShape2D<half, HalfHidden, HiddenSize, Layout::ND>,
                    Layout::ND>;
+  using HalfMaskGlobal =
+      GlobalTensor<half, TileShape2D<half, HalfChunk, ChunkSize, Layout::ND>,
+                   BaseShape2D<half, HalfChunk, ChunkSize, Layout::ND>,
+                   Layout::ND>;
 
   const int64_t total_work = batch_size * NumHeads;
   const int64_t chunk_num = seq_len / ChunkSize;
@@ -154,12 +161,14 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
 
   UbVec<half, HalfHidden, HiddenSize> hsum_ub;
   UbVec<half, HalfHidden, HiddenSize> h_ub;
-  UbVec<half, HalfChunk, ChunkSize> zero_ub;
   UbVec<half, HalfChunk, ChunkSize> acc_ub;
+  UbVec<half, HalfChunk, ChunkSize> mask_ub;
+  UbVec<half, HalfChunk, ChunkSize> masked_acc_ub;
   TASSIGN(hsum_ub, HsumUbAddr);
-  TASSIGN(zero_ub, ZeroUbAddr);
   TASSIGN(acc_ub, AccUbAddr);
   TASSIGN(h_ub, HUbAddr);
+  TASSIGN(mask_ub, MaskUbAddr);
+  TASSIGN(masked_acc_ub, MaskedAccUbAddr);
 
 #if defined(__DAV_C220_CUBE__)
   for (int64_t work_idx = 0; work_idx < (total_work + block_num - 1) / block_num;
@@ -224,7 +233,8 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
 #if defined(__DAV_C220_VEC__)
   set_mask_norm();
   set_vector_mask(-1, -1);
-  TEXPANDS(zero_ub, 0.0f);
+  HalfMaskGlobal mask_global(causal_mask + vid * HalfChunk * ChunkSize);
+  TLOAD(mask_ub, mask_global);
   pipe_barrier(PIPE_ALL);
 
   for (int64_t work_idx = 0; work_idx < (total_work + block_num - 1) / block_num;
@@ -254,19 +264,11 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
       TLOAD(acc_ub, acc_global);
       TLOAD(h_ub, h_global);
       pipe_barrier(PIPE_ALL);
-
-      for (int32_t j = 0; j < HalfChunk; ++j) {
-        for (int32_t col = 0; col < ChunkSize; ++col) {
-          if ((vid * HalfChunk + j) < col) {
-            acc_ub.SetValue(j * ChunkSize + col,
-                            zero_ub.GetValue(j * ChunkSize + col));
-          }
-        }
-      }
+      TMUL(masked_acc_ub, acc_ub, mask_ub);
 
       TADD(hsum_ub, hsum_ub, h_ub);
       pipe_barrier(PIPE_ALL);
-      TSTORE(acc_global, acc_ub);
+      TSTORE(acc_global, masked_acc_ub);
       TSTORE(h_global, hsum_ub);
       pipe_barrier(PIPE_ALL);
       SetCrossFlag<PIPE_MTE3>(1, 2);
@@ -277,23 +279,27 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
 
 extern "C" __global__ AICORE void launch_linear_attention(
     __gm__ uint8_t *q, __gm__ uint8_t *k, __gm__ uint8_t *v,
-    __gm__ uint8_t *workspace_1, __gm__ uint8_t *workspace_2, __gm__ uint8_t *o,
-    int64_t batch_size, int64_t seq_len, uint64_t ffts_addr) {
+    __gm__ uint8_t *workspace_1, __gm__ uint8_t *workspace_2,
+    __gm__ uint8_t *causal_mask, __gm__ uint8_t *o, int64_t batch_size,
+    int64_t seq_len, uint64_t ffts_addr) {
   main_kernel<LINEAR_ATTN_H, LINEAR_ATTN_D, LINEAR_ATTN_C>(
       reinterpret_cast<__gm__ half *>(q), reinterpret_cast<__gm__ half *>(k),
       reinterpret_cast<__gm__ half *>(v),
       reinterpret_cast<__gm__ half *>(workspace_1),
       reinterpret_cast<__gm__ half *>(workspace_2),
+      reinterpret_cast<__gm__ half *>(causal_mask),
       reinterpret_cast<__gm__ half *>(o), batch_size, seq_len, ffts_addr);
 }
 
 extern "C" void call_kernel(uint32_t blockDim, void *stream, uint8_t *q,
                             uint8_t *k, uint8_t *v, uint8_t *workspace_1,
-                            uint8_t *workspace_2, uint8_t *o,
+                            uint8_t *workspace_2, uint8_t *causal_mask,
+                            uint8_t *o,
                             int64_t batch_size, int64_t seq_len) {
   uint32_t ffts_len = 0;
   uint64_t ffts_addr = 0;
   rtGetC2cCtrlAddr(&ffts_addr, &ffts_len);
   launch_linear_attention<<<blockDim, nullptr, stream>>>(
-      q, k, v, workspace_1, workspace_2, o, batch_size, seq_len, ffts_addr);
+      q, k, v, workspace_1, workspace_2, causal_mask, o, batch_size, seq_len,
+      ffts_addr);
 }

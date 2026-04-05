@@ -4,7 +4,7 @@ from functools import lru_cache
 import torch
 import torch_npu  # noqa: F401
 
-from jit_util_linear_attention import BLOCK_DIM, jit_compile
+from jit_util_linear_attention import BLOCK_DIM, get_causal_mask, jit_compile
 
 DTYPE = torch.float16
 RTOL = 1e-2
@@ -44,9 +44,12 @@ def run_kernel(
     linear_attention_func = _compiled_kernel(src, h, d, chunk_size)
     workspace_1 = torch.zeros((BLOCK_DIM, chunk_size, chunk_size), device=q.device, dtype=DTYPE)
     workspace_2 = torch.zeros((BLOCK_DIM, d, d), device=q.device, dtype=DTYPE)
+    causal_mask = get_causal_mask(chunk_size, DTYPE, q.device.index or 0)
     o = torch.zeros((b, h, l, d), device=q.device, dtype=DTYPE)
 
-    linear_attention_func(q, k, v, workspace_1, workspace_2, o, block_dim=BLOCK_DIM)
+    linear_attention_func(
+        q, k, v, workspace_1, workspace_2, causal_mask, o, block_dim=BLOCK_DIM
+    )
     torch.npu.synchronize()
     return o
 

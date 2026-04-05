@@ -72,11 +72,30 @@ def torch_to_ctypes(tensor: torch.Tensor) -> ctypes.c_void_p:
     return ctypes.c_void_p(tensor.data_ptr())
 
 
+@lru_cache(maxsize=None)
+def get_causal_mask(chunk_size: int, dtype: torch.dtype, device_index: int):
+    vec_num = 2
+    if chunk_size % vec_num != 0:
+        raise ValueError("chunk_size must be divisible by 2 for the causal mask.")
+    half_chunk = chunk_size // vec_num
+    mask = torch.zeros(
+        (vec_num, half_chunk, chunk_size),
+        device=f"npu:{device_index}",
+        dtype=dtype,
+    )
+    for vid in range(vec_num):
+        rows = torch.arange(vid * half_chunk, (vid + 1) * half_chunk, device=mask.device)
+        cols = torch.arange(chunk_size, device=mask.device)
+        mask[vid] = (rows[:, None] >= cols[None, :]).to(dtype)
+    return mask.contiguous()
+
+
 def load_lib(lib_path: str):
     lib = ctypes.CDLL(os.path.abspath(lib_path))
 
     lib.call_kernel.argtypes = [
         ctypes.c_uint32,
+        ctypes.c_void_p,
         ctypes.c_void_p,
         ctypes.c_void_p,
         ctypes.c_void_p,
@@ -95,6 +114,7 @@ def load_lib(lib_path: str):
         v: torch.Tensor,
         workspace_1: torch.Tensor,
         workspace_2: torch.Tensor,
+        causal_mask: torch.Tensor,
         o: torch.Tensor,
         block_dim: int | None = None,
         stream_ptr=None,
@@ -112,6 +132,7 @@ def load_lib(lib_path: str):
             torch_to_ctypes(v),
             torch_to_ctypes(workspace_1),
             torch_to_ctypes(workspace_2),
+            torch_to_ctypes(causal_mask),
             torch_to_ctypes(o),
             q.shape[0],
             q.shape[2],
