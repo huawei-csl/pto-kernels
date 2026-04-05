@@ -23,6 +23,13 @@ QUICK_SHAPES = [
     (16, 20, 1024, 128, 128),
 ]
 
+THROUGHPUT_HUNT_SHAPES = [
+    (24, 20, 2048, 128, 128),
+    (48, 20, 1024, 128, 128),
+    (12, 20, 8192, 128, 128),
+    (24, 20, 1536, 128, 128),
+]
+
 
 def parse_shapes(shape_text: str):
     shapes = []
@@ -134,6 +141,11 @@ def main():
         action="store_true",
         help="Run a shorter preset shape list.",
     )
+    parser.add_argument(
+        "--throughput-hunt",
+        action="store_true",
+        help="Run a larger-shape preset to search for higher steady-state utilization.",
+    )
     args = parser.parse_args()
 
     torch.manual_seed(0)
@@ -142,6 +154,8 @@ def main():
     src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "linear_attention.cpp")
     if args.shapes:
         shapes = parse_shapes(args.shapes)
+    elif args.throughput_hunt:
+        shapes = THROUGHPUT_HUNT_SHAPES
     elif args.quick:
         shapes = QUICK_SHAPES
     else:

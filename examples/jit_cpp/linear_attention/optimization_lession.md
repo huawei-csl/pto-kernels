@@ -318,8 +318,8 @@ Suggested workflow:
 - `Hypothesis`: current cube stages still serialize `TLOAD`, `TEXTRACT`, `TMATMUL`, and `TSTORE`
 - `Change`: introduce double buffering for L1/L0A/L0B tiles in the cube path
 - `Check`: correctness sweep plus benchmark table, compare against current ~30 TFLOP/s baseline
-- `Status`: `todo`
-- `Result`: not started
+- `Status`: `done`
+- `Result`: rewrote the cube `MatmulL1` helper into a true L0 ping-pong path for `K=128`, splitting each matmul into `2 x 64` phases with `MTE1 <-> M` event handoff; the full correctness sweep still passed, the default `C=128` table improved from `47.79-53.07 TFLOP/s` to `50.64-57.59 TFLOP/s`, and the throughput-hunt best improved to `58.48 TFLOP/s` at `(12, 20, 8192, 128, 128)`
 
 #### `exp03` Two-Stage Workspace Pipeline
 
@@ -381,8 +381,8 @@ Suggested workflow:
 - `Hypothesis`: larger `B * H` and longer `L` may reduce fixed overhead impact further
 - `Change`: add a second benchmark preset specifically for throughput hunting
 - `Check`: benchmark-only experiment, keep same correctness-tested kernel
-- `Status`: `todo`
-- `Result`: not started
+- `Status`: `done`
+- `Result`: added a `--throughput-hunt` preset to `benchmark_linear_attention.py` and measured larger `C=128, D=128` shapes; after the cube double-buffer landed, the same correctness-validated kernel reached `58.48 TFLOP/s` / `425.53 GiB/s` at `(12, 20, 8192, 128, 128)`, above the default-table best of `57.59 TFLOP/s`
 
 #### `exp10` Compiler Flag Sweep
 

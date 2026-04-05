@@ -37,40 +37,103 @@ AICORE inline void SetCrossFlag(int32_t flag, int32_t mode) {
 
 AICORE inline void WaitCrossFlag(int32_t flag) { wait_flag_dev(flag); }
 
+template <pipe_t Src, pipe_t Dst>
+AICORE inline void SetFlag(uint32_t id) {
+  set_flag(Src, Dst, static_cast<event_t>(id));
+}
+
+template <pipe_t Src, pipe_t Dst>
+AICORE inline void WaitFlag(uint32_t id) {
+  wait_flag(Src, Dst, static_cast<event_t>(id));
+}
+
 template <int M, int N, int K, bool TransposeA = false, bool TransposeB = false>
 AICORE inline void MatmulL1(
     TileAcc<float, M, N, M, N> &dst,
     std::conditional_t<TransposeA, L1Mat<half, K, M>, L1Mat<half, M, K>> &a_l1,
     std::conditional_t<TransposeB, L1Mat<half, N, K>, L1Mat<half, K, N>> &b_l1,
     bool init) {
-  TileLeft<half, M, K, M, K> a_l0;
-  TileRight<half, K, N, K, N> b_l0;
-  TASSIGN(a_l0, 0x0);
-  TASSIGN(b_l0, 0x0);
+  if constexpr ((K % 64 == 0) && (K > 64)) {
+    constexpr int KStep = 64;
+    constexpr int Parts = K / KStep;
+    constexpr uintptr_t AStepBytes = M * KStep * sizeof(half);
+    constexpr uintptr_t BStepBytes = KStep * N * sizeof(half);
 
-  if constexpr (TransposeA) {
-    L1MatTrans<half, M, K> a_view;
-    TRESHAPE(a_view, a_l1);
-    TEXTRACT(a_l0, a_view, 0, 0);
-  } else {
-    TEXTRACT(a_l0, a_l1, 0, 0);
-  }
+    TileLeft<half, M, KStep, M, KStep> a_l0[2];
+    TileRight<half, KStep, N, KStep, N> b_l0[2];
+    TASSIGN(a_l0[0], static_cast<uintptr_t>(0));
+    TASSIGN(a_l0[1], AStepBytes);
+    TASSIGN(b_l0[0], static_cast<uintptr_t>(0));
+    TASSIGN(b_l0[1], BStepBytes);
 
-  if constexpr (TransposeB) {
-    L1MatTrans<half, K, N> b_view;
-    TRESHAPE(b_view, b_l1);
-    TEXTRACT(b_l0, b_view, 0, 0);
-  } else {
-    TEXTRACT(b_l0, b_l1, 0, 0);
-  }
+    SetFlag<PIPE_M, PIPE_MTE1>(0);
+    SetFlag<PIPE_M, PIPE_MTE1>(1);
 
-  pipe_barrier(PIPE_ALL);
-  if (init) {
-    TMATMUL(dst, a_l0, b_l0);
+    for (int part = 0; part < Parts; ++part) {
+      const int buf = part & 1;
+      WaitFlag<PIPE_M, PIPE_MTE1>(buf);
+
+      if constexpr (TransposeA) {
+        L1MatTrans<half, M, K> a_view;
+        TRESHAPE(a_view, a_l1);
+        TEXTRACT(a_l0[buf], a_view, 0, part * KStep);
+      } else {
+        TEXTRACT(a_l0[buf], a_l1, 0, part * KStep);
+      }
+
+      if constexpr (TransposeB) {
+        L1MatTrans<half, K, N> b_view;
+        TRESHAPE(b_view, b_l1);
+        TEXTRACT(b_l0[buf], b_view, part * KStep, 0);
+      } else {
+        TEXTRACT(b_l0[buf], b_l1, part * KStep, 0);
+      }
+
+      SetFlag<PIPE_MTE1, PIPE_M>(buf);
+      WaitFlag<PIPE_MTE1, PIPE_M>(buf);
+
+      if (init && part == 0) {
+        TMATMUL(dst, a_l0[buf], b_l0[buf]);
+      } else {
+        TMATMUL_ACC(dst, dst, a_l0[buf], b_l0[buf]);
+      }
+
+      SetFlag<PIPE_M, PIPE_MTE1>(buf);
+    }
+
+    WaitFlag<PIPE_M, PIPE_MTE1>(0);
+    WaitFlag<PIPE_M, PIPE_MTE1>(1);
+    pipe_barrier(PIPE_ALL);
   } else {
-    TMATMUL_ACC(dst, dst, a_l0, b_l0);
+    TileLeft<half, M, K, M, K> a_l0;
+    TileRight<half, K, N, K, N> b_l0;
+    TASSIGN(a_l0, 0x0);
+    TASSIGN(b_l0, 0x0);
+
+    if constexpr (TransposeA) {
+      L1MatTrans<half, M, K> a_view;
+      TRESHAPE(a_view, a_l1);
+      TEXTRACT(a_l0, a_view, 0, 0);
+    } else {
+      TEXTRACT(a_l0, a_l1, 0, 0);
+    }
+
+    if constexpr (TransposeB) {
+      L1MatTrans<half, K, N> b_view;
+      TRESHAPE(b_view, b_l1);
+      TEXTRACT(b_l0, b_view, 0, 0);
+    } else {
+      TEXTRACT(b_l0, b_l1, 0, 0);
+    }
+
+    pipe_barrier(PIPE_ALL);
+    if (init) {
+      TMATMUL(dst, a_l0, b_l0);
+    } else {
+      TMATMUL_ACC(dst, dst, a_l0, b_l0);
+    }
+    pipe_barrier(PIPE_ALL);
   }
-  pipe_barrier(PIPE_ALL);
 }
 
 template <int32_t NumHeads, int32_t HiddenSize, int32_t ChunkSize>
