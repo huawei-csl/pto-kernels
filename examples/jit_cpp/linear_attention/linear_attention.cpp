@@ -144,6 +144,7 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
                         uint64_t ffts_addr) {
   constexpr int32_t StageCount = 2;
   constexpr bool UseTwoStagePipeline = (ChunkSize >= 128);
+  constexpr bool InplaceMaskApply = (ChunkSize >= 128);
   constexpr int32_t VecNum = 2;
   constexpr int32_t HalfChunk = ChunkSize / VecNum;
   constexpr int32_t HalfHidden = HiddenSize / VecNum;
@@ -158,6 +159,7 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
   constexpr int32_t VL1Addr = KL1Addr + ChunkElems * sizeof(half);
   constexpr int32_t HL1Addr = VL1Addr + ChunkElems * sizeof(half);
   constexpr int32_t AccL1Addr = HL1Addr + Workspace2SlotElems * sizeof(half);
+  constexpr int32_t HNextL1Addr = AccL1Addr + Workspace1SlotElems * sizeof(half);
 
   constexpr int32_t SharedL0Addr = 0;
 
@@ -167,7 +169,8 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
   constexpr int32_t HUbAddr = AccUbAddr + HalfChunk * ChunkSize * sizeof(half);
   constexpr int32_t RawUBBytes =
       (HalfHidden * HiddenSize + HalfChunk * ChunkSize + HalfHidden * HiddenSize +
-       HalfChunk * ChunkSize + HalfChunk * ChunkSize) *
+       HalfChunk * ChunkSize +
+       (InplaceMaskApply ? 0 : HalfChunk * ChunkSize)) *
       sizeof(half);
   constexpr bool PreloadMask = RawUBBytes <= 72 * 1024;
   constexpr bool AliasMaskIntoH =
@@ -175,7 +178,7 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
   constexpr int32_t MaskUbAddr =
       AliasMaskIntoH ? HUbAddr : HUbAddr + HalfHidden * HiddenSize * sizeof(half);
   constexpr int32_t MaskedAccUbAddr =
-      MaskUbAddr + HalfChunk * ChunkSize * sizeof(half);
+      InplaceMaskApply ? AccUbAddr : MaskUbAddr + HalfChunk * ChunkSize * sizeof(half);
 
   constexpr int32_t L0CBytes =
       (Workspace2SlotElems > Workspace1SlotElems
@@ -186,12 +189,17 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
       (HalfHidden * HiddenSize + HalfChunk * ChunkSize +
        (AliasMaskIntoH ? HalfHidden * HiddenSize
                        : HalfHidden * HiddenSize + HalfChunk * ChunkSize) +
-       HalfChunk * ChunkSize) *
+       (InplaceMaskApply ? 0 : HalfChunk * ChunkSize)) *
       sizeof(half);
+  constexpr int32_t L1Bytes =
+      UseTwoStagePipeline ? (HNextL1Addr + Workspace2SlotElems * sizeof(half))
+                          : (AccL1Addr + Workspace1SlotElems * sizeof(half));
   static_assert((HiddenSize % 2) == 0, "HiddenSize must be even.");
   static_assert((ChunkSize % 2) == 0, "ChunkSize must be even.");
   static_assert(L0CBytes <= 112 * 1024,
                 "Tile sizes exceed the validated L0C budget for this minimum kernel.");
+  static_assert(L1Bytes <= 192 * 1024,
+                "Tile sizes exceed the validated L1 budget for this minimum kernel.");
   static_assert(PreloadMask || AliasMaskIntoH,
                 "Current minimum kernel requires either a preloaded mask or H UB large enough to alias the mask.");
   static_assert(UBBytes <= 72 * 1024,
@@ -232,11 +240,13 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
   L1Mat<half, ChunkSize, HiddenSize> k_l1;
   L1Mat<half, ChunkSize, HiddenSize> v_l1;
   L1Mat<half, HiddenSize, HiddenSize> h_l1;
+  L1Mat<half, HiddenSize, HiddenSize> h_next_l1;
   L1Mat<half, ChunkSize, ChunkSize> acc_l1;
   TASSIGN(q_l1, QL1Addr);
   TASSIGN(k_l1, KL1Addr);
   TASSIGN(v_l1, VL1Addr);
   TASSIGN(h_l1, HL1Addr);
+  TASSIGN(h_next_l1, HNextL1Addr);
   TASSIGN(acc_l1, AccL1Addr);
 
   TileAcc<float, ChunkSize, ChunkSize, ChunkSize, ChunkSize> acc_l0;
@@ -273,6 +283,7 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
 
     if constexpr (UseTwoStagePipeline) {
       const int32_t flag_base = static_cast<int32_t>((work_idx & 3) * 6);
+      int32_t h_buf = 0;
       WaitCrossFlag(flag_base + 4);
       HiddenGlobal zero_h_global(workspace_2 + workspace2_base + Workspace2SlotElems);
       TLOAD(h_l1, zero_h_global);
@@ -344,22 +355,34 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
         ChunkGlobal v_global(v + chunk_base);
         TLOAD(q_l1, q_global);
         TLOAD(v_l1, v_global);
+        if (i + 1 < chunk_num) {
+          HiddenGlobal next_h_global(workspace_2 + workspace2_base +
+                                     slot * Workspace2SlotElems);
+          if (h_buf == 0) {
+            TLOAD(h_next_l1, next_h_global);
+          } else {
+            TLOAD(h_l1, next_h_global);
+          }
+        }
         pipe_barrier(PIPE_ALL);
 
         MatmulL1<ChunkSize, HiddenSize, ChunkSize, false, false>(o_l0, acc_l1,
                                                                  v_l1, true);
-        MatmulL1<ChunkSize, HiddenSize, HiddenSize, false, false>(o_l0, q_l1, h_l1,
-                                                                  false);
+        if (h_buf == 0) {
+          MatmulL1<ChunkSize, HiddenSize, HiddenSize, false, false>(o_l0, q_l1,
+                                                                    h_l1, false);
+        } else {
+          MatmulL1<ChunkSize, HiddenSize, HiddenSize, false, false>(o_l0, q_l1,
+                                                                    h_next_l1,
+                                                                    false);
+        }
 
         ChunkGlobal o_global(o + chunk_base);
         TSTORE(o_global, o_l0);
         pipe_barrier(PIPE_ALL);
 
         if (i + 1 < chunk_num) {
-          HiddenGlobal next_h_global(workspace_2 + workspace2_base +
-                                     slot * Workspace2SlotElems);
-          TLOAD(h_l1, next_h_global);
-          pipe_barrier(PIPE_ALL);
+          h_buf ^= 1;
         }
       }
       SetCrossFlag<PIPE_FIX>(flag_base + 5, 2);
@@ -466,9 +489,17 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
           TLOAD(mask_ub, mask_global);
           pipe_barrier(PIPE_ALL);
         }
-        TMUL(masked_acc_ub, acc_ub, mask_ub);
+        if constexpr (InplaceMaskApply) {
+          TMUL(acc_ub, acc_ub, mask_ub);
+        } else {
+          TMUL(masked_acc_ub, acc_ub, mask_ub);
+        }
         pipe_barrier(PIPE_ALL);
-        TSTORE(acc_global, masked_acc_ub);
+        if constexpr (InplaceMaskApply) {
+          TSTORE(acc_global, acc_ub);
+        } else {
+          TSTORE(acc_global, masked_acc_ub);
+        }
         TSTORE(h_global, hsum_ub);
         pipe_barrier(PIPE_ALL);
         SetCrossFlag<PIPE_MTE3>(flag_base + 2 + slot, 2);
@@ -498,9 +529,17 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
           TLOAD(mask_ub, mask_global);
           pipe_barrier(PIPE_ALL);
         }
-        TMUL(masked_acc_ub, acc_ub, mask_ub);
+        if constexpr (InplaceMaskApply) {
+          TMUL(acc_ub, acc_ub, mask_ub);
+        } else {
+          TMUL(masked_acc_ub, acc_ub, mask_ub);
+        }
         pipe_barrier(PIPE_ALL);
-        TSTORE(acc_global, masked_acc_ub);
+        if constexpr (InplaceMaskApply) {
+          TSTORE(acc_global, acc_ub);
+        } else {
+          TSTORE(acc_global, masked_acc_ub);
+        }
         TSTORE(h_global, hsum_ub);
         pipe_barrier(PIPE_ALL);
         SetCrossFlag<PIPE_MTE3>(1, 2);

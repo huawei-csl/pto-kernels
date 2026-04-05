@@ -9,7 +9,8 @@ The file name intentionally matches the requested spelling: `optimization_lessio
 - The current kernel is a minimal direct-`pto::` implementation in `linear_attention.cpp`.
 - It keeps dynamic `B` and `L`, while `H`, `D`, and `C` stay compile-time parameters.
 - It passes the full correctness sweep in `run_linear_attention.py`.
-- The current measured default-table performance is about `29-31 TFLOP/s`, with best measured throughput around `30.53 TFLOP/s`.
+- The current fast path is `C=128, D=128`, with a true cube-side L0 double buffer plus a correctness-validated 2-slot cube<->vec workspace pipeline.
+- The current measured default-table performance is in the `73-76 TFLOP/s` range on large enough shapes, with the latest validated default-table throughput at `76.11 TFLOP/s`.
 
 ## Practices That Already Helped
 
@@ -44,15 +45,16 @@ The file name intentionally matches the requested spelling: `optimization_lessio
 - Precomputing the triangular mask in PyTorch once, passing it as an extra tensor, and applying it with UB `TMUL` gave a large speedup.
 - This follows the same general advice from flash-attention docs: replace scalar loops with tile/vector operations.
 
-### 6. Match the compiler flags used by stronger PTO builds
+### 6. Match the compiler flags that actually help this kernel
 
-- Using the stronger Bisheng/AICore flags mattered a lot:
-  `-cce-aicore-addr-transform`
+- Compiler/codegen choices mattered a lot, but not every "stronger-looking" flag was actually beneficial here.
+- The current best configuration keeps:
   stack sizing flags
   overflow-record flags
   `-cce-aicore-dcci-insert-for-scalar=false`
+- The local sweep showed this kernel is faster without:
+  `-cce-aicore-addr-transform`
   `-DL2_CACHE_HINT`
-- These recovered a meaningful amount of performance even before deeper kernel changes.
 
 ### 7. Separate cube and vector responsibilities clearly
 
@@ -66,6 +68,7 @@ The file name intentionally matches the requested spelling: `optimization_lessio
 - Cross-core synchronization around workspace handoff is essential.
 - The vector side must initialize or update workspace state before cube consumes it.
 - Reducing barriers is tempting, but correctness breaks easily if producer/consumer edges are not exact.
+- After adding the 2-slot pipeline, an explicit end-of-work-item acknowledgment was required before vector could safely recycle staged buffers for the next `pid` when `B * H > block_dim`.
 
 ## Main Lessons From High-Performance Examples
 
@@ -328,7 +331,7 @@ Suggested workflow:
 - `Change`: add 2 workspace slots per core and a stage-aware cross-core handshake
 - `Check`: correctness sweep, deadlock check, benchmark table
 - `Status`: `done`
-- `Result`: added a correctness-validated 2-slot workspace pipeline for the `C=128` fast path so cube can compute raw chunk `i + 1` while vector processes chunk `i`; the final working version needed an explicit end-of-work-item acknowledgment before vector could recycle the staged workspace when `B * H > block_dim`; after this landed, the full correctness sweep still passed and large-shape performance moved from the high-`50 TFLOP/s` range to roughly `73-75 TFLOP/s`, with the current default-table best at `(24, 20, 6144, 128, 128)`
+- `Result`: added a correctness-validated 2-slot workspace pipeline for the `C=128` fast path so cube can compute raw chunk `i + 1` while vector processes chunk `i`; the final working version needed an explicit end-of-work-item acknowledgment before vector could recycle the staged workspace when `B * H > block_dim`; after this landed, the full correctness sweep still passed and large-shape performance moved from the high-`50 TFLOP/s` range to roughly `73-75 TFLOP/s`, with the latest validated default-table best at `(24, 20, 6144, 128, 128)` running at `74.54 TFLOP/s`
 
 #### `exp04` Reduced Sync Frequency
 
@@ -345,8 +348,8 @@ Suggested workflow:
 - `Hypothesis`: some `pipe_barrier(PIPE_ALL)` calls can be replaced by narrower event dependencies
 - `Change`: replace selected full barriers with more precise waits/flags
 - `Check`: correctness sweep and repeated benchmark runs to catch unstable behavior
-- `Status`: `todo`
-- `Result`: not started
+- `Status`: `done (reverted)`
+- `Result`: a first focused attempt narrowed a few vector-side `PIPE_ALL` barriers to `PIPE_V`, but even the smallest `C=64` correctness case failed immediately; this confirms that the current vector-store path still depends on stronger ordering than it first appears, so the change was reverted and the stable pipelined baseline was kept
 
 #### `exp06` K-Split Cube Microkernel
 
@@ -354,8 +357,8 @@ Suggested workflow:
 - `Hypothesis`: explicit K-splitting can outperform the current single full-tile extract path
 - `Change`: rewrite `MatmulL1` into a K-part microkernel with accumulation across parts
 - `Check`: correctness sweep and benchmark table
-- `Status`: `todo`
-- `Result`: not started
+- `Status`: `todo (first attempt blocked)`
+- `Result`: a first steady-state rewrite tried to queue the next `TEXTRACT` while cube computed the current K-slice, but the obvious formulation used local lambda-style structure that Bisheng treated as host context inside `AICORE` code (`WaitFlag`/`SetFlag`/`TEXTRACT` became illegal from host). The change was reverted before runtime validation. A follow-up attempt must stay fully inline and AICORE-safe.
 
 #### `exp07` Workspace Layout / Padding
 
@@ -363,8 +366,8 @@ Suggested workflow:
 - `Hypothesis`: padding or alternate workspace layout may improve burst behavior or reduce conflicts
 - `Change`: try aligned/padded workspace layout and matching indexing changes
 - `Check`: correctness sweep and benchmark table
-- `Status`: `todo`
-- `Result`: not started
+- `Status`: `done (reverted)`
+- `Result`: added per-slot padding to both staged workspaces and switched the Python runners to allocate wider scratch buffers. Full correctness still passed, but the performance impact was flat to slightly negative: the large-shape check at `(24, 20, 6144, 128, 128)` measured `76.06 TFLOP/s` versus the prior `76.11 TFLOP/s` best, so the layout change was reverted to keep the cleaner baseline.
 
 #### `exp08` Alternate `(C, D)` Search
 
@@ -382,7 +385,7 @@ Suggested workflow:
 - `Change`: add a second benchmark preset specifically for throughput hunting
 - `Check`: benchmark-only experiment, keep same correctness-tested kernel
 - `Status`: `done`
-- `Result`: added a `--throughput-hunt` preset to `benchmark_linear_attention.py` and then promoted larger high-utilization shapes into the default benchmark table; with the staged cube↔vec pipeline in place, the current large-shape measurements sit in the `72-75 TFLOP/s` range, with the best validated table entry at `75.19 TFLOP/s` / `547.12 GiB/s` for `(24, 20, 6144, 128, 128)`
+- `Result`: added a `--throughput-hunt` preset to `benchmark_linear_attention.py` and then promoted larger high-utilization shapes into the default benchmark table; with the staged cube↔vec pipeline in place, the current large-shape measurements sit in the `72-75 TFLOP/s` range, with the latest validated table entry at `74.54 TFLOP/s` / `542.38 GiB/s` for `(24, 20, 6144, 128, 128)`
 
 #### `exp10` Compiler Flag Sweep
 
@@ -399,8 +402,8 @@ Suggested workflow:
 - `Hypothesis`: keeping the mask resident or regenerating it cheaply in-core may beat GM mask load
 - `Change`: test persistent UB-resident mask or vector-generated mask forms
 - `Check`: correctness sweep and benchmark table
-- `Status`: `todo`
-- `Result`: not started
+- `Status`: `done`
+- `Result`: instead of synthesizing the mask in-core, the working win was to remove the extra `masked_acc_ub` tile on the `C=128` fast path and apply `TMUL` in-place on `acc_ub`; that reduced UB pressure enough to make the mask preloadable again, removed the per-chunk mask GM reload, passed the full correctness sweep, and improved the large-shape table into the `73-76 TFLOP/s` range before the later `exp12` cube-side state-prefetch lifted the combined kernel further
 
 #### `exp12` MLA-Style Pipeline Borrowing
 
@@ -408,8 +411,8 @@ Suggested workflow:
 - `Hypothesis`: MLA-style staged ping-pong plus delayed launch and multi-buffer orchestration is needed for the next major jump
 - `Change`: selectively port one structural idea from `mla_prefill_cce`, starting with ping-pong L0C or staggered stage scheduling
 - `Check`: correctness sweep, deadlock check, benchmark table
-- `Status`: `todo`
-- `Result`: not started
+- `Status`: `done`
+- `Result`: borrowed one MLA-style idea by adding a second `H`-state L1 tile on the cube side and prefetching the next accumulated hidden-state chunk while the current chunk was already loading `Q`, `V`, and masked attention for the output matmuls. The full correctness sweep still passed, and after isolating this change from the non-winning `exp06` retry the default benchmark table improved from the previous `76.11 TFLOP/s` best to `77.78 TFLOP/s` / `565.90 GiB/s` at `(24, 20, 4096, 128, 128)`, with nearby shapes `(12, 20, 8192, 128, 128)` and `(24, 20, 6144, 128, 128)` also validating in the `77.5-77.6 TFLOP/s` range
 
 ## Closing Thought
 
