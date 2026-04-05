@@ -27,10 +27,11 @@ The example:
 - reports effective TFLOP/s and GiB/s for larger benchmark shapes
 
 Performance notes:
-- the JIT compile path uses the same key Bisheng/AICore codegen flags as the generated TileLang PTO build (`addr-transform`, stack sizing, overflow recording, scalar DCCI disable, `L2_CACHE_HINT`)
+- the JIT compile path keeps the proven stack sizing, overflow recording, and scalar DCCI settings, but the local flag sweep showed this kernel is faster without `addr-transform` and without `L2_CACHE_HINT`
 - the current minimum direct-`pto::` kernel applies the causal mask with a precomputed GM mask tensor plus UB vector multiply, avoiding the old scalar per-element masking loop
-- the current minimum direct-`pto::` kernel is substantially faster than both the earlier wrapper-heavy version and the intermediate scalar-mask minimum version on the tested device while keeping the same numerical result
-- larger compile-time tiles such as `C=128` or `D=256` currently exceed this minimum kernel's validated L0C budget on the tested device, so the practical high-throughput envelope remains centered on `C=64`, `D=128`
+- the current minimum direct-`pto::` kernel now reuses one shared L0C accumulator region across the serialized cube stages, which allows a valid `C=128, D=128` configuration without changing the algorithm
+- the current bandwidth estimate excludes workspace traffic so the reported GiB/s reflects only the external tensors plus the causal mask, not the temporary per-core scratch buffers
+- `C=128, D=128` is currently the best measured point on this machine and lifts throughput into the `~50 TFLOP/s` range while keeping the same numerical result
 
 Measured results:
 - command: `python benchmark_linear_attention.py --warmup 2 --repeats 5`
@@ -38,9 +39,10 @@ Measured results:
 
 | Shape `(B,H,L,D,C)` | Median ms | TFLOP/s | GiB/s |
 | --- | ---: | ---: | ---: |
-| `(16, 20, 1024, 128, 64)` | `1.115` | `28.89` | `989.58` |
-| `(16, 20, 2048, 128, 64)` | `2.163` | `29.78` | `1015.81` |
-| `(32, 20, 1024, 128, 64)` | `2.110` | `30.53` | `1045.80` |
-| `(8, 20, 4096, 128, 64)` | `2.193` | `29.38` | `999.89` |
+| `(16, 20, 1024, 128, 128)` | `0.899` | `47.79` | `347.77` |
+| `(16, 20, 2048, 128, 128)` | `1.698` | `50.58` | `368.03` |
+| `(32, 20, 1024, 128, 128)` | `1.619` | `53.07` | `386.12` |
+| `(8, 20, 4096, 128, 128)` | `1.726` | `49.76` | `362.10` |
 
-- best measured throughput in the default table: `30.53 TFLOP/s` and `1045.80 GiB/s` at shape `(32, 20, 1024, 128, 64)`
+- for reference, the same kernel family at `C=64, D=128` currently measures roughly `28-31 TFLOP/s` on the same benchmark shapes
+- best measured throughput in the default table: `53.07 TFLOP/s` and `386.12 GiB/s` at shape `(32, 20, 1024, 128, 128)`

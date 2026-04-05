@@ -12,15 +12,15 @@ DTYPE = torch.float16
 # Larger presets intended to drive better utilization while keeping H/D/C static
 # within each compiled kernel.
 DEFAULT_SHAPES = [
-    (16, 20, 1024, 128, 64),
-    (16, 20, 2048, 128, 64),
-    (32, 20, 1024, 128, 64),
-    (8, 20, 4096, 128, 64),
+    (16, 20, 1024, 128, 128),
+    (16, 20, 2048, 128, 128),
+    (32, 20, 1024, 128, 128),
+    (8, 20, 4096, 128, 128),
 ]
 
 QUICK_SHAPES = [
-    (8, 20, 1024, 128, 64),
-    (16, 20, 1024, 128, 64),
+    (8, 20, 1024, 128, 128),
+    (16, 20, 1024, 128, 128),
 ]
 
 
@@ -51,9 +51,9 @@ def estimate_gm_bytes(batch: int, heads: int, seq: int, hidden: int, chunk: int)
     if seq % chunk != 0:
         raise ValueError("This benchmark requires L to be a multiple of C.")
     chunk_num = seq // chunk
-    workspace_init_bytes = 2 * hidden * hidden
-    bytes_per_chunk = 8 * chunk * hidden + 8 * chunk * chunk + 8 * hidden * hidden
-    return batch * heads * (workspace_init_bytes + chunk_num * bytes_per_chunk)
+    qkv_and_output_bytes = chunk_num * (4 * chunk * hidden * 2)
+    causal_mask_bytes = chunk * chunk * 2
+    return batch * heads * qkv_and_output_bytes + causal_mask_bytes
 
 
 def make_inputs(batch: int, heads: int, seq: int, hidden: int):

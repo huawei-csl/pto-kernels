@@ -309,8 +309,8 @@ Suggested workflow:
 - `Hypothesis`: the vector side still has serial bubbles after the mask-vectorization improvement
 - `Change`: ping-pong `acc_ub`, `h_ub`, and masked output UB tiles
 - `Check`: full `run_linear_attention.py` plus default benchmark table
-- `Status`: `todo`
-- `Result`: not started
+- `Status`: `done (reverted)`
+- `Result`: first implementation compiled and passed a smoke test but deadlocked during the full sweep; reverted to the known-good baseline and noted that future vector double-buffer attempts need a stricter event plan and careful cleanup of orphaned hung processes before re-measuring
 
 #### `exp02` Cube L1/L0 Ping-Pong
 
@@ -372,8 +372,8 @@ Suggested workflow:
 - `Hypothesis`: some valid `(C, D)` combinations may use the machine better than the current one
 - `Change`: benchmark additional compile-time shape families that still satisfy the current memory budget
 - `Check`: compile success, correctness, benchmark table
-- `Status`: `todo`
-- `Result`: not started
+- `Status`: `done`
+- `Result`: reworked the minimum kernel to reuse one shared L0C accumulator region across the serialized cube stages and kept the vector mask path adaptive to the UB budget; this enabled `C=128, D=128` to compile and pass correctness, and the benchmark improved from the `~30 TFLOP/s` class at `C=64` to `47.79-53.07 TFLOP/s` on the default large-shape table, with the current best at `(32, 20, 1024, 128, 128)`
 
 #### `exp09` Larger Throughput Shapes
 
@@ -390,8 +390,8 @@ Suggested workflow:
 - `Hypothesis`: some Bisheng/AICore flags may interact differently with the new vectorized mask path
 - `Change`: sweep a small set of compile flags around the current known-good configuration
 - `Check`: correctness on at least one small and one large shape, benchmark table on one reference shape
-- `Status`: `todo`
-- `Result`: not started
+- `Status`: `done`
+- `Result`: on the reference shape `(16, 20, 2048, 128, 64)`, `baseline` measured `30.77 TFLOP/s`, dropping `L2_CACHE_HINT` measured `31.22 TFLOP/s`, and dropping both `L2_CACHE_HINT` plus `addr-transform` measured `31.70 TFLOP/s`; the default JIT flags were updated accordingly, the full correctness sweep still passed, and the default benchmark table improved to `31.17 TFLOP/s` / `1062.92 GiB/s`
 
 #### `exp11` Mask Residency Experiment
 

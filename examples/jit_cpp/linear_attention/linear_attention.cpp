@@ -92,23 +92,43 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
   constexpr int32_t HL1Addr = VL1Addr + ChunkElems * sizeof(half);
   constexpr int32_t AccL1Addr = HL1Addr + Workspace2Elems * sizeof(half);
 
-  constexpr int32_t AccL0Addr = 0;
-  constexpr int32_t HL0Addr = AccL0Addr + Workspace1Elems * sizeof(float);
-  constexpr int32_t OL0Addr = HL0Addr + Workspace2Elems * sizeof(float);
+  constexpr int32_t SharedL0Addr = 0;
 
   constexpr int32_t HsumUbAddr = 0;
-  constexpr int32_t AccUbAddr = HsumUbAddr + HalfHidden * HiddenSize * sizeof(half);
+  constexpr int32_t AccUbAddr =
+      HsumUbAddr + HalfHidden * HiddenSize * sizeof(half);
   constexpr int32_t HUbAddr = AccUbAddr + HalfChunk * ChunkSize * sizeof(half);
-  constexpr int32_t MaskUbAddr = HUbAddr + HalfHidden * HiddenSize * sizeof(half);
+  constexpr int32_t RawUBBytes =
+      (HalfHidden * HiddenSize + HalfChunk * ChunkSize + HalfHidden * HiddenSize +
+       HalfChunk * ChunkSize + HalfChunk * ChunkSize) *
+      sizeof(half);
+  constexpr bool PreloadMask = RawUBBytes <= 72 * 1024;
+  constexpr bool AliasMaskIntoH =
+      !PreloadMask && (HalfHidden * HiddenSize >= HalfChunk * ChunkSize);
+  constexpr int32_t MaskUbAddr =
+      AliasMaskIntoH ? HUbAddr : HUbAddr + HalfHidden * HiddenSize * sizeof(half);
   constexpr int32_t MaskedAccUbAddr =
       MaskUbAddr + HalfChunk * ChunkSize * sizeof(half);
 
   constexpr int32_t L0CBytes =
-      (Workspace1Elems + Workspace2Elems + ChunkElems) * sizeof(float);
+      (Workspace2Elems > Workspace1Elems
+           ? (Workspace2Elems > ChunkElems ? Workspace2Elems : ChunkElems)
+           : (Workspace1Elems > ChunkElems ? Workspace1Elems : ChunkElems)) *
+      sizeof(float);
+  constexpr int32_t UBBytes =
+      (HalfHidden * HiddenSize + HalfChunk * ChunkSize +
+       (AliasMaskIntoH ? HalfHidden * HiddenSize
+                       : HalfHidden * HiddenSize + HalfChunk * ChunkSize) +
+       HalfChunk * ChunkSize) *
+      sizeof(half);
   static_assert((HiddenSize % 2) == 0, "HiddenSize must be even.");
   static_assert((ChunkSize % 2) == 0, "ChunkSize must be even.");
   static_assert(L0CBytes <= 112 * 1024,
                 "Tile sizes exceed the validated L0C budget for this minimum kernel.");
+  static_assert(PreloadMask || AliasMaskIntoH,
+                "Current minimum kernel requires either a preloaded mask or H UB large enough to alias the mask.");
+  static_assert(UBBytes <= 72 * 1024,
+                "Tile sizes exceed the validated UB budget for this minimum kernel.");
 
   using ChunkGlobal =
       GlobalTensor<half, TileShape2D<half, ChunkSize, HiddenSize, Layout::ND>,
@@ -155,9 +175,9 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
   TileAcc<float, ChunkSize, ChunkSize, ChunkSize, ChunkSize> acc_l0;
   TileAcc<float, HiddenSize, HiddenSize, HiddenSize, HiddenSize> h_l0;
   TileAcc<float, ChunkSize, HiddenSize, ChunkSize, HiddenSize> o_l0;
-  TASSIGN(acc_l0, AccL0Addr);
-  TASSIGN(h_l0, HL0Addr);
-  TASSIGN(o_l0, OL0Addr);
+  TASSIGN(acc_l0, SharedL0Addr);
+  TASSIGN(h_l0, SharedL0Addr);
+  TASSIGN(o_l0, SharedL0Addr);
 
   UbVec<half, HalfHidden, HiddenSize> hsum_ub;
   UbVec<half, HalfHidden, HiddenSize> h_ub;
@@ -234,8 +254,10 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
   set_mask_norm();
   set_vector_mask(-1, -1);
   HalfMaskGlobal mask_global(causal_mask + vid * HalfChunk * ChunkSize);
-  TLOAD(mask_ub, mask_global);
-  pipe_barrier(PIPE_ALL);
+  if constexpr (PreloadMask) {
+    TLOAD(mask_ub, mask_global);
+    pipe_barrier(PIPE_ALL);
+  }
 
   for (int64_t work_idx = 0; work_idx < (total_work + block_num - 1) / block_num;
        ++work_idx) {
@@ -264,9 +286,14 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
       TLOAD(acc_ub, acc_global);
       TLOAD(h_ub, h_global);
       pipe_barrier(PIPE_ALL);
-      TMUL(masked_acc_ub, acc_ub, mask_ub);
 
       TADD(hsum_ub, hsum_ub, h_ub);
+      pipe_barrier(PIPE_ALL);
+      if constexpr (!PreloadMask) {
+        TLOAD(mask_ub, mask_global);
+        pipe_barrier(PIPE_ALL);
+      }
+      TMUL(masked_acc_ub, acc_ub, mask_ub);
       pipe_barrier(PIPE_ALL);
       TSTORE(acc_global, masked_acc_ub);
       TSTORE(h_global, hsum_ub);
