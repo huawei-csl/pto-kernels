@@ -95,11 +95,27 @@ Current measured table on this machine:
 | `(12, 20, 8192, 128, 128)` | `3.327` | `77.45` | `563.54` |
 | `(24, 20, 6144, 128, 128)` | `5.063` | `76.35` | `555.55` |
 
+Feature-extension quick table on this machine
+using `python benchmark_linear_attention.py --quick --repeats 10 --warmup 3`
+and the corresponding `--seq-first`, `--use-g`, and `--varlen-uniform` modes:
+
+| Shape `(B,H,L,D,C)` | PTO path | Median ms | TFLOP/s | GiB/s |
+| --- | --- | ---: | ---: | ---: |
+| `(8, 20, 1024, 128, 128)` | `legacy_head_first` | `0.416` | `51.62` | `375.66` |
+| `(8, 20, 1024, 128, 128)` | `seq_first` | `0.580` | `37.00` | `269.27` |
+| `(8, 20, 1024, 128, 128)` | `seq_first_gated` | `0.576` | `37.30` | `271.41` |
+| `(8, 20, 1024, 128, 128)` | `seq_first_varlen_uniform` | `0.591` | `36.36` | `264.64` |
+| `(16, 20, 1024, 128, 128)` | `legacy_head_first` | `0.710` | `60.49` | `440.13` |
+| `(16, 20, 1024, 128, 128)` | `seq_first` | `0.964` | `44.55` | `324.16` |
+| `(16, 20, 1024, 128, 128)` | `seq_first_gated` | `0.986` | `43.57` | `317.06` |
+| `(16, 20, 1024, 128, 128)` | `seq_first_varlen_uniform` | `0.972` | `44.18` | `321.48` |
+
 Notes:
 - device-local results will vary
 - bandwidth here excludes workspace traffic, so it reflects external tensor movement plus the mask tensor
 - the same kernel family at `C=64, D=128` is roughly in the `28-31 TFLOP/s` range on large shapes
 - the best measured default-table point here is `77.45 TFLOP/s` at `(12, 20, 8192, 128, 128)`
+- the feature-extension rows above benchmark the new seq-first / gated / varlen PTO path with precomputed chunk states `h`, so they are best compared against each other and against the quick `legacy_head_first` rows, not against the fused large-shape default table
 
 ## Reading Order
 

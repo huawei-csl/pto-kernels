@@ -136,6 +136,281 @@ AICORE inline void MatmulL1(
   }
 }
 
+struct LinearAttnSeqInfo {
+  uint32_t bos;
+  uint32_t seq_len;
+  uint32_t chunk_offset;
+  uint32_t token_base_offset;
+  uint32_t row_stride;
+};
+
+AICORE inline uint32_t DivCeilU32(uint32_t x, uint32_t y) {
+  return (x + y - 1) / y;
+}
+
+AICORE inline LinearAttnSeqInfo GetLinearAttnSeqInfo(
+    uint32_t seq_idx, uint32_t head_idx, uint32_t num_heads,
+    uint32_t hidden_size, uint32_t chunk_size, uint32_t fixed_seq_len,
+    bool seq_first, __gm__ int32_t *cu_seqlens) {
+  if (!seq_first) {
+    const uint32_t chunk_num = DivCeilU32(fixed_seq_len, chunk_size);
+    return {
+        seq_idx * fixed_seq_len,
+        fixed_seq_len,
+        seq_idx * chunk_num,
+        ((seq_idx * num_heads + head_idx) * fixed_seq_len) * hidden_size,
+        hidden_size,
+    };
+  }
+
+  if (cu_seqlens == nullptr) {
+    const uint32_t bos = seq_idx * fixed_seq_len;
+    const uint32_t chunk_num = DivCeilU32(fixed_seq_len, chunk_size);
+    return {
+        bos,
+        fixed_seq_len,
+        seq_idx * chunk_num,
+        bos * num_heads * hidden_size + head_idx * hidden_size,
+        num_heads * hidden_size,
+    };
+  }
+
+  uint32_t bos = 0;
+  uint32_t chunk_offset = 0;
+  for (uint32_t i = 0; i < seq_idx; ++i) {
+    const uint32_t seq_start = static_cast<uint32_t>(cu_seqlens[i]);
+    const uint32_t seq_end = static_cast<uint32_t>(cu_seqlens[i + 1]);
+    chunk_offset += DivCeilU32(seq_end - seq_start, chunk_size);
+  }
+  bos = static_cast<uint32_t>(cu_seqlens[seq_idx]);
+  const uint32_t eos = static_cast<uint32_t>(cu_seqlens[seq_idx + 1]);
+  return {
+      bos,
+      eos - bos,
+      chunk_offset,
+      bos * num_heads * hidden_size + head_idx * hidden_size,
+      num_heads * hidden_size,
+  };
+}
+
+template <int32_t NumHeads, int32_t HiddenSize, int32_t ChunkSize>
+AICORE void main_kernel_precomputed(__gm__ half *q, __gm__ half *k,
+                                    __gm__ half *v, __gm__ half *workspace_1,
+                                    __gm__ half *h, __gm__ half *causal_mask,
+                                    __gm__ half *o, __gm__ int32_t *cu_seqlens,
+                                    int64_t batch_size, int64_t seq_len,
+                                    bool seq_first, uint64_t ffts_addr) {
+  constexpr int32_t HalfChunk = ChunkSize / 2;
+  constexpr int32_t HalfHidden = HiddenSize / 2;
+  constexpr int32_t ChunkElems = ChunkSize * HiddenSize;
+  constexpr int32_t Workspace1Elems = ChunkSize * ChunkSize;
+  constexpr int32_t HiddenElems = HiddenSize * HiddenSize;
+
+  constexpr int32_t QL1Addr = 0;
+  constexpr int32_t KL1Addr = QL1Addr + ChunkElems * sizeof(half);
+  constexpr int32_t VL1Addr = KL1Addr + ChunkElems * sizeof(half);
+  constexpr int32_t HL1Addr = VL1Addr + ChunkElems * sizeof(half);
+  constexpr int32_t AccL1Addr = HL1Addr + HiddenElems * sizeof(half);
+  constexpr int32_t SharedL0Addr = 0;
+  constexpr int32_t AccUbAddr = 0;
+  constexpr int32_t MaskUbAddr = AccUbAddr + HalfChunk * ChunkSize * sizeof(half);
+
+  using ChunkGlobal =
+      GlobalTensor<half, TileShape2D<half, ChunkSize, HiddenSize, Layout::ND>,
+                   BaseShape2D<half, ChunkSize, HiddenSize, Layout::ND>,
+                   Layout::ND>;
+  using ChunkGlobalDynShape = Shape<1, 1, 1, DYNAMIC, DYNAMIC>;
+  using ChunkGlobalDynStride = Stride<1, 1, 1, DYNAMIC, 1>;
+  using ChunkGlobalDyn =
+      GlobalTensor<half, ChunkGlobalDynShape, ChunkGlobalDynStride, Layout::ND>;
+  using AccGlobal =
+      GlobalTensor<half, TileShape2D<half, ChunkSize, ChunkSize, Layout::ND>,
+                   BaseShape2D<half, ChunkSize, ChunkSize, Layout::ND>,
+                   Layout::ND>;
+  using HiddenGlobal =
+      GlobalTensor<half, TileShape2D<half, HiddenSize, HiddenSize, Layout::ND>,
+                   BaseShape2D<half, HiddenSize, HiddenSize, Layout::ND>,
+                   Layout::ND>;
+  using HalfAccGlobal =
+      GlobalTensor<half, TileShape2D<half, HalfChunk, ChunkSize, Layout::ND>,
+                   BaseShape2D<half, HalfChunk, ChunkSize, Layout::ND>,
+                   Layout::ND>;
+  using HalfMaskGlobal =
+      GlobalTensor<half, TileShape2D<half, HalfChunk, ChunkSize, Layout::ND>,
+                   BaseShape2D<half, HalfChunk, ChunkSize, Layout::ND>,
+                   Layout::ND>;
+  using OutGlobalDyn =
+      GlobalTensor<half, ChunkGlobalDynShape, ChunkGlobalDynStride, Layout::ND>;
+
+  using ChunkL1Dyn = Tile<TileType::Mat, half, ChunkSize, HiddenSize,
+                          BLayout::ColMajor, DYNAMIC, DYNAMIC,
+                          SLayout::RowMajor, 512, PadValue::Zero>;
+  using OutL0Dyn =
+      TileAcc<float, ChunkSize, HiddenSize, DYNAMIC, DYNAMIC>;
+
+  const int64_t total_work = batch_size * NumHeads;
+  const int64_t cid = get_block_idx();
+  const int64_t vid = get_subblockid();
+  set_ffts_base_addr(ffts_addr);
+
+  L1Mat<half, ChunkSize, HiddenSize> q_l1;
+  L1Mat<half, ChunkSize, HiddenSize> k_l1;
+  L1Mat<half, ChunkSize, HiddenSize> v_l1;
+  L1Mat<half, HiddenSize, HiddenSize> h_l1;
+  L1Mat<half, ChunkSize, ChunkSize> acc_l1;
+  TASSIGN(q_l1, QL1Addr);
+  TASSIGN(k_l1, KL1Addr);
+  TASSIGN(v_l1, VL1Addr);
+  TASSIGN(h_l1, HL1Addr);
+  TASSIGN(acc_l1, AccL1Addr);
+
+  TileAcc<float, ChunkSize, ChunkSize, ChunkSize, ChunkSize> acc_l0;
+  TileAcc<float, ChunkSize, HiddenSize, ChunkSize, HiddenSize> o_l0;
+  TASSIGN(acc_l0, SharedL0Addr);
+  TASSIGN(o_l0, SharedL0Addr);
+
+  UbVec<half, HalfChunk, ChunkSize> acc_ub;
+  UbVec<half, HalfChunk, ChunkSize> mask_ub;
+  TASSIGN(acc_ub, AccUbAddr);
+  TASSIGN(mask_ub, MaskUbAddr);
+
+#if defined(__DAV_C220_CUBE__)
+  for (int64_t work_idx = 0; work_idx < (total_work + block_num - 1) / block_num;
+       ++work_idx) {
+    const int64_t pid = work_idx * block_num + cid;
+    if (pid >= total_work) {
+      continue;
+    }
+
+    const uint32_t by = static_cast<uint32_t>(pid % NumHeads);
+    const uint32_t bz = static_cast<uint32_t>(pid / NumHeads);
+    const LinearAttnSeqInfo seq_info =
+        GetLinearAttnSeqInfo(bz, by, NumHeads, HiddenSize, ChunkSize,
+                             static_cast<uint32_t>(seq_len), seq_first,
+                             cu_seqlens);
+    const uint32_t chunk_num = DivCeilU32(seq_info.seq_len, ChunkSize);
+    const int64_t workspace1_base = cid * Workspace1Elems;
+
+    for (uint32_t i = 0; i < chunk_num; ++i) {
+      const uint32_t row_start = i * ChunkSize;
+      const uint32_t valid_rows =
+          min(static_cast<uint32_t>(seq_info.seq_len - row_start),
+              static_cast<uint32_t>(ChunkSize));
+      const uint32_t token_offset = seq_info.token_base_offset +
+                                    row_start * seq_info.row_stride;
+
+      if (valid_rows == ChunkSize && seq_info.row_stride == HiddenSize) {
+        ChunkGlobal q_global(q + token_offset);
+        ChunkGlobal k_global(k + token_offset);
+        ChunkGlobal v_global(v + token_offset);
+        TLOAD(q_l1, q_global);
+        TLOAD(k_l1, k_global);
+        TLOAD(v_l1, v_global);
+      } else {
+        ChunkL1Dyn q_dyn(valid_rows, HiddenSize);
+        ChunkL1Dyn k_dyn(valid_rows, HiddenSize);
+        ChunkL1Dyn v_dyn(valid_rows, HiddenSize);
+        TASSIGN(q_dyn, QL1Addr);
+        TASSIGN(k_dyn, KL1Addr);
+        TASSIGN(v_dyn, VL1Addr);
+        ChunkGlobalDyn q_global_dyn(q + token_offset,
+                                    {1, 1, 1, static_cast<int>(valid_rows),
+                                     HiddenSize},
+                                    {1, 1, 1,
+                                     static_cast<int>(seq_info.row_stride), 1});
+        ChunkGlobalDyn k_global_dyn(k + token_offset,
+                                    {1, 1, 1, static_cast<int>(valid_rows),
+                                     HiddenSize},
+                                    {1, 1, 1,
+                                     static_cast<int>(seq_info.row_stride), 1});
+        ChunkGlobalDyn v_global_dyn(v + token_offset,
+                                    {1, 1, 1, static_cast<int>(valid_rows),
+                                     HiddenSize},
+                                    {1, 1, 1,
+                                     static_cast<int>(seq_info.row_stride), 1});
+        TLOAD(q_dyn, q_global_dyn);
+        TLOAD(k_dyn, k_global_dyn);
+        TLOAD(v_dyn, v_global_dyn);
+      }
+
+      HiddenGlobal h_global(
+          h + ((seq_info.chunk_offset + i) * NumHeads + by) * HiddenElems);
+      TLOAD(h_l1, h_global);
+      pipe_barrier(PIPE_ALL);
+
+      MatmulL1<ChunkSize, ChunkSize, HiddenSize, false, true>(acc_l0, q_l1, k_l1,
+                                                              true);
+      AccGlobal acc_global(workspace_1 + workspace1_base);
+      TSTORE(acc_global, acc_l0);
+      pipe_barrier(PIPE_ALL);
+      SetCrossFlag<PIPE_FIX>(0, 2);
+
+      WaitCrossFlag(1);
+      TLOAD(acc_l1, acc_global);
+      pipe_barrier(PIPE_ALL);
+
+      MatmulL1<ChunkSize, HiddenSize, ChunkSize, false, false>(o_l0, acc_l1, v_l1,
+                                                               true);
+      MatmulL1<ChunkSize, HiddenSize, HiddenSize, false, false>(o_l0, q_l1, h_l1,
+                                                                false);
+
+      if (valid_rows == ChunkSize && seq_info.row_stride == HiddenSize) {
+        ChunkGlobal o_global(o + token_offset);
+        TSTORE(o_global, o_l0);
+      } else {
+        OutL0Dyn o_tail(valid_rows, HiddenSize);
+        TASSIGN(o_tail, SharedL0Addr);
+        OutGlobalDyn o_global_dyn(o + token_offset,
+                                  {1, 1, 1, static_cast<int>(valid_rows),
+                                   HiddenSize},
+                                  {1, 1, 1,
+                                   static_cast<int>(seq_info.row_stride), 1});
+        TSTORE(o_global_dyn, o_tail);
+      }
+      pipe_barrier(PIPE_ALL);
+    }
+  }
+#endif
+
+#if defined(__DAV_C220_VEC__)
+  set_mask_norm();
+  set_vector_mask(-1, -1);
+  HalfMaskGlobal mask_global(causal_mask + vid * HalfChunk * ChunkSize);
+  TLOAD(mask_ub, mask_global);
+  pipe_barrier(PIPE_ALL);
+
+  for (int64_t work_idx = 0; work_idx < (total_work + block_num - 1) / block_num;
+       ++work_idx) {
+    const int64_t pid = work_idx * block_num + cid;
+    if (pid >= total_work) {
+      continue;
+    }
+
+    const uint32_t by = static_cast<uint32_t>(pid % NumHeads);
+    const uint32_t bz = static_cast<uint32_t>(pid / NumHeads);
+    const LinearAttnSeqInfo seq_info =
+        GetLinearAttnSeqInfo(bz, by, NumHeads, HiddenSize, ChunkSize,
+                             static_cast<uint32_t>(seq_len), seq_first,
+                             cu_seqlens);
+    const uint32_t chunk_num = DivCeilU32(seq_info.seq_len, ChunkSize);
+    const int64_t workspace1_base = cid * Workspace1Elems;
+
+    for (uint32_t i = 0; i < chunk_num; ++i) {
+      WaitCrossFlag(0);
+      HalfAccGlobal acc_global(workspace_1 + workspace1_base +
+                               vid * HalfChunk * ChunkSize);
+      TLOAD(acc_ub, acc_global);
+      pipe_barrier(PIPE_ALL);
+      TMUL(acc_ub, acc_ub, mask_ub);
+      pipe_barrier(PIPE_ALL);
+      TSTORE(acc_global, acc_ub);
+      pipe_barrier(PIPE_ALL);
+      SetCrossFlag<PIPE_MTE3>(1, 2);
+    }
+  }
+#endif
+}
+
 template <int32_t NumHeads, int32_t HiddenSize, int32_t ChunkSize>
 AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
                         __gm__ half *workspace_1, __gm__ half *workspace_2,
@@ -556,8 +831,21 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
 extern "C" __global__ AICORE void launch_linear_attention(
     __gm__ uint8_t *q, __gm__ uint8_t *k, __gm__ uint8_t *v,
     __gm__ uint8_t *workspace_1, __gm__ uint8_t *workspace_2,
-    __gm__ uint8_t *causal_mask, __gm__ uint8_t *o, int64_t batch_size,
-    int64_t seq_len, uint64_t ffts_addr) {
+    __gm__ uint8_t *causal_mask, __gm__ uint8_t *o,
+    __gm__ int32_t *cu_seqlens, int64_t batch_size, int64_t seq_len,
+    uint32_t seq_first, uint32_t use_precomputed_h, uint64_t ffts_addr) {
+  if (use_precomputed_h != 0) {
+    main_kernel_precomputed<LINEAR_ATTN_H, LINEAR_ATTN_D, LINEAR_ATTN_C>(
+        reinterpret_cast<__gm__ half *>(q), reinterpret_cast<__gm__ half *>(k),
+        reinterpret_cast<__gm__ half *>(v),
+        reinterpret_cast<__gm__ half *>(workspace_1),
+        reinterpret_cast<__gm__ half *>(workspace_2),
+        reinterpret_cast<__gm__ half *>(causal_mask),
+        reinterpret_cast<__gm__ half *>(o), cu_seqlens, batch_size, seq_len,
+        seq_first != 0, ffts_addr);
+    return;
+  }
+
   main_kernel<LINEAR_ATTN_H, LINEAR_ATTN_D, LINEAR_ATTN_C>(
       reinterpret_cast<__gm__ half *>(q), reinterpret_cast<__gm__ half *>(k),
       reinterpret_cast<__gm__ half *>(v),
@@ -570,12 +858,13 @@ extern "C" __global__ AICORE void launch_linear_attention(
 extern "C" void call_kernel(uint32_t blockDim, void *stream, uint8_t *q,
                             uint8_t *k, uint8_t *v, uint8_t *workspace_1,
                             uint8_t *workspace_2, uint8_t *causal_mask,
-                            uint8_t *o,
-                            int64_t batch_size, int64_t seq_len) {
+                            uint8_t *o, int32_t *cu_seqlens,
+                            int64_t batch_size, int64_t seq_len,
+                            uint32_t seq_first, uint32_t use_precomputed_h) {
   uint32_t ffts_len = 0;
   uint64_t ffts_addr = 0;
   rtGetC2cCtrlAddr(&ffts_addr, &ffts_len);
   launch_linear_attention<<<blockDim, nullptr, stream>>>(
-      q, k, v, workspace_1, workspace_2, causal_mask, o, batch_size, seq_len,
-      ffts_addr);
+      q, k, v, workspace_1, workspace_2, causal_mask, o, cu_seqlens,
+      batch_size, seq_len, seq_first, use_precomputed_h, ffts_addr);
 }

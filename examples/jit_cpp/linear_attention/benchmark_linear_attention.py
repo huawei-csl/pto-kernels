@@ -6,6 +6,7 @@ import torch
 import torch_npu  # noqa: F401
 
 from jit_util_linear_attention import BLOCK_DIM, get_causal_mask, jit_compile
+from run_linear_attention import _apply_gating, _build_precomputed_h
 
 DTYPE = torch.float16
 _DEFAULT_MAX_CACHE_SIZE = 256 * 1024 * 1024
@@ -73,6 +74,15 @@ def make_inputs(batch: int, heads: int, seq: int, hidden: int):
     return q, k, v
 
 
+def make_inputs_seq_first(batch: int, heads: int, seq: int, hidden: int):
+    q = torch.randn((batch, seq, heads, hidden), device="npu", dtype=DTYPE)
+    k = torch.randn((batch, seq, heads, hidden), device="npu", dtype=DTYPE)
+    v = torch.randn((batch, seq, heads, hidden), device="npu", dtype=DTYPE)
+    q = q / (q.pow(2).sum(dim=-1, keepdim=True).sqrt() + 1e-6)
+    k = k / (k.pow(2).sum(dim=-1, keepdim=True).sqrt() + 1e-6)
+    return q, k, v
+
+
 def benchmark_shape(
     src: str,
     batch: int,
@@ -82,19 +92,71 @@ def benchmark_shape(
     chunk: int,
     warmup: int,
     repeats: int,
+    *,
+    seq_first: bool = False,
+    use_g: bool = False,
+    varlen_uniform: bool = False,
 ):
     kernel = jit_compile(src, num_heads=heads, hidden_size=hidden, chunk_size=chunk)
-    q, k, v = make_inputs(batch, heads, seq, hidden)
-    workspace_1 = torch.zeros((BLOCK_DIM, 2, chunk, chunk), device="npu", dtype=DTYPE)
-    workspace_2 = torch.zeros((BLOCK_DIM, 2, hidden, hidden), device="npu", dtype=DTYPE)
     causal_mask = get_causal_mask(chunk, DTYPE, 0)
-    out = torch.zeros((batch, heads, seq, hidden), device="npu", dtype=DTYPE)
     cache = torch.ones(_DEFAULT_MAX_CACHE_SIZE, dtype=torch.int8, device="npu")
 
+    if not seq_first and not use_g and not varlen_uniform:
+        q, k, v = make_inputs(batch, heads, seq, hidden)
+        workspace_1 = torch.zeros((BLOCK_DIM, 2, chunk, chunk), device="npu", dtype=DTYPE)
+        workspace_2 = torch.zeros((BLOCK_DIM, 2, hidden, hidden), device="npu", dtype=DTYPE)
+        out = torch.zeros((batch, heads, seq, hidden), device="npu", dtype=DTYPE)
+
+        def launch():
+            kernel(q, k, v, workspace_1, workspace_2, causal_mask, out, block_dim=BLOCK_DIM)
+
+    else:
+        q, k, v = make_inputs_seq_first(batch, heads, seq, hidden)
+        g = torch.zeros((batch, seq, heads), device="npu", dtype=torch.float32) if use_g else None
+        cu_seqlens = None
+        if varlen_uniform:
+            total_t = batch * seq
+            cu_seqlens = torch.arange(0, total_t + 1, seq, device="npu", dtype=torch.int32)
+            q = q.reshape(1, total_t, heads, hidden).contiguous()
+            k = k.reshape(1, total_t, heads, hidden).contiguous()
+            v = v.reshape(1, total_t, heads, hidden).contiguous()
+            if g is not None:
+                g = g.reshape(1, total_t, heads).contiguous()
+            batch_for_kernel = batch
+        else:
+            batch_for_kernel = batch
+
+        q_scaled, k_scaled = _apply_gating(q, k, g, head_first=False)
+        h_states = _build_precomputed_h(
+            k_scaled,
+            v,
+            chunk,
+            head_first=False,
+            cu_seqlens=cu_seqlens,
+        ).contiguous()
+        workspace_1 = torch.zeros((BLOCK_DIM, chunk, chunk), device="npu", dtype=DTYPE)
+        out = torch.zeros_like(v)
+
+        def launch():
+            kernel(
+                q_scaled,
+                k_scaled,
+                v,
+                workspace_1,
+                h_states,
+                causal_mask,
+                out,
+                cu_seqlens=cu_seqlens,
+                seq_first=True,
+                use_precomputed_h=True,
+                batch_size_override=batch_for_kernel,
+                block_dim=BLOCK_DIM,
+            )
+
+        batch = batch_for_kernel
+
     for _ in range(warmup):
-        kernel(
-            q, k, v, workspace_1, workspace_2, causal_mask, out, block_dim=BLOCK_DIM
-        )
+        launch()
     torch.npu.synchronize()
 
     samples_ms = []
@@ -104,9 +166,7 @@ def benchmark_shape(
         start = torch.npu.Event(enable_timing=True)
         end = torch.npu.Event(enable_timing=True)
         start.record()
-        kernel(
-            q, k, v, workspace_1, workspace_2, causal_mask, out, block_dim=BLOCK_DIM
-        )
+        launch()
         end.record()
         end.synchronize()
         samples_ms.append(start.elapsed_time(end))
@@ -150,6 +210,13 @@ def main():
         action="store_true",
         help="Run a larger-shape preset to search for higher steady-state utilization.",
     )
+    parser.add_argument("--seq-first", action="store_true", help="Benchmark native (B, T, H, D) mode.")
+    parser.add_argument("--use-g", action="store_true", help="Benchmark gated mode using uniform zero gate.")
+    parser.add_argument(
+        "--varlen-uniform",
+        action="store_true",
+        help="Benchmark the seq-first varlen path with uniform cu_seqlens.",
+    )
     args = parser.parse_args()
 
     torch.manual_seed(0)
@@ -183,6 +250,9 @@ def main():
             chunk=chunk,
             warmup=args.warmup,
             repeats=args.repeats,
+            seq_first=args.seq_first or args.varlen_uniform,
+            use_g=args.use_g,
+            varlen_uniform=args.varlen_uniform,
         )
         results.append(result)
         print(

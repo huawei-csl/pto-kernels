@@ -71,6 +71,12 @@ def torch_to_ctypes(tensor: torch.Tensor) -> ctypes.c_void_p:
     return ctypes.c_void_p(tensor.data_ptr())
 
 
+def optional_torch_to_ctypes(tensor: torch.Tensor | None) -> ctypes.c_void_p:
+    if tensor is None:
+        return ctypes.c_void_p()
+    return torch_to_ctypes(tensor)
+
+
 @lru_cache(maxsize=None)
 def get_causal_mask(chunk_size: int, dtype: torch.dtype, device_index: int):
     vec_num = 2
@@ -102,8 +108,11 @@ def load_lib(lib_path: str):
         ctypes.c_void_p,
         ctypes.c_void_p,
         ctypes.c_void_p,
+        ctypes.c_void_p,
         ctypes.c_int64,
         ctypes.c_int64,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
     ]
     lib.call_kernel.restype = None
 
@@ -115,6 +124,10 @@ def load_lib(lib_path: str):
         workspace_2: torch.Tensor,
         causal_mask: torch.Tensor,
         o: torch.Tensor,
+        cu_seqlens: torch.Tensor | None = None,
+        seq_first: bool = False,
+        use_precomputed_h: bool = False,
+        batch_size_override: int | None = None,
         block_dim: int | None = None,
         stream_ptr=None,
     ):
@@ -122,7 +135,13 @@ def load_lib(lib_path: str):
             block_dim = BLOCK_DIM
         if stream_ptr is None:
             stream_ptr = torch.npu.current_stream()._as_parameter_
+        if cu_seqlens is not None:
+            if cu_seqlens.dtype != torch.int32:
+                raise TypeError("cu_seqlens must be int32.")
+            if not cu_seqlens.is_contiguous():
+                raise ValueError("cu_seqlens must be contiguous.")
 
+        batch_size = q.shape[0] if batch_size_override is None else batch_size_override
         lib.call_kernel(
             block_dim,
             stream_ptr,
@@ -133,8 +152,11 @@ def load_lib(lib_path: str):
             torch_to_ctypes(workspace_2),
             torch_to_ctypes(causal_mask),
             torch_to_ctypes(o),
-            q.shape[0],
-            q.shape[2],
+            optional_torch_to_ctypes(cu_seqlens),
+            batch_size,
+            q.shape[1] if seq_first else q.shape[2],
+            int(seq_first),
+            int(use_precomputed_h),
         )
 
     return linear_attention_func

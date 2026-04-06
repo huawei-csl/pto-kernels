@@ -67,3 +67,18 @@ Notes:
 - The `pto_cpp` `C=128` rows are included as fair references for the same `(B, H, L, D)` workloads because `C` is an internal algorithm parameter.
 - On this device, the Triton kernels in this baseline could not be compiled/benchmarked for `C=128`; the copied vLLM-style kernel's unmodified `BT=C=128` configuration overflowed UB.
 - `TRITON_ALL_BLOCKS_PARALLEL` is intentionally left disabled here because it produced incorrect outputs for this kernel.
+
+## PTO Feature Path Extensions
+
+The updated PTO example now also supports native `(B, T, H, D)` input layout, gating, and packed varlen batches. Those paths are benchmarked with precomputed chunk states `h`, so this section compares PTO-only feature-path overhead against the original fused head-first fast path.
+
+| Shape `(B,H,L,D,C)` | PTO path | Median ms | TFLOP/s | GiB/s | vs legacy PTO ms |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `(8, 20, 1024, 128, 128)` | `legacy_head_first` | 0.416 | 51.62 | 375.66 | 1.00x |
+| `(8, 20, 1024, 128, 128)` | `seq_first` | 0.580 | 37.00 | 269.27 | 1.39x |
+| `(8, 20, 1024, 128, 128)` | `seq_first_gated` | 0.576 | 37.30 | 271.41 | 1.38x |
+| `(8, 20, 1024, 128, 128)` | `seq_first_varlen_uniform` | 0.591 | 36.36 | 264.64 | 1.42x |
+| `(16, 20, 1024, 128, 128)` | `legacy_head_first` | 0.710 | 60.49 | 440.13 | 1.00x |
+| `(16, 20, 1024, 128, 128)` | `seq_first` | 0.964 | 44.55 | 324.16 | 1.36x |
+| `(16, 20, 1024, 128, 128)` | `seq_first_gated` | 0.986 | 43.57 | 317.06 | 1.39x |
+| `(16, 20, 1024, 128, 128)` | `seq_first_varlen_uniform` | 0.972 | 44.18 | 321.48 | 1.37x |
