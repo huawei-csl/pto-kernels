@@ -25,6 +25,7 @@ def compile_cpp(
         f"linear_attention_H{num_heads}_D{hidden_size}_C{chunk_size}_jit.so",
     )
 
+    extra_flags = os.environ.get("LINEAR_ATTN_EXTRA_FLAGS", "").split()
     flags = [
         "-fPIC",
         "-shared",
@@ -43,6 +44,7 @@ def compile_cpp(
         "-cce-aicore-dcci-insert-for-scalar=false",
         "-Wno-macro-redefined",
         "-Wno-ignored-attributes",
+        *extra_flags,
         f"-I{PTO_LIB_PATH}/include",
         f"-I{ASCEND_TOOLKIT_HOME}/include",
         f"-I{ASCEND_TOOLKIT_HOME}/pkg_inc",

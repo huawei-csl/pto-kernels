@@ -169,7 +169,7 @@ def run_kernel(
         head_first=head_first,
         cu_seqlens=cu_seqlens,
     )
-    workspace_1 = torch.zeros((BLOCK_DIM, chunk_size, chunk_size), device=q.device, dtype=DTYPE)
+    workspace_1 = torch.zeros((BLOCK_DIM, 2, chunk_size, chunk_size), device=q.device, dtype=DTYPE)
     o = torch.zeros_like(v)
     linear_attention_func(
         q_scaled.contiguous(),

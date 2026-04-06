@@ -200,10 +200,13 @@ AICORE void main_kernel_precomputed(__gm__ half *q, __gm__ half *k,
                                     __gm__ half *o, __gm__ int32_t *cu_seqlens,
                                     int64_t batch_size, int64_t seq_len,
                                     bool seq_first, uint64_t ffts_addr) {
+  constexpr int32_t StageCount = 2;
+  constexpr bool UseTwoStagePipeline = (ChunkSize >= 128);
+  constexpr bool InplaceMaskApply = true;
   constexpr int32_t HalfChunk = ChunkSize / 2;
-  constexpr int32_t HalfHidden = HiddenSize / 2;
   constexpr int32_t ChunkElems = ChunkSize * HiddenSize;
-  constexpr int32_t Workspace1Elems = ChunkSize * ChunkSize;
+  constexpr int32_t Workspace1SlotElems = ChunkSize * ChunkSize;
+  constexpr int32_t Workspace1Elems = StageCount * Workspace1SlotElems;
   constexpr int32_t HiddenElems = HiddenSize * HiddenSize;
 
   constexpr int32_t QL1Addr = 0;
@@ -211,6 +214,7 @@ AICORE void main_kernel_precomputed(__gm__ half *q, __gm__ half *k,
   constexpr int32_t VL1Addr = KL1Addr + ChunkElems * sizeof(half);
   constexpr int32_t HL1Addr = VL1Addr + ChunkElems * sizeof(half);
   constexpr int32_t AccL1Addr = HL1Addr + HiddenElems * sizeof(half);
+  constexpr int32_t HNextL1Addr = AccL1Addr + Workspace1SlotElems * sizeof(half);
   constexpr int32_t SharedL0Addr = 0;
   constexpr int32_t AccUbAddr = 0;
   constexpr int32_t MaskUbAddr = AccUbAddr + HalfChunk * ChunkSize * sizeof(half);
@@ -223,6 +227,10 @@ AICORE void main_kernel_precomputed(__gm__ half *q, __gm__ half *k,
   using ChunkGlobalDynStride = Stride<1, 1, 1, DYNAMIC, 1>;
   using ChunkGlobalDyn =
       GlobalTensor<half, ChunkGlobalDynShape, ChunkGlobalDynStride, Layout::ND>;
+  using SeqChunkGlobalStride = Stride<1, 1, 1, -1, 1>;
+  using SeqChunkGlobal =
+      GlobalTensor<half, TileShape2D<half, ChunkSize, HiddenSize, Layout::ND>,
+                   SeqChunkGlobalStride, Layout::ND>;
   using AccGlobal =
       GlobalTensor<half, TileShape2D<half, ChunkSize, ChunkSize, Layout::ND>,
                    BaseShape2D<half, ChunkSize, ChunkSize, Layout::ND>,
@@ -257,11 +265,13 @@ AICORE void main_kernel_precomputed(__gm__ half *q, __gm__ half *k,
   L1Mat<half, ChunkSize, HiddenSize> k_l1;
   L1Mat<half, ChunkSize, HiddenSize> v_l1;
   L1Mat<half, HiddenSize, HiddenSize> h_l1;
+  L1Mat<half, HiddenSize, HiddenSize> h_next_l1;
   L1Mat<half, ChunkSize, ChunkSize> acc_l1;
   TASSIGN(q_l1, QL1Addr);
   TASSIGN(k_l1, KL1Addr);
   TASSIGN(v_l1, VL1Addr);
   TASSIGN(h_l1, HL1Addr);
+  TASSIGN(h_next_l1, HNextL1Addr);
   TASSIGN(acc_l1, AccL1Addr);
 
   TileAcc<float, ChunkSize, ChunkSize, ChunkSize, ChunkSize> acc_l0;
@@ -291,86 +301,285 @@ AICORE void main_kernel_precomputed(__gm__ half *q, __gm__ half *k,
     const uint32_t chunk_num = DivCeilU32(seq_info.seq_len, ChunkSize);
     const int64_t workspace1_base = cid * Workspace1Elems;
 
-    for (uint32_t i = 0; i < chunk_num; ++i) {
-      const uint32_t row_start = i * ChunkSize;
-      const uint32_t valid_rows =
-          min(static_cast<uint32_t>(seq_info.seq_len - row_start),
-              static_cast<uint32_t>(ChunkSize));
-      const uint32_t token_offset = seq_info.token_base_offset +
-                                    row_start * seq_info.row_stride;
+    if constexpr (UseTwoStagePipeline) {
+      const int32_t flag_base = static_cast<int32_t>((work_idx & 3) * 6);
+      int32_t h_buf = 0;
+      WaitCrossFlag(flag_base + 4);
 
-      if (valid_rows == ChunkSize && seq_info.row_stride == HiddenSize) {
-        ChunkGlobal q_global(q + token_offset);
-        ChunkGlobal k_global(k + token_offset);
-        ChunkGlobal v_global(v + token_offset);
-        TLOAD(q_l1, q_global);
-        TLOAD(k_l1, k_global);
-        TLOAD(v_l1, v_global);
-      } else {
-        // Tail chunks load only the valid rows. The later causal masking zeros
-        // the invalid score columns, so the untouched rows in these full-size
-        // L1 tiles never contribute to the stored valid output rows.
-        ChunkL1Dyn q_dyn(valid_rows, HiddenSize);
-        ChunkL1Dyn k_dyn(valid_rows, HiddenSize);
-        ChunkL1Dyn v_dyn(valid_rows, HiddenSize);
-        TASSIGN(q_dyn, QL1Addr);
-        TASSIGN(k_dyn, KL1Addr);
-        TASSIGN(v_dyn, VL1Addr);
-        ChunkGlobalDyn q_global_dyn(q + token_offset,
-                                    {1, 1, 1, static_cast<int>(valid_rows),
-                                     HiddenSize},
-                                    {1, 1, 1,
-                                     static_cast<int>(seq_info.row_stride), 1});
-        ChunkGlobalDyn k_global_dyn(k + token_offset,
-                                    {1, 1, 1, static_cast<int>(valid_rows),
-                                     HiddenSize},
-                                    {1, 1, 1,
-                                     static_cast<int>(seq_info.row_stride), 1});
-        ChunkGlobalDyn v_global_dyn(v + token_offset,
-                                    {1, 1, 1, static_cast<int>(valid_rows),
-                                     HiddenSize},
-                                    {1, 1, 1,
-                                     static_cast<int>(seq_info.row_stride), 1});
-        TLOAD(q_dyn, q_global_dyn);
-        TLOAD(k_dyn, k_global_dyn);
-        TLOAD(v_dyn, v_global_dyn);
+      {
+        const uint32_t token_offset = seq_info.token_base_offset;
+        const uint32_t valid_rows =
+            min(seq_info.seq_len, static_cast<uint32_t>(ChunkSize));
+        if (valid_rows == ChunkSize && seq_info.row_stride == HiddenSize) {
+          ChunkGlobal q_global(q + token_offset);
+          ChunkGlobal k_global(k + token_offset);
+          TLOAD(q_l1, q_global);
+          TLOAD(k_l1, k_global);
+        } else if (valid_rows == ChunkSize) {
+          SeqChunkGlobal q_global(q + token_offset, {},
+                                  {static_cast<int>(seq_info.row_stride)});
+          SeqChunkGlobal k_global(k + token_offset, {},
+                                  {static_cast<int>(seq_info.row_stride)});
+          TLOAD(q_l1, q_global);
+          TLOAD(k_l1, k_global);
+        } else {
+          ChunkL1Dyn q_dyn(valid_rows, HiddenSize);
+          ChunkL1Dyn k_dyn(valid_rows, HiddenSize);
+          TASSIGN(q_dyn, QL1Addr);
+          TASSIGN(k_dyn, KL1Addr);
+          ChunkGlobalDyn q_global_dyn(q + token_offset,
+                                      {1, 1, 1, static_cast<int>(valid_rows),
+                                       HiddenSize},
+                                      {1, 1, 1,
+                                       static_cast<int>(seq_info.row_stride), 1});
+          ChunkGlobalDyn k_global_dyn(k + token_offset,
+                                      {1, 1, 1, static_cast<int>(valid_rows),
+                                       HiddenSize},
+                                      {1, 1, 1,
+                                       static_cast<int>(seq_info.row_stride), 1});
+          TLOAD(q_dyn, q_global_dyn);
+          TLOAD(k_dyn, k_global_dyn);
+        }
+        HiddenGlobal h_global(h + (seq_info.chunk_offset * NumHeads + by) * HiddenElems);
+        TLOAD(h_l1, h_global);
+        pipe_barrier(PIPE_ALL);
+
+        MatmulL1<ChunkSize, ChunkSize, HiddenSize, false, true>(acc_l0, q_l1, k_l1,
+                                                                true);
+        AccGlobal acc_global(workspace_1 + workspace1_base);
+        TSTORE(acc_global, acc_l0);
+        pipe_barrier(PIPE_ALL);
+        SetCrossFlag<PIPE_FIX>(flag_base, 2);
       }
 
-      HiddenGlobal h_global(
-          h + ((seq_info.chunk_offset + i) * NumHeads + by) * HiddenElems);
-      TLOAD(h_l1, h_global);
-      pipe_barrier(PIPE_ALL);
+      for (uint32_t i = 0; i < chunk_num; ++i) {
+        const int32_t slot = static_cast<int32_t>(i & 1);
+        const int32_t next_slot = slot ^ 1;
+        const uint32_t row_start = i * ChunkSize;
+        const uint32_t valid_rows =
+            min(static_cast<uint32_t>(seq_info.seq_len - row_start),
+                static_cast<uint32_t>(ChunkSize));
+        const uint32_t token_offset = seq_info.token_base_offset +
+                                      row_start * seq_info.row_stride;
 
-      MatmulL1<ChunkSize, ChunkSize, HiddenSize, false, true>(acc_l0, q_l1, k_l1,
-                                                              true);
-      AccGlobal acc_global(workspace_1 + workspace1_base);
-      TSTORE(acc_global, acc_l0);
-      pipe_barrier(PIPE_ALL);
-      SetCrossFlag<PIPE_FIX>(0, 2);
+        if (i + 1 < chunk_num) {
+          const uint32_t next_row_start = (i + 1) * ChunkSize;
+          const uint32_t next_valid_rows =
+              min(static_cast<uint32_t>(seq_info.seq_len - next_row_start),
+                  static_cast<uint32_t>(ChunkSize));
+          const uint32_t next_token_offset = seq_info.token_base_offset +
+                                             next_row_start * seq_info.row_stride;
+          const int64_t next_workspace1_base =
+              workspace1_base + next_slot * Workspace1SlotElems;
 
-      WaitCrossFlag(1);
-      TLOAD(acc_l1, acc_global);
-      pipe_barrier(PIPE_ALL);
+          if (next_valid_rows == ChunkSize && seq_info.row_stride == HiddenSize) {
+            ChunkGlobal q_global(q + next_token_offset);
+            ChunkGlobal k_global(k + next_token_offset);
+            TLOAD(q_l1, q_global);
+            TLOAD(k_l1, k_global);
+          } else if (next_valid_rows == ChunkSize) {
+            SeqChunkGlobal q_global(q + next_token_offset, {},
+                                    {static_cast<int>(seq_info.row_stride)});
+            SeqChunkGlobal k_global(k + next_token_offset, {},
+                                    {static_cast<int>(seq_info.row_stride)});
+            TLOAD(q_l1, q_global);
+            TLOAD(k_l1, k_global);
+          } else {
+            ChunkL1Dyn q_dyn(next_valid_rows, HiddenSize);
+            ChunkL1Dyn k_dyn(next_valid_rows, HiddenSize);
+            TASSIGN(q_dyn, QL1Addr);
+            TASSIGN(k_dyn, KL1Addr);
+            ChunkGlobalDyn q_global_dyn(
+                q + next_token_offset,
+                {1, 1, 1, static_cast<int>(next_valid_rows), HiddenSize},
+                {1, 1, 1, static_cast<int>(seq_info.row_stride), 1});
+            ChunkGlobalDyn k_global_dyn(
+                k + next_token_offset,
+                {1, 1, 1, static_cast<int>(next_valid_rows), HiddenSize},
+                {1, 1, 1, static_cast<int>(seq_info.row_stride), 1});
+            TLOAD(q_dyn, q_global_dyn);
+            TLOAD(k_dyn, k_global_dyn);
+          }
+          pipe_barrier(PIPE_ALL);
 
-      MatmulL1<ChunkSize, HiddenSize, ChunkSize, false, false>(o_l0, acc_l1, v_l1,
-                                                               true);
-      MatmulL1<ChunkSize, HiddenSize, HiddenSize, false, false>(o_l0, q_l1, h_l1,
-                                                                false);
+          MatmulL1<ChunkSize, ChunkSize, HiddenSize, false, true>(
+              acc_l0, q_l1, k_l1, true);
+          AccGlobal acc_global(workspace_1 + next_workspace1_base);
+          TSTORE(acc_global, acc_l0);
+          pipe_barrier(PIPE_ALL);
+          SetCrossFlag<PIPE_FIX>(flag_base + next_slot, 2);
+        }
 
-      if (valid_rows == ChunkSize && seq_info.row_stride == HiddenSize) {
-        ChunkGlobal o_global(o + token_offset);
-        TSTORE(o_global, o_l0);
-      } else {
-        OutL0Dyn o_tail(valid_rows, HiddenSize);
-        TASSIGN(o_tail, SharedL0Addr);
-        OutGlobalDyn o_global_dyn(o + token_offset,
-                                  {1, 1, 1, static_cast<int>(valid_rows),
-                                   HiddenSize},
-                                  {1, 1, 1,
-                                   static_cast<int>(seq_info.row_stride), 1});
-        TSTORE(o_global_dyn, o_tail);
+        WaitCrossFlag(flag_base + 2 + slot);
+        AccGlobal masked_acc_global(workspace_1 + workspace1_base +
+                                    slot * Workspace1SlotElems);
+        TLOAD(acc_l1, masked_acc_global);
+
+        if (valid_rows == ChunkSize && seq_info.row_stride == HiddenSize) {
+          ChunkGlobal q_global(q + token_offset);
+          ChunkGlobal v_global(v + token_offset);
+          TLOAD(q_l1, q_global);
+          TLOAD(v_l1, v_global);
+        } else if (valid_rows == ChunkSize) {
+          SeqChunkGlobal q_global(q + token_offset, {},
+                                  {static_cast<int>(seq_info.row_stride)});
+          SeqChunkGlobal v_global(v + token_offset, {},
+                                  {static_cast<int>(seq_info.row_stride)});
+          TLOAD(q_l1, q_global);
+          TLOAD(v_l1, v_global);
+        } else {
+          ChunkL1Dyn q_dyn(valid_rows, HiddenSize);
+          ChunkL1Dyn v_dyn(valid_rows, HiddenSize);
+          TASSIGN(q_dyn, QL1Addr);
+          TASSIGN(v_dyn, VL1Addr);
+          ChunkGlobalDyn q_global_dyn(
+              q + token_offset,
+              {1, 1, 1, static_cast<int>(valid_rows), HiddenSize},
+              {1, 1, 1, static_cast<int>(seq_info.row_stride), 1});
+          ChunkGlobalDyn v_global_dyn(
+              v + token_offset,
+              {1, 1, 1, static_cast<int>(valid_rows), HiddenSize},
+              {1, 1, 1, static_cast<int>(seq_info.row_stride), 1});
+          TLOAD(q_dyn, q_global_dyn);
+          TLOAD(v_dyn, v_global_dyn);
+        }
+
+        if (i + 1 < chunk_num) {
+          HiddenGlobal next_h_global(
+              h + ((seq_info.chunk_offset + i + 1) * NumHeads + by) * HiddenElems);
+          if (h_buf == 0) {
+            TLOAD(h_next_l1, next_h_global);
+          } else {
+            TLOAD(h_l1, next_h_global);
+          }
+        }
+        pipe_barrier(PIPE_ALL);
+
+        MatmulL1<ChunkSize, HiddenSize, ChunkSize, false, false>(o_l0, acc_l1, v_l1,
+                                                                 true);
+        if (h_buf == 0) {
+          MatmulL1<ChunkSize, HiddenSize, HiddenSize, false, false>(o_l0, q_l1,
+                                                                    h_l1, false);
+        } else {
+          MatmulL1<ChunkSize, HiddenSize, HiddenSize, false, false>(o_l0, q_l1,
+                                                                    h_next_l1,
+                                                                    false);
+        }
+
+        if (valid_rows == ChunkSize && seq_info.row_stride == HiddenSize) {
+          ChunkGlobal o_global(o + token_offset);
+          TSTORE(o_global, o_l0);
+        } else if (valid_rows == ChunkSize) {
+          SeqChunkGlobal o_global(o + token_offset, {},
+                                  {static_cast<int>(seq_info.row_stride)});
+          TSTORE(o_global, o_l0);
+        } else {
+          OutL0Dyn o_tail(valid_rows, HiddenSize);
+          TASSIGN(o_tail, SharedL0Addr);
+          OutGlobalDyn o_global_dyn(o + token_offset,
+                                    {1, 1, 1, static_cast<int>(valid_rows),
+                                     HiddenSize},
+                                    {1, 1, 1,
+                                     static_cast<int>(seq_info.row_stride), 1});
+          TSTORE(o_global_dyn, o_tail);
+        }
+        pipe_barrier(PIPE_ALL);
+
+        if (i + 1 < chunk_num) {
+          h_buf ^= 1;
+        }
       }
-      pipe_barrier(PIPE_ALL);
+      SetCrossFlag<PIPE_FIX>(flag_base + 5, 2);
+    } else {
+      for (uint32_t i = 0; i < chunk_num; ++i) {
+        const uint32_t row_start = i * ChunkSize;
+        const uint32_t valid_rows =
+            min(static_cast<uint32_t>(seq_info.seq_len - row_start),
+                static_cast<uint32_t>(ChunkSize));
+        const uint32_t token_offset = seq_info.token_base_offset +
+                                      row_start * seq_info.row_stride;
+
+        if (valid_rows == ChunkSize && seq_info.row_stride == HiddenSize) {
+          ChunkGlobal q_global(q + token_offset);
+          ChunkGlobal k_global(k + token_offset);
+          ChunkGlobal v_global(v + token_offset);
+          TLOAD(q_l1, q_global);
+          TLOAD(k_l1, k_global);
+          TLOAD(v_l1, v_global);
+        } else if (valid_rows == ChunkSize) {
+          SeqChunkGlobal q_global(q + token_offset, {},
+                                  {static_cast<int>(seq_info.row_stride)});
+          SeqChunkGlobal k_global(k + token_offset, {},
+                                  {static_cast<int>(seq_info.row_stride)});
+          SeqChunkGlobal v_global(v + token_offset, {},
+                                  {static_cast<int>(seq_info.row_stride)});
+          TLOAD(q_l1, q_global);
+          TLOAD(k_l1, k_global);
+          TLOAD(v_l1, v_global);
+        } else {
+          ChunkL1Dyn q_dyn(valid_rows, HiddenSize);
+          ChunkL1Dyn k_dyn(valid_rows, HiddenSize);
+          ChunkL1Dyn v_dyn(valid_rows, HiddenSize);
+          TASSIGN(q_dyn, QL1Addr);
+          TASSIGN(k_dyn, KL1Addr);
+          TASSIGN(v_dyn, VL1Addr);
+          ChunkGlobalDyn q_global_dyn(
+              q + token_offset,
+              {1, 1, 1, static_cast<int>(valid_rows), HiddenSize},
+              {1, 1, 1, static_cast<int>(seq_info.row_stride), 1});
+          ChunkGlobalDyn k_global_dyn(
+              k + token_offset,
+              {1, 1, 1, static_cast<int>(valid_rows), HiddenSize},
+              {1, 1, 1, static_cast<int>(seq_info.row_stride), 1});
+          ChunkGlobalDyn v_global_dyn(
+              v + token_offset,
+              {1, 1, 1, static_cast<int>(valid_rows), HiddenSize},
+              {1, 1, 1, static_cast<int>(seq_info.row_stride), 1});
+          TLOAD(q_dyn, q_global_dyn);
+          TLOAD(k_dyn, k_global_dyn);
+          TLOAD(v_dyn, v_global_dyn);
+        }
+
+        HiddenGlobal h_global(
+            h + ((seq_info.chunk_offset + i) * NumHeads + by) * HiddenElems);
+        TLOAD(h_l1, h_global);
+        pipe_barrier(PIPE_ALL);
+
+        MatmulL1<ChunkSize, ChunkSize, HiddenSize, false, true>(acc_l0, q_l1, k_l1,
+                                                                true);
+        AccGlobal acc_global(workspace_1 + workspace1_base);
+        TSTORE(acc_global, acc_l0);
+        pipe_barrier(PIPE_ALL);
+        SetCrossFlag<PIPE_FIX>(0, 2);
+
+        WaitCrossFlag(1);
+        TLOAD(acc_l1, acc_global);
+        pipe_barrier(PIPE_ALL);
+
+        MatmulL1<ChunkSize, HiddenSize, ChunkSize, false, false>(o_l0, acc_l1, v_l1,
+                                                                 true);
+        MatmulL1<ChunkSize, HiddenSize, HiddenSize, false, false>(o_l0, q_l1, h_l1,
+                                                                  false);
+
+        if (valid_rows == ChunkSize && seq_info.row_stride == HiddenSize) {
+          ChunkGlobal o_global(o + token_offset);
+          TSTORE(o_global, o_l0);
+        } else if (valid_rows == ChunkSize) {
+          SeqChunkGlobal o_global(o + token_offset, {},
+                                  {static_cast<int>(seq_info.row_stride)});
+          TSTORE(o_global, o_l0);
+        } else {
+          OutL0Dyn o_tail(valid_rows, HiddenSize);
+          TASSIGN(o_tail, SharedL0Addr);
+          OutGlobalDyn o_global_dyn(o + token_offset,
+                                    {1, 1, 1, static_cast<int>(valid_rows),
+                                     HiddenSize},
+                                    {1, 1, 1,
+                                     static_cast<int>(seq_info.row_stride), 1});
+          TSTORE(o_global_dyn, o_tail);
+        }
+        pipe_barrier(PIPE_ALL);
+      }
     }
   }
 #endif
@@ -398,17 +607,39 @@ AICORE void main_kernel_precomputed(__gm__ half *q, __gm__ half *k,
     const uint32_t chunk_num = DivCeilU32(seq_info.seq_len, ChunkSize);
     const int64_t workspace1_base = cid * Workspace1Elems;
 
-    for (uint32_t i = 0; i < chunk_num; ++i) {
-      WaitCrossFlag(0);
-      HalfAccGlobal acc_global(workspace_1 + workspace1_base +
-                               vid * HalfChunk * ChunkSize);
-      TLOAD(acc_ub, acc_global);
-      pipe_barrier(PIPE_ALL);
-      TMUL(acc_ub, acc_ub, mask_ub);
-      pipe_barrier(PIPE_ALL);
-      TSTORE(acc_global, acc_ub);
-      pipe_barrier(PIPE_ALL);
-      SetCrossFlag<PIPE_MTE3>(1, 2);
+    if constexpr (UseTwoStagePipeline) {
+      const int32_t flag_base = static_cast<int32_t>((work_idx & 3) * 6);
+      SetCrossFlag<PIPE_MTE3>(flag_base + 4, 2);
+      for (uint32_t i = 0; i < chunk_num; ++i) {
+        const int32_t slot = static_cast<int32_t>(i & 1);
+        WaitCrossFlag(flag_base + slot);
+        HalfAccGlobal acc_global(workspace_1 + workspace1_base +
+                                 slot * Workspace1SlotElems +
+                                 vid * HalfChunk * ChunkSize);
+        TLOAD(acc_ub, acc_global);
+        pipe_barrier(PIPE_ALL);
+        if constexpr (InplaceMaskApply) {
+          TMUL(acc_ub, acc_ub, mask_ub);
+        }
+        pipe_barrier(PIPE_ALL);
+        TSTORE(acc_global, acc_ub);
+        pipe_barrier(PIPE_ALL);
+        SetCrossFlag<PIPE_MTE3>(flag_base + 2 + slot, 2);
+      }
+      WaitCrossFlag(flag_base + 5);
+    } else {
+      for (uint32_t i = 0; i < chunk_num; ++i) {
+        WaitCrossFlag(0);
+        HalfAccGlobal acc_global(workspace_1 + workspace1_base +
+                                 vid * HalfChunk * ChunkSize);
+        TLOAD(acc_ub, acc_global);
+        pipe_barrier(PIPE_ALL);
+        TMUL(acc_ub, acc_ub, mask_ub);
+        pipe_barrier(PIPE_ALL);
+        TSTORE(acc_global, acc_ub);
+        pipe_barrier(PIPE_ALL);
+        SetCrossFlag<PIPE_MTE3>(1, 2);
+      }
     }
   }
 #endif

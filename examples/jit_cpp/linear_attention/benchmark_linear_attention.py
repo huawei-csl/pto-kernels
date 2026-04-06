@@ -109,7 +109,6 @@ def benchmark_shape(
 
         def launch():
             kernel(q, k, v, workspace_1, workspace_2, causal_mask, out, block_dim=BLOCK_DIM)
-
     else:
         q, k, v = make_inputs_seq_first(batch, heads, seq, hidden)
         g = torch.zeros((batch, seq, heads), device="npu", dtype=torch.float32) if use_g else None
@@ -134,7 +133,7 @@ def benchmark_shape(
             head_first=False,
             cu_seqlens=cu_seqlens,
         ).contiguous()
-        workspace_1 = torch.zeros((BLOCK_DIM, chunk, chunk), device="npu", dtype=DTYPE)
+        workspace_1 = torch.zeros((BLOCK_DIM, 2, chunk, chunk), device="npu", dtype=DTYPE)
         out = torch.zeros_like(v)
 
         def launch():
