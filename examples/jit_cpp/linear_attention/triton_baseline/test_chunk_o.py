@@ -3,6 +3,7 @@ import torch
 import torch_npu  # noqa: F401
 
 from chunk_o import chunk_o, ref_chunk_o
+from chunk_o_vllm_adapted import chunk_o_vllm_adapted
 
 
 DTYPE = torch.float16
@@ -84,3 +85,40 @@ def test_chunk_o_final_state_matches_reference(
     torch.testing.assert_close(
         final_state.cpu(), ref_final_state.cpu(), rtol=RTOL, atol=atol
     )
+
+
+@pytest.mark.parametrize("g_mode", ["none", "uniform_zero"])
+@pytest.mark.parametrize("varlen_mode", ["static", "varlen_equiv"])
+@pytest.mark.parametrize(
+    ("b", "h", "l", "d", "c"),
+    [
+        (1, 2, 256, 128, 64),
+        (2, 2, 300, 128, 64),
+        (4, 4, 512, 128, 64),
+    ],
+)
+def test_vllm_adapted_chunk_o_matches_reference(
+    b: int,
+    h: int,
+    l: int,
+    d: int,
+    c: int,
+    g_mode: str,
+    varlen_mode: str,
+):
+    torch.manual_seed(2)
+    torch.npu.set_device("npu:0")
+
+    q, k, v = make_inputs(b, h, l, d)
+    out = chunk_o_vllm_adapted(
+        q,
+        k,
+        v,
+        chunk_size=c,
+        g_mode=g_mode,
+        varlen_mode=varlen_mode,
+    )
+    ref = ref_chunk_o(q, k, v, chunk_size=c)
+
+    torch.npu.synchronize()
+    torch.testing.assert_close(out.cpu(), ref.cpu(), rtol=RTOL, atol=pick_atol(l))

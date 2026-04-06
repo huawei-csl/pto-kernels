@@ -8,6 +8,8 @@ import torch
 import torch_npu  # noqa: F401
 
 from chunk_o import chunk_o
+from chunk_o_vllm_adapted import chunk_fwd_o as vllm_chunk_fwd_o
+from chunk_o_vllm_adapted import prepare_vllm_equivalent_inputs
 
 
 DTYPE = torch.float16
@@ -18,9 +20,16 @@ PTO_UTIL = PTO_DIR / "jit_util_linear_attention.py"
 _DEFAULT_MAX_CACHE_SIZE = 256 * 1024 * 1024
 
 DEFAULT_SHAPES = [
-    (8, 20, 1024, 128, 128),
-    (16, 20, 1024, 128, 128),
-    (24, 20, 2048, 128, 128),
+    (8, 20, 1024, 128, 64),
+    (16, 20, 1024, 128, 64),
+    (24, 20, 2048, 128, 64),
+]
+
+VLLM_VARIANTS = [
+    ("vllm_static_no_g", "none", "static"),
+    ("vllm_static_uniform_g", "uniform_zero", "static"),
+    ("vllm_varlen_no_g", "none", "varlen_equiv"),
+    ("vllm_varlen_uniform_g", "uniform_zero", "varlen_equiv"),
 ]
 
 
@@ -125,6 +134,45 @@ def benchmark_pto_shape(
     return summarize_result("pto_cpp", batch, heads, seq, hidden, chunk, med_ms)
 
 
+def benchmark_vllm_shape(
+    kernel_name: str,
+    batch: int,
+    heads: int,
+    seq: int,
+    hidden: int,
+    chunk: int,
+    warmup: int,
+    repeats: int,
+    *,
+    g_mode: str,
+    varlen_mode: str,
+):
+    q, k, v = make_inputs(batch, heads, seq, hidden)
+    prepared = prepare_vllm_equivalent_inputs(
+        q,
+        k,
+        v,
+        chunk,
+        g_mode=g_mode,
+        varlen_mode=varlen_mode,
+    )
+
+    def run():
+        vllm_chunk_fwd_o(
+            q=prepared["q"],
+            k=prepared["k"],
+            v=prepared["v"],
+            h=prepared["h"],
+            g=prepared["g"],
+            scale=1.0,
+            cu_seqlens=prepared["cu_seqlens"],
+            chunk_size=chunk,
+        )
+
+    med_ms = benchmark_callable(run, warmup, repeats)
+    return summarize_result(kernel_name, batch, heads, seq, hidden, chunk, med_ms)
+
+
 def summarize_result(
     kernel_name: str,
     batch: int,
@@ -163,17 +211,21 @@ def render_markdown(results):
     for result in results:
         grouped.setdefault(result["shape"], {})[result["kernel"]] = result
 
-    lines.extend(["", "## Comparison", ""])
-    lines.append("| Shape `(B,H,L,D,C)` | Triton / PTO speedup | Triton - PTO TFLOP/s delta |")
-    lines.append("| --- | ---: | ---: |")
+    lines.extend(["", "## PTO / Kernel Speedup", ""])
+    lines.append("| Shape `(B,H,L,D,C)` | Kernel | PTO / Kernel speedup | Kernel - PTO TFLOP/s delta |")
+    lines.append("| --- | --- | ---: | ---: |")
     for shape, pair in grouped.items():
-        if "triton_ascend" not in pair or "pto_cpp" not in pair:
+        if "pto_cpp" not in pair:
             continue
-        triton_ms = pair["triton_ascend"]["median_ms"]
         pto_ms = pair["pto_cpp"]["median_ms"]
-        speedup = pto_ms / triton_ms
-        tflops_delta = pair["triton_ascend"]["tflops"] - pair["pto_cpp"]["tflops"]
-        lines.append(f"| `{shape}` | {speedup:.2f}x | {tflops_delta:+.2f} |")
+        for kernel_name, result in pair.items():
+            if kernel_name == "pto_cpp":
+                continue
+            speedup = result["median_ms"] / pto_ms
+            tflops_delta = result["tflops"] - pair["pto_cpp"]["tflops"]
+            lines.append(
+                f"| `{shape}` | `{kernel_name}` | {speedup:.2f}x | {tflops_delta:+.2f} |"
+            )
 
     lines.extend(
         [
@@ -181,6 +233,8 @@ def render_markdown(results):
             "Notes:",
             "- Reported TFLOP/s and GiB/s are computed from the same algorithm-level model for both kernels.",
             "- The Triton kernel is forward-only, head-first only, and currently omits gating and varlen support.",
+            "- The copied vLLM-style kernel is benchmarked with precomputed `h` state and pre-transposed inputs, so transpose/setup cost is excluded as requested.",
+            "- On this device, the copied vLLM-style kernel compiled and ran for `C=64`, but the unmodified `BT=C=128` configuration overflowed UB and was not benchmarked.",
             "- `TRITON_ALL_BLOCKS_PARALLEL` is intentionally left disabled here because it produced incorrect outputs for this kernel.",
         ]
     )
@@ -233,6 +287,27 @@ def main():
             f"{triton_result['median_ms']:>9.3f}  {triton_result['tflops']:>10.2f}  "
             f"{triton_result['gib_s']:>10.2f}"
         )
+
+        for kernel_name, g_mode, varlen_mode in VLLM_VARIANTS:
+            print(f"Running {kernel_name} {shape} ...")
+            vllm_result = benchmark_vllm_shape(
+                kernel_name,
+                batch,
+                heads,
+                seq,
+                hidden,
+                chunk,
+                args.warmup,
+                args.repeats,
+                g_mode=g_mode,
+                varlen_mode=varlen_mode,
+            )
+            results.append(vllm_result)
+            print(
+                f"{vllm_result['kernel']:>14}  {str(vllm_result['shape']):>24}  "
+                f"{vllm_result['median_ms']:>9.3f}  {vllm_result['tflops']:>10.2f}  "
+                f"{vllm_result['gib_s']:>10.2f}"
+            )
 
         if not args.skip_pto:
             print(f"Running PTO C++ {shape} ...")
