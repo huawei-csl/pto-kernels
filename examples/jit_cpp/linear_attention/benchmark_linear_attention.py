@@ -8,6 +8,7 @@ import torch_npu  # noqa: F401
 from jit_util_linear_attention import BLOCK_DIM, get_causal_mask, jit_compile
 
 DTYPE = torch.float16
+_DEFAULT_MAX_CACHE_SIZE = 256 * 1024 * 1024
 
 # Larger presets intended to drive better utilization while keeping H/D/C static
 # within each compiled kernel.
@@ -88,6 +89,7 @@ def benchmark_shape(
     workspace_2 = torch.zeros((BLOCK_DIM, 2, hidden, hidden), device="npu", dtype=DTYPE)
     causal_mask = get_causal_mask(chunk, DTYPE, 0)
     out = torch.zeros((batch, heads, seq, hidden), device="npu", dtype=DTYPE)
+    cache = torch.ones(_DEFAULT_MAX_CACHE_SIZE, dtype=torch.int8, device="npu")
 
     for _ in range(warmup):
         kernel(
@@ -97,6 +99,8 @@ def benchmark_shape(
 
     samples_ms = []
     for _ in range(repeats):
+        cache.zero_()
+        torch.npu.synchronize()
         start = torch.npu.Event(enable_timing=True)
         end = torch.npu.Event(enable_timing=True)
         start.record()
@@ -104,7 +108,7 @@ def benchmark_shape(
             q, k, v, workspace_1, workspace_2, causal_mask, out, block_dim=BLOCK_DIM
         )
         end.record()
-        torch.npu.synchronize()
+        end.synchronize()
         samples_ms.append(start.elapsed_time(end))
 
     med_ms = median(samples_ms)

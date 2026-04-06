@@ -483,6 +483,8 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
         TLOAD(h_ub, h_global);
         pipe_barrier(PIPE_ALL);
 
+        // Precompute the chunk carry state H_t = sum_{j<=t}(K_j^T V_j) on the
+        // vector core, then write it back for the cube core output stage.
         TADD(hsum_ub, hsum_ub, h_ub);
         pipe_barrier(PIPE_ALL);
         if constexpr (!PreloadMask) {
@@ -523,6 +525,8 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
         TLOAD(h_ub, h_global);
         pipe_barrier(PIPE_ALL);
 
+        // Precompute the chunk carry state H_t = sum_{j<=t}(K_j^T V_j) on the
+        // vector core, then write it back for the cube core output stage.
         TADD(hsum_ub, hsum_ub, h_ub);
         pipe_barrier(PIPE_ALL);
         if constexpr (!PreloadMask) {
