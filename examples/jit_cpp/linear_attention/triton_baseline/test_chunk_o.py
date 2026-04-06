@@ -2,7 +2,7 @@ import pytest
 import torch
 import torch_npu  # noqa: F401
 
-from chunk_o import chunk_o, ref_chunk_o
+from chunk_o import build_chunk_states, chunk_o, ref_chunk_o
 from chunk_o_vllm_adapted import chunk_o_vllm_adapted
 
 
@@ -85,6 +85,28 @@ def test_chunk_o_final_state_matches_reference(
     torch.testing.assert_close(
         final_state.cpu(), ref_final_state.cpu(), rtol=RTOL, atol=atol
     )
+
+
+@pytest.mark.parametrize(
+    ("b", "h", "l", "d", "c"),
+    [
+        (1, 2, 256, 128, 64),
+        (4, 4, 257, 128, 128),
+    ],
+)
+def test_chunk_o_precomputed_h_matches_reference(
+    b: int, h: int, l: int, d: int, c: int
+):
+    torch.manual_seed(3)
+    torch.npu.set_device("npu:0")
+
+    q, k, v = make_inputs(b, h, l, d)
+    precomputed_h = build_chunk_states(k, v, c)
+    out = chunk_o(q, k, v, chunk_size=c, precomputed_h=precomputed_h)
+    ref = ref_chunk_o(q, k, v, chunk_size=c)
+
+    torch.npu.synchronize()
+    torch.testing.assert_close(out.cpu(), ref.cpu(), rtol=RTOL, atol=pick_atol(l))
 
 
 @pytest.mark.parametrize("g_mode", ["none", "uniform_zero"])

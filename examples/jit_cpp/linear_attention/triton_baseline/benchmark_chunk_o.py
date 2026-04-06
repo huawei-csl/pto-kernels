@@ -7,7 +7,7 @@ from statistics import median
 import torch
 import torch_npu  # noqa: F401
 
-from chunk_o import chunk_o
+from chunk_o import build_chunk_states, chunk_o
 from chunk_o_vllm_adapted import chunk_fwd_o as vllm_chunk_fwd_o
 from chunk_o_vllm_adapted import prepare_vllm_equivalent_inputs
 
@@ -105,7 +105,12 @@ def benchmark_triton_shape(
     batch: int, heads: int, seq: int, hidden: int, chunk: int, warmup: int, repeats: int
 ):
     q, k, v = make_inputs(batch, heads, seq, hidden)
-    med_ms = benchmark_callable(lambda: chunk_o(q, k, v, chunk_size=chunk), warmup, repeats)
+    precomputed_h = build_chunk_states(k, v, chunk)
+    med_ms = benchmark_callable(
+        lambda: chunk_o(q, k, v, chunk_size=chunk, precomputed_h=precomputed_h),
+        warmup,
+        repeats,
+    )
     return summarize_result("triton_ascend", batch, heads, seq, hidden, chunk, med_ms)
 
 
@@ -233,6 +238,7 @@ def render_markdown(results):
             "Notes:",
             "- Reported TFLOP/s and GiB/s are computed from the same algorithm-level model for both kernels.",
             "- The Triton kernel is forward-only, head-first only, and currently omits gating and varlen support.",
+            "- The updated custom Triton kernel is benchmarked with precomputed chunk states `h`, so state construction is excluded from timed measurements.",
             "- The copied vLLM-style kernel is benchmarked with precomputed `h` state and pre-transposed inputs, so transpose/setup cost is excluded as requested.",
             "- On this device, the copied vLLM-style kernel compiled and ran for `C=64`, but the unmodified `BT=C=128` configuration overflowed UB and was not benchmarked.",
             "- `TRITON_ALL_BLOCKS_PARALLEL` is intentionally left disabled here because it produced incorrect outputs for this kernel.",
