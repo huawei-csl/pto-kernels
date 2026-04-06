@@ -80,43 +80,6 @@ def _build_precomputed_h(
     return torch.stack(states, dim=0).contiguous()
 
 
-def _pack_seq_first_varlen(
-    x: torch.Tensor,
-    cu_seqlens: torch.Tensor,
-    chunk_size: int,
-) -> tuple[torch.Tensor, torch.Tensor, list[tuple[int, int, int]]]:
-    if x.shape[0] != 1:
-        raise ValueError("Varlen seq-first packing expects batch=1 packed inputs.")
-    lengths = [int(e) - int(s) for s, e in zip(cu_seqlens[:-1].tolist(), cu_seqlens[1:].tolist(), strict=False)]
-    padded_lengths = [math.ceil(length / chunk_size) * chunk_size for length in lengths]
-    total_padded = sum(padded_lengths)
-    packed = torch.zeros((1, total_padded, *x.shape[2:]), device=x.device, dtype=x.dtype)
-    new_cu = [0]
-    restore_ranges: list[tuple[int, int, int]] = []
-    src_cursor = 0
-    dst_cursor = 0
-    for length, padded in zip(lengths, padded_lengths, strict=False):
-        packed[:, dst_cursor : dst_cursor + length] = x[:, src_cursor : src_cursor + length]
-        restore_ranges.append((dst_cursor, src_cursor, length))
-        src_cursor += length
-        dst_cursor += padded
-        new_cu.append(dst_cursor)
-    return packed, torch.tensor(new_cu, device=x.device, dtype=torch.int32), restore_ranges
-
-
-def _restore_packed_varlen(
-    x_padded: torch.Tensor,
-    original_total_t: int,
-    restore_ranges: list[tuple[int, int, int]],
-) -> torch.Tensor:
-    restored = torch.zeros((1, original_total_t, *x_padded.shape[2:]), device=x_padded.device, dtype=x_padded.dtype)
-    for padded_start, original_start, length in restore_ranges:
-        restored[:, original_start : original_start + length] = x_padded[
-            :, padded_start : padded_start + length
-        ]
-    return restored
-
-
 def ref_linear_attention(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -199,22 +162,12 @@ def run_kernel(
         return o
 
     q_scaled, k_scaled = _apply_gating(q, k, g, head_first=head_first)
-    restore_ranges = None
-    original_total_t = None
-    kernel_cu_seqlens = cu_seqlens
-    if cu_seqlens is not None:
-        original_total_t = q.shape[1]
-        q_scaled, kernel_cu_seqlens, restore_ranges = _pack_seq_first_varlen(
-            q_scaled, cu_seqlens, chunk_size
-        )
-        k_scaled, _, _ = _pack_seq_first_varlen(k_scaled, cu_seqlens, chunk_size)
-        v, _, _ = _pack_seq_first_varlen(v, cu_seqlens, chunk_size)
     h_states = _build_precomputed_h(
         k_scaled,
         v,
         chunk_size,
         head_first=head_first,
-        cu_seqlens=kernel_cu_seqlens,
+        cu_seqlens=cu_seqlens,
     )
     workspace_1 = torch.zeros((BLOCK_DIM, chunk_size, chunk_size), device=q.device, dtype=DTYPE)
     o = torch.zeros_like(v)
@@ -226,15 +179,13 @@ def run_kernel(
         h_states.contiguous(),
         causal_mask,
         o,
-        cu_seqlens=kernel_cu_seqlens.contiguous() if kernel_cu_seqlens is not None else None,
+        cu_seqlens=cu_seqlens.contiguous() if cu_seqlens is not None else None,
         seq_first=not head_first,
         use_precomputed_h=True,
-        batch_size_override=(len(kernel_cu_seqlens) - 1) if kernel_cu_seqlens is not None else None,
+        batch_size_override=(len(cu_seqlens) - 1) if cu_seqlens is not None else None,
         block_dim=BLOCK_DIM,
     )
     torch.npu.synchronize()
-    if restore_ranges is not None and original_total_t is not None:
-        o = _restore_packed_varlen(o, original_total_t, restore_ranges)
     return o
 
 

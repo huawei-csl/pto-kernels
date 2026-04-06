@@ -307,6 +307,9 @@ AICORE void main_kernel_precomputed(__gm__ half *q, __gm__ half *k,
         TLOAD(k_l1, k_global);
         TLOAD(v_l1, v_global);
       } else {
+        // Tail chunks load only the valid rows. The later causal masking zeros
+        // the invalid score columns, so the untouched rows in these full-size
+        // L1 tiles never contribute to the stored valid output rows.
         ChunkL1Dyn q_dyn(valid_rows, HiddenSize);
         ChunkL1Dyn k_dyn(valid_rows, HiddenSize);
         ChunkL1Dyn v_dyn(valid_rows, HiddenSize);
