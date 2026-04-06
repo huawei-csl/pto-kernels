@@ -54,6 +54,10 @@ The current kernel keeps:
 
 The current fast path is `C=128, D=128`.
 
+The directory now contains two PTO execution styles:
+- legacy fused `head_first` `(B, H, T, D)` for the highest throughput reference path
+- native `seq_first` `(B, T, H, D)` including gated and packed-varlen support without transpose or Python padding
+
 The main performance ideas now present in `linear_attention.cpp` are:
 - precomputed causal mask passed from PyTorch and applied with vector tile ops
 - shared L0C reuse so larger tiles fit without changing the math
@@ -61,6 +65,7 @@ The main performance ideas now present in `linear_attention.cpp` are:
 - 2-slot cube/vector workspace pipeline for chunk overlap
 - in-place mask application on `acc_ub` to reduce UB pressure
 - two L1 hidden-state buffers so the next prefix-state tile can be prefetched early
+- static strided full-chunk PTO loads/stores for native `seq_first` inputs, with dynamic `TLOAD`/`TSTORE` reserved for only true varlen tail chunks
 
 ## Step-By-Step Tutorial
 
@@ -102,20 +107,31 @@ and the corresponding `--seq-first`, `--use-g`, and `--varlen-uniform` modes:
 | Shape `(B,H,L,D,C)` | PTO path | Median ms | TFLOP/s | GiB/s |
 | --- | --- | ---: | ---: | ---: |
 | `(8, 20, 1024, 128, 128)` | `legacy_head_first` | `0.416` | `51.62` | `375.66` |
-| `(8, 20, 1024, 128, 128)` | `seq_first` | `0.580` | `37.00` | `269.27` |
-| `(8, 20, 1024, 128, 128)` | `seq_first_gated` | `0.576` | `37.30` | `271.41` |
-| `(8, 20, 1024, 128, 128)` | `seq_first_varlen_uniform` | `0.591` | `36.36` | `264.64` |
+| `(8, 20, 1024, 128, 128)` | `seq_first` | `0.549` | `39.10` | `284.54` |
+| `(8, 20, 1024, 128, 128)` | `seq_first_gated` | `0.535` | `40.11` | `291.90` |
+| `(8, 20, 1024, 128, 128)` | `seq_first_varlen_uniform` | `0.529` | `40.61` | `295.50` |
 | `(16, 20, 1024, 128, 128)` | `legacy_head_first` | `0.710` | `60.49` | `440.13` |
-| `(16, 20, 1024, 128, 128)` | `seq_first` | `0.964` | `44.55` | `324.16` |
-| `(16, 20, 1024, 128, 128)` | `seq_first_gated` | `0.986` | `43.57` | `317.06` |
-| `(16, 20, 1024, 128, 128)` | `seq_first_varlen_uniform` | `0.972` | `44.18` | `321.48` |
+| `(16, 20, 1024, 128, 128)` | `seq_first` | `0.880` | `48.80` | `355.07` |
+| `(16, 20, 1024, 128, 128)` | `seq_first_gated` | `0.872` | `49.24` | `358.30` |
+| `(16, 20, 1024, 128, 128)` | `seq_first_varlen_uniform` | `0.872` | `49.27` | `358.50` |
+
+Native `seq_first` larger-shape table on this machine
+using `python benchmark_linear_attention.py --throughput-hunt --repeats 5 --warmup 2 --seq-first`:
+
+| Shape `(B,H,L,D,C)` | PTO path | Median ms | TFLOP/s | GiB/s |
+| --- | --- | ---: | ---: | ---: |
+| `(24, 20, 2048, 128, 128)` | `seq_first` | `2.154` | `59.81` | `435.15` |
+| `(48, 20, 1024, 128, 128)` | `seq_first` | `2.160` | `59.66` | `434.09` |
+| `(12, 20, 8192, 128, 128)` | `seq_first` | `4.085` | `63.08` | `458.99` |
+| `(24, 20, 1536, 128, 128)` | `seq_first` | `1.661` | `58.19` | `423.39` |
 
 Notes:
 - device-local results will vary
 - bandwidth here excludes workspace traffic, so it reflects external tensor movement plus the mask tensor
 - the same kernel family at `C=64, D=128` is roughly in the `28-31 TFLOP/s` range on large shapes
 - the best measured default-table point here is `77.45 TFLOP/s` at `(12, 20, 8192, 128, 128)`
-- the feature-extension rows above benchmark the new seq-first / gated / varlen PTO path with precomputed chunk states `h`, so they are best compared against each other and against the quick `legacy_head_first` rows, not against the fused large-shape default table
+- the feature-extension rows above benchmark the native `seq_first` / gated / varlen PTO path with precomputed chunk states `h`; after optimization they now reach roughly `49 TFLOP/s` on the quick shapes and `~63 TFLOP/s` on larger seq-first workloads
+- the native `seq_first` path still trails the legacy fused `head_first` reference on the smallest quick shapes, but it no longer needs any transpose or Python-side padding and now lands in the same broad throughput class on larger inputs
 
 ## Reading Order
 

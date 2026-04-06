@@ -75,10 +75,20 @@ The updated PTO example now also supports native `(B, T, H, D)` input layout, ga
 | Shape `(B,H,L,D,C)` | PTO path | Median ms | TFLOP/s | GiB/s | vs legacy PTO ms |
 | --- | --- | ---: | ---: | ---: | ---: |
 | `(8, 20, 1024, 128, 128)` | `legacy_head_first` | 0.416 | 51.62 | 375.66 | 1.00x |
-| `(8, 20, 1024, 128, 128)` | `seq_first` | 0.580 | 37.00 | 269.27 | 1.39x |
-| `(8, 20, 1024, 128, 128)` | `seq_first_gated` | 0.576 | 37.30 | 271.41 | 1.38x |
-| `(8, 20, 1024, 128, 128)` | `seq_first_varlen_uniform` | 0.591 | 36.36 | 264.64 | 1.42x |
+| `(8, 20, 1024, 128, 128)` | `seq_first` | 0.549 | 39.10 | 284.54 | 1.32x |
+| `(8, 20, 1024, 128, 128)` | `seq_first_gated` | 0.535 | 40.11 | 291.90 | 1.29x |
+| `(8, 20, 1024, 128, 128)` | `seq_first_varlen_uniform` | 0.529 | 40.61 | 295.50 | 1.27x |
 | `(16, 20, 1024, 128, 128)` | `legacy_head_first` | 0.710 | 60.49 | 440.13 | 1.00x |
-| `(16, 20, 1024, 128, 128)` | `seq_first` | 0.964 | 44.55 | 324.16 | 1.36x |
-| `(16, 20, 1024, 128, 128)` | `seq_first_gated` | 0.986 | 43.57 | 317.06 | 1.39x |
-| `(16, 20, 1024, 128, 128)` | `seq_first_varlen_uniform` | 0.972 | 44.18 | 321.48 | 1.37x |
+| `(16, 20, 1024, 128, 128)` | `seq_first` | 0.880 | 48.80 | 355.07 | 1.24x |
+| `(16, 20, 1024, 128, 128)` | `seq_first_gated` | 0.872 | 49.24 | 358.30 | 1.23x |
+| `(16, 20, 1024, 128, 128)` | `seq_first_varlen_uniform` | 0.872 | 49.27 | 358.50 | 1.23x |
+
+Native `seq_first` larger-shape results on this machine
+using `python benchmark_linear_attention.py --throughput-hunt --repeats 5 --warmup 2 --seq-first`:
+
+| Shape `(B,H,L,D,C)` | PTO path | Median ms | TFLOP/s | GiB/s |
+| --- | --- | ---: | ---: | ---: |
+| `(24, 20, 2048, 128, 128)` | `seq_first` | 2.154 | 59.81 | 435.15 |
+| `(48, 20, 1024, 128, 128)` | `seq_first` | 2.160 | 59.66 | 434.09 |
+| `(12, 20, 8192, 128, 128)` | `seq_first` | 4.085 | 63.08 | 458.99 |
+| `(24, 20, 1536, 128, 128)` | `seq_first` | 1.661 | 58.19 | 423.39 |

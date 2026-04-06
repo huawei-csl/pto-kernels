@@ -34,9 +34,11 @@ Current fast configuration:
 - 2-slot cube/vector staging
 - in-place mask apply
 - dual `H`-state L1 buffers
+- native `seq_first` support keeps full-chunk strided PTO loads/stores on the fast path and uses dynamic `TLOAD`/`TSTORE` only for true varlen tails
 
 Current validated performance class in this directory:
-- roughly `77 TFLOP/s` on large enough benchmark shapes
+- roughly `77 TFLOP/s` for the legacy fused `head_first` reference on large enough benchmark shapes
+- roughly `63 TFLOP/s` for the native `seq_first` path on larger benchmark shapes without transpose or padding
 
 ## Core Lessons
 
@@ -211,6 +213,44 @@ The local sweep showed this kernel was faster without:
 Rule for future kernels:
 - treat compiler flags as experiments, not assumptions
 - keep only settings that survive correctness and benchmark comparison
+
+### 12. Prefer Static Strided Tiles Over Dynamic Tiles For The Common Seq-First Case
+
+The native `(B, T, H, D)` path improved once the common full-chunk case stopped
+using dynamic PTO tensors everywhere.
+
+The useful split was:
+- full chunk, dense row stride: use the normal static tile path
+- full chunk, strided `seq_first` row layout: use static strided PTO tensors
+- only true tail chunks use dynamic `TLOAD` / `TSTORE`
+
+Why it helped:
+- dynamic tile metadata stopped sitting on the hot path for every `seq_first`
+  chunk
+- full-chunk `seq_first` execution became closer to the legacy fixed-layout PTO
+  fast path
+- true packed varlen tails still stayed native and correct
+
+Rule for future kernels:
+- if a layout is strided but regular, try static strided global tensors before
+  falling back to dynamic tiles for the whole kernel
+- reserve dynamic load/store machinery for the irregular tail path only
+
+### 13. Keep Experimental Fast Paths Only If They Beat The Best Structured Path
+
+During the `seq_first` work, a larger fused PTO fast path was prototyped to try
+to match the old `head_first` kernel more directly.
+
+What happened:
+- it increased code size and complexity
+- it did not beat the optimized precomputed `seq_first` pipeline consistently
+- the simpler staged `seq_first` path scaled better and was easier to keep
+  correct with native varlen support
+
+Rule for future kernels:
+- when an experiment adds a second major kernel structure, demand a clear and
+  repeated benchmark win before keeping it
+- if the improvement is not durable, revert it and keep the smaller design
 
 ## Common Failure Modes
 
