@@ -1,0 +1,51 @@
+# Static PTO baseline (no TileLang JIT)
+
+Self-contained PTO kernels extracted from TileLang-generated sources under `../tilelang_codegen/`, compiled with `bisheng` and tested against PyTorch references on NPU.
+
+## Shared pieces
+
+| File | Role |
+|------|------|
+| `include/common.h` | Copy of `tilelang-ascend/src/tl_templates/pto/common.h` with **`namespace tl::ascend_pto` → `chunk_gdn_pto`**. |
+| `pto_static_common.py` | Shared `bisheng` flags: local `include/`, then **`$TL_ROOT/3rdparty/pto-isa/include` before CANN** (required for a working build). |
+
+## Kernels (`.cpp` → `compiled_lib/*.so` → Python test)
+
+All use the same fixed shape as the TileLang dumps: **`B=2`, `H=16`, `L=16384`, `DK=128`, `DV=128`, `C=128`** (and `chunk_num=128` where applicable).
+
+| Kernel source | Test driver | Reference tolerance (matches TileLang tests) |
+|---------------|---------------|-----------------------------------------------|
+| `chunk_cumsum_kernel.cpp` | `run_chunk_cumsum_static.py` | rtol/atol `1e-5` |
+| `chunk_h_kernel.cpp` | `run_chunk_h_static.py` | `1e-5` |
+| `chunk_o_kernel.cpp` | `run_chunk_o_static.py` | `1e-5` |
+| `scaled_dot_kkt_kernel.cpp` | `run_scaled_dot_kkt_static.py` | `1e-3` (same as `opt_gdn_chunk_scaled_dot_kkt.py`) |
+| `wy_fast_kernel.cpp` | `run_wy_fast_static.py` | `1e-5` |
+
+Run everything:
+
+```bash
+cd static_baseline
+export TL_ROOT=/path/to/tilelang-ascend
+export ASCEND_HOME_PATH=/path/to/cann   # or ASCEND_TOOLKIT_HOME
+python3 run_all_static_kernels.py
+```
+
+Or run a single test, e.g. `python3 run_chunk_o_static.py`.
+
+## Environment
+
+- `ASCEND_TOOLKIT_HOME` or `ASCEND_HOME_PATH` — CANN prefix.
+- `TL_ROOT` — TileLang root so `$TL_ROOT/3rdparty/pto-isa/include` exists; **override** with `PTO_ISA_INCLUDE` if needed.
+
+## Regenerating `*_kernel.cpp` from TileLang
+
+From `../tilelang_codegen/opt_gdn_*.cpp`:
+
+1. Copy into the matching `*_kernel.cpp` name in this directory.
+2. `#include "tl_templates/pto/common.h"` → `#include "common.h"`.
+3. Remove a duplicate `#include <pto/pto-inst.hpp>` if present.
+4. `tl::ascend_pto::` → `chunk_gdn_pto::` (must match `include/common.h`).
+
+Refresh `include/common.h` from upstream when needed and re-apply the namespace rename.
+
+Optional: `PTO_STATIC_EXTRA_FLAGS` — extra flags appended to `bisheng` (space-separated).
