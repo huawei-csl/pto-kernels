@@ -11,8 +11,8 @@ from pto_kernels import pto_abs
 import pytest
 
 
-@pytest.mark.parametrize("size0", [1,2,3,10,20,64,128])
-@pytest.mark.parametrize("size1", [1,2,3,10,20,64,128])
+@pytest.mark.parametrize("size0", [1, 2, 3, 10, 20, 64, 128])
+@pytest.mark.parametrize("size1", [1, 2, 3, 10, 20, 64, 128])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.float32], ids=str)
 def test_pto_abs(size0: int, size1: int, dtype: torch.dtype):
     size = [size0, size1]

@@ -35,8 +35,8 @@ AICORE void runTAbs(__gm__ T* x, __gm__ T* z, uint32_t total_size) {
 
   // Define UB tile type
   using TileData =
-    Tile<TileType::Vec, T, 1, TILE_SIZE, BLayout::RowMajor, 1, DYNAMIC>;
-  
+      Tile<TileType::Vec, T, 1, TILE_SIZE, BLayout::RowMajor, 1, DYNAMIC>;
+
   set_mask_norm();
   set_vector_mask(-1, -1);
 
@@ -46,44 +46,47 @@ AICORE void runTAbs(__gm__ T* x, __gm__ T* z, uint32_t total_size) {
   constexpr uint32_t UB_ZERO_ADDR = 0;
   constexpr uint32_t TILE_SIZE_IN_BYTES = TILE_SIZE * sizeof(T);
   const uint32_t num_tiles = (total_size + TILE_SIZE - 1) / TILE_SIZE;
-  const uint32_t num_tiles_per_block = (num_tiles + num_aiv_cores - 1) / num_aiv_cores;
-  const uint32_t global_offset =
-      aiv_core_id * TILE_SIZE * num_tiles_per_block;
+  const uint32_t num_tiles_per_block =
+      (num_tiles + num_aiv_cores - 1) / num_aiv_cores;
+  const uint32_t global_offset = aiv_core_id * TILE_SIZE * num_tiles_per_block;
 
   // Unlock first iteration
   set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
   set_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
 
   // Loop for full size tiles
-  for (uint32_t inner_offset = global_offset; inner_offset < total_size; inner_offset += TILE_SIZE) {
-
+  for (uint32_t inner_offset = global_offset; inner_offset < total_size;
+       inner_offset += TILE_SIZE) {
     const uint32_t remainder_size = total_size - inner_offset;
-    const int32_t remaining_elements = remainder_size > TILE_SIZE ? TILE_SIZE : remainder_size;
+    const int32_t remaining_elements =
+        remainder_size > TILE_SIZE ? TILE_SIZE : remainder_size;
 
     // Define tile on GM
-    GlobalData xGlobal(x + inner_offset, {remaining_elements}, 
-      {remaining_elements, remaining_elements, remaining_elements, remaining_elements});
-    GlobalData zGlobal(z + inner_offset, {remaining_elements}, 
-      {remaining_elements, remaining_elements, remaining_elements, remaining_elements});
-    
+    GlobalData xGlobal(x + inner_offset, {remaining_elements},
+                       {remaining_elements, remaining_elements,
+                        remaining_elements, remaining_elements});
+    GlobalData zGlobal(z + inner_offset, {remaining_elements},
+                       {remaining_elements, remaining_elements,
+                        remaining_elements, remaining_elements});
+
     // Define tile UB buffer
     TileData xTiles(remaining_elements);
     TileData zTiles(remaining_elements);
-    
+
     // Assign the UB address for each tile
     TASSIGN(xTiles, UB_ZERO_ADDR);
     TASSIGN(zTiles, UB_ZERO_ADDR + TILE_SIZE_IN_BYTES);
-    
+
     // MTE2 (load) wait for vector core to be done
     // (previous iteration's computation)
     wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
-    
+
     // Load data from global memory to UB buffer
     TLOAD(xTiles, xGlobal);
-    
+
     // Signal end of current load to vector core
     set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
-    
+
     // Vector core wait for MTE2 (current load)
     // and MTE3 (previous store) to be done
     wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
