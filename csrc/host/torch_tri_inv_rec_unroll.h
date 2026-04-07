@@ -59,9 +59,10 @@ at::Tensor run_tri_inv_rec_unroll(const at::Tensor& M,
                 at::TensorOptions().dtype(dtype).device(device));
   I_neg.fill_diagonal_(-1);
 
+  void* cu_seqlens;
   if (dtype == at::kHalf) {
     EXEC_KERNEL_CMD(tri_inv_rec_unroll_fp16, block_dim, M_inv, M, I_neg,
-                    matrix_size, total_tiles, num_bsnd_heads);
+                    matrix_size, total_tiles, num_bsnd_heads, cu_seqlens);
   }
 
   return M_inv;

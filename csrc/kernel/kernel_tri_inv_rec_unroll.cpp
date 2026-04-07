@@ -491,7 +491,8 @@ template <typename InputT, typename OutputT, uint32_t MatrixSize,
 AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
                                          __gm__ InputT* M, __gm__ InputT* I_neg,
                                          uint32_t total_tiles,
-                                         uint32_t num_bsnd_heads = 0) {
+                                         uint32_t num_bsnd_heads = 0,
+                                         __gm__ int32_t* cu_seqlens = nullptr) {
   /* Initializations */
   constexpr uint32_t TileLen = MatrixSize * MatrixSize;
   constexpr uint32_t FractalSize = 16;  // fractal size for half
@@ -526,19 +527,19 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
   using GlobalTileOut = GlobalTensor<OutputT, GlobalTileShapeOut,
                                      GlobalTileStridesOut, Layout::ND>;
   using GlobalTileDynamicOut =
-      GlobalTensor<OutputT, GlobalTileDynShape, GlobalTileDynStride, Layout::ND>;
+      GlobalTensor<OutputT, GlobalTileDynamicShape, GlobalTileDynamicStride, Layout::ND>;
   using TileL1AB =
       Tile<TileType::Mat, InputT, MatrixSize, MatrixSize, BLayout::ColMajor,
            MatrixSize, MatrixSize, SLayout::RowMajor, 512>;
   using TileL1ABDynamic = Tile<TileType::Mat, InputT, MatrixSize, MatrixSize,
                            BLayout::ColMajor, DYNAMIC, DYNAMIC,
                            SLayout::RowMajor, 512, PadValue::Zero>;
-  using TileL0CDynamic = TileAcc<OutputT, MatrixSize, MatrixSize, DYNAMIC, DYNAMIC>;
 
   // L0 Memory
   using TileL0A = TileLeft<InputT, MatrixSize, MatrixSize>;
   using TileL0B = TileRight<InputT, MatrixSize, MatrixSize>;
   using TileL0C = TileAcc<OutputT, MatrixSize, MatrixSize>;
+  using TileL0CDynamic = TileAcc<OutputT, MatrixSize, MatrixSize, DYNAMIC, DYNAMIC>;
 
   GlobalTileINeg I_neg_global_in(I_neg);
 
@@ -597,7 +598,8 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
     for (uint32_t tile_id = 0; (tile_id < NumTilesPerCubeIter) &&
                                (global_index + tile_id < total_tiles);
          ++tile_id) {
-      const uint32_t global_tile_id = global_index + tile_id;
+      if constexpr (IsBSND) {
+        const uint32_t global_tile_id = global_index + tile_id;
         if (cu_seqlens != nullptr) {
           const BSNDVarlenTileInfo tile_info = GetBSNDVarlenTileInfoFromCuSeqlens(
               global_tile_id, num_bsnd_heads, MatrixSize, cu_seqlens);
@@ -613,19 +615,21 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
         const int row_stride = static_cast<int>(MatrixSize * num_bsnd_heads);
         wait_flag(PIPE_M, PIPE_MTE2, static_cast<event_t>(tile_id));
         if (valid_size < MatrixSize) {
-          TileL1ABDyn Y_dyn_l1_tile(valid_size, valid_size);
+          TileL1ABDynamic Y_dyn_l1_tile(valid_size, valid_size);
           TASSIGN(Y_dyn_l1_tile,
                   0x0 + (5 + tile_id) * TileLen * sizeof(InputT));
-          GlobalTileInDyn M_global_in_dyn(
+          GlobalTileDynamicIn M_global_in_dyn(
               M + bsnd_offset,
               {1, 1, 1, static_cast<int>(valid_size), static_cast<int>(valid_size)},
               {1, 1, 1, row_stride, 1});
+          wait_flag(PIPE_M, PIPE_MTE2, static_cast<event_t>(tile_id));
           TLOAD(Y_dyn_l1_tile, M_global_in_dyn);
           set_flag(PIPE_MTE2, PIPE_MTE1, static_cast<event_t>(tile_id));
           wait_flag(PIPE_MTE2, PIPE_MTE1, static_cast<event_t>(tile_id));
           TFILLPAD(Y_dyn_l1_tile, Y_dyn_l1_tile);
         } else {
           GlobalTileIn M_global_in(M + bsnd_offset, {}, {row_stride});
+          wait_flag(PIPE_M, PIPE_MTE2, static_cast<event_t>(tile_id));
           TLOAD(Y_l1_tile[tile_id], M_global_in);
         }
       } else {
@@ -656,7 +660,6 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
 
       /* Store result */
       if constexpr (IsBSND) {
-      if constexpr (IsBSND) {
         const uint32_t bsnd_offset = bsnd_tile_offsets[tile_id];
         const uint32_t valid_size = bsnd_tile_valid_sizes[tile_id];
         const int row_stride = static_cast<int>(MatrixSize * num_bsnd_heads);
@@ -664,7 +667,7 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
           const event_t event_0 = static_cast<event_t>(tile_id);
           const event_t event_1 =
               static_cast<event_t>(tile_id + NumTilesPerCubeIter);
-          TileL0CDyn c_l0_tail_tile(valid_size, valid_size);
+          TileL0CDynamic c_l0_tail_tile(valid_size, valid_size);
           TASSIGN(c_l0_tail_tile,
                   0x0 + final_c_buffer_index * TileLen * sizeof(OutputT));
           if constexpr (final_c_buffer_index == 1) {
@@ -676,7 +679,7 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
           }
           set_flag(PIPE_FIX, PIPE_MTE3, static_cast<event_t>(tile_id));
           wait_flag(PIPE_FIX, PIPE_MTE3, static_cast<event_t>(tile_id));
-          GlobalTileOutDyn M_inv_global_out_dyn(
+          GlobalTileDynamicOut M_inv_global_out_dyn(
               M_inv + bsnd_offset,
               {1, 1, 1, static_cast<int>(valid_size), static_cast<int>(valid_size)},
               {1, 1, 1, row_stride, 1});
@@ -705,172 +708,6 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
             static_cast<event_t>(next_tile_id_that_waits_for_pipe_fix_pipe_m));
 }
 
-/*
- * @brief: Varlen BSND kernel.
- *
- * The input/output tensors stay unpadded. For tail chunks with size
- * `actual_size < MatrixSize`, the kernel:
- * 1. derives the chunk row-start and runtime size from `cu_seqlens`
- * 2. loads only the valid `actual_size x actual_size` prefix via dynamic TLOAD
- * 3. zero-fills the remaining rows/cols in-place via TFILLPAD_INPLACE
- * 4. runs the original dense recursive inverse on the materialized full tile
- * 5. stores only the valid `actual_size x actual_size` prefix back to GM
- */
-template <typename InputT, typename OutputT, uint32_t MatrixSize,
-          uint32_t NumTilesPerCubeIter>
-AICORE inline void TriInvRecUnrollKernelBSNDVarlen(
-    __gm__ OutputT* M_inv, __gm__ InputT* M, __gm__ InputT* I_neg,
-    uint32_t total_tiles, uint32_t num_bsnd_heads, __gm__ int32_t* cu_seqlens) {
-  constexpr uint32_t TileLen = MatrixSize * MatrixSize;
-  constexpr uint32_t FractalSize = 16;
-  constexpr uint32_t NumL0Buffers = 2;
-
-  if (get_block_idx() * NumTilesPerCubeIter >= total_tiles) {
-    return;
-  }
-
-  using GlobalTileShapeIn =
-      TileShape2D<InputT, MatrixSize, MatrixSize, Layout::ND>;
-  using GlobalTileStridesIn = Stride<1, 1, 1, -1, 1>;
-  using GlobalTileIn =
-      GlobalTensor<InputT, GlobalTileShapeIn, GlobalTileStridesIn, Layout::ND>;
-
-  using GlobalTileDynShape = Shape<1, 1, 1, DYNAMIC, DYNAMIC>;
-  using GlobalTileDynStride = Stride<1, 1, 1, DYNAMIC, 1>;
-  using GlobalTileInDyn =
-      GlobalTensor<InputT, GlobalTileDynShape, GlobalTileDynStride, Layout::ND>;
-  using GlobalTileOutDyn =
-      GlobalTensor<OutputT, GlobalTileDynShape, GlobalTileDynStride, Layout::ND>;
-
-  using GlobalTileStridesINeg =
-      BaseShape2D<InputT, MatrixSize, MatrixSize, Layout::ND>;
-  using GlobalTileINeg = GlobalTensor<InputT, GlobalTileShapeIn,
-                                      GlobalTileStridesINeg, Layout::ND>;
-
-  using GlobalTileShapeOut =
-      TileShape2D<OutputT, MatrixSize, MatrixSize, Layout::ND>;
-  using GlobalTileStridesOut = Stride<1, 1, 1, -1, 1>;
-  using GlobalTileOut = GlobalTensor<OutputT, GlobalTileShapeOut,
-                                     GlobalTileStridesOut, Layout::ND>;
-
-  using TileL1AB =
-      Tile<TileType::Mat, InputT, MatrixSize, MatrixSize, BLayout::ColMajor,
-           MatrixSize, MatrixSize, SLayout::RowMajor, 512>;
-  using TileL1ABDyn = Tile<TileType::Mat, InputT, MatrixSize, MatrixSize,
-                           BLayout::ColMajor, DYNAMIC, DYNAMIC,
-                           SLayout::RowMajor, 512, PadValue::Zero>;
-
-  using TileL0A = TileLeft<InputT, MatrixSize, MatrixSize>;
-  using TileL0B = TileRight<InputT, MatrixSize, MatrixSize>;
-  using TileL0C = TileAcc<OutputT, MatrixSize, MatrixSize>;
-  using TileL0CDyn = TileAcc<OutputT, MatrixSize, MatrixSize, DYNAMIC, DYNAMIC>;
-
-  GlobalTileINeg I_neg_global_in(I_neg);
-
-  TileL1AB X_l1_tile;
-  TileL1AB I_l1_tile;
-  TileL1AB I_neg_l1_tile;
-  TileL1AB M_neg_l1_tile;
-  TileL1AB Zero_l1_tile;
-  TileL1AB Y_l1_tile[NumTilesPerCubeIter];
-
-  TileL0A a_l0_tile[NumL0Buffers];
-  TileL0B b_l0_tile[NumL0Buffers];
-  TileL0C c_l0_tile[NumL0Buffers];
-
-  TASSIGN(I_l1_tile, 0x0);
-  TASSIGN(I_neg_l1_tile, 0x0 + TileLen * sizeof(InputT));
-  TASSIGN(Zero_l1_tile, 0x0 + 2 * TileLen * sizeof(InputT));
-  TASSIGN(M_neg_l1_tile, 0x0 + 3 * TileLen * sizeof(InputT));
-  TASSIGN(X_l1_tile, 0x0 + 4 * TileLen * sizeof(InputT));
-  for (uint32_t tile_id = 0; tile_id < NumTilesPerCubeIter; ++tile_id) {
-    TASSIGN(Y_l1_tile[tile_id], 0x0 + (5 + tile_id) * TileLen * sizeof(InputT));
-  }
-
-  for (uint32_t buffer_num = 0; buffer_num < NumL0Buffers; ++buffer_num) {
-    TASSIGN(a_l0_tile[buffer_num], 0x0 + buffer_num * TileLen * sizeof(InputT));
-    TASSIGN(b_l0_tile[buffer_num], 0x0 + buffer_num * TileLen * sizeof(InputT));
-    TASSIGN(c_l0_tile[buffer_num],
-            0x0 + buffer_num * TileLen * sizeof(OutputT));
-  }
-  TLOAD(I_neg_l1_tile, I_neg_global_in);
-  set_flag(PIPE_MTE2, PIPE_MTE1, static_cast<event_t>(0));
-  wait_flag(PIPE_MTE2, PIPE_MTE1, static_cast<event_t>(0));
-
-  PrepareAuxiliaryMatrices<TileL1AB, TileL0A, TileL0B, TileL0C>(
-      I_neg_l1_tile, Zero_l1_tile, I_l1_tile, a_l0_tile[0], b_l0_tile[0],
-      c_l0_tile[0]);
-
-  const uint32_t max_iters_per_aic =
-      CeilDiv(total_tiles, (uint32_t)(NumTilesPerCubeIter * get_block_num()));
-  constexpr uint32_t final_c_buffer_index = MatrixSize > FractalSize ? 1 : 0;
-
-  for (uint32_t cube_iter = 0; cube_iter < max_iters_per_aic; ++cube_iter) {
-    const uint32_t global_index =
-        (cube_iter * get_block_num() + get_block_idx()) * NumTilesPerCubeIter;
-    if (global_index >= total_tiles) {
-      break;
-    }
-
-    for (uint32_t tile_id = 0; (tile_id < NumTilesPerCubeIter) &&
-                               (global_index + tile_id < total_tiles);
-         ++tile_id) {
-      const uint32_t global_tile_id = global_index + tile_id;
-      const BSNDVarlenTileInfo tile_info = GetBSNDVarlenTileInfoFromCuSeqlens(
-          global_tile_id, num_bsnd_heads, MatrixSize, cu_seqlens);
-      const uint32_t valid_size = tile_info.valid_size;
-      const uint32_t bsnd_offset = tile_info.bsnd_offset;
-      const int row_stride = static_cast<int>(MatrixSize * num_bsnd_heads);
-
-      if (valid_size == MatrixSize) {
-        GlobalTileIn M_global_in(M + bsnd_offset, {}, {row_stride});
-        TLOAD(Y_l1_tile[tile_id], M_global_in);
-        set_flag(PIPE_MTE2, PIPE_MTE1, static_cast<event_t>(tile_id));
-        wait_flag(PIPE_MTE2, PIPE_MTE1, static_cast<event_t>(tile_id));
-      } else {
-        TileL1ABDyn Y_dyn_l1_tile(valid_size, valid_size);
-        TASSIGN(Y_dyn_l1_tile,
-                0x0 + (5 + tile_id) * TileLen * sizeof(InputT));
-        GlobalTileInDyn M_global_in_dyn(M + bsnd_offset,
-                                        {1, 1, 1, valid_size, valid_size},
-                                        {1, 1, 1, row_stride, 1});
-        TLOAD(Y_dyn_l1_tile, M_global_in_dyn);
-        set_flag(PIPE_MTE2, PIPE_MTE1, static_cast<event_t>(tile_id));
-        wait_flag(PIPE_MTE2, PIPE_MTE1, static_cast<event_t>(tile_id));
-        TFILLPAD(Y_dyn_l1_tile, Y_dyn_l1_tile);
-      }
-
-      InvertSingleTile<InputT, TileL1AB, TileL0A, TileL0B, TileL0C, MatrixSize,
-                       FractalSize, NumTilesPerCubeIter>(
-          X_l1_tile, I_l1_tile, I_neg_l1_tile, M_neg_l1_tile, Zero_l1_tile,
-          Y_l1_tile[tile_id], a_l0_tile, b_l0_tile, c_l0_tile, tile_id);
-
-      if (valid_size == MatrixSize) {
-        GlobalTileOut M_inv_global_out(M_inv + bsnd_offset, {}, {row_stride});
-        TSTORE(M_inv_global_out, c_l0_tile[final_c_buffer_index]);
-      } else {
-        const event_t event_0 = static_cast<event_t>(tile_id);
-        const event_t event_1 = static_cast<event_t>(tile_id + NumTilesPerCubeIter);
-        TileL0CDyn c_l0_tail_tile(valid_size, valid_size);
-        TASSIGN(c_l0_tail_tile,
-                0x0 + final_c_buffer_index * TileLen * sizeof(OutputT));
-        if constexpr (final_c_buffer_index == 1) {
-          set_flag(PIPE_M, PIPE_FIX, event_1);
-          wait_flag(PIPE_M, PIPE_FIX, event_1);
-        } else {
-          set_flag(PIPE_M, PIPE_FIX, event_0);
-          wait_flag(PIPE_M, PIPE_FIX, event_0);
-        }
-        set_flag(PIPE_FIX, PIPE_MTE3, static_cast<event_t>(tile_id));
-        wait_flag(PIPE_FIX, PIPE_MTE3, static_cast<event_t>(tile_id));
-        GlobalTileOutDyn M_inv_global_out_dyn(
-            M_inv + bsnd_offset, {1, 1, 1, valid_size, valid_size},
-            {1, 1, 1, row_stride, 1});
-        TSTORE(M_inv_global_out_dyn, c_l0_tail_tile);
-      }
-    }
-  }
-}
 
 /*
  * @brief: Computes the inverses of the blocks of tensor M
