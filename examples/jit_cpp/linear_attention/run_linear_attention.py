@@ -132,6 +132,7 @@ def run_kernel(
     g: torch.Tensor | None = None,
     head_first: bool = True,
     cu_seqlens: torch.Tensor | None = None,
+    mask_variant: str = "cached_mask",
 ):
     if q.shape != k.shape or q.shape != v.shape:
         raise ValueError("q, k, v must have identical shapes.")
@@ -142,6 +143,9 @@ def run_kernel(
     hidden = q.shape[-1]
     linear_attention_func = _compiled_kernel(src, num_heads, hidden, chunk_size)
     causal_mask = get_causal_mask(chunk_size, DTYPE, q.device.index or 0)
+    if mask_variant not in {"cached_mask", "fast_onthefly"}:
+        raise ValueError(f"Unsupported mask_variant: {mask_variant}")
+    use_fast_mask = mask_variant == "fast_onthefly"
 
     if g is None and head_first and cu_seqlens is None and q.shape[2] % chunk_size == 0:
         b, _, l, d = q.shape
@@ -156,6 +160,7 @@ def run_kernel(
             workspace_2,
             causal_mask,
             o,
+            use_fast_mask=use_fast_mask,
             block_dim=BLOCK_DIM,
         )
         torch.npu.synchronize()
@@ -182,6 +187,7 @@ def run_kernel(
         cu_seqlens=cu_seqlens.contiguous() if cu_seqlens is not None else None,
         seq_first=not head_first,
         use_precomputed_h=True,
+            use_fast_mask=use_fast_mask,
         batch_size_override=(len(cu_seqlens) - 1) if cu_seqlens is not None else None,
         block_dim=BLOCK_DIM,
     )
@@ -241,13 +247,13 @@ def main():
             "cu_seqlens": [0, 17, 96, 161],
         },
     ]
+    mask_variants = ["cached_mask", "fast_onthefly"]
 
     for cfg in test_configs:
         shape = cfg["shape"]
         chunk = cfg["chunk"]
         head_first = cfg["head_first"]
         cu_seqlens = cfg["cu_seqlens"]
-        print(f"Testing {cfg['label']} shape={shape} C={chunk}")
 
         q = _make_normalized(shape)
         k = _make_normalized(shape)
@@ -261,17 +267,6 @@ def main():
             torch.tensor(cu_seqlens, device="npu", dtype=torch.int32)
             if cu_seqlens is not None
             else None
-        )
-
-        o = run_kernel(
-            src,
-            q,
-            k,
-            v,
-            chunk,
-            g=g,
-            head_first=head_first,
-            cu_seqlens=cu_tensor,
         )
         ref_o = ref_linear_attention(
             q,
@@ -290,8 +285,21 @@ def main():
         else:
             atol = 1e-2
 
-        torch.testing.assert_close(o.cpu(), ref_o.cpu(), rtol=RTOL, atol=atol)
-        print("  passed!")
+        for mask_variant in mask_variants:
+            print(f"Testing {cfg['label']} [{mask_variant}] shape={shape} C={chunk}")
+            o = run_kernel(
+                src,
+                q,
+                k,
+                v,
+                chunk,
+                g=g,
+                head_first=head_first,
+                cu_seqlens=cu_tensor,
+                mask_variant=mask_variant,
+            )
+            torch.testing.assert_close(o.cpu(), ref_o.cpu(), rtol=RTOL, atol=atol)
+            print("  passed!")
 
     print("Kernel Output Match!")
 

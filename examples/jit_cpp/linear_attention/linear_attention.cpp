@@ -47,6 +47,16 @@ AICORE inline void WaitFlag(uint32_t id) {
   wait_flag(Src, Dst, static_cast<event_t>(id));
 }
 
+template <typename TileData>
+AICORE inline void BuildLowerTriMask(TileData &mask_tile, int64_t vector_id) {
+  if (vector_id == 0) {
+    TTRI<TileData, /*isUpperOrLower=*/0, /*diagonal=*/0>(mask_tile);
+  } else {
+    TTRI<TileData, /*isUpperOrLower=*/0, /*diagonal=*/TileData::Rows>(mask_tile);
+  }
+  pipe_barrier(PIPE_ALL);
+}
+
 template <int M, int N, int K, bool TransposeA = false, bool TransposeB = false>
 AICORE inline void MatmulL1(
     TileAcc<float, M, N, M, N> &dst,
@@ -199,7 +209,8 @@ AICORE void main_kernel_precomputed(__gm__ half *q, __gm__ half *k,
                                     __gm__ half *h, __gm__ half *causal_mask,
                                     __gm__ half *o, __gm__ int32_t *cu_seqlens,
                                     int64_t batch_size, int64_t seq_len,
-                                    bool seq_first, uint64_t ffts_addr) {
+                                    bool seq_first, uint32_t use_fast_mask,
+                                    uint64_t ffts_addr) {
   constexpr int32_t StageCount = 2;
   constexpr bool UseTwoStagePipeline = (ChunkSize >= 128);
   constexpr bool InplaceMaskApply = true;
@@ -588,8 +599,12 @@ AICORE void main_kernel_precomputed(__gm__ half *q, __gm__ half *k,
   set_mask_norm();
   set_vector_mask(-1, -1);
   HalfMaskGlobal mask_global(causal_mask + vid * HalfChunk * ChunkSize);
-  TLOAD(mask_ub, mask_global);
-  pipe_barrier(PIPE_ALL);
+  if (use_fast_mask != 0) {
+    BuildLowerTriMask(mask_ub, vid);
+  } else {
+    TLOAD(mask_ub, mask_global);
+    pipe_barrier(PIPE_ALL);
+  }
 
   for (int64_t work_idx = 0; work_idx < (total_work + block_num - 1) / block_num;
        ++work_idx) {
@@ -649,7 +664,7 @@ template <int32_t NumHeads, int32_t HiddenSize, int32_t ChunkSize>
 AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
                         __gm__ half *workspace_1, __gm__ half *workspace_2,
                         __gm__ half *causal_mask, __gm__ half *o,
-                        int64_t batch_size, int64_t seq_len,
+                        int64_t batch_size, int64_t seq_len, uint32_t use_fast_mask,
                         uint64_t ffts_addr) {
   constexpr int32_t StageCount = 2;
   constexpr bool UseTwoStagePipeline = (ChunkSize >= 128);
@@ -947,7 +962,9 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
   set_mask_norm();
   set_vector_mask(-1, -1);
   HalfMaskGlobal mask_global(causal_mask + vid * HalfChunk * ChunkSize);
-  if constexpr (PreloadMask) {
+  if (use_fast_mask != 0) {
+    BuildLowerTriMask(mask_ub, vid);
+  } else if constexpr (PreloadMask) {
     TLOAD(mask_ub, mask_global);
     pipe_barrier(PIPE_ALL);
   }
@@ -996,7 +1013,7 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
         // vector core, then write it back for the cube core output stage.
         TADD(hsum_ub, hsum_ub, h_ub);
         pipe_barrier(PIPE_ALL);
-        if constexpr (!PreloadMask) {
+        if ((use_fast_mask == 0) && !PreloadMask) {
           TLOAD(mask_ub, mask_global);
           pipe_barrier(PIPE_ALL);
         }
@@ -1038,7 +1055,7 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
         // vector core, then write it back for the cube core output stage.
         TADD(hsum_ub, hsum_ub, h_ub);
         pipe_barrier(PIPE_ALL);
-        if constexpr (!PreloadMask) {
+        if ((use_fast_mask == 0) && !PreloadMask) {
           TLOAD(mask_ub, mask_global);
           pipe_barrier(PIPE_ALL);
         }
@@ -1067,7 +1084,8 @@ extern "C" __global__ AICORE void launch_linear_attention(
     __gm__ uint8_t *workspace_1, __gm__ uint8_t *workspace_2,
     __gm__ uint8_t *causal_mask, __gm__ uint8_t *o,
     __gm__ int32_t *cu_seqlens, int64_t batch_size, int64_t seq_len,
-    uint32_t seq_first, uint32_t use_precomputed_h, uint64_t ffts_addr) {
+    uint32_t seq_first, uint32_t use_precomputed_h, uint32_t use_fast_mask,
+    uint64_t ffts_addr) {
   if (use_precomputed_h != 0) {
     main_kernel_precomputed<LINEAR_ATTN_H, LINEAR_ATTN_D, LINEAR_ATTN_C>(
         reinterpret_cast<__gm__ half *>(q), reinterpret_cast<__gm__ half *>(k),
@@ -1076,7 +1094,7 @@ extern "C" __global__ AICORE void launch_linear_attention(
         reinterpret_cast<__gm__ half *>(workspace_2),
         reinterpret_cast<__gm__ half *>(causal_mask),
         reinterpret_cast<__gm__ half *>(o), cu_seqlens, batch_size, seq_len,
-        seq_first != 0, ffts_addr);
+        seq_first != 0, use_fast_mask, ffts_addr);
     return;
   }
 
@@ -1086,7 +1104,8 @@ extern "C" __global__ AICORE void launch_linear_attention(
       reinterpret_cast<__gm__ half *>(workspace_1),
       reinterpret_cast<__gm__ half *>(workspace_2),
       reinterpret_cast<__gm__ half *>(causal_mask),
-      reinterpret_cast<__gm__ half *>(o), batch_size, seq_len, ffts_addr);
+      reinterpret_cast<__gm__ half *>(o), batch_size, seq_len, use_fast_mask,
+      ffts_addr);
 }
 
 extern "C" void call_kernel(uint32_t blockDim, void *stream, uint8_t *q,
@@ -1094,11 +1113,13 @@ extern "C" void call_kernel(uint32_t blockDim, void *stream, uint8_t *q,
                             uint8_t *workspace_2, uint8_t *causal_mask,
                             uint8_t *o, int32_t *cu_seqlens,
                             int64_t batch_size, int64_t seq_len,
-                            uint32_t seq_first, uint32_t use_precomputed_h) {
+                            uint32_t seq_first, uint32_t use_precomputed_h,
+                            uint32_t use_fast_mask) {
   uint32_t ffts_len = 0;
   uint64_t ffts_addr = 0;
   rtGetC2cCtrlAddr(&ffts_addr, &ffts_len);
   launch_linear_attention<<<blockDim, nullptr, stream>>>(
       q, k, v, workspace_1, workspace_2, causal_mask, o, cu_seqlens,
-      batch_size, seq_len, seq_first, use_precomputed_h, ffts_addr);
+      batch_size, seq_len, seq_first, use_precomputed_h, use_fast_mask,
+      ffts_addr);
 }

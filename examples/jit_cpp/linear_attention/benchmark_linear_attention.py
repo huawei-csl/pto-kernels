@@ -56,12 +56,20 @@ def estimate_flops(batch: int, heads: int, seq: int, hidden: int, chunk: int) ->
     return batch * heads * chunk_num * flops_per_chunk
 
 
-def estimate_gm_bytes(batch: int, heads: int, seq: int, hidden: int, chunk: int) -> int:
+def estimate_gm_bytes(
+    batch: int,
+    heads: int,
+    seq: int,
+    hidden: int,
+    chunk: int,
+    *,
+    include_mask_bytes: bool,
+) -> int:
     if seq % chunk != 0:
         raise ValueError("This benchmark requires L to be a multiple of C.")
     chunk_num = seq // chunk
     qkv_and_output_bytes = chunk_num * (4 * chunk * hidden * 2)
-    causal_mask_bytes = chunk * chunk * 2
+    causal_mask_bytes = chunk * chunk * 2 if include_mask_bytes else 0
     return batch * heads * qkv_and_output_bytes + causal_mask_bytes
 
 
@@ -96,10 +104,14 @@ def benchmark_shape(
     seq_first: bool = False,
     use_g: bool = False,
     varlen_uniform: bool = False,
+    mask_variant: str = "cached_mask",
 ):
     kernel = jit_compile(src, num_heads=heads, hidden_size=hidden, chunk_size=chunk)
     causal_mask = get_causal_mask(chunk, DTYPE, 0)
     cache = torch.ones(_DEFAULT_MAX_CACHE_SIZE, dtype=torch.int8, device="npu")
+    if mask_variant not in {"cached_mask", "fast_onthefly"}:
+        raise ValueError(f"Unsupported mask_variant: {mask_variant}")
+    use_fast_mask = mask_variant == "fast_onthefly"
 
     if not seq_first and not use_g and not varlen_uniform:
         q, k, v = make_inputs(batch, heads, seq, hidden)
@@ -108,7 +120,17 @@ def benchmark_shape(
         out = torch.zeros((batch, heads, seq, hidden), device="npu", dtype=DTYPE)
 
         def launch():
-            kernel(q, k, v, workspace_1, workspace_2, causal_mask, out, block_dim=BLOCK_DIM)
+            kernel(
+                q,
+                k,
+                v,
+                workspace_1,
+                workspace_2,
+                causal_mask,
+                out,
+                use_fast_mask=use_fast_mask,
+                block_dim=BLOCK_DIM,
+            )
     else:
         q, k, v = make_inputs_seq_first(batch, heads, seq, hidden)
         g = torch.zeros((batch, seq, heads), device="npu", dtype=torch.float32) if use_g else None
@@ -148,6 +170,7 @@ def benchmark_shape(
                 cu_seqlens=cu_seqlens,
                 seq_first=True,
                 use_precomputed_h=True,
+                use_fast_mask=use_fast_mask,
                 batch_size_override=batch_for_kernel,
                 block_dim=BLOCK_DIM,
             )
@@ -173,12 +196,20 @@ def benchmark_shape(
     med_ms = median(samples_ms)
     secs = med_ms / 1e3
     flops = estimate_flops(batch, heads, seq, hidden, chunk)
-    gm_bytes = estimate_gm_bytes(batch, heads, seq, hidden, chunk)
+    gm_bytes = estimate_gm_bytes(
+        batch,
+        heads,
+        seq,
+        hidden,
+        chunk,
+        include_mask_bytes=not use_fast_mask,
+    )
     tflops = flops / secs / 1e12
     gib_s = gm_bytes / secs / (2**30)
 
     return {
         "shape": (batch, heads, seq, hidden, chunk),
+        "mask_variant": mask_variant,
         "median_ms": med_ms,
         "tflops": tflops,
         "gib_s": gib_s,
@@ -216,6 +247,12 @@ def main():
         action="store_true",
         help="Benchmark the seq-first varlen path with uniform cu_seqlens.",
     )
+    parser.add_argument(
+        "--mask-variant",
+        choices=["cached_mask", "fast_onthefly", "both"],
+        default="cached_mask",
+        help="Choose cached-mask, fast on-the-fly, or run both.",
+    )
     args = parser.parse_args()
 
     torch.manual_seed(0)
@@ -232,34 +269,43 @@ def main():
         shapes = DEFAULT_SHAPES
 
     header = (
-        f"{'shape (B,H,L,D,C)':>24}  {'ms':>9}  {'TFLOP/s':>10}  {'GiB/s':>10}"
+        f"{'mask variant':>18}  {'shape (B,H,L,D,C)':>24}  {'ms':>9}  {'TFLOP/s':>10}  {'GiB/s':>10}"
     )
     print(header)
     print("-" * len(header))
 
     results = []
+    mask_variants = (
+        ["cached_mask", "fast_onthefly"]
+        if args.mask_variant == "both"
+        else [args.mask_variant]
+    )
+
     for batch, heads, seq, hidden, chunk in shapes:
-        print(f"Running {batch}x{heads}x{seq}x{hidden}x{chunk} ...")
-        result = benchmark_shape(
-            src,
-            batch=batch,
-            heads=heads,
-            seq=seq,
-            hidden=hidden,
-            chunk=chunk,
-            warmup=args.warmup,
-            repeats=args.repeats,
-            seq_first=args.seq_first or args.varlen_uniform,
-            use_g=args.use_g,
-            varlen_uniform=args.varlen_uniform,
-        )
-        results.append(result)
-        print(
-            f"{str(result['shape']):>24}  "
-            f"{result['median_ms']:>9.3f}  "
-            f"{result['tflops']:>10.2f}  "
-            f"{result['gib_s']:>10.2f}"
-        )
+        for mask_variant in mask_variants:
+            print(f"Running {batch}x{heads}x{seq}x{hidden}x{chunk} [{mask_variant}] ...")
+            result = benchmark_shape(
+                src,
+                batch=batch,
+                heads=heads,
+                seq=seq,
+                hidden=hidden,
+                chunk=chunk,
+                warmup=args.warmup,
+                repeats=args.repeats,
+                seq_first=args.seq_first or args.varlen_uniform,
+                use_g=args.use_g,
+                varlen_uniform=args.varlen_uniform,
+                mask_variant=mask_variant,
+            )
+            results.append(result)
+            print(
+                f"{result['mask_variant']:>18}  "
+                f"{str(result['shape']):>24}  "
+                f"{result['median_ms']:>9.3f}  "
+                f"{result['tflops']:>10.2f}  "
+                f"{result['gib_s']:>10.2f}"
+            )
 
     if results:
         best_tflops = max(results, key=lambda x: x["tflops"])

@@ -115,6 +115,7 @@ def load_lib(lib_path: str):
         ctypes.c_int64,
         ctypes.c_uint32,
         ctypes.c_uint32,
+        ctypes.c_uint32,
     ]
     lib.call_kernel.restype = None
 
@@ -129,6 +130,7 @@ def load_lib(lib_path: str):
         cu_seqlens: torch.Tensor | None = None,
         seq_first: bool = False,
         use_precomputed_h: bool = False,
+        use_fast_mask: bool = False,
         batch_size_override: int | None = None,
         block_dim: int | None = None,
         stream_ptr=None,
@@ -159,6 +161,7 @@ def load_lib(lib_path: str):
             q.shape[1] if seq_first else q.shape[2],
             int(seq_first),
             int(use_precomputed_h),
+            int(use_fast_mask),
         )
 
     return linear_attention_func
