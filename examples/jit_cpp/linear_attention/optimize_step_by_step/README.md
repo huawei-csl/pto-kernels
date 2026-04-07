@@ -10,15 +10,17 @@ Suggested reading order:
 1. `01_naive_static_shape`
 2. `02_naive_dynamic_shape`
 3. `03_cached_mask`
-4. `04_chunk128`
-5. `05_l0_double_buffer`
-6. `06_two_slot_cv_pipeline`
-7. `07_l1_prefetching`
+4. `03a_fast_mask_construct`
+5. `04_chunk128`
+6. `05_l0_double_buffer`
+7. `06_two_slot_cv_pipeline`
+8. `07_l1_prefetching`
 
 ## What Each Step Teaches
 - `01_naive_static_shape`: the smallest fixed-shape PTO-ISA kernel; easiest place to understand workspace layout and tensor indexing
 - `02_naive_dynamic_shape`: move `B` and `L` to runtime, keep launch shape fixed to the number of cores, and loop over work items inside the kernel
 - `03_cached_mask`: precompute the triangular mask in PyTorch and apply it with vector tile ops instead of scalar loops
+- `03a_fast_mask_construct`: keep mask construction inside the kernel, but build the triangular mask once with vector writes and reuse it for all chunks
 - `04_chunk128`: raise chunk size from `64` to `128` to increase arithmetic intensity
 - `05_l0_double_buffer`: split `K=128` into `2 x 64` cube phases and overlap extract with compute
 - `06_two_slot_cv_pipeline`: let cube prepare chunk `i + 1` while vector finishes chunk `i`
@@ -32,10 +34,14 @@ These are the short smoke-test numbers produced while verifying the intermediate
 | --- | --- |
 | `01_naive_static_shape` | fixed-shape smoke benchmark: `(2, 2, 512, 128, 64)` in `0.275 ms` |
 | `02_naive_dynamic_shape` | `5.21 TFLOP/s` at `(16, 20, 1024, 128, 64)` |
-| `03_cached_mask` | `30.02 TFLOP/s` at `(16, 20, 1024, 128, 64)` |
+| `03_cached_mask` | `28.47 TFLOP/s` at `(16, 20, 1024, 128, 64)` |
+| `03a_fast_mask_construct` | `29.01 TFLOP/s` at `(16, 20, 1024, 128, 64)` |
 | `04_chunk128` | `49.73 TFLOP/s` at `(16, 20, 1024, 128, 128)` |
 | `05_l0_double_buffer` | `52.57 TFLOP/s` at `(16, 20, 1024, 128, 128)` |
 | `06_two_slot_cv_pipeline` | `63.15 TFLOP/s` at `(16, 20, 1024, 128, 128)` |
+
+The new `03a` result was measured with `python benchmark_linear_attention.py --shapes 16x20x1024x128x64 --warmup 2 --repeats 5`.
+For the same command on this machine, step `02` measured `5.21 TFLOP/s` and step `03` measured `28.47 TFLOP/s`, so the fast on-the-fly mask closes essentially all of the gap to the cached-mask version without loading a mask tensor from global memory.
 
 ## Final Step Full Benchmark
 
