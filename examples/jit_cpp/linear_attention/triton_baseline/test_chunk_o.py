@@ -2,7 +2,7 @@ import pytest
 import torch
 import torch_npu  # noqa: F401
 
-from chunk_o import build_chunk_states, chunk_o, ref_chunk_o
+from chunk_o import build_chunk_states, chunk_o, get_causal_mask, ref_chunk_o
 from chunk_o_vllm_adapted import chunk_o_vllm_adapted
 
 
@@ -45,6 +45,28 @@ def test_chunk_o_forward_matches_reference(b: int, h: int, l: int, d: int, c: in
 
     q, k, v = make_inputs(b, h, l, d)
     out = chunk_o(q, k, v, chunk_size=c)
+    ref = ref_chunk_o(q, k, v, chunk_size=c)
+
+    torch.npu.synchronize()
+    torch.testing.assert_close(out.cpu(), ref.cpu(), rtol=RTOL, atol=pick_atol(l))
+
+
+@pytest.mark.parametrize(
+    ("b", "h", "l", "d", "c"),
+    [
+        (1, 2, 64, 128, 64),
+        (1, 2, 300, 128, 64),
+        (4, 4, 257, 128, 128),
+    ],
+)
+def test_chunk_o_onthefly_mask_matches_reference(
+    b: int, h: int, l: int, d: int, c: int
+):
+    torch.manual_seed(5)
+    torch.npu.set_device("npu:0")
+
+    q, k, v = make_inputs(b, h, l, d)
+    out = chunk_o(q, k, v, chunk_size=c, use_cached_mask=False)
     ref = ref_chunk_o(q, k, v, chunk_size=c)
 
     torch.npu.synchronize()
@@ -103,6 +125,28 @@ def test_chunk_o_precomputed_h_matches_reference(
     q, k, v = make_inputs(b, h, l, d)
     precomputed_h = build_chunk_states(k, v, c)
     out = chunk_o(q, k, v, chunk_size=c, precomputed_h=precomputed_h)
+    ref = ref_chunk_o(q, k, v, chunk_size=c)
+
+    torch.npu.synchronize()
+    torch.testing.assert_close(out.cpu(), ref.cpu(), rtol=RTOL, atol=pick_atol(l))
+
+
+@pytest.mark.parametrize(
+    ("b", "h", "l", "d", "c"),
+    [
+        (1, 2, 256, 128, 64),
+        (4, 4, 257, 128, 128),
+    ],
+)
+def test_chunk_o_precomputed_mask_matches_reference(
+    b: int, h: int, l: int, d: int, c: int
+):
+    torch.manual_seed(4)
+    torch.npu.set_device("npu:0")
+
+    q, k, v = make_inputs(b, h, l, d)
+    precomputed_mask = get_causal_mask(c, DTYPE, q.device.index or 0)
+    out = chunk_o(q, k, v, chunk_size=c, precomputed_mask=precomputed_mask)
     ref = ref_chunk_o(q, k, v, chunk_size=c)
 
     torch.npu.synchronize()

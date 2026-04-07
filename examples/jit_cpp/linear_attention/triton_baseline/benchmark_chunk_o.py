@@ -7,7 +7,7 @@ from statistics import median
 import torch
 import torch_npu  # noqa: F401
 
-from chunk_o import build_chunk_states, chunk_o
+from chunk_o import build_chunk_states, chunk_o, get_causal_mask
 from chunk_o_vllm_adapted import chunk_fwd_o as vllm_chunk_fwd_o
 from chunk_o_vllm_adapted import prepare_vllm_equivalent_inputs
 
@@ -102,16 +102,36 @@ def load_pto_helpers():
 
 
 def benchmark_triton_shape(
-    batch: int, heads: int, seq: int, hidden: int, chunk: int, warmup: int, repeats: int
+    kernel_name: str,
+    batch: int,
+    heads: int,
+    seq: int,
+    hidden: int,
+    chunk: int,
+    warmup: int,
+    repeats: int,
+    *,
+    use_cached_mask: bool,
 ):
     q, k, v = make_inputs(batch, heads, seq, hidden)
     precomputed_h = build_chunk_states(k, v, chunk)
+    precomputed_mask = (
+        get_causal_mask(chunk, DTYPE, q.device.index or 0) if use_cached_mask else None
+    )
     med_ms = benchmark_callable(
-        lambda: chunk_o(q, k, v, chunk_size=chunk, precomputed_h=precomputed_h),
+        lambda: chunk_o(
+            q,
+            k,
+            v,
+            chunk_size=chunk,
+            precomputed_h=precomputed_h,
+            precomputed_mask=precomputed_mask,
+            use_cached_mask=use_cached_mask,
+        ),
         warmup,
         repeats,
     )
-    return summarize_result("triton_ascend", batch, heads, seq, hidden, chunk, med_ms)
+    return summarize_result(kernel_name, batch, heads, seq, hidden, chunk, med_ms)
 
 
 def benchmark_pto_shape(
@@ -232,13 +252,30 @@ def render_markdown(results):
                 f"| `{shape}` | `{kernel_name}` | {speedup:.2f}x | {tflops_delta:+.2f} |"
             )
 
+    lines.extend(["", "## Triton Cached vs On-The-Fly", ""])
+    lines.append(
+        "| Shape `(B,H,L,D,C)` | Cached ms | On-the-fly ms | On-the-fly / Cached | Cached TFLOP/s delta |"
+    )
+    lines.append("| --- | ---: | ---: | ---: | ---: |")
+    for shape, pair in grouped.items():
+        if "triton_mask_cached" not in pair or "triton_mask_onthefly" not in pair:
+            continue
+        cached = pair["triton_mask_cached"]
+        onthefly = pair["triton_mask_onthefly"]
+        lines.append(
+            f"| `{shape}` | {cached['median_ms']:.3f} | {onthefly['median_ms']:.3f} | "
+            f"{onthefly['median_ms'] / cached['median_ms']:.2f}x | "
+            f"{cached['tflops'] - onthefly['tflops']:+.2f} |"
+        )
+
     lines.extend(
         [
             "",
             "Notes:",
             "- Reported TFLOP/s and GiB/s are computed from the same algorithm-level model for both kernels.",
             "- The Triton kernel is forward-only, head-first only, and currently omits gating and varlen support.",
-            "- The updated custom Triton kernel is benchmarked with precomputed chunk states `h`, so state construction is excluded from timed measurements.",
+            "- `triton_mask_onthefly` computes the causal mask inside the Triton kernel but still uses precomputed chunk states `h`.",
+            "- `triton_mask_cached` is benchmarked with precomputed chunk states `h` and a cached causal mask, so state construction and mask setup are excluded from timed measurements.",
             "- The copied vLLM-style kernel is benchmarked with precomputed `h` state and pre-transposed inputs, so transpose/setup cost is excluded as requested.",
             "- On this device, the copied vLLM-style kernel compiled and ran for `C=64`, but the unmodified `BT=C=128` configuration overflowed UB and was not benchmarked.",
             "- `TRITON_ALL_BLOCKS_PARALLEL` is intentionally left disabled here because it produced incorrect outputs for this kernel.",
@@ -283,15 +320,42 @@ def main():
     results = []
     for shape in shapes:
         batch, heads, seq, hidden, chunk = shape
-        print(f"Running Triton-Ascend {shape} ...")
-        triton_result = benchmark_triton_shape(
-            batch, heads, seq, hidden, chunk, args.warmup, args.repeats
+        print(f"Running Triton on-the-fly mask {shape} ...")
+        triton_onthefly_result = benchmark_triton_shape(
+            "triton_mask_onthefly",
+            batch,
+            heads,
+            seq,
+            hidden,
+            chunk,
+            args.warmup,
+            args.repeats,
+            use_cached_mask=False,
         )
-        results.append(triton_result)
+        results.append(triton_onthefly_result)
         print(
-            f"{triton_result['kernel']:>14}  {str(triton_result['shape']):>24}  "
-            f"{triton_result['median_ms']:>9.3f}  {triton_result['tflops']:>10.2f}  "
-            f"{triton_result['gib_s']:>10.2f}"
+            f"{triton_onthefly_result['kernel']:>14}  {str(triton_onthefly_result['shape']):>24}  "
+            f"{triton_onthefly_result['median_ms']:>9.3f}  {triton_onthefly_result['tflops']:>10.2f}  "
+            f"{triton_onthefly_result['gib_s']:>10.2f}"
+        )
+
+        print(f"Running Triton cached mask {shape} ...")
+        triton_cached_result = benchmark_triton_shape(
+            "triton_mask_cached",
+            batch,
+            heads,
+            seq,
+            hidden,
+            chunk,
+            args.warmup,
+            args.repeats,
+            use_cached_mask=True,
+        )
+        results.append(triton_cached_result)
+        print(
+            f"{triton_cached_result['kernel']:>14}  {str(triton_cached_result['shape']):>24}  "
+            f"{triton_cached_result['median_ms']:>9.3f}  {triton_cached_result['tflops']:>10.2f}  "
+            f"{triton_cached_result['gib_s']:>10.2f}"
         )
 
         for kernel_name, g_mode, varlen_mode in VLLM_VARIANTS:

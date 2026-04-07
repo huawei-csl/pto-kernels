@@ -1,4 +1,5 @@
 import math
+from functools import lru_cache
 from typing import Optional
 
 import torch
@@ -13,6 +14,7 @@ def _chunk_o_fwd_kernel(
     k,
     v,
     h,
+    mask,
     o,
     scale,
     T,
@@ -24,6 +26,7 @@ def _chunk_o_fwd_kernel(
     BT: tl.constexpr,
     BK: tl.constexpr,
     BV: tl.constexpr,
+    USE_PRECOMPUTED_MASK: tl.constexpr,
 ):
     pid = tl.program_id(0)
     NV: tl.constexpr = tl.cdiv(V, BV)
@@ -51,6 +54,9 @@ def _chunk_o_fwd_kernel(
             p_o = tl.make_block_ptr(
                 o, (T, V), (V, 1), (row_start, i_v * BV), (BT, BV), (1, 0)
             )
+            p_mask = tl.make_block_ptr(
+                mask, (C, C), (C, 1), (i_t * BT, 0), (BT, C), (1, 0)
+            )
             b_o = tl.zeros([BT, BV], dtype=tl.float32)
             b_a = tl.zeros([BT, C], dtype=tl.float32)
 
@@ -70,9 +76,13 @@ def _chunk_o_fwd_kernel(
                 b_o += tl.dot(b_q, b_h)
                 b_a += tl.dot(b_q, b_k)
 
-            row_offsets = (i_t * BT + tl.arange(0, BT)).to(tl.float32)
-            col_offsets = tl.arange(0, C).to(tl.float32)
-            b_a = tl.where(row_offsets[:, None] >= col_offsets[None, :], b_a, 0)
+            if USE_PRECOMPUTED_MASK:
+                b_mask = tl.load(p_mask, boundary_check=(0, 1))
+                b_a *= b_mask.to(b_a.dtype)
+            else:
+                row_offsets = (i_t * BT + tl.arange(0, BT)).to(tl.float32)
+                col_offsets = tl.arange(0, C).to(tl.float32)
+                b_a = tl.where(row_offsets[:, None] >= col_offsets[None, :], b_a, 0)
             b_o += tl.dot(b_a.to(b_v.dtype), b_v)
             b_o *= scale
 
@@ -161,6 +171,18 @@ def build_chunk_states(
     return stacked
 
 
+@lru_cache(maxsize=None)
+def get_causal_mask(chunk_size: int, dtype: torch.dtype, device_index: int) -> torch.Tensor:
+    if chunk_size <= 0:
+        raise ValueError(f"chunk_size must be positive, got {chunk_size}")
+    mask = torch.ones(
+        (chunk_size, chunk_size),
+        device=f"npu:{device_index}",
+        dtype=dtype,
+    )
+    return torch.tril(mask).contiguous()
+
+
 def _normalize_precomputed_h(
     h: torch.Tensor,
     b: int,
@@ -190,6 +212,8 @@ def chunk_o(
     initial_state: Optional[torch.Tensor] = None,
     output_final_state: bool = False,
     precomputed_h: Optional[torch.Tensor] = None,
+    precomputed_mask: Optional[torch.Tensor] = None,
+    use_cached_mask: bool = True,
 ):
     # TODO: support seq_first layout: (B, T, H, D).
     # TODO: support gated and varlen variants when the baseline is proven out.
@@ -245,6 +269,23 @@ def chunk_o(
         final_state = None
 
     precomputed_h = _normalize_precomputed_h(precomputed_h, b, h, nt, d_k, d_v)
+    if precomputed_mask is not None:
+        if not use_cached_mask:
+            raise ValueError("precomputed_mask requires use_cached_mask=True")
+        expected_mask = (chunk_size, chunk_size)
+        if tuple(precomputed_mask.shape) != expected_mask:
+            raise ValueError(
+                f"precomputed_mask must have shape {expected_mask}, got {tuple(precomputed_mask.shape)}"
+            )
+        if precomputed_mask.device != q.device:
+            raise ValueError(
+                f"precomputed_mask must be on {q.device}, got {precomputed_mask.device}"
+            )
+        precomputed_mask = precomputed_mask.contiguous()
+    elif use_cached_mask:
+        precomputed_mask = get_causal_mask(chunk_size, q.dtype, q.device.index or 0)
+    else:
+        precomputed_mask = torch.empty((chunk_size, chunk_size), device=q.device, dtype=q.dtype)
     out = torch.empty_like(v)
     tile_rows = min(64, chunk_size)
     bk = min(64, triton.next_power_of_2(d_k))
@@ -255,6 +296,7 @@ def chunk_o(
         k=k,
         v=v,
         h=precomputed_h,
+        mask=precomputed_mask,
         o=out,
         scale=scale,
         T=t,
@@ -266,6 +308,7 @@ def chunk_o(
         BT=tile_rows,
         BK=bk,
         BV=bv,
+        USE_PRECOMPUTED_MASK=use_cached_mask,
         num_warps=4,
         num_stages=2,
     )

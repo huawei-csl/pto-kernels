@@ -2,93 +2,64 @@
 
 | Kernel | Shape `(B,H,L,D,C)` | Median ms | TFLOP/s | GiB/s |
 | --- | --- | ---: | ---: | ---: |
-| triton_ascend | `(8, 20, 1024, 128, 64)` | 1.260 | 12.78 | 124.02 |
-| vllm_static_no_g | `(8, 20, 1024, 128, 64)` | 1.461 | 11.02 | 106.95 |
-| vllm_static_uniform_g | `(8, 20, 1024, 128, 64)` | 1.543 | 10.44 | 101.24 |
-| vllm_varlen_no_g | `(8, 20, 1024, 128, 64)` | 1.944 | 8.29 | 80.39 |
-| vllm_varlen_uniform_g | `(8, 20, 1024, 128, 64)` | 2.011 | 8.01 | 77.70 |
-| pto_cpp | `(8, 20, 1024, 128, 64)` | 0.583 | 27.60 | 267.79 |
-| pto_cpp | `(8, 20, 1024, 128, 128)` | 0.407 | 52.72 | 383.61 |
-| triton_ascend | `(16, 20, 1024, 128, 64)` | 2.215 | 14.54 | 141.07 |
-| vllm_static_no_g | `(16, 20, 1024, 128, 64)` | 2.669 | 12.07 | 117.08 |
-| vllm_static_uniform_g | `(16, 20, 1024, 128, 64)` | 2.732 | 11.79 | 114.39 |
-| vllm_varlen_no_g | `(16, 20, 1024, 128, 64)` | 3.119 | 10.33 | 100.19 |
-| vllm_varlen_uniform_g | `(16, 20, 1024, 128, 64)` | 3.172 | 10.15 | 98.51 |
-| pto_cpp | `(16, 20, 1024, 128, 64)` | 1.062 | 30.33 | 294.25 |
-| pto_cpp | `(16, 20, 1024, 128, 128)` | 0.705 | 60.89 | 443.03 |
-| triton_ascend | `(24, 20, 2048, 128, 64)` | 6.053 | 15.97 | 154.89 |
-| vllm_static_no_g | `(24, 20, 2048, 128, 64)` | 7.450 | 12.97 | 125.84 |
-| vllm_static_uniform_g | `(24, 20, 2048, 128, 64)` | 7.503 | 12.88 | 124.95 |
-| vllm_varlen_no_g | `(24, 20, 2048, 128, 64)` | 7.885 | 12.26 | 118.89 |
-| vllm_varlen_uniform_g | `(24, 20, 2048, 128, 64)` | 7.930 | 12.19 | 118.22 |
-| pto_cpp | `(24, 20, 2048, 128, 64)` | 3.051 | 31.67 | 307.26 |
-| pto_cpp | `(24, 20, 2048, 128, 128)` | 1.776 | 72.55 | 527.90 |
+| triton_mask_onthefly | `(8, 20, 1024, 128, 64)` | 1.305 | 12.34 | 119.69 |
+| triton_mask_cached | `(8, 20, 1024, 128, 64)` | 1.323 | 12.17 | 118.10 |
+| vllm_static_no_g | `(8, 20, 1024, 128, 64)` | 1.470 | 10.96 | 106.29 |
+| vllm_static_uniform_g | `(8, 20, 1024, 128, 64)` | 1.565 | 10.29 | 99.82 |
+| vllm_varlen_no_g | `(8, 20, 1024, 128, 64)` | 2.030 | 7.93 | 76.97 |
+| vllm_varlen_uniform_g | `(8, 20, 1024, 128, 64)` | 2.090 | 7.71 | 74.78 |
+| pto_cpp | `(8, 20, 1024, 128, 64)` | 0.583 | 27.61 | 267.87 |
+| triton_mask_onthefly | `(16, 20, 1024, 128, 64)` | 2.260 | 14.25 | 138.28 |
+| triton_mask_cached | `(16, 20, 1024, 128, 64)` | 2.312 | 13.93 | 135.14 |
+| vllm_static_no_g | `(16, 20, 1024, 128, 64)` | 2.681 | 12.01 | 116.56 |
+| vllm_static_uniform_g | `(16, 20, 1024, 128, 64)` | 2.758 | 11.68 | 113.31 |
+| vllm_varlen_no_g | `(16, 20, 1024, 128, 64)` | 3.200 | 10.07 | 97.66 |
+| vllm_varlen_uniform_g | `(16, 20, 1024, 128, 64)` | 3.252 | 9.90 | 96.08 |
+| pto_cpp | `(16, 20, 1024, 128, 64)` | 1.121 | 28.74 | 278.82 |
+| triton_mask_onthefly | `(24, 20, 2048, 128, 64)` | 6.096 | 15.85 | 153.79 |
+| triton_mask_cached | `(24, 20, 2048, 128, 64)` | 6.264 | 15.43 | 149.67 |
+| vllm_static_no_g | `(24, 20, 2048, 128, 64)` | 7.458 | 12.96 | 125.71 |
+| vllm_static_uniform_g | `(24, 20, 2048, 128, 64)` | 7.529 | 12.83 | 124.51 |
+| vllm_varlen_no_g | `(24, 20, 2048, 128, 64)` | 7.978 | 12.11 | 117.51 |
+| vllm_varlen_uniform_g | `(24, 20, 2048, 128, 64)` | 8.007 | 12.07 | 117.08 |
+| pto_cpp | `(24, 20, 2048, 128, 64)` | 3.072 | 31.46 | 305.18 |
 
 ## PTO / Kernel Speedup
 
 | Shape `(B,H,L,D,C)` | Kernel | PTO / Kernel speedup | Kernel - PTO TFLOP/s delta |
 | --- | --- | ---: | ---: |
-| `(8, 20, 1024, 128, 64)` | `triton_ascend` | 2.16x | -14.82 |
-| `(8, 20, 1024, 128, 64)` | `vllm_static_no_g` | 2.50x | -16.58 |
-| `(8, 20, 1024, 128, 64)` | `vllm_static_uniform_g` | 2.65x | -17.17 |
-| `(8, 20, 1024, 128, 64)` | `vllm_varlen_no_g` | 3.33x | -19.32 |
-| `(8, 20, 1024, 128, 64)` | `vllm_varlen_uniform_g` | 3.45x | -19.59 |
-| `(8, 20, 1024, 128, 128)` | `triton_ascend` | 3.10x | -39.94 |
-| `(8, 20, 1024, 128, 128)` | `vllm_static_no_g` | 3.59x | -41.70 |
-| `(8, 20, 1024, 128, 128)` | `vllm_static_uniform_g` | 3.79x | -42.28 |
-| `(8, 20, 1024, 128, 128)` | `vllm_varlen_no_g` | 4.78x | -44.43 |
-| `(8, 20, 1024, 128, 128)` | `vllm_varlen_uniform_g` | 4.94x | -44.71 |
-| `(16, 20, 1024, 128, 64)` | `triton_ascend` | 2.09x | -15.79 |
-| `(16, 20, 1024, 128, 64)` | `vllm_static_no_g` | 2.51x | -18.26 |
-| `(16, 20, 1024, 128, 64)` | `vllm_static_uniform_g` | 2.57x | -18.54 |
-| `(16, 20, 1024, 128, 64)` | `vllm_varlen_no_g` | 2.94x | -20.00 |
-| `(16, 20, 1024, 128, 64)` | `vllm_varlen_uniform_g` | 2.99x | -20.18 |
-| `(16, 20, 1024, 128, 128)` | `triton_ascend` | 3.14x | -46.35 |
-| `(16, 20, 1024, 128, 128)` | `vllm_static_no_g` | 3.79x | -48.82 |
-| `(16, 20, 1024, 128, 128)` | `vllm_static_uniform_g` | 3.88x | -49.10 |
-| `(16, 20, 1024, 128, 128)` | `vllm_varlen_no_g` | 4.42x | -50.56 |
-| `(16, 20, 1024, 128, 128)` | `vllm_varlen_uniform_g` | 4.50x | -50.74 |
-| `(24, 20, 2048, 128, 64)` | `triton_ascend` | 1.98x | -15.71 |
-| `(24, 20, 2048, 128, 64)` | `vllm_static_no_g` | 2.44x | -18.70 |
-| `(24, 20, 2048, 128, 64)` | `vllm_static_uniform_g` | 2.46x | -18.79 |
-| `(24, 20, 2048, 128, 64)` | `vllm_varlen_no_g` | 2.58x | -19.42 |
-| `(24, 20, 2048, 128, 64)` | `vllm_varlen_uniform_g` | 2.60x | -19.49 |
-| `(24, 20, 2048, 128, 128)` | `triton_ascend` | 3.41x | -56.58 |
-| `(24, 20, 2048, 128, 128)` | `vllm_static_no_g` | 4.20x | -59.58 |
-| `(24, 20, 2048, 128, 128)` | `vllm_static_uniform_g` | 4.22x | -59.67 |
-| `(24, 20, 2048, 128, 128)` | `vllm_varlen_no_g` | 4.44x | -60.29 |
-| `(24, 20, 2048, 128, 128)` | `vllm_varlen_uniform_g` | 4.46x | -60.36 |
+| `(8, 20, 1024, 128, 64)` | `triton_mask_onthefly` | 2.24x | -15.27 |
+| `(8, 20, 1024, 128, 64)` | `triton_mask_cached` | 2.27x | -15.44 |
+| `(8, 20, 1024, 128, 64)` | `vllm_static_no_g` | 2.52x | -16.66 |
+| `(8, 20, 1024, 128, 64)` | `vllm_static_uniform_g` | 2.68x | -17.32 |
+| `(8, 20, 1024, 128, 64)` | `vllm_varlen_no_g` | 3.48x | -19.68 |
+| `(8, 20, 1024, 128, 64)` | `vllm_varlen_uniform_g` | 3.58x | -19.90 |
+| `(16, 20, 1024, 128, 64)` | `triton_mask_onthefly` | 2.02x | -14.49 |
+| `(16, 20, 1024, 128, 64)` | `triton_mask_cached` | 2.06x | -14.81 |
+| `(16, 20, 1024, 128, 64)` | `vllm_static_no_g` | 2.39x | -16.73 |
+| `(16, 20, 1024, 128, 64)` | `vllm_static_uniform_g` | 2.46x | -17.06 |
+| `(16, 20, 1024, 128, 64)` | `vllm_varlen_no_g` | 2.85x | -18.67 |
+| `(16, 20, 1024, 128, 64)` | `vllm_varlen_uniform_g` | 2.90x | -18.84 |
+| `(24, 20, 2048, 128, 64)` | `triton_mask_onthefly` | 1.98x | -15.61 |
+| `(24, 20, 2048, 128, 64)` | `triton_mask_cached` | 2.04x | -16.03 |
+| `(24, 20, 2048, 128, 64)` | `vllm_static_no_g` | 2.43x | -18.50 |
+| `(24, 20, 2048, 128, 64)` | `vllm_static_uniform_g` | 2.45x | -18.62 |
+| `(24, 20, 2048, 128, 64)` | `vllm_varlen_no_g` | 2.60x | -19.34 |
+| `(24, 20, 2048, 128, 64)` | `vllm_varlen_uniform_g` | 2.61x | -19.39 |
+
+## Triton Cached vs On-The-Fly
+
+| Shape `(B,H,L,D,C)` | Cached ms | On-the-fly ms | On-the-fly / Cached | Cached TFLOP/s delta |
+| --- | ---: | ---: | ---: | ---: |
+| `(8, 20, 1024, 128, 64)` | 1.323 | 1.305 | 0.99x | -0.16 |
+| `(16, 20, 1024, 128, 64)` | 2.312 | 2.260 | 0.98x | -0.32 |
+| `(24, 20, 2048, 128, 64)` | 6.264 | 6.096 | 0.97x | -0.43 |
 
 Notes:
 - Reported TFLOP/s and GiB/s are computed from the same algorithm-level model for both kernels.
 - The Triton kernel is forward-only, head-first only, and currently omits gating and varlen support.
-- The updated custom Triton kernel is benchmarked with precomputed chunk states `h`, so state construction is excluded from timed measurements.
+- `triton_mask_onthefly` computes the causal mask inside the Triton kernel but still uses precomputed chunk states `h`.
+- `triton_mask_cached` is benchmarked with precomputed chunk states `h` and a cached causal mask, so state construction and mask setup are excluded from timed measurements.
 - The copied vLLM-style kernel is benchmarked with precomputed `h` state and pre-transposed inputs, so transpose/setup cost is excluded as requested.
-- The `pto_cpp` `C=128` rows are included as fair references for the same `(B, H, L, D)` workloads because `C` is an internal algorithm parameter.
-- On this device, the Triton kernels in this baseline could not be compiled/benchmarked for `C=128`; the copied vLLM-style kernel's unmodified `BT=C=128` configuration overflowed UB.
+- On this device, the copied vLLM-style kernel compiled and ran for `C=64`, but the unmodified `BT=C=128` configuration overflowed UB and was not benchmarked.
 - `TRITON_ALL_BLOCKS_PARALLEL` is intentionally left disabled here because it produced incorrect outputs for this kernel.
-
-## PTO Feature Path Extensions
-
-The updated PTO example now also supports native `(B, T, H, D)` input layout, gating, and packed varlen batches. Those paths are benchmarked with precomputed chunk states `h`, so this section compares PTO-only feature-path overhead against the original fused head-first fast path.
-
-| Shape `(B,H,L,D,C)` | PTO path | Median ms | TFLOP/s | GiB/s | vs legacy PTO ms |
-| --- | --- | ---: | ---: | ---: | ---: |
-| `(8, 20, 1024, 128, 128)` | `legacy_head_first` | 0.416 | 51.62 | 375.66 | 1.00x |
-| `(8, 20, 1024, 128, 128)` | `seq_first` | 0.549 | 39.10 | 284.54 | 1.32x |
-| `(8, 20, 1024, 128, 128)` | `seq_first_gated` | 0.535 | 40.11 | 291.90 | 1.29x |
-| `(8, 20, 1024, 128, 128)` | `seq_first_varlen_uniform` | 0.529 | 40.61 | 295.50 | 1.27x |
-| `(16, 20, 1024, 128, 128)` | `legacy_head_first` | 0.710 | 60.49 | 440.13 | 1.00x |
-| `(16, 20, 1024, 128, 128)` | `seq_first` | 0.880 | 48.80 | 355.07 | 1.24x |
-| `(16, 20, 1024, 128, 128)` | `seq_first_gated` | 0.872 | 49.24 | 358.30 | 1.23x |
-| `(16, 20, 1024, 128, 128)` | `seq_first_varlen_uniform` | 0.872 | 49.27 | 358.50 | 1.23x |
-
-Native `seq_first` larger-shape results on this machine
-using `python benchmark_linear_attention.py --throughput-hunt --repeats 5 --warmup 2 --seq-first`:
-
-| Shape `(B,H,L,D,C)` | PTO path | Median ms | TFLOP/s | GiB/s |
-| --- | --- | ---: | ---: | ---: |
-| `(24, 20, 2048, 128, 128)` | `seq_first` | 2.154 | 59.81 | 435.15 |
-| `(48, 20, 1024, 128, 128)` | `seq_first` | 2.160 | 59.66 | 434.09 |
-| `(12, 20, 8192, 128, 128)` | `seq_first` | 4.085 | 63.08 | 458.99 |
-| `(24, 20, 1536, 128, 128)` | `seq_first` | 1.661 | 58.19 | 423.39 |
