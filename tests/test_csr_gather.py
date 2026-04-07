@@ -14,9 +14,9 @@ import pytest
 def ref_csr_gather(values: torch.Tensor, indices: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
     return values * x[indices]
 
-@pytest.mark.parametrize("x_size", [1024])
-@pytest.mark.parametrize("v_size", [600])
-@pytest.mark.parametrize("dtype", [torch.float32], ids=str)
+@pytest.mark.parametrize("x_size", [512, 1024, 2048, 16384])
+@pytest.mark.parametrize("v_size", [100, 128, 256, 600])
+@pytest.mark.parametrize("dtype", [torch.float16, torch.float32], ids=str)
 def test_pto_csr_gather(x_size: int, v_size: int, dtype: torch.dtype):
     # Create random input tensors on CPU
     x = torch.rand((x_size,), device="cpu", dtype=dtype)
