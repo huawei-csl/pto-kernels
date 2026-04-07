@@ -10,9 +10,6 @@ from functools import lru_cache
 from jit_shared import BLOCK_DIM, STEP03_KERNEL_FLAGS, compile_cpp as shared_compile_cpp
 from jit_shared import load_dynamic_nomask_lib
 
-WORKDIR = Path(__file__).resolve().parents[6]
-LOCAL_PTO_ISA_INCLUDE = WORKDIR / "pto-isa" / "include"
-
 
 def compile_cpp(
     kernel_cpp: str,
@@ -31,7 +28,7 @@ def compile_cpp(
             f"-DLINEAR_ATTN_D={hidden_size}",
             f"-DLINEAR_ATTN_C={chunk_size}",
         ],
-        extra_flags=[f"-I{LOCAL_PTO_ISA_INCLUDE}", *STEP03_KERNEL_FLAGS],
+        extra_flags=STEP03_KERNEL_FLAGS,
         verbose=verbose,
         timeout=timeout,
     )
