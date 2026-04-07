@@ -21,7 +21,7 @@ All use the same fixed shape as the TileLang dumps: **`B=2`, `H=16`, `L=16384`, 
 | `scaled_dot_kkt_kernel.cpp` | `run_scaled_dot_kkt_static.py` | `1e-3` (same as `opt_gdn_chunk_scaled_dot_kkt.py`) |
 | `wy_fast_kernel.cpp` | `run_wy_fast_static.py` | `1e-5` |
 
-Run everything:
+Run per-kernel tests:
 
 ```bash
 cd static_baseline
@@ -31,6 +31,22 @@ python3 run_all_static_kernels.py
 ```
 
 Or run a single test, e.g. `python3 run_chunk_o_static.py`.
+
+### End-to-end GDN (chained static kernels + solve\_tril)
+
+`gdn_chain_e2e_static.py` runs the same pipeline as `tilelang-ascend/examples/linear_attention_and_rnn/opt_gdn_full.py`:
+
+`cumsum → KKT → solve_tril → wy_fast → chunk_h → chunk_o`
+
+- Shapes are fixed to the extracted kernels: `B=2`, `H=16`, `L=16384`, `DK=DV=C=128`.
+- **solve\_tril** (C=128): prefers `pto_tri_inv_rec_unroll` from the `pto_kernels` package (same math as `kernel_tri_inv_rec_unroll.cpp` / `test_tri_inv_rec_unroll.py`: invert `I + U` with `U = A^T` strict upper, then transpose). If `pto_kernels` is not importable, falls back to CPU `torch.linalg.inv(I + A)` with `A` forced to strict lower via `torch.tril(..., -1)`.
+- Asserts against **`ref_seq_gdn`** from `opt_gdn_full.py` at `rtol/atol = 1e-3`.
+
+```bash
+python3 gdn_chain_e2e_static.py
+```
+
+To use the PTO tri-inv kernel, install/build the `pto-kernels` Python extension so `from pto_kernels import pto_tri_inv_rec_unroll` works (this repo adds `../../../python` to `sys.path` automatically when present).
 
 ## Environment
 
