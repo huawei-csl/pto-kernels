@@ -33,14 +33,14 @@ at::Tensor run_csr_gather(const at::Tensor& values, const at::Tensor& indices, c
   
   // FIXME: expand to support bigger sizes
   const uint32_t x_size = x.numel();
-  if (x_size > 512) {
-    throw std::runtime_error("Input x size exceeds the maximum supported size of 512 elements");
+  if (x_size > 1024) {
+    throw std::runtime_error("Input x size exceeds the maximum supported size of 1024 elements");
   }
 
   // Define the number of blocks of vector core
   const uint32_t indices_size = indices.numel();
-  // FIXME: tile length is fixed to 128 for now
-  constexpr uint32_t TILE_SIZE = 128;
+  // FIXME: tile length is fixed to 256 for now
+  constexpr uint32_t TILE_SIZE = 256;
 
   // Persistent kernel launch parameter
   uint32_t total_tiles = (indices_size + TILE_SIZE - 1) / TILE_SIZE;
@@ -49,6 +49,9 @@ at::Tensor run_csr_gather(const at::Tensor& values, const at::Tensor& indices, c
   if (total_tiles < block_dim) {
     block_dim = total_tiles;
   }
+
+  // DEBUG
+  block_dim = 1;
 
   if (dtype == at::kHalf) {
     EXEC_KERNEL_CMD(vcsr_gather_fp16, block_dim, values, indices, x, z, x_size, indices_size);
