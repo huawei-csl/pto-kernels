@@ -11,27 +11,29 @@ from pto_kernels import pto_histogram
 import pytest
 
 
-# @pytest.mark.parametrize("num_blocks", [1, 2, 10, 20, 32, 64])
-# @pytest.mark.parametrize("bins", [2, 4, 16, 50, 100])
-# @pytest.mark.parametrize("dtype", [torch.float16, torch.float32], ids=str)
-@pytest.mark.parametrize("num_blocks", [64])
-@pytest.mark.parametrize("bins", [64])
+@pytest.mark.parametrize("size", [1, 8, 50, 256, 1000])
+@pytest.mark.parametrize("bins", [2, 4, 32, 100, 256])
+# torch.float16 requires different boundary calculation to match torch implementeation
 @pytest.mark.parametrize("dtype", [torch.float32], ids=str)
-def test_pto_histogram(num_blocks: int, bins: int, dtype: torch.dtype):
-    tile_len = 64
-    length = [num_blocks * tile_len]
+def test_pto_histogram(size: int, bins: int, dtype: torch.dtype):
+    # Tile size is fixed in the kernel
+    tile_size = 512
+    num_cores = torch.npu.get_device_properties(0).vector_core_num
+    num_tiles = num_cores * tile_size
+    total_len = num_tiles * size
 
-    # x = torch.rand(length, device="cpu", dtype=dtype)
-    x = torch.arange(length[0], device="cpu", dtype=dtype)
-    x_npu = x.npu()
+    x = torch.randint(high=bins, size=(total_len,), device="cpu", dtype=dtype)
 
-    y_npu = pto_histogram(x_npu, bins=bins).cpu().float()
-    y_npu2 = pto_histogram(x_npu, bins=bins).cpu().float()
-    y_npu3 = pto_histogram(x_npu, bins=bins).cpu().float()
-    y_npu4 = pto_histogram(x_npu, bins=bins).cpu().float()
-    assert torch.equal(y_npu, y_npu2)
-    assert torch.equal(y_npu, y_npu3)
-    assert torch.equal(y_npu, y_npu4)
-    y_cpu = torch.histc(x, bins=bins)
+    # Golden PyTorch implementation
+    y_cpu = torch.histc(x, bins=bins).float()
 
-    assert torch.equal(y_npu, y_cpu)
+    # NPU kernel execution, test to see if any race conditions occur across multiple runs
+    x_npu = x.npu().contiguous()
+    y_npu = []
+    repeat_runs = 100
+    for _ in range(repeat_runs):
+        y_npu.append(pto_histogram(x_npu, bins=bins).cpu().float())
+
+    torch.npu.synchronize()
+
+    assert all(torch.equal(y_cpu, y) for y in y_npu)

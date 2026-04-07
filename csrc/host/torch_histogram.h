@@ -11,8 +11,9 @@ for the full License text.
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
-#include "aclrtlaunch_vhistogram_fp16.h"
-#include "aclrtlaunch_vhistogram_fp32.h"
+#include "aclrtlaunch_histogram_final.h"
+#include "aclrtlaunch_histogram_fp16.h"
+#include "aclrtlaunch_histogram_fp32.h"
 #include "utils.h"
 
 namespace pto_isa_ops {
@@ -29,23 +30,30 @@ namespace pto_isa_ops {
 at::Tensor run_histogram(const at::Tensor& x, int64_t bins = 100,
                          double min_val = 0.0, double max_val = 0.0) {
   const uint32_t total_len = x.numel();
-  constexpr uint32_t TILE_LEN = 64;
-  constexpr uint32_t TILE_SIZE = TILE_LEN * TILE_LEN;
-  // const uint32_t block_dim = (total_len + TILE_SIZE - 1) / TILE_SIZE;
-  // const uint32_t block_dim = GetNumVectorCores();;
-  const uint32_t block_dim = 1;
+  constexpr uint32_t TILE_SIZE = 512;
+  const uint32_t block_dim = GetNumVectorCores();
 
-  TORCH_CHECK(total_len / TILE_SIZE != 0,
-              "total number of elements must be divisible by 64 * 64");
-  TORCH_CHECK(bins <= 1024, "bins must be <= 1024");
+  TORCH_CHECK(total_len % TILE_SIZE == 0,
+              "total number of elements must be divisible by TILE_SIZE");
+  TORCH_CHECK(bins <= 256, "bins must be <= 256");
+  TORCH_CHECK(x.is_contiguous(), "x must be contiguous");
 
   const auto dtype = x.options().dtype();
   const auto device = x.options().device();
-  auto z_opts =
+
+  // Allocate a 1D tensor sized `[block_dim * bins]` for the local histogram
+  // counts.
+  auto z_local_opts =
       at::TensorOptions()
-          .dtype(at::kInt)  // Set data type to int32 for histogram counts
+          .dtype(
+              at::kFloat)  // Local (per-core) histogram counts will be floats
           .device(device);
+  at::Tensor z_local = at::zeros({block_dim * bins}, z_local_opts);
+
   // Allocate a 1D tensor sized `[bins]` for the histogram.
+  auto z_opts = at::TensorOptions()
+                    .dtype(at::kInt)  // The final result will be int32 counts
+                    .device(device);
   at::Tensor z = at::zeros({bins}, z_opts);
 
   const auto num_bins = static_cast<int32_t>(bins);
@@ -59,18 +67,19 @@ at::Tensor run_histogram(const at::Tensor& x, int64_t bins = 100,
 
   const auto f_min_val = static_cast<float>(min_val);
   const auto f_max_val = static_cast<float>(max_val);
-  const float f_bin_width = (f_max_val - f_min_val) / (float)num_bins;
 
-  at::Tensor x_contig = x.contiguous();  // Just in case
   if (dtype == at::kHalf) {
-    EXEC_KERNEL_CMD(vhistogram_fp16, block_dim, x_contig, z, total_len,
-                    num_bins, f_min_val, f_max_val, f_bin_width);
+    EXEC_KERNEL_CMD(histogram_fp16, block_dim, x, z_local, total_len, num_bins,
+                    f_min_val, f_max_val);
   } else if (dtype == at::kFloat) {
-    EXEC_KERNEL_CMD(vhistogram_fp32, block_dim, x_contig, z, total_len,
-                    num_bins, f_min_val, f_max_val, f_bin_width);
+    EXEC_KERNEL_CMD(histogram_fp32, block_dim, x, z_local, total_len, num_bins,
+                    f_min_val, f_max_val);
   } else {
     throw std::runtime_error("Unsupported dtype for `pto_histogram` kernel");
   }
+
+  const uint32_t reduce_dim = 1;
+  EXEC_KERNEL_CMD(histogram_final, reduce_dim, z_local, z, num_bins, block_dim);
 
   return z;
 }
