@@ -28,7 +28,7 @@ namespace pto_isa_ops {
  * @return at::Tensor Tensor containing inverses of input matrices.
  */
 at::Tensor run_tri_inv_rec_unroll(const at::Tensor& M,
-                                  const bool is_bsnd_format = false) {
+                                  const bool is_bsnd_format = false, const at::Tensor& cu_seqlens = at::zeros({1})) {
   const at::Device device = M.options().device();
   const auto dtype = M.options().dtype();
   const auto dtype_out = at::kFloat;
@@ -59,10 +59,15 @@ at::Tensor run_tri_inv_rec_unroll(const at::Tensor& M,
                 at::TensorOptions().dtype(dtype).device(device));
   I_neg.fill_diagonal_(-1);
 
-  void* cu_seqlens;
   if (dtype == at::kHalf) {
-    EXEC_KERNEL_CMD(tri_inv_rec_unroll_fp16, block_dim, M_inv, M, I_neg,
-                    matrix_size, total_tiles, num_bsnd_heads, cu_seqlens);
+    if (cu_seqlens.numel() == 1){
+        void* void_null_ptr = nullptr;
+        EXEC_KERNEL_CMD(tri_inv_rec_unroll_fp16, block_dim, M_inv, M, I_neg,
+                        matrix_size, total_tiles, num_bsnd_heads, void_null_ptr);
+    } else {
+        EXEC_KERNEL_CMD(tri_inv_rec_unroll_fp16, block_dim, M_inv, M, I_neg,
+                        matrix_size, total_tiles, num_bsnd_heads, cu_seqlens);
+    }
   }
 
   return M_inv;

@@ -622,14 +622,12 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
               M + bsnd_offset,
               {1, 1, 1, static_cast<int>(valid_size), static_cast<int>(valid_size)},
               {1, 1, 1, row_stride, 1});
-          wait_flag(PIPE_M, PIPE_MTE2, static_cast<event_t>(tile_id));
           TLOAD(Y_dyn_l1_tile, M_global_in_dyn);
           set_flag(PIPE_MTE2, PIPE_MTE1, static_cast<event_t>(tile_id));
           wait_flag(PIPE_MTE2, PIPE_MTE1, static_cast<event_t>(tile_id));
           TFILLPAD(Y_dyn_l1_tile, Y_dyn_l1_tile);
         } else {
           GlobalTileIn M_global_in(M + bsnd_offset, {}, {row_stride});
-          wait_flag(PIPE_M, PIPE_MTE2, static_cast<event_t>(tile_id));
           TLOAD(Y_l1_tile[tile_id], M_global_in);
         }
       } else {
@@ -735,7 +733,7 @@ AICORE void run_tri_inv_rec_unroll(__gm__ float* tensor_out,
                                    __gm__ InputT* minus_identity_in,
                                    uint32_t matrix_size, uint32_t num_matrices,
                                    uint32_t num_bsnd_heads,
-                                   __gm__ int32_t* cu_seqlens) {
+                                   __gm__ int32_t* cu_seqlens = nullptr) {
   static_assert(std::is_same_v<InputT, half>,
                 "tri_inv_rec_unroll supports only fp16.");
   switch (matrix_size) {
