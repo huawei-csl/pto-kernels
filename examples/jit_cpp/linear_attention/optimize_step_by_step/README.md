@@ -35,7 +35,7 @@ These are the short smoke-test numbers produced while verifying the intermediate
 | `01_naive_static_shape` | fixed-shape smoke benchmark: `(2, 2, 512, 128, 64)` in `0.275 ms` |
 | `02_naive_dynamic_shape` | `5.21 TFLOP/s` at `(16, 20, 1024, 128, 64)` |
 | `03_cached_mask` | `28.47 TFLOP/s` at `(16, 20, 1024, 128, 64)` |
-| `03a_fast_mask_construct` | `29.01 TFLOP/s` at `(16, 20, 1024, 128, 64)` |
+| `03a_fast_mask_construct` | `29.79 TFLOP/s` at `(16, 20, 1024, 128, 64)` |
 | `04_chunk128` | `49.73 TFLOP/s` at `(16, 20, 1024, 128, 128)` |
 | `05_l0_double_buffer` | `52.57 TFLOP/s` at `(16, 20, 1024, 128, 128)` |
 | `06_two_slot_cv_pipeline` | `63.15 TFLOP/s` at `(16, 20, 1024, 128, 128)` |

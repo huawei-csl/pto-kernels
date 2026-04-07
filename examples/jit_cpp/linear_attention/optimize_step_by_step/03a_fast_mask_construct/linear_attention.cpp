@@ -4,9 +4,9 @@
 using namespace pto;
 
 // Step 03a keeps the dynamic-shape kernel from step 02, but replaces the slow
-// scalar mask loop with an on-chip vectorized mask build. We synthesize the
-// lower-triangular half mask once per vector sub-core using masked vector_dup
-// writes, then reuse the same cheap elementwise multiply as step 03.
+// scalar mask loop with an on-chip vectorized mask build. Each vector sub-core
+// constructs its lower-triangular half mask once with the higher-level TTRI
+// PTO-ISA wrapper, then reuses the same cheap elementwise multiply as step 03.
 
 #ifndef LINEAR_ATTN_H
 #define LINEAR_ATTN_H 2
@@ -40,31 +40,6 @@ AICORE inline void SetCrossFlag(int32_t flag, int32_t mode) {
 }
 
 AICORE inline void WaitCrossFlag(int32_t flag) { wait_flag_dev(flag); }
-
-template <typename TileData, unsigned rowStride>
-__tf__ AICORE inline void BuildLowerTriHalfMask(typename TileData::TileDType dst,
-                                                int vector_offset,
-                                                int valid_row,
-                                                int valid_col) {
-  __ubuf__ half *dst_ptr = (__ubuf__ half *)__cce_get_tile_ptr(dst);
-  set_mask_count();
-  for (int row = 0; row < valid_row; ++row) {
-    __ubuf__ half *dst_row = dst_ptr + row * rowStride;
-    set_vector_mask(0, valid_col);
-    vector_dup(dst_row, (half)0.0f, 1, 1, 1, 8, 0);
-    pipe_barrier(PIPE_V);
-
-    const int fill_cols = vector_offset + row + 1;
-    if (fill_cols > 0) {
-      const int bounded_fill_cols = fill_cols < valid_col ? fill_cols : valid_col;
-      set_vector_mask(0, bounded_fill_cols);
-      vector_dup(dst_row, (half)1.0f, 1, 1, 1, 8, 0);
-      pipe_barrier(PIPE_V);
-    }
-  }
-  set_mask_norm();
-  set_vector_mask(-1, -1);
-}
 
 template <int M, int N, int K, bool TransposeA = false, bool TransposeB = false>
 AICORE inline void MatmulL1(
@@ -255,13 +230,13 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
   set_vector_mask(-1, -1);
 
   // Build the lower-triangular mask once per vector sub-core and reuse it for
-  // every chunk. The loop is only over rows; each row body is a vector write.
+  // every chunk. The two vector sub-cores cover global rows [0, 31] and [32, 63].
   TEXPANDS(zero_score_ub, 0.0f);
-  BuildLowerTriHalfMask<decltype(mask_ub), decltype(mask_ub)::RowStride>(
-      mask_ub.data(),
-      vector_id * kHalfChunk,
-      kHalfChunk,
-      ChunkSize);
+  if (vector_id == 0) {
+    TTRI<decltype(mask_ub), /*isUpperOrLower=*/0, /*diagonal=*/0>(mask_ub);
+  } else {
+    TTRI<decltype(mask_ub), /*isUpperOrLower=*/0, /*diagonal=*/kHalfChunk>(mask_ub);
+  }
   pipe_barrier(PIPE_ALL);
 
   for (int64_t work_idx = 0; work_idx < (total_work + block_num - 1) / block_num;

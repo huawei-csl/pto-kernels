@@ -5,7 +5,7 @@ slow scalar `SetValue` / `GetValue` causal-mask loop.
 
 What changed:
 - the lower-triangular mask is synthesized on-chip with PTO-ISA vector ops
-- each row is filled with masked `vector_dup` writes instead of per-element `SetValue` / `GetValue`
+- the mask is built with the higher-level `TTRI` PTO-ISA wrapper instead of raw per-element scalar updates
 - the kernel then reuses the same fast `TMUL` masking pattern as step 03
 - unlike step 03, this path does not read a precomputed mask from global memory
 
