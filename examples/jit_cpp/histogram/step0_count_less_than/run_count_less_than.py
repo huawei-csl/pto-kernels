@@ -5,21 +5,6 @@ import torch_npu  # noqa
 from jit_util_count_less_than import jit_compile
 
 
-def hist_ref(x, bins):
-    return torch.histc(x, bins=bins)
-
-
-def random_2d_shape(
-    min_m=1,
-    max_m=2048,
-    min_n=1,
-    max_n=2048,
-):
-    m = random.randint(min_m, max_m)
-    n = random.randint(min_n, max_n)
-    return [m, n]
-
-
 def test_count_less_than(size_mult=1, repeat_runs=20, use_atomic_impl=False):
     device = "npu:1"
     dtype = torch.float32
