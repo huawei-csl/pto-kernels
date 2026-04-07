@@ -11,9 +11,9 @@ from pto_kernels import pto_abs
 import pytest
 
 
-@pytest.mark.parametrize("size0", [1,2,3,10,20])
-@pytest.mark.parametrize("size1", [10,20,64])
-@pytest.mark.parametrize("dtype", [torch.float16], ids=str)
+@pytest.mark.parametrize("size0", [1,2,3,10,20,64,128])
+@pytest.mark.parametrize("size1", [1,2,3,10,20,64,128])
+@pytest.mark.parametrize("dtype", [torch.float16, torch.float32], ids=str)
 def test_pto_abs(size0: int, size1: int, dtype: torch.dtype):
     size = [size0, size1]
     # Create random input tensors on CPU
@@ -25,11 +25,5 @@ def test_pto_abs(size0: int, size1: int, dtype: torch.dtype):
     output = pto_abs(x_npu).cpu()
     # Compute the expected result using standard torch.abs on CPU
     cpuout = torch.abs(x)
-
-    diff_mask = output != cpuout
-    diff_indices = torch.nonzero(diff_mask)
-    print("Differences found at indices:", diff_indices)
-    print("Output values at those indices:", output[diff_mask])
-    print("Expected values at those indices:", cpuout[diff_mask])
     # Validate the results
     assert torch.allclose(output, cpuout)

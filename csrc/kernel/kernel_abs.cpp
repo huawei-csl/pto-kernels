@@ -50,23 +50,16 @@ AICORE void runTAbs(__gm__ T* x, __gm__ T* z, uint32_t total_size) {
   const uint32_t global_offset =
       aiv_core_id * TILE_SIZE * num_tiles_per_block;
 
-
   // Unlock first iteration
   set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
   set_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
 
   // Loop for full size tiles
-  for (uint32_t i = 0; i < num_tiles_per_block; i++) {
-    const uint32_t inner_offset = global_offset + i * TILE_SIZE;
-    
-    if (inner_offset >= total_size) {
-      break;  // No more tiles to process
-    }
+  for (uint32_t inner_offset = global_offset; inner_offset < total_size; inner_offset += TILE_SIZE) {
 
     const uint32_t remainder_size = total_size - inner_offset;
     const int32_t remaining_elements = remainder_size > TILE_SIZE ? TILE_SIZE : remainder_size;
 
-    
     // Define tile on GM
     GlobalData xGlobal(x + inner_offset, {remaining_elements}, 
       {remaining_elements, remaining_elements, remaining_elements, remaining_elements});
@@ -120,13 +113,13 @@ AICORE void runTAbs(__gm__ T* x, __gm__ T* z, uint32_t total_size) {
 
 extern "C" __global__ AICORE void vabs_fp16(GM_ADDR x, GM_ADDR z,
                                             uint32_t in_length) {
-  constexpr uint32_t TILE_LEN = 64;
+  constexpr uint32_t TILE_LEN = 128;
   runTAbs<half, TILE_LEN>((__gm__ half*)x, (__gm__ half*)z, in_length);
 }
 
 extern "C" __global__ AICORE void vabs_fp32(GM_ADDR x, GM_ADDR z,
                                             uint32_t in_length) {
-  constexpr uint32_t TILE_LEN = 64;
+  constexpr uint32_t TILE_LEN = 128;
   runTAbs<float, TILE_LEN>((__gm__ float*)x, (__gm__ float*)z, in_length);
 }
 
