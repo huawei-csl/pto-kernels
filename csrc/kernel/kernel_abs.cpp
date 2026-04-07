@@ -101,7 +101,6 @@ AICORE void runTAbs(__gm__ T* x, __gm__ T* z, uint32_t total_size) {
 
     // MTE3 (store) wait for vector core to be done
     wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
-    pipe_barrier(PIPE_MTE3);
     // Store data from UB buffer to global memory
     TSTORE(zGlobal, zTiles);
 
