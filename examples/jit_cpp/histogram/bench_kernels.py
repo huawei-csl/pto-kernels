@@ -1,6 +1,5 @@
 import argparse
 import os
-import sys
 from pathlib import Path
 
 import pandas as pd
@@ -186,7 +185,7 @@ def main():
 
         if include_torch:
 
-            def torch_hist_bench(x, z, bins, min_val, max_val):
+            def torch_hist_bench(x, _, bins, min_val, max_val):
                 return torch.histc(x, bins=bins, min=min_val, max=max_val).to(
                     torch.int32
                 )

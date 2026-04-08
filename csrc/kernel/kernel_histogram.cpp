@@ -14,9 +14,9 @@ for the full License text.
 #include <pto/pto-inst.hpp>
 
 #include "kernel_utils.h"
-
+// clang-format off
 #define GM_ADDR __gm__ uint8_t*
-
+// clang-format on
 using namespace pto;
 
 constexpr uint32_t DEFAULT_TILE_SIZE = 512;
