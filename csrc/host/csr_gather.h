@@ -18,7 +18,7 @@ for the full License text.
 namespace pto_isa_ops {
 
 /**
- * @brief Runs the CSR gather operation. 
+ * @brief Runs the CSR gather operation.
  *  z = values[indices] * x
  *
  * @param [in] values Input tensor of dtype fp16 or fp32.
@@ -27,14 +27,16 @@ namespace pto_isa_ops {
  * @return at::Tensor Tensor containing the gathered values.
  */
 
-at::Tensor run_csr_gather(const at::Tensor& values, const at::Tensor& indices, const at::Tensor& x) {
+at::Tensor run_csr_gather(const at::Tensor& values, const at::Tensor& indices,
+                          const at::Tensor& x) {
   const auto dtype = x.options().dtype();
   at::Tensor z = at::empty_like(values);
-  
+
   // FIXME: expand to support bigger sizes
   const uint32_t x_size = x.numel();
   if (x_size > 16384) {
-    throw std::runtime_error("Input x size exceeds the maximum supported size of 16384 elements");
+    throw std::runtime_error(
+        "Input x size exceeds the maximum supported size of 16384 elements");
   }
 
   // Define the number of blocks of vector core
@@ -51,10 +53,12 @@ at::Tensor run_csr_gather(const at::Tensor& values, const at::Tensor& indices, c
   }
 
   if (dtype == at::kHalf) {
-    EXEC_KERNEL_CMD(vcsr_gather_fp16, block_dim, values, indices, x, z, x_size, indices_size);
+    EXEC_KERNEL_CMD(vcsr_gather_fp16, block_dim, values, indices, x, z, x_size,
+                    indices_size);
 
   } else if (dtype == at::kFloat) {
-    EXEC_KERNEL_CMD(vcsr_gather_fp32, block_dim, values, indices, x, z, x_size, indices_size);
+    EXEC_KERNEL_CMD(vcsr_gather_fp32, block_dim, values, indices, x, z, x_size,
+                    indices_size);
 
   } else {
     throw std::runtime_error("Unsupported dtype for `pto_csr_gather` kernel");

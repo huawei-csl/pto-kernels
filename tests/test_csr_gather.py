@@ -11,13 +11,17 @@ from pto_kernels import pto_csr_gather
 import pytest
 
 
-def ref_csr_gather(values: torch.Tensor, indices: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+def ref_csr_gather(
+    values: torch.Tensor, indices: torch.Tensor, x: torch.Tensor
+) -> torch.Tensor:
     return values * x[indices]
+
 
 x_size = [512, 1024, 2048, 16384]
 v_size = [100, 128, 256, 600, 1024, 1200]
 # Sweep only for v < x
 sweep_sizes = [(x, v) for x in x_size for v in v_size if v < x]
+
 
 @pytest.mark.parametrize("x_size, v_size", sweep_sizes)
 @pytest.mark.parametrize("dtype", [torch.float16, torch.float32], ids=str)
