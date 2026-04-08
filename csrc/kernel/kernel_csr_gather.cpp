@@ -72,7 +72,8 @@ AICORE void runTCsrGather(__gm__ T* values, __gm__ int32_t* indices,
   TASSIGN(xTiles,
           UB_ZERO_ADDR + 3 * TILE_SIZE_IN_BYTES + TILE_SIZE_IDX_IN_BYTES);
   TLOAD(xTiles, xGlobal);
-  pipe_barrier(PIPE_MTE2);
+  set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+  wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
   // Unlock first iteration
   set_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
