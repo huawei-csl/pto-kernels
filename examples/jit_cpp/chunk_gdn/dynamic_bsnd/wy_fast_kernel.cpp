@@ -170,7 +170,7 @@ AICORE void main_kernel(__gm__ half *k, __gm__ half *v, __gm__ half *beta,
   constexpr int32_t A2UbAddr = A1UbAddr + HalfChunk * ChunkSize * sizeof(float);
   constexpr int32_t A2HalfUbAddr = A2UbAddr + HalfChunk * ChunkSize * sizeof(float);
   constexpr int32_t GUbAddr = A2HalfUbAddr + HalfChunk * ChunkSize * sizeof(half);
-  constexpr int32_t G2dUbAddr = GUbAddr + HalfChunk * sizeof(float);
+  constexpr int32_t G2dUbAddr = GUbAddr + ChunkSize * sizeof(float);
 
   using PackedA =
       GlobalTensor<half, TileShape2D<half, HalfChunk, ChunkSize, Layout::ND>,
@@ -202,7 +202,7 @@ AICORE void main_kernel(__gm__ half *k, __gm__ half *v, __gm__ half *beta,
   using BetaUb = GdnUbND<float, 1, HalfChunk>;
   using AHalfUb = GdnUbND<half, HalfChunk, ChunkSize>;
   using AFloatUb = GdnUbND<float, HalfChunk, ChunkSize>;
-  using GUb = GdnUbND<float, 1, HalfChunk>;
+  using GUb = GdnUbND<float, 1, ChunkSize>;
   using GColUb = GdnUbDN<float, HalfChunk, 1>;
   using Beta2dUb = GdnUbND<float, HalfChunk, ChunkSize>;
   using G2dUb = GdnUbND<float, HalfChunk, ChunkSize>;
@@ -295,8 +295,8 @@ AICORE void main_kernel(__gm__ half *k, __gm__ half *v, __gm__ half *beta,
                         row_offset * ChunkSize);
       PackedA a2_global(workspace_a2 + chunk_base * ChunkSquareElems +
                         row_offset * ChunkSize);
-      GLocalGlobal g_global(g_packed + chunk_base * ChunkSize + row_offset,
-                            {1, 1, 1, 1, static_cast<int32_t>(local_rows)},
+      GLocalGlobal g_global(g_packed + chunk_base * ChunkSize,
+                            {1, 1, 1, 1, static_cast<int32_t>(ChunkSize)},
                             {1, 1, 1, 1, 1});
       BetaFlatGlobal beta_global(
           beta + (seq.bos + row_start + row_offset) * NumHeads,
@@ -310,22 +310,19 @@ AICORE void main_kernel(__gm__ half *k, __gm__ half *v, __gm__ half *beta,
       GdnWaitFlag<PIPE_MTE2, PIPE_V>(0);
 
       for (uint32_t i = 0; i < HalfChunk; ++i) {
-        beta_half_ub.SetValue(i, static_cast<half>(0.0f));
-      }
-      for (uint32_t i = 0; i < local_rows; ++i) {
-        beta_half_ub.SetValue(i,
-                              beta_block_ub.GetValue(i * NumHeads + head_idx));
+        set_flag(PIPE_V, PIPE_S, EVENT_ID0);
+        wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
+        beta_ub.SetValue(i,
+                         i < local_rows
+                             ? static_cast<float>(
+                                   beta_block_ub.GetValue(i * NumHeads + head_idx))
+                             : 0.0f);
       }
       pipe_barrier(PIPE_V);
-      TCVT(beta_ub, beta_half_ub, pto::RoundMode::CAST_NONE);
-      pipe_barrier(PIPE_V);
+
       TCVT(a1_ub, a_half_ub, pto::RoundMode::CAST_NONE);
-      TMOV(a2_ub, a1_ub);
-      for (uint32_t row = 0; row < HalfChunk; ++row) {
-        RowSliceUb a2_row;
-        TASSIGN(a2_row, A2UbAddr + row * ChunkSize * sizeof(float));
-        TMULS(a2_row, a2_row, row < local_rows ? beta_ub.GetValue(row) : 0.0f);
-      }
+      pipe_barrier(PIPE_V);
+      TROWEXPANDMUL(a2_ub, a1_ub, beta_col_ub);
       pipe_barrier(PIPE_V);
       TCVT(a2_half_ub, a2_ub, pto::RoundMode::CAST_NONE);
       GdnSetFlag<PIPE_V, PIPE_MTE3>(0);
@@ -334,29 +331,26 @@ AICORE void main_kernel(__gm__ half *k, __gm__ half *v, __gm__ half *beta,
       pipe_barrier(PIPE_ALL);
       GdnSetCrossFlag<PIPE_MTE3>(2, 2);
 
-      set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-      wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-      const float g_first = g_ub.GetValue(0);
       TEXP(g_ub, g_ub);
       pipe_barrier(PIPE_V);
-      RowSliceUb g_exp_patch;
-      TASSIGN(g_exp_patch, Beta2dUbAddr);
-      TEXPANDS(g_exp_patch, 0.0f);
-      set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-      wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-      g_exp_patch.SetValue(1, g_first);
-      pipe_barrier(PIPE_V);
-      TEXP(g_exp_patch, g_exp_patch);
-      pipe_barrier(PIPE_V);
-      set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-      wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-      g_ub.SetValue(0, g_exp_patch.GetValue(1));
-      pipe_barrier(PIPE_V);
-      for (uint32_t row = 0; row < HalfChunk; ++row) {
-        RowSliceUb a1_row;
-        TASSIGN(a1_row, A1UbAddr + row * ChunkSize * sizeof(float));
-        TMULS(a1_row, a1_row, row < local_rows ? g_ub.GetValue(row) : 0.0f);
+      {
+        using GDynUb = Tile<TileType::Vec, float, 1, HalfChunk,
+                            BLayout::RowMajor, DYNAMIC, DYNAMIC,
+                            SLayout::NoneBox, 512, PadValue::Zero>;
+        BetaUb g_scratch_ub;
+        TASSIGN(g_scratch_ub, G2dUbAddr);
+        TEXPANDS(g_scratch_ub, 0.0f);
+        pipe_barrier(PIPE_V);
+        GDynUb g_src(1, local_rows);
+        TASSIGN(g_src, GUbAddr + row_offset * static_cast<int32_t>(sizeof(float)));
+        GDynUb g_dst(1, local_rows);
+        TASSIGN(g_dst, G2dUbAddr);
+        TMOV(g_dst, g_src);
+        pipe_barrier(PIPE_V);
+        TMUL(beta_ub, beta_ub, g_scratch_ub);
       }
+      pipe_barrier(PIPE_V);
+      TROWEXPANDMUL(a1_ub, a1_ub, beta_col_ub);
       pipe_barrier(PIPE_V);
       TCVT(a1_half_ub, a1_ub, pto::RoundMode::CAST_NONE);
       GdnSetFlag<PIPE_V, PIPE_MTE3>(1);

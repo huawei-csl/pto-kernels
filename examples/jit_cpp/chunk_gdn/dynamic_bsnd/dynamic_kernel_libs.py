@@ -228,6 +228,23 @@ def wy_fast_kernel(num_heads: int, hidden_size: int, chunk_size: int):
         ctypes.c_int64,
     ]
     lib.call_matmul_kernel.restype = None
+    lib.call_kernel.argtypes = [
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_int64,
+        ctypes.c_int64,
+    ]
+    lib.call_kernel.restype = None
     return lib
 
 
@@ -371,38 +388,28 @@ def run_wy_fast_kernel(
     batch_size = k.shape[0] if batch_size_override is None else batch_size_override
     lib = wy_fast_kernel(num_heads, hidden_size, chunk_size)
     stream = torch.npu.current_stream()._as_parameter_
-    beta_packed = pack_bsh_tensor(beta.contiguous(), chunk_size=chunk_size, cu_seqlens=cu_seqlens)
-    g_exp_beta = beta_packed * torch.exp(g_packed.float())
-    a_float = a_packed.float()
-    a2_packed = (a_float * beta_packed.unsqueeze(-1)).to(torch.float16)
-    a1_packed = (a_float * g_exp_beta.unsqueeze(-1)).to(torch.float16)
-    w_tmp = torch.zeros(w_out.shape, device=w_out.device, dtype=torch.float32)
-    u_tmp = torch.zeros(u_out.shape, device=u_out.device, dtype=torch.float32)
-
-    lib.call_matmul_kernel(
+    total_chunks = g_packed.shape[0]
+    workspace_a1 = torch.zeros(
+        (total_chunks, num_heads, chunk_size, chunk_size),
+        device=k.device, dtype=torch.float16,
+    )
+    workspace_a2 = torch.zeros_like(workspace_a1)
+    lib.call_kernel(
         block_dim,
         stream,
-        torch_to_ctypes(a1_packed.contiguous()),
         torch_to_ctypes(k.contiguous()),
-        torch_to_ctypes(w_tmp),
+        torch_to_ctypes(v.contiguous()),
+        torch_to_ctypes(beta.contiguous()),
+        torch_to_ctypes(g_packed.contiguous()),
+        torch_to_ctypes(a_packed.contiguous()),
+        torch_to_ctypes(workspace_a1),
+        torch_to_ctypes(workspace_a2),
+        torch_to_ctypes(w_out),
+        torch_to_ctypes(u_out),
         optional_torch_to_ctypes(cu_seqlens),
         batch_size,
         k.shape[1],
     )
-    lib.call_matmul_kernel(
-        block_dim,
-        stream,
-        torch_to_ctypes(a2_packed.contiguous()),
-        torch_to_ctypes(v.contiguous()),
-        torch_to_ctypes(u_tmp),
-        optional_torch_to_ctypes(cu_seqlens),
-        batch_size,
-        v.shape[1],
-    )
-    k_packed = pack_bshd_tensor(k.contiguous(), chunk_size=chunk_size, cu_seqlens=cu_seqlens).float()
-    v_packed = pack_bshd_tensor(v.contiguous(), chunk_size=chunk_size, cu_seqlens=cu_seqlens).float()
-    w_out.copy_(torch.matmul(a1_packed.float(), k_packed).to(w_out.dtype))
-    u_out.copy_(torch.matmul(a2_packed.float(), v_packed).to(u_out.dtype))
 
 
 def run_chunk_h_kernel(
