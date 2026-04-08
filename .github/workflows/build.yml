@@ -96,7 +96,6 @@ jobs:
           export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/Ascend/ascend-toolkit/latest/`uname -i`-linux/devlib # to avoid libascend_hal.so issue
           pip3 install pyyaml setuptools pytest packaging pybind11[global]
           pip3 install -r requirements.txt
-          pip3 install torch-npu==2.8.0.post2 --extra-index-url https://download.pytorch.org/whl/cpu
           make clean build_cmake
 
   build_wheel_docker:
@@ -138,5 +137,4 @@ jobs:
           export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/Ascend/ascend-toolkit/latest/`uname -i`-linux/devlib # to avoid libascend_hal.so issue
           pip3 install pyyaml setuptools pytest packaging pybind11[global]
           pip3 install -r requirements.txt
-          pip3 install torch-npu==2.8.0.post2 --extra-index-url https://download.pytorch.org/whl/cpu
           make clean build_wheel

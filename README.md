@@ -26,6 +26,14 @@ export CMAKE_GENERATOR="Unix Makefiles" && pip install -v git+https://github.com
 ```
 ---
 
+## Install repository using pip
+
+The repository is "pip installable", i.e.,
+
+```bash
+export CMAKE_GENERATOR="Unix Makefiles" && pip install -v git+https://github.com/huawei-csl/pto-dsl.git
+```
+
 ## Build
 
 ```bash

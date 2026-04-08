@@ -12,13 +12,12 @@ clean:
 
 setup_once:
 	pip3 install -r requirements.txt
-	pip3 install torch-npu==2.8.0.post2 --extra-index-url https://download.pytorch.org/whl/cpu
 
 build_cmake: clean
 	bash scripts/build.sh
 
 build_wheel:
-	export CMAKE_GENERATOR="Unix Makefiles" && pip wheel -v  . --extra-index-url https://download.pytorch.org/whl/cpu
+	export CMAKE_GENERATOR="Unix Makefiles" && pip wheel -v .
 
 install:
 	python3 -m pip install --force-reinstall pto_kernels-*.whl
