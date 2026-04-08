@@ -113,6 +113,9 @@ AICORE void runTLocalHistogram(__gm__ T *x, __gm__ float *z_local,
 
   const float bin_width = (max_val - min_val) / static_cast<float>(num_bins);
 
+  set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+  set_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
+
   // --- Main Calculation Loop ---
   for (uint32_t tile_idx = start_idx; tile_idx < end_idx; ++tile_idx) {
     int offset = tile_idx * TILE_SIZE;
@@ -156,6 +159,9 @@ AICORE void runTLocalHistogram(__gm__ T *x, __gm__ float *z_local,
       TMOV(prev_f32, cur_f32);
     }
   }
+
+  wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+  wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
 
   // --- Final Store to Global Memory ---
   HistGlobalData z_gm(z_local + block_idx * num_bins,

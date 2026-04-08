@@ -27,7 +27,7 @@ constexpr uint32_t MAX_BLOCKS = 64;
  * runTLocalHistogram - Local, per-core histogram calculation
  */
 template <typename T, unsigned TILE_SIZE>
-AICORE void runTLocalHistogram(__gm__ T* x, __gm__ float* z_local,
+AICORE void runTLocalHistogram(__gm__ T *x, __gm__ float *z_local,
                                const uint32_t total_length,
                                const int32_t num_bins, const float min_val,
                                const float max_val) {
@@ -55,7 +55,9 @@ AICORE void runTLocalHistogram(__gm__ T* x, __gm__ float* z_local,
 
   // --- Define UB Tiles and Memory Layout ---
   uint32_t addr = 0;
-  const uint32_t UB_X_ADDR = addr;
+  const uint32_t UB_X_PING = addr;
+  addr += TILE_SIZE * sizeof(T);
+  const uint32_t UB_X_PONG = addr;
   addr += TILE_SIZE * sizeof(T);
   const uint32_t UB_CUR_MASK_ADDR = addr;
   addr += TILE_SIZE * sizeof(uint8_t);
@@ -78,8 +80,6 @@ AICORE void runTLocalHistogram(__gm__ T* x, __gm__ float* z_local,
   InputGlobalData x_gm(x, {static_cast<int32_t>(total_length)});
 
   using InputTileData = Tile<TileType::Vec, T, 1, TILE_SIZE>;
-  InputTileData x_tile;
-  TASSIGN(x_tile, UB_X_ADDR);
 
   using MaskTileData = Tile<TileType::Vec, uint8_t, 1, TILE_SIZE>;
   MaskTileData current_mask;
@@ -118,16 +118,27 @@ AICORE void runTLocalHistogram(__gm__ T* x, __gm__ float* z_local,
 
   const float bin_width = (max_val - min_val) / static_cast<float>(num_bins);
 
+  set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+  set_flag(PIPE_V, PIPE_MTE2, EVENT_ID1);
+  set_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
+  set_flag(PIPE_MTE3, PIPE_V, EVENT_ID1);
+
   // --- Main Calculation Loop ---
-  for (uint32_t tile_idx = start_idx; tile_idx < end_idx; ++tile_idx) {
+  for (uint32_t tile_idx = start_idx, ping = 1; tile_idx < end_idx;
+       ++tile_idx) {
     int offset = tile_idx * TILE_SIZE;
     TASSIGN(x_gm, x + offset);
 
-    set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
-    wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+    const event_t ev = ping ? (event_t)EVENT_ID0 : (event_t)EVENT_ID1;
+    const unsigned x_base = ping ? UB_X_PING : UB_X_PONG;
+
+    InputTileData x_tile;
+    TASSIGN(x_tile, x_base);
+
+    wait_flag(PIPE_V, PIPE_MTE2, ev);
     TLOAD(x_tile, x_gm);
-    set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
-    wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+    set_flag(PIPE_MTE2, PIPE_V, ev);
+    wait_flag(PIPE_MTE2, PIPE_V, ev);
 
     // Generate packed bit-mask
     TCMPS(current_mask, x_tile, static_cast<T>(min_val), CmpMode::LT);
@@ -149,18 +160,26 @@ AICORE void runTLocalHistogram(__gm__ T* x, __gm__ float* z_local,
       TROWSUM(count_f32_tile, bin_mask_f32, reduce_tmp);
 
       // Scalar move to update UB local histogram
-      set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-      wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
+      set_flag(PIPE_V, PIPE_S, EVENT_ID2);
+      wait_flag(PIPE_V, PIPE_S, EVENT_ID2);
       float f_count = count_f32_tile.GetValue(0);
       if (f_count > 0.0f) {
         local_hist.SetValue(j, local_hist.GetValue(j) + f_count);
       }
-      set_flag(PIPE_S, PIPE_V, EVENT_ID0);
-      wait_flag(PIPE_S, PIPE_V, EVENT_ID0);
+      set_flag(PIPE_S, PIPE_V, EVENT_ID2);
+      wait_flag(PIPE_S, PIPE_V, EVENT_ID2);
 
       TMOV(prev_f32, cur_f32);
     }
+
+    set_flag(PIPE_V, PIPE_MTE2, ev);
+    ping = 1 - ping;
   }
+
+  wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+  wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID1);
+  wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
+  wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID1);
 
   // --- Final Store to Global Memory ---
   HistGlobalData z_gm(z_local + block_idx * num_bins,
@@ -175,7 +194,7 @@ AICORE void runTLocalHistogram(__gm__ T* x, __gm__ float* z_local,
 
 // Template parameter to avoid "no function" kernel launch error
 template <unsigned UNUSED>
-AICORE void runTHistogramFinal(__gm__ float* z_local, __gm__ int32_t* z,
+AICORE void runTHistogramFinal(__gm__ float *z_local, __gm__ int32_t *z,
                                const int32_t num_bins,
                                const int32_t num_blocks) {
   set_mask_norm();
@@ -259,9 +278,9 @@ extern "C" __global__ AICORE void histogram_fp16(GM_ADDR x, GM_ADDR z_local,
                                                  const int32_t num_bins,
                                                  const float min_val,
                                                  const float max_val) {
-  runTLocalHistogram<half, DEFAULT_TILE_SIZE>((__gm__ half*)x,
-                                              (__gm__ float*)z_local, in_length,
-                                              num_bins, min_val, max_val);
+  runTLocalHistogram<half, DEFAULT_TILE_SIZE>(
+      (__gm__ half *)x, (__gm__ float *)z_local, in_length, num_bins, min_val,
+      max_val);
 }
 
 extern "C" __global__ AICORE void histogram_fp32(GM_ADDR x, GM_ADDR z_local,
@@ -270,14 +289,14 @@ extern "C" __global__ AICORE void histogram_fp32(GM_ADDR x, GM_ADDR z_local,
                                                  const float min_val,
                                                  const float max_val) {
   runTLocalHistogram<float, DEFAULT_TILE_SIZE>(
-      (__gm__ float*)x, (__gm__ float*)z_local, in_length, num_bins, min_val,
+      (__gm__ float *)x, (__gm__ float *)z_local, in_length, num_bins, min_val,
       max_val);
 }
 
 extern "C" __global__ AICORE void histogram_final(GM_ADDR z_local, GM_ADDR z,
                                                   const int32_t num_bins,
                                                   const int32_t num_blocks) {
-  runTHistogramFinal<0>((__gm__ float*)z_local, (__gm__ int32_t*)z, num_bins,
+  runTHistogramFinal<0>((__gm__ float *)z_local, (__gm__ int32_t *)z, num_bins,
                         num_blocks);
 }
 

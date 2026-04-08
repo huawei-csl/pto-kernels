@@ -115,6 +115,8 @@ AICORE void runTLocalHistogram(__gm__ T *x, __gm__ float *z_local,
 
   set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
   set_flag(PIPE_V, PIPE_MTE2, EVENT_ID1);
+  set_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
+  set_flag(PIPE_MTE3, PIPE_V, EVENT_ID1);
 
   // --- Main Calculation Loop ---
   for (uint32_t tile_idx = start_idx, ping = 1; tile_idx < end_idx;
@@ -171,6 +173,8 @@ AICORE void runTLocalHistogram(__gm__ T *x, __gm__ float *z_local,
 
   wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
   wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID1);
+  wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
+  wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID1);
 
   // --- Final Store to Global Memory ---
   HistGlobalData z_gm(z_local + block_idx * num_bins,

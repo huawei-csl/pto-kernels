@@ -42,11 +42,11 @@ def test_histogram(size_mult=1, repeat_runs=20):
     for i, hist in enumerate(actual_hist):
         assert torch.equal(
             hist, actual_hist[0]
-        ), f"Inconsistent results across runs at run {i}"
+        ), f"Inconsistent results across runs at run {i}, expected\n {actual_hist[0]}\ngot\n{hist}\n"
 
     assert torch.equal(
         expected_hist, actual_hist[0]
-    ), "Mismatch between expected and actual histogram"
+    ), f"Mismatch between expected and actual histogram, expected\n {expected_hist}\ngot\n{actual_hist[0]}\n"
 
 
 if __name__ == "__main__":
