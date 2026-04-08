@@ -28,11 +28,11 @@ python run_gated_delta_dynamic_bsnd.py
 
 Latest reported outputs:
 
-- `chunk_cumsum`: fixed `0.062 ms`, packed-varlen `0.058 ms`
-- `scaled_dot_kkt`: fixed `0.067 ms, 0.50 TFLOP/s`, packed-varlen `0.065 ms, 0.39 TFLOP/s`
-- `wy_fast`: fixed `2.400 ms, 0.03 TFLOP/s`, packed-varlen `1.945 ms, 0.03 TFLOP/s`
-- `chunk_h`: fixed `5.204 ms`, packed-varlen `4.057 ms`
-- `chunk_o`: fixed `0.184 ms, 0.36 TFLOP/s`, packed-varlen `0.184 ms, 0.27 TFLOP/s`
+- `chunk_cumsum`: fixed `0.074 ms`, packed-varlen `0.072 ms`
+- `scaled_dot_kkt`: fixed `0.064 ms, 0.52 TFLOP/s`, packed-varlen `0.062 ms, 0.41 TFLOP/s`
+- `wy_fast`: fixed `1.934 ms, 0.03 TFLOP/s`, packed-varlen `1.645 ms, 0.03 TFLOP/s`
+- `chunk_h`: fixed `4.611 ms`, packed-varlen `3.620 ms`
+- `chunk_o`: fixed `0.167 ms, 0.40 TFLOP/s`, packed-varlen `0.172 ms, 0.29 TFLOP/s`
 
 ## Remaining high-level problems
 
@@ -94,6 +94,12 @@ Most useful findings from the latest native debugging:
 - `A2` was brought much closer to correct after fixing row-wise scaling semantics
 - the remaining drift is concentrated in the `A1 = A * (exp(g) * beta)` side
 - the bug appears near half-chunk boundaries and row/tail handling, not in the cube GEMM itself
+- the most recent probe narrowed this further:
+  - native `A2` can be made close to correct with local row-wise `beta` scaling
+  - the most suspicious remaining native issue is the `g` vector load / `TEXP` path used to build `A1`
+  - identity-style probes (`A=1`, `beta=1`, `g=0`) showed that `A1` can still corrupt leading rows of a half-chunk even when `A2` is much healthier
+  - attempts to patch this with scalar exp or alternate contiguous `g` loads either failed to link or regressed the wider kernel, so the current committed path keeps the host-backed correctness wrapper
+  - a scratch-row `TEXP` patch was also tried and still did not remove the leading-row corruption, so the unresolved bug is not yet reduced to a trivial scalar-exp replacement
 
 Practical consequence:
 
@@ -136,6 +142,7 @@ Practical consequence:
 5. Focus especially on:
    - half-chunk boundary rows
    - the last rows in each local vector slice
+   - the first row of each half-chunk on the native `g` / `TEXP` path
    - whether row-wise versus column-wise scaling semantics are correct for packed BSND `A`
 6. Only replace the fallback path in `dynamic_kernel_libs.py` after both fixed and packed-varlen stage checks pass.
 

@@ -28,17 +28,18 @@ Current status:
 
 Latest stage-check outputs from `run_gated_delta_dynamic_bsnd.py`:
 
-- `chunk_cumsum`: fixed `0.062 ms`, packed-varlen `0.058 ms`
-- `scaled_dot_kkt`: fixed `0.067 ms, 0.50 TFLOP/s`, packed-varlen `0.065 ms, 0.39 TFLOP/s`
-- `wy_fast`: fixed `2.400 ms, 0.03 TFLOP/s`, packed-varlen `1.945 ms, 0.03 TFLOP/s`
-- `chunk_h`: fixed `5.204 ms`, packed-varlen `4.057 ms`
-- `chunk_o`: fixed `0.184 ms, 0.36 TFLOP/s`, packed-varlen `0.184 ms, 0.27 TFLOP/s`
+- `chunk_cumsum`: fixed `0.074 ms`, packed-varlen `0.072 ms`
+- `scaled_dot_kkt`: fixed `0.064 ms, 0.52 TFLOP/s`, packed-varlen `0.062 ms, 0.41 TFLOP/s`
+- `wy_fast`: fixed `1.934 ms, 0.03 TFLOP/s`, packed-varlen `1.645 ms, 0.03 TFLOP/s`
+- `chunk_h`: fixed `4.611 ms`, packed-varlen `3.620 ms`
+- `chunk_o`: fixed `0.167 ms, 0.40 TFLOP/s`, packed-varlen `0.172 ms, 0.29 TFLOP/s`
 
 Important caveats:
 
 - The current driver is a stage-validation suite, not a fully native end-to-end GDN kernel chain.
 - `wy_fast` and `chunk_h` still rely on Torch-side fallback/orchestration for correctness.
 - The dynamic kernels remain much slower than the original static kernels, so correctness is ahead of performance at the moment.
+- The latest native `wy_fast` debugging still points to the vector-side `A1 = A * (exp(g) * beta)` path as the main unresolved bug. Row-wise `beta` handling for `A2` is much closer than before, but the native `g` / `TEXP` path still corrupts leading rows of a half-chunk, so the public wrapper remains on the host-backed correctness path.
 
 Run the implemented stage checks with:
 

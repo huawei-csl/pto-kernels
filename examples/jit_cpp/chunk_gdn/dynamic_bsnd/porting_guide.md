@@ -198,6 +198,12 @@ Trying to debug the full GDN chain before each stage is stable makes failures mu
 - the fused kernel structure exists and mostly mirrors the static version
 - the remaining native bug is in the dynamic BSND vector-side coefficient build for `A1/A2`, especially around half-chunk boundaries and row-wise scaling semantics
 - the current correctness path still uses exact Torch helpers for packed `A1/A2`
+- the latest native debugging narrowed the failure further:
+  - row-wise `beta` scaling for `A2` is much closer to correct than the older column-scaling attempt
+  - the most suspicious remaining issue is now the native `g` load plus `TEXP` path for `A1`
+  - identity probes (`beta = 1`, `g = 0`) showed that the native `A1` path can still corrupt leading rows of a half-chunk even when `A2` is otherwise correct
+  - additional scratch-row `TEXP` experiments did not eliminate that leading-row corruption, so the bug is likely deeper than a simple scalar-exp patch
+  - future work should debug native `g` extraction and exponentiation first, before changing the cube matmul path again
 
 ### `chunk_h`
 

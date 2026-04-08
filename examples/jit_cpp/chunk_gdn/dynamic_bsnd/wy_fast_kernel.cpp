@@ -155,24 +155,22 @@ AICORE void main_kernel(__gm__ half *k, __gm__ half *v, __gm__ half *beta,
                         __gm__ int32_t *cu_seqlens, int64_t batch_size,
                         int64_t fixed_seq_len, uint64_t ffts_addr) {
   constexpr int32_t HalfChunk = ChunkSize / 2;
-  constexpr int32_t HeadTileCols = ((NumHeads + 15) / 16) * 16;
   constexpr int32_t ChunkSquareElems = ChunkSize * ChunkSize;
   constexpr int32_t ChunkHiddenElems = ChunkSize * HiddenSize;
   constexpr int32_t QL1Addr = 0;
   constexpr int32_t XL1Addr = 32768;
 
   constexpr int32_t BetaHalfUbAddr = 0;
-  constexpr int32_t AUbHalfAddr = BetaHalfUbAddr + ChunkSize * sizeof(half);
+  constexpr int32_t BetaLocalHalfUbAddr =
+      BetaHalfUbAddr + HalfChunk * NumHeads * sizeof(half);
+  constexpr int32_t AUbHalfAddr = BetaLocalHalfUbAddr + HalfChunk * sizeof(half);
   constexpr int32_t BetaUbAddr = AUbHalfAddr + HalfChunk * ChunkSize * sizeof(half);
-  constexpr int32_t BetaRowUbAddr = BetaUbAddr + ChunkSize * sizeof(float);
-  constexpr int32_t Beta2dUbAddr = BetaRowUbAddr + ChunkSize * sizeof(float);
-  constexpr int32_t TmpUbAddr = Beta2dUbAddr + HalfChunk * ChunkSize * sizeof(float);
-  constexpr int32_t A1UbAddr = TmpUbAddr + 24576 * sizeof(uint8_t);
+  constexpr int32_t Beta2dUbAddr = BetaUbAddr + HalfChunk * sizeof(float);
+  constexpr int32_t A1UbAddr = Beta2dUbAddr + HalfChunk * ChunkSize * sizeof(float);
   constexpr int32_t A2UbAddr = A1UbAddr + HalfChunk * ChunkSize * sizeof(float);
   constexpr int32_t A2HalfUbAddr = A2UbAddr + HalfChunk * ChunkSize * sizeof(float);
   constexpr int32_t GUbAddr = A2HalfUbAddr + HalfChunk * ChunkSize * sizeof(half);
-  constexpr int32_t GRowUbAddr = GUbAddr + ChunkSize * sizeof(float);
-  constexpr int32_t G2dUbAddr = GRowUbAddr + ChunkSize * sizeof(float);
+  constexpr int32_t G2dUbAddr = GUbAddr + HalfChunk * sizeof(float);
 
   using PackedA =
       GlobalTensor<half, TileShape2D<half, HalfChunk, ChunkSize, Layout::ND>,
@@ -180,9 +178,10 @@ AICORE void main_kernel(__gm__ half *k, __gm__ half *v, __gm__ half *beta,
   using PackedAFull =
       GlobalTensor<half, TileShape2D<half, ChunkSize, ChunkSize, Layout::ND>,
                    BaseShape2D<half, ChunkSize, ChunkSize, Layout::ND>, Layout::ND>;
-  using PackedGGlobal =
-      GlobalTensor<float, TileShape2D<float, 1, ChunkSize, Layout::ND>,
-                   BaseShape2D<float, 1, ChunkSize, Layout::ND>, Layout::ND>;
+  using GLocalGlobalShape = Shape<1, 1, 1, 1, DYNAMIC>;
+  using GLocalGlobalStride = Stride<1, 1, 1, 1, 1>;
+  using GLocalGlobal =
+      GlobalTensor<float, GLocalGlobalShape, GLocalGlobalStride, Layout::ND>;
   using PackedOut =
       GlobalTensor<half, TileShape2D<half, ChunkSize, HiddenSize, Layout::ND>,
                    BaseShape2D<half, ChunkSize, HiddenSize, Layout::ND>, Layout::ND>;
@@ -194,24 +193,20 @@ AICORE void main_kernel(__gm__ half *k, __gm__ half *v, __gm__ half *beta,
   using ChunkGlobalDynStride = Stride<1, 1, 1, DYNAMIC, 1>;
   using ChunkGlobalDyn =
       GlobalTensor<half, ChunkGlobalDynShape, ChunkGlobalDynStride, Layout::ND>;
-  using BetaBlockShape = Shape<1, 1, 1, DYNAMIC, DYNAMIC>;
-  using BetaBlockStride = Stride<1, 1, 1, DYNAMIC, 1>;
-  using BetaBlockGlobal =
-      GlobalTensor<half, BetaBlockShape, BetaBlockStride, Layout::ND>;
-  using BetaBlockUb =
-      Tile<TileType::Vec, half, ChunkSize, HeadTileCols, BLayout::RowMajor,
-           DYNAMIC, DYNAMIC, SLayout::NoneBox, 512, PadValue::Zero>;
-  using BetaUb =
-      Tile<TileType::Vec, float, 1, ChunkSize, BLayout::RowMajor, DYNAMIC,
-           DYNAMIC, SLayout::NoneBox, 512, PadValue::Zero>;
+  using BetaFlatGlobalShape = Shape<1, 1, 1, 1, DYNAMIC>;
+  using BetaFlatGlobalStride = Stride<1, 1, 1, 1, 1>;
+  using BetaFlatGlobal =
+      GlobalTensor<half, BetaFlatGlobalShape, BetaFlatGlobalStride, Layout::ND>;
+  using BetaFlatUb = GdnUbND<half, 1, HalfChunk * NumHeads>;
+  using BetaHalfUb = GdnUbND<half, 1, HalfChunk>;
+  using BetaUb = GdnUbND<float, 1, HalfChunk>;
   using AHalfUb = GdnUbND<half, HalfChunk, ChunkSize>;
   using AFloatUb = GdnUbND<float, HalfChunk, ChunkSize>;
-  using GUb =
-      Tile<TileType::Vec, float, 1, ChunkSize, BLayout::RowMajor, DYNAMIC,
-           DYNAMIC, SLayout::NoneBox, 512, PadValue::Zero>;
+  using GUb = GdnUbND<float, 1, HalfChunk>;
+  using GColUb = GdnUbDN<float, HalfChunk, 1>;
   using Beta2dUb = GdnUbND<float, HalfChunk, ChunkSize>;
   using G2dUb = GdnUbND<float, HalfChunk, ChunkSize>;
-  using GRowUb = GdnUbND<float, 1, ChunkSize>;
+  using RowSliceUb = GdnUbND<float, 1, ChunkSize>;
   using AFullL1 = GdnL1Mat<half, ChunkSize, ChunkSize>;
   using XFullL1 = GdnL1Mat<half, ChunkSize, HiddenSize>;
   using ADynL1 = Tile<TileType::Mat, half, ChunkSize, ChunkSize, BLayout::ColMajor,
@@ -235,24 +230,28 @@ AICORE void main_kernel(__gm__ half *k, __gm__ half *v, __gm__ half *beta,
   AFloatUb a1_ub;
   AFloatUb a2_ub;
   AHalfUb a2_half_ub;
-  BetaUb beta_ub(1, ChunkSize);
-  GUb g_ub(1, ChunkSize);
-  GRowUb beta_r_ub;
-  GRowUb g_r_ub;
+  BetaFlatUb beta_block_ub;
+  BetaHalfUb beta_half_ub;
+  BetaUb beta_ub;
+  GUb g_ub;
+  GColUb beta_col_ub;
+  GColUb g_col_ub;
   Beta2dUb beta_2d_ub;
   G2dUb g_2d_ub;
-  GdnUbND<uint8_t, 1, 24576> tmp_ub;
+  AHalfUb a1_half_ub;
+  TASSIGN(beta_block_ub, BetaHalfUbAddr);
+  TASSIGN(beta_half_ub, BetaLocalHalfUbAddr);
   TASSIGN(a_half_ub, AUbHalfAddr);
   TASSIGN(a1_ub, A1UbAddr);
   TASSIGN(a2_ub, A2UbAddr);
   TASSIGN(a2_half_ub, A2HalfUbAddr);
   TASSIGN(beta_ub, BetaUbAddr);
   TASSIGN(g_ub, GUbAddr);
-  TASSIGN(beta_r_ub, BetaRowUbAddr);
-  TASSIGN(g_r_ub, GRowUbAddr);
+  TASSIGN(beta_col_ub, BetaUbAddr);
+  TASSIGN(g_col_ub, GUbAddr);
   TASSIGN(beta_2d_ub, Beta2dUbAddr);
   TASSIGN(g_2d_ub, G2dUbAddr);
-  TASSIGN(tmp_ub, TmpUbAddr);
+  TASSIGN(a1_half_ub, AUbHalfAddr);
 
 #if defined(__DAV_C220_VEC__)
   set_mask_norm();
@@ -284,53 +283,85 @@ AICORE void main_kernel(__gm__ half *k, __gm__ half *v, __gm__ half *beta,
       const int32_t chunk_base =
           static_cast<int32_t>((seq.chunk_offset + chunk_idx) * NumHeads + head_idx);
 
+      if (local_rows == 0) {
+        GdnSetCrossFlag<PIPE_MTE3>(2, 2);
+        GdnSetCrossFlag<PIPE_MTE3>(1, 2);
+        continue;
+      }
+
       PackedA a_global(a_packed + chunk_base * ChunkSquareElems +
                        row_offset * ChunkSize);
       PackedA a1_global(workspace_a1 + chunk_base * ChunkSquareElems +
                         row_offset * ChunkSize);
       PackedA a2_global(workspace_a2 + chunk_base * ChunkSquareElems +
                         row_offset * ChunkSize);
-      PackedGGlobal g_global(g_packed + chunk_base * ChunkSize);
-      BetaBlockGlobal beta_global(
-          beta + (seq.bos + row_start) * NumHeads + head_idx,
-          {1, 1, 1, static_cast<int32_t>(valid_rows), NumHeads},
-          {1, 1, 1, NumHeads, 1});
-      BetaBlockUb beta_block_ub(valid_rows, NumHeads);
-      TASSIGN(beta_block_ub, BetaHalfUbAddr);
+      GLocalGlobal g_global(g_packed + chunk_base * ChunkSize + row_offset,
+                            {1, 1, 1, 1, static_cast<int32_t>(local_rows)},
+                            {1, 1, 1, 1, 1});
+      BetaFlatGlobal beta_global(
+          beta + (seq.bos + row_start + row_offset) * NumHeads,
+          {1, 1, 1, 1, static_cast<int32_t>(local_rows * NumHeads)},
+          {1, 1, 1, 1, 1});
 
+      TLOAD(beta_block_ub, beta_global);
       TLOAD(a_half_ub, a_global);
       TLOAD(g_ub, g_global);
-      TLOAD(beta_block_ub, beta_global);
-      pipe_barrier(PIPE_ALL);
+      GdnSetFlag<PIPE_MTE2, PIPE_V>(0);
+      GdnWaitFlag<PIPE_MTE2, PIPE_V>(0);
 
-      for (uint32_t i = 0; i < ChunkSize; ++i) {
-        beta_ub.SetValue(i, 0.0f);
+      for (uint32_t i = 0; i < HalfChunk; ++i) {
+        beta_half_ub.SetValue(i, static_cast<half>(0.0f));
       }
-      for (uint32_t i = 0; i < valid_rows; ++i) {
-        beta_ub.SetValue(
-            i, static_cast<float>(
-                   beta_block_ub.GetValue(i * HeadTileCols + head_idx)));
+      for (uint32_t i = 0; i < local_rows; ++i) {
+        beta_half_ub.SetValue(i,
+                              beta_block_ub.GetValue(i * NumHeads + head_idx));
       }
+      pipe_barrier(PIPE_V);
+      TCVT(beta_ub, beta_half_ub, pto::RoundMode::CAST_NONE);
       pipe_barrier(PIPE_V);
       TCVT(a1_ub, a_half_ub, pto::RoundMode::CAST_NONE);
-      TMOV(beta_r_ub, beta_ub);
-      TCOLEXPAND(beta_2d_ub, beta_r_ub);
-      TMUL(a2_ub, a1_ub, beta_2d_ub);
+      TMOV(a2_ub, a1_ub);
+      for (uint32_t row = 0; row < HalfChunk; ++row) {
+        RowSliceUb a2_row;
+        TASSIGN(a2_row, A2UbAddr + row * ChunkSize * sizeof(float));
+        TMULS(a2_row, a2_row, row < local_rows ? beta_ub.GetValue(row) : 0.0f);
+      }
       pipe_barrier(PIPE_V);
       TCVT(a2_half_ub, a2_ub, pto::RoundMode::CAST_NONE);
+      GdnSetFlag<PIPE_V, PIPE_MTE3>(0);
+      GdnWaitFlag<PIPE_V, PIPE_MTE3>(0);
       TSTORE(a2_global, a2_half_ub);
       pipe_barrier(PIPE_ALL);
       GdnSetCrossFlag<PIPE_MTE3>(2, 2);
 
+      set_flag(PIPE_V, PIPE_S, EVENT_ID0);
+      wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
+      const float g_first = g_ub.GetValue(0);
       TEXP(g_ub, g_ub);
       pipe_barrier(PIPE_V);
-      TMUL(g_ub, g_ub, beta_ub);
-      TMOV(g_r_ub, g_ub);
-      TCOLEXPAND(g_2d_ub, g_r_ub);
-      TMUL(a1_ub, a1_ub, g_2d_ub);
+      RowSliceUb g_exp_patch;
+      TASSIGN(g_exp_patch, Beta2dUbAddr);
+      TEXPANDS(g_exp_patch, 0.0f);
+      set_flag(PIPE_V, PIPE_S, EVENT_ID0);
+      wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
+      g_exp_patch.SetValue(1, g_first);
       pipe_barrier(PIPE_V);
-      TCVT(a_half_ub, a1_ub, pto::RoundMode::CAST_NONE);
-      TSTORE(a1_global, a_half_ub);
+      TEXP(g_exp_patch, g_exp_patch);
+      pipe_barrier(PIPE_V);
+      set_flag(PIPE_V, PIPE_S, EVENT_ID0);
+      wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
+      g_ub.SetValue(0, g_exp_patch.GetValue(1));
+      pipe_barrier(PIPE_V);
+      for (uint32_t row = 0; row < HalfChunk; ++row) {
+        RowSliceUb a1_row;
+        TASSIGN(a1_row, A1UbAddr + row * ChunkSize * sizeof(float));
+        TMULS(a1_row, a1_row, row < local_rows ? g_ub.GetValue(row) : 0.0f);
+      }
+      pipe_barrier(PIPE_V);
+      TCVT(a1_half_ub, a1_ub, pto::RoundMode::CAST_NONE);
+      GdnSetFlag<PIPE_V, PIPE_MTE3>(1);
+      GdnWaitFlag<PIPE_V, PIPE_MTE3>(1);
+      TSTORE(a1_global, a1_half_ub);
       pipe_barrier(PIPE_ALL);
       GdnSetCrossFlag<PIPE_MTE3>(1, 2);
     }
