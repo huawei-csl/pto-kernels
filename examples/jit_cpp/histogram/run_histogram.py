@@ -6,6 +6,7 @@ from jit_util_histogram import jit_compile
 IMPLEMENTATIONS = {
     1: "step1_naive_histogram",
     2: "step2_double_buffering",
+    3: "step3_scatter_index_to_gm",  # Not working on A2/A3
 }
 
 
