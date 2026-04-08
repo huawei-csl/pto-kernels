@@ -7,7 +7,7 @@ Self-contained PTO kernels extracted from TileLang-generated sources under `../t
 | File | Role |
 |------|------|
 | `include/common.h` | Copy of `tilelang-ascend/src/tl_templates/pto/common.h` with **`namespace tl::ascend_pto` → `chunk_gdn_pto`**. |
-| `pto_static_common.py` | Shared `bisheng` flags: local `include/`, then **`$TL_ROOT/3rdparty/pto-isa/include` before CANN** (required for a working build). |
+| `pto_static_common.py` | Shared `bisheng` flags: local `include/`, then **`$PTO_LIB_PATH/include` before CANN** (same as other `jit_cpp` examples; defaults to CANN via `ASCEND_TOOLKIT_HOME`). |
 
 ## Kernels (`.cpp` → `compiled_lib/*.so` → Python test)
 
@@ -25,8 +25,8 @@ Run per-kernel tests:
 
 ```bash
 cd static_baseline
-export TL_ROOT=/path/to/tilelang-ascend
 export ASCEND_HOME_PATH=/path/to/cann   # or ASCEND_TOOLKIT_HOME
+# optional: export PTO_LIB_PATH=/path/to/cann   # default; set if PTO headers live elsewhere
 python3 run_all_static_kernels.py
 ```
 
@@ -50,8 +50,8 @@ To use the PTO tri-inv kernel, install/build the `pto-kernels` Python extension 
 
 ## Environment
 
-- `ASCEND_TOOLKIT_HOME` or `ASCEND_HOME_PATH` — CANN prefix.
-- `TL_ROOT` — TileLang root so `$TL_ROOT/3rdparty/pto-isa/include` exists; **override** with `PTO_ISA_INCLUDE` if needed.
+- `ASCEND_TOOLKIT_HOME` or `ASCEND_HOME_PATH` — CANN prefix (used as the default `PTO_LIB_PATH` when unset).
+- `PTO_LIB_PATH` — prefix whose `include/` supplies PTO headers for `bisheng` (listed before CANN `-I`). Defaults to the same value as your CANN home when unset.
 
 ## Regenerating `*_kernel.cpp` from TileLang
 

@@ -13,14 +13,11 @@ ASCEND_TOOLKIT_HOME = os.environ.get("ASCEND_TOOLKIT_HOME") or os.environ.get(
 if not ASCEND_TOOLKIT_HOME:
     raise RuntimeError("Set ASCEND_TOOLKIT_HOME or ASCEND_HOME_PATH")
 
-PTO_ISA_INCLUDE = os.environ.get(
-    "PTO_ISA_INCLUDE",
-    os.path.join(os.environ.get("TL_ROOT", ""), "3rdparty", "pto-isa", "include"),
-)
-if not os.path.isdir(PTO_ISA_INCLUDE):
+PTO_LIB_PATH = os.environ.get("PTO_LIB_PATH", ASCEND_TOOLKIT_HOME)
+_pto_inc = os.path.join(PTO_LIB_PATH, "include")
+if not os.path.isdir(_pto_inc):
     raise RuntimeError(
-        "Set TL_ROOT or PTO_ISA_INCLUDE to the pto-isa include directory "
-        "(must be listed before CANN -I; same as tilelang JIT)."
+        f"PTO include directory missing: {_pto_inc!r} (set PTO_LIB_PATH; must be before CANN -I)."
     )
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -55,7 +52,7 @@ def compile_pto_kernel(kernel_cpp_basename: str, so_basename: str) -> str:
         "-Wno-macro-redefined",
         "-Wno-ignored-attributes",
         f"-I{INCLUDE_DIR}",
-        f"-I{PTO_ISA_INCLUDE}",
+        f"-I{_pto_inc}",
         f"-I{ASCEND_TOOLKIT_HOME}/include",
         f"-I{ASCEND_TOOLKIT_HOME}/pkg_inc",
         f"-I{ASCEND_TOOLKIT_HOME}/pkg_inc/runtime",
