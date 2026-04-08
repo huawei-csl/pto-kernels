@@ -32,23 +32,25 @@ at::Tensor run_abs(const at::Tensor& x) {
   const auto dtype = x.options().dtype();
   at::Tensor z = at::empty_like(x);
   // Define the number of blocks of vector core
-  const uint32_t total_len = x.numel();
-  // FIXME: tile length is fixed to 64 for now
-  constexpr uint32_t TILE_LEN = 64;
-  const uint32_t block_dim = total_len / TILE_LEN;
+  const uint32_t total_size = x.numel();
+  // FIXME: tile length is fixed to 128 for now
+  constexpr uint32_t TILE_SIZE = 128;
 
-  if (total_len % TILE_LEN != 0) {
-    throw std::runtime_error(
-        "pto_abs supports only inputs with length that is multiple of 64.");
+  // Persistent kernel launch parameter
+  uint32_t total_tiles = (total_size + TILE_SIZE - 1) / TILE_SIZE;
+  uint32_t block_dim = GetNumVectorCores();
+
+  if (total_tiles < block_dim) {
+    block_dim = total_tiles;
   }
 
   auto acl_stream = c10_npu::getCurrentNPUStream().stream(true);
   if (dtype == at::kHalf) {
     call_vabs_fp16(block_dim, acl_stream, ConvertType(x), ConvertType(z),
-                   total_len);
+                   total_size);
   } else if (dtype == at::kFloat) {
     call_vabs_fp32(block_dim, acl_stream, ConvertType(x), ConvertType(z),
-                   total_len);
+                   total_size);
 
   } else {
     throw std::runtime_error("Unsupported dtype for `pto_abs` kernel");
