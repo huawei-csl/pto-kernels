@@ -18,7 +18,14 @@ for the full License text.
 using namespace pto;
 
 /**
- * @brief Elementwise absolute value: `torch.abs(x)`
+ * @brief Performs the CSR gather operation on the vector core as described
+ * in SEGMV algorithm in [1]
+ * 
+ * [1] Segmented operations for sparse matrix computation on vector 
+ * multiprocessors: https://dl.acm.org/doi/abs/10.5555/865221
+ * 
+ * The operation is defined as:
+ * z = values * x[indices] 
  *
  * @tparam T Input data type. Supports `fp16` or `fp32`
  * @tparam TILE_LEN Tile length
@@ -28,7 +35,7 @@ using namespace pto;
  * @param x Input tensor
  * @param z Output tensor
  * @param x_size Number of elements in x
- * @param idx_size Number of elements in indices
+ * @param indices_size Number of elements in indices
  */
 template <typename T, uint32_t TILE_SIZE, uint32_t TILE_SIZE_X>
 AICORE void runTCsrGather(__gm__ T* values, __gm__ int32_t* indices, __gm__ T* x, __gm__ T* z, uint32_t x_size, uint32_t indices_size) {
@@ -62,7 +69,10 @@ AICORE void runTCsrGather(__gm__ T* values, __gm__ int32_t* indices, __gm__ T* x
   wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
 
-
+  // Unlock first iteration
+  set_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
+  set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+  set_flag(PIPE_V, PIPE_MTE2, EVENT_ID1);
 
   // Loop for full size tiles
   for (uint32_t inner_offset = global_offset; inner_offset < indices_size;
@@ -91,49 +101,66 @@ AICORE void runTCsrGather(__gm__ T* values, __gm__ int32_t* indices, __gm__ T* x
 
     // Assign the UB address for each tile
     constexpr uint32_t TILE_SIZE_X_IN_BYTES = TILE_SIZE_X * sizeof(T);
-    constexpr uint32_t TILE_SIZE_IN_BYTES = TILE_SIZE * sizeof(T);  
-    constexpr uint32_t TILE_SIZE_IDX_IN_BYTES = TILE_SIZE * sizeof(int32_t);
+    constexpr uint32_t TILE_SIZE_IN_BYTES = TILE_SIZE * sizeof(T);
     TASSIGN(valTiles, UB_ZERO_ADDR + TILE_SIZE_X_IN_BYTES);
     TASSIGN(wTiles, UB_ZERO_ADDR + TILE_SIZE_X_IN_BYTES + 1 * TILE_SIZE_IN_BYTES);
     TASSIGN(zTiles, UB_ZERO_ADDR + TILE_SIZE_X_IN_BYTES + 2 * TILE_SIZE_IN_BYTES);
     TASSIGN(idxTiles, UB_ZERO_ADDR + TILE_SIZE_X_IN_BYTES + 3 * TILE_SIZE_IN_BYTES);
 
-    // MTE2 (load) wait for vector core to be done
+    // MTE2 (load) wait for gather to be done
     // (previous iteration's computation)
-    set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
     wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
-
+    
     // Load data from global memory to UB buffer
     TLOAD(idxTiles, idxGlobal);
-
+    
     // Signal end of current load to vector core
     set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
-    wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
+    // Wait for MT2 (current load) to be done
+    wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+    
     // Gather
     TGATHER(wTiles, xTiles, idxTiles);
 
+    // Signal end of gather to MTE2 (next load)
     set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+
+    // Wait for mul to be done (previous iteration's computation)
     wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
 
     // Load data from global memory to UB buffer
     TLOAD(valTiles, valGlobal);
 
+    // Signal end of current load to vector core
     set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+    
+    // Wait for MT2 (current load) and MT3
+    // (previous iteration's store) to be done
     wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+    wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
 
     // Mul
     TMUL(zTiles, valTiles, wTiles);
 
+    // Signal end of computation to MT3 (current store)
+    // and to MTE2 (next load)
     set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+    set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+
+    // Wait for mul to be done before store
     wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
 
+    // Store result from UB buffer to GM
     TSTORE(zGlobal, zTiles);
 
     // Signal end of MTE3 (current store) to vector core
     set_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
-    wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
   }
+  // Cleanup flags
+  wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
+  wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+  wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID1);
 }
 
 extern "C" __global__ AICORE void vcsr_gather_fp16(GM_ADDR values, GM_ADDR indices, GM_ADDR x, GM_ADDR z, uint32_t x_size, uint32_t indices_size) {
