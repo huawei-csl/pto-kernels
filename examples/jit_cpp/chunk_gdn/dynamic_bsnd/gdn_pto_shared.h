@@ -53,8 +53,9 @@ AICORE inline void GdnBuildLowerTriMask(TileData &mask_tile, int64_t vector_id,
     const int32_t global_r = row_offset + r;
     for (int32_t c = 0; c < cols; ++c) {
       const bool keep = inclusive ? (global_r >= c) : (global_r > c);
-      mask_tile.SetValue(r * cols + c, keep ? static_cast<half>(1.0f)
-                                            : static_cast<half>(0.0f));
+      mask_tile.SetValue(r * cols + c,
+                         keep ? static_cast<half>(1.0f)
+                              : static_cast<half>(0.0f));
     }
   }
 }

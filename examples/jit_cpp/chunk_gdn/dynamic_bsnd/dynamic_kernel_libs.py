@@ -198,8 +198,6 @@ def scaled_dot_kkt_kernel(num_heads: int, hidden_size: int, chunk_size: int):
         ctypes.c_void_p,
         ctypes.c_void_p,
         ctypes.c_void_p,
-        ctypes.c_void_p,
-        ctypes.c_void_p,
         ctypes.c_int64,
         ctypes.c_int64,
     ]
@@ -282,47 +280,13 @@ def chunk_o_kernel(num_heads: int, hidden_size: int, chunk_size: int):
         chunk_size=chunk_size,
     )
     lib = ctypes.CDLL(os.path.abspath(lib_path))
-    lib.call_qk_kernel.argtypes = [
+    lib.call_kernel.argtypes = [
         ctypes.c_uint32,
         ctypes.c_void_p,
         ctypes.c_void_p,
         ctypes.c_void_p,
         ctypes.c_void_p,
         ctypes.c_void_p,
-        ctypes.c_int64,
-        ctypes.c_int64,
-    ]
-    lib.call_qs_kernel.argtypes = [
-        ctypes.c_uint32,
-        ctypes.c_void_p,
-        ctypes.c_void_p,
-        ctypes.c_void_p,
-        ctypes.c_void_p,
-        ctypes.c_void_p,
-        ctypes.c_int64,
-        ctypes.c_int64,
-    ]
-    lib.call_gate_qk_kernel.argtypes = [
-        ctypes.c_uint32,
-        ctypes.c_void_p,
-        ctypes.c_void_p,
-        ctypes.c_void_p,
-        ctypes.c_void_p,
-        ctypes.c_int64,
-        ctypes.c_int64,
-    ]
-    lib.call_qkv_kernel.argtypes = [
-        ctypes.c_uint32,
-        ctypes.c_void_p,
-        ctypes.c_void_p,
-        ctypes.c_void_p,
-        ctypes.c_void_p,
-        ctypes.c_void_p,
-        ctypes.c_int64,
-        ctypes.c_int64,
-    ]
-    lib.call_add_store_kernel.argtypes = [
-        ctypes.c_uint32,
         ctypes.c_void_p,
         ctypes.c_void_p,
         ctypes.c_void_p,
@@ -332,11 +296,7 @@ def chunk_o_kernel(num_heads: int, hidden_size: int, chunk_size: int):
         ctypes.c_int64,
         ctypes.c_int64,
     ]
-    lib.call_qk_kernel.restype = None
-    lib.call_qs_kernel.restype = None
-    lib.call_gate_qk_kernel.restype = None
-    lib.call_qkv_kernel.restype = None
-    lib.call_add_store_kernel.restype = None
+    lib.call_kernel.restype = None
     return lib
 
 
@@ -428,7 +388,6 @@ def run_wy_fast_kernel(
     batch_size = k.shape[0] if batch_size_override is None else batch_size_override
     lib = wy_fast_kernel(num_heads, hidden_size, chunk_size)
     stream = torch.npu.current_stream()._as_parameter_
-
     beta_packed = pack_bsh_tensor(beta.contiguous(), chunk_size=chunk_size, cu_seqlens=cu_seqlens)
     g_exp_beta = beta_packed * torch.exp(g_packed.float())
     a_float = a_packed.float()
@@ -571,60 +530,26 @@ def run_chunk_o_kernel(
     lib = chunk_o_kernel(num_heads, hidden_size, chunk_size)
     stream = torch.npu.current_stream()._as_parameter_
     workspace_qk = torch.zeros((total_chunks, num_heads, chunk_size, chunk_size), device=q.device, dtype=torch.float16)
-    workspace_qs = torch.zeros((total_chunks, num_heads, chunk_size, hidden_size), device=q.device, dtype=torch.float16)
-    workspace_qkv = torch.zeros_like(workspace_qs)
+    workspace_qs_qkv = torch.zeros((total_chunks, num_heads, chunk_size, hidden_size), device=q.device, dtype=torch.float16)
+    workspace_qk_gated = torch.zeros_like(workspace_qk)
     q_c = q.contiguous()
     k_c = k.contiguous()
     v_c = v.contiguous()
     s_c = s_packed.contiguous()
     g_c = g_packed.contiguous()
-    lib.call_qk_kernel(
+    lib.call_kernel(
         block_dim,
         stream,
         torch_to_ctypes(q_c),
         torch_to_ctypes(k_c),
-        torch_to_ctypes(workspace_qk),
-        optional_torch_to_ctypes(cu_seqlens),
-        batch_size,
-        q.shape[1],
-    )
-    lib.call_qs_kernel(
-        block_dim,
-        stream,
-        torch_to_ctypes(q_c),
+        torch_to_ctypes(v_c),
         torch_to_ctypes(s_c),
-        torch_to_ctypes(workspace_qs),
+        torch_to_ctypes(g_c),
+        torch_to_ctypes(workspace_qk),
+        torch_to_ctypes(workspace_qs_qkv),
+        torch_to_ctypes(workspace_qk_gated),
+        torch_to_ctypes(out),
         optional_torch_to_ctypes(cu_seqlens),
         batch_size,
         q.shape[1],
-    )
-    valid_mask = packed_chunk_valid_mask(
-        batch=q.shape[0],
-        total_t=q.shape[1],
-        chunk_size=chunk_size,
-        device=q.device,
-        cu_seqlens=cu_seqlens,
-    )
-    valid_matrix = valid_mask.unsqueeze(1).unsqueeze(-1) & valid_mask.unsqueeze(1).unsqueeze(-2)
-    workspace_qk.copy_(
-        torch.tril(
-            torch.where(
-                valid_matrix,
-                workspace_qk.float()
-                * torch.exp(g_c.unsqueeze(-1) - g_c.unsqueeze(-2)),
-                torch.zeros_like(workspace_qk, dtype=torch.float32),
-            ),
-            diagonal=0,
-        ).to(workspace_qk.dtype)
-    )
-    v_packed = pack_bshd_tensor(v_c, chunk_size=chunk_size, cu_seqlens=cu_seqlens).float()
-    workspace_qkv = torch.matmul(workspace_qk.float(), v_packed)
-    out_packed = workspace_qs.float() * torch.exp(g_c).unsqueeze(-1) + workspace_qkv
-    out.copy_(
-        unpack_packed_bshd_tensor(
-            out_packed.to(out.dtype),
-            output_shape=tuple(out.shape),
-            chunk_size=chunk_size,
-            cu_seqlens=cu_seqlens,
-        )
     )

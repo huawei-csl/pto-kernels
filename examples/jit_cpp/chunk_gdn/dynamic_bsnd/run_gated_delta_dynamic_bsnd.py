@@ -14,7 +14,7 @@ def main():
     print("  - scaled_dot_kkt (cube PTO kernel + exact NPU torch epilogue)")
     print("  - wy_fast (cube PTO matmul kernels + exact NPU torch packing epilogue)")
     print("  - chunk_h (PTO cube matmuls with host-side recurrent sequencing)")
-    print("  - chunk_o (PTO qk/qs cube kernels + exact host gating/qkv epilogue)")
+    print("  - chunk_o (fully fused PTO cube+vector kernel)")
     print("")
     run_chunk_cumsum_main()
     print("")

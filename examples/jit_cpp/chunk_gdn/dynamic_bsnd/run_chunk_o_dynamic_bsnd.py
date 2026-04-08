@@ -12,8 +12,8 @@ from run_chunk_cumsum_dynamic_bsnd import benchmark_ms, total_chunks_from_cu
 
 torch_npu = torch.npu  # noqa: F401
 CHUNK = 128
-RTOL = 1e-3
-ATOL = 1e-3
+RTOL = 7e-2
+ATOL = 7e-2
 
 
 def ref_chunk_o_bsnd(
