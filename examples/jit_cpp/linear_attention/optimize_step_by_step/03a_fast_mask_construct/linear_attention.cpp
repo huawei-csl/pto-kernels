@@ -1,4 +1,5 @@
 #include <pto/pto-inst.hpp>
+#include <pto/common/pto_tile.hpp>
 #include <runtime/rt_ffts.h>
 
 using namespace pto;
@@ -32,6 +33,26 @@ using L1MatTrans =
 template <typename T, int Rows, int Cols>
 using UbVec = Tile<TileType::Vec, T, Rows, Cols, BLayout::RowMajor, Rows, Cols,
                    SLayout::NoneBox, 512, PadValue::Null>;
+
+// PTO 8.5.0 bakes `diagonal` into the TTRI template arguments, while
+// pto-isa-master passes it as a runtime argument. Keep one call site that
+// accepts either form so the example builds against both header versions.
+template <typename TileData, int isUpperOrLower, int diagonal>
+AICORE inline auto TTriCompatImpl(TileData &dst, int diagonal_value, int)
+    -> decltype(TTRI<TileData, isUpperOrLower>(dst, diagonal_value), void()) {
+  TTRI<TileData, isUpperOrLower>(dst, diagonal_value);
+}
+
+template <typename TileData, int isUpperOrLower, int diagonal>
+AICORE inline auto TTriCompatImpl(TileData &dst, int, long)
+    -> decltype(TTRI<TileData, isUpperOrLower, diagonal>(dst), void()) {
+  TTRI<TileData, isUpperOrLower, diagonal>(dst);
+}
+
+template <typename TileData, int isUpperOrLower, int diagonal>
+AICORE inline void TTriCompat(TileData &dst) {
+  TTriCompatImpl<TileData, isUpperOrLower, diagonal>(dst, diagonal, 0);
+}
 
 template <pipe_t Pipe>
 AICORE inline void SetCrossFlag(int32_t flag, int32_t mode) {
@@ -233,9 +254,10 @@ AICORE void main_kernel(__gm__ half *q, __gm__ half *k, __gm__ half *v,
   // every chunk. The two vector sub-cores cover global rows [0, 31] and [32, 63].
   TEXPANDS(zero_score_ub, 0.0f);
   if (vector_id == 0) {
-    TTRI<decltype(mask_ub), /*isUpperOrLower=*/0, /*diagonal=*/0>(mask_ub);
+    TTriCompat<decltype(mask_ub), /*isUpperOrLower=*/0, /*diagonal=*/0>(mask_ub);
   } else {
-    TTRI<decltype(mask_ub), /*isUpperOrLower=*/0, /*diagonal=*/kHalfChunk>(mask_ub);
+    TTriCompat<decltype(mask_ub), /*isUpperOrLower=*/0,
+               /*diagonal=*/kHalfChunk>(mask_ub);
   }
   pipe_barrier(PIPE_ALL);
 

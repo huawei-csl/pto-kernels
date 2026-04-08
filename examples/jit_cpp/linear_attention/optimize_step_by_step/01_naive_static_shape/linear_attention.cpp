@@ -1,5 +1,7 @@
 #include <pto/pto-inst.hpp>
+#include <pto/common/pto_tile.hpp>
 #include <runtime/rt_ffts.h>
+#include <type_traits>
 
 using namespace pto;
 

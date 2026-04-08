@@ -1,4 +1,5 @@
 #include <pto/pto-inst.hpp>
+#include <pto/common/pto_tile.hpp>
 #include <runtime/rt_ffts.h>
 #include <type_traits>
 
@@ -29,6 +30,26 @@ template <typename T, int Rows, int Cols>
 using UbVec = Tile<TileType::Vec, T, Rows, Cols, BLayout::RowMajor, Rows, Cols,
                    SLayout::NoneBox, 512, PadValue::Null>;
 
+// PTO 8.5.0 bakes `diagonal` into the TTRI template arguments, while
+// pto-isa-master passes it as a runtime argument. Keep one call site that
+// accepts either form so the example builds against both header versions.
+template <typename TileData, int isUpperOrLower, int diagonal>
+AICORE inline auto TTriCompatImpl(TileData &dst, int diagonal_value, int)
+    -> decltype(TTRI<TileData, isUpperOrLower>(dst, diagonal_value), void()) {
+  TTRI<TileData, isUpperOrLower>(dst, diagonal_value);
+}
+
+template <typename TileData, int isUpperOrLower, int diagonal>
+AICORE inline auto TTriCompatImpl(TileData &dst, int, long)
+    -> decltype(TTRI<TileData, isUpperOrLower, diagonal>(dst), void()) {
+  TTRI<TileData, isUpperOrLower, diagonal>(dst);
+}
+
+template <typename TileData, int isUpperOrLower, int diagonal>
+AICORE inline void TTriCompat(TileData &dst) {
+  TTriCompatImpl<TileData, isUpperOrLower, diagonal>(dst, diagonal, 0);
+}
+
 template <pipe_t Pipe>
 AICORE inline void SetCrossFlag(int32_t flag, int32_t mode) {
   const int config = 1 | (mode << 4) | (flag << 8);
@@ -50,9 +71,10 @@ AICORE inline void WaitFlag(uint32_t id) {
 template <typename TileData>
 AICORE inline void BuildLowerTriMask(TileData &mask_tile, int64_t vector_id) {
   if (vector_id == 0) {
-    TTRI<TileData, /*isUpperOrLower=*/0, /*diagonal=*/0>(mask_tile);
+    TTriCompat<TileData, /*isUpperOrLower=*/0, /*diagonal=*/0>(mask_tile);
   } else {
-    TTRI<TileData, /*isUpperOrLower=*/0, /*diagonal=*/TileData::Rows>(mask_tile);
+    TTriCompat<TileData, /*isUpperOrLower=*/0, /*diagonal=*/TileData::Rows>(
+        mask_tile);
   }
   pipe_barrier(PIPE_ALL);
 }

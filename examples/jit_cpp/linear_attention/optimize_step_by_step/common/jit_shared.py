@@ -8,6 +8,7 @@ import torch
 ASCEND_TOOLKIT_HOME = os.environ["ASCEND_TOOLKIT_HOME"]
 PTO_LIB_PATH = os.environ.get("PTO_LIB_PATH", ASCEND_TOOLKIT_HOME)
 BLOCK_DIM = int(getattr(torch.npu.get_device_properties("npu:0"), "cube_core_num", 20))
+AICORE_ARCH = "dav-c220"
 
 STACK_TUNING_FLAGS = [
     "-mllvm",
@@ -38,6 +39,33 @@ STEP03_KERNEL_FLAGS = [
 ]
 
 
+def _verify_aicore_predefines(kernel_cpp: str, include_flags: list[str], timeout: int) -> None:
+    probe = [
+        "bisheng",
+        "-dM",
+        "-E",
+        "-xcce",
+        f"--cce-aicore-arch={AICORE_ARCH}",
+        *include_flags,
+        kernel_cpp,
+    ]
+    result = subprocess.run(
+        probe,
+        check=True,
+        timeout=min(timeout, 30),
+        capture_output=True,
+        text=True,
+    )
+    macros = result.stdout
+    expected = ("#define __CCE_AICORE__ 220", "__DAV_C220_CUBE__", "__DAV_C220_VEC__")
+    if not all(token in macros for token in expected):
+        raise RuntimeError(
+            "bisheng did not expose the expected dav-c220 AICORE predefines "
+            "for this compile command. That can cause <pto/pto-inst.hpp> to "
+            "skip PTO tile/instruction headers in some preprocessing paths."
+        )
+
+
 def compile_cpp(
     kernel_cpp: str,
     *,
@@ -51,6 +79,13 @@ def compile_cpp(
     lib_dir = os.path.join(os.path.dirname(kernel_cpp), "compiled_lib")
     os.makedirs(lib_dir, exist_ok=True)
     lib_path = os.path.join(lib_dir, output_name)
+    include_flags = [
+        f"-I{PTO_LIB_PATH}/include",
+        f"-I{ASCEND_TOOLKIT_HOME}/include",
+        f"-I{ASCEND_TOOLKIT_HOME}/pkg_inc",
+        f"-I{ASCEND_TOOLKIT_HOME}/pkg_inc/runtime",
+        f"-I{ASCEND_TOOLKIT_HOME}/pkg_inc/profiling",
+    ]
 
     flags = [
         "-fPIC",
@@ -59,13 +94,9 @@ def compile_cpp(
         "-DMEMORY_BASE",
         "-O2",
         f"-std={std}",
-        "--cce-aicore-arch=dav-c220",
+        f"--cce-aicore-arch={AICORE_ARCH}",
         *(extra_flags or []),
-        f"-I{PTO_LIB_PATH}/include",
-        f"-I{ASCEND_TOOLKIT_HOME}/include",
-        f"-I{ASCEND_TOOLKIT_HOME}/pkg_inc",
-        f"-I{ASCEND_TOOLKIT_HOME}/pkg_inc/runtime",
-        f"-I{ASCEND_TOOLKIT_HOME}/pkg_inc/profiling",
+        *include_flags,
         *(defines or []),
     ]
 
@@ -74,6 +105,7 @@ def compile_cpp(
         print("compile command:", " ".join(command))
 
     try:
+        _verify_aicore_predefines(kernel_cpp, include_flags, timeout)
         subprocess.run(command, timeout=timeout, check=True)
     except Exception as exc:
         raise RuntimeError(f"Compile failed: {exc}") from exc

@@ -1,4 +1,5 @@
 #include <pto/pto-inst.hpp>
+#include <pto/common/pto_tile.hpp>
 #include <runtime/rt_ffts.h>
 
 using namespace pto;
