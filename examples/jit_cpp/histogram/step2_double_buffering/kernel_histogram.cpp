@@ -13,7 +13,9 @@ for the full License text.
 
 using namespace pto;
 
-constexpr uint32_t DEFAULT_TILE_SIZE = 512;
+#ifndef HIST_TILE_SIZE
+#define HIST_TILE_SIZE 1024
+#endif
 constexpr uint32_t MAX_BINS = 256;
 constexpr uint32_t MAX_BLOCKS = 64;
 
@@ -276,9 +278,9 @@ AICORE void runTHistogramFinal(__gm__ float *z_local, __gm__ int32_t *z,
 __global__ AICORE void histogram_local_fp32(
     __gm__ void *x, __gm__ void *z_local, const uint32_t in_length,
     const int32_t num_bins, const float min_val, const float max_val) {
-  runTLocalHistogram<float, DEFAULT_TILE_SIZE>(
-      (__gm__ float *)x, (__gm__ float *)z_local, in_length, num_bins, min_val,
-      max_val);
+  runTLocalHistogram<float, HIST_TILE_SIZE>((__gm__ float *)x,
+                                            (__gm__ float *)z_local, in_length,
+                                            num_bins, min_val, max_val);
 }
 
 __global__ AICORE void histogram_final(__gm__ void *z_local, __gm__ void *z,

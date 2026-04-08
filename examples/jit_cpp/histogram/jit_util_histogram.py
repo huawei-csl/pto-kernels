@@ -5,11 +5,14 @@ import ctypes
 import torch
 
 ASCEND_TOOLKIT_HOME = os.environ["ASCEND_TOOLKIT_HOME"]
-PTO_LIB_PATH = os.environ["PTO_LIB_PATH"]
+PTO_LIB_PATH = os.environ.get("PTO_LIB_PATH", ASCEND_TOOLKIT_HOME)
 
 
-def compile_cpp(kernel_cpp: str, verbose: bool = False, timeout: int = 120) -> str:
-    lib_path = os.path.join(os.path.dirname(kernel_cpp), "histogram_jit.so")
+def compile_cpp(
+    kernel_cpp: str, tile_size=512, verbose: bool = False, timeout: int = 120
+) -> str:
+    dirname = os.path.dirname(kernel_cpp)
+    lib_path = os.path.join(dirname, f"{dirname}_jit.so")
 
     flags = [
         "-fPIC",
@@ -17,6 +20,7 @@ def compile_cpp(kernel_cpp: str, verbose: bool = False, timeout: int = 120) -> s
         "-xcce",
         "--npu-arch=dav-2201",
         "-DMEMORY_BASE",  # here hardcoded for A2A3; TODO: expose this option to jit interface
+        "-DHIST_TILE_SIZE=" + str(tile_size),
         "-O2",
         "-std=c++17",
         f"-I{PTO_LIB_PATH}/include",
@@ -91,8 +95,8 @@ def load_lib(lib_path, check_type=True):
     return hist_func
 
 
-def jit_compile(src_path, clean_up=True):
-    lib_path = compile_cpp(src_path, verbose=True)
+def jit_compile(src_path, tile_size=512, clean_up=True):
+    lib_path = compile_cpp(src_path, tile_size=tile_size, verbose=True)
     func = load_lib(lib_path, check_type=False)
     if clean_up:
         os.remove(lib_path)
