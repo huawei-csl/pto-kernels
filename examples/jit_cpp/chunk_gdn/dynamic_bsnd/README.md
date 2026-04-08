@@ -12,11 +12,23 @@ Compared with `../static_baseline`, this path removes fixed `B/H/L` assumptions 
 Implemented today:
 
 - `chunk_cumsum_kernel.cpp`
+- `scaled_dot_kkt_kernel.cpp`
+- `wy_fast_kernel.cpp`
+- `chunk_h_kernel.cpp`
+
+Current note:
+
+- `scaled_dot_kkt` uses the PTO cube kernel for the `K @ K^T` workspace and an exact NPU Torch epilogue for the BSND/varlen coefficient application while the all-PTO vector epilogue is still being debugged. Correctness is covered; performance is not yet at the static-baseline target for this stage.
+- `wy_fast` uses PTO cube kernels for the packed `A1 @ K` and `A2 @ V` matmuls, with exact NPU Torch packing/scaling used to build `A1/A2` from the dynamic BSND inputs. Correctness is covered; performance is not yet at the static-baseline target for this stage.
+- `chunk_h` uses PTO cube kernels for the two dominant matmuls in the recurrence (`W @ S` and `K^T @ new_v`). The chunk-by-chunk recurrent sequencing is currently orchestrated on the host to keep the dynamic varlen path correct while the fully in-kernel recurrence is still being ported.
 
 Run the implemented stage checks with:
 
 ```bash
 export PTO_LIB_PATH=/sources/pto-isa
 python run_chunk_cumsum_dynamic_bsnd.py
+python run_scaled_dot_kkt_dynamic_bsnd.py
+python run_wy_fast_dynamic_bsnd.py
+python run_chunk_h_dynamic_bsnd.py
 python run_gated_delta_dynamic_bsnd.py
 ```
