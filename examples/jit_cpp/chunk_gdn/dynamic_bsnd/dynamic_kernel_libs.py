@@ -198,20 +198,12 @@ def scaled_dot_kkt_kernel(num_heads: int, hidden_size: int, chunk_size: int):
         ctypes.c_void_p,
         ctypes.c_void_p,
         ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
         ctypes.c_int64,
         ctypes.c_int64,
     ]
     lib.call_kernel.restype = None
-    lib.call_cube_only.argtypes = [
-        ctypes.c_uint32,
-        ctypes.c_void_p,
-        ctypes.c_void_p,
-        ctypes.c_void_p,
-        ctypes.c_void_p,
-        ctypes.c_int64,
-        ctypes.c_int64,
-    ]
-    lib.call_cube_only.restype = None
     return lib
 
 
@@ -334,28 +326,19 @@ def run_scaled_dot_kkt_kernel(
     k_c = k.contiguous()
     beta_c = beta.contiguous()
     g_c = g_packed.contiguous()
-    lib.call_cube_only(
+    lib.call_kernel(
         block_dim,
         stream,
         torch_to_ctypes(k_c),
+        torch_to_ctypes(beta_c),
+        torch_to_ctypes(g_c),
+        torch_to_ctypes(mask.contiguous()),
         torch_to_ctypes(workspace),
+        torch_to_ctypes(out),
         optional_torch_to_ctypes(cu_seqlens),
         batch_size,
         k.shape[1],
     )
-    total_chunks = g_packed.shape[0]
-    beta_packed = pack_bsh_tensor(beta_c, chunk_size=chunk_size, cu_seqlens=cu_seqlens)
-    valid_mask = packed_chunk_valid_mask(
-        batch=beta.shape[0],
-        total_t=beta.shape[1],
-        chunk_size=chunk_size,
-        device=beta.device,
-        cu_seqlens=cu_seqlens,
-    )
-    coeff = beta_packed.unsqueeze(-1) * torch.exp(g_c.unsqueeze(-1) - g_c.unsqueeze(-2))
-    valid_matrix = valid_mask.unsqueeze(1).unsqueeze(-1) & valid_mask.unsqueeze(1).unsqueeze(-2)
-    out_float = torch.where(valid_matrix, workspace.float() * coeff, torch.zeros_like(workspace, dtype=torch.float32))
-    out.copy_(torch.tril(out_float, diagonal=-1).to(out.dtype))
 
 
 def run_wy_fast_kernel(

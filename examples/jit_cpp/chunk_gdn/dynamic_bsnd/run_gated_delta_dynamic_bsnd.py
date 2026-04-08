@@ -11,7 +11,7 @@ def main():
     print("`dynamic_bsnd` is being ported stage-by-stage onto PTO vector/tile kernels.")
     print("Implemented stages:")
     print("  - chunk_cumsum (native BSND + packed varlen)")
-    print("  - scaled_dot_kkt (cube PTO kernel + exact NPU torch epilogue)")
+    print("  - scaled_dot_kkt (fused PTO cube+vector kernel)")
     print("  - wy_fast (cube PTO matmul kernels + exact NPU torch packing epilogue)")
     print("  - chunk_h (PTO cube matmuls with host-side recurrent sequencing)")
     print("  - chunk_o (fully fused PTO cube+vector kernel)")

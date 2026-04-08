@@ -19,7 +19,7 @@ Implemented today:
 
 Current note:
 
-- `scaled_dot_kkt` uses the PTO cube kernel for the `K @ K^T` workspace and an exact NPU Torch epilogue for the BSND/varlen coefficient application while the all-PTO vector epilogue is still being debugged. Correctness is covered; performance is not yet at the static-baseline target for this stage.
+- `scaled_dot_kkt` now runs through the fused PTO cube+vector path for both fixed-length and packed-varlen BSND inputs. The PTO vector epilogue builds and applies the packed coefficient matrix in-kernel, and the standalone stage check passes on both paths.
 - `wy_fast` uses PTO cube kernels for the packed `A1 @ K` and `A2 @ V` matmuls, with exact NPU Torch packing/scaling used to build `A1/A2` from the dynamic BSND inputs. Correctness is covered; performance is not yet at the static-baseline target for this stage.
 - `chunk_h` uses PTO cube kernels for the two dominant matmuls in the recurrence (`W @ S` and `K^T @ new_v`). The chunk-by-chunk recurrent sequencing is currently orchestrated on the host to keep the dynamic varlen path correct while the fully in-kernel recurrence is still being ported.
 - `chunk_o` now runs as one fused cube+vector PTO kernel with cross-core synchronization (`qk`, `qs`, gated `qk`, `qkv`, and direct BSND output store are all kernel-side). The current standalone check passes both fixed-length and packed-varlen cases with FP16-stage tolerances.
