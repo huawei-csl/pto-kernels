@@ -3,8 +3,12 @@ import torch_npu  # noqa
 
 from jit_util_histogram import jit_compile
 
+algo_steps = {
+    1: "step1_naive_histogram",
+    2: "step2_double_buffering",
+}
 
-def test_histogram(size_mult=1, repeat_runs=20):
+def test_histogram(algo_step=2, size_mult=1, repeat_runs=20):
     device = "npu:1"
     dtype = torch.float32
     torch.npu.set_device(device)
@@ -26,7 +30,7 @@ def test_histogram(size_mult=1, repeat_runs=20):
     # Golden PyTorch implementation
     expected_hist = torch.histc(x.cpu(), bins, min=min_val, max=max_val).to(torch.int32)
 
-    hist_func = jit_compile("kernel_histogram.cpp")
+    hist_func = jit_compile(f"{algo_steps[algo_step]}/kernel_histogram.cpp")
 
     # NPU kernel execution, test to see if any race conditions occur across multiple runs
     actual_hist = []
@@ -49,4 +53,4 @@ def test_histogram(size_mult=1, repeat_runs=20):
 
 
 if __name__ == "__main__":
-    test_histogram(size_mult=64, repeat_runs=20)
+    test_histogram(algo_step=2, size_mult=64, repeat_runs=20)
