@@ -43,6 +43,22 @@ AICORE inline void GdnWaitFlag(uint32_t id) {
   wait_flag(Src, Dst, static_cast<event_t>(id));
 }
 
+template <typename TileData>
+AICORE inline void GdnBuildLowerTriMask(TileData &mask_tile, int64_t vector_id,
+                                        bool inclusive) {
+  constexpr int32_t rows = TileData::Rows;
+  constexpr int32_t cols = TileData::Cols;
+  const int32_t row_offset = static_cast<int32_t>(vector_id) * rows;
+  for (int32_t r = 0; r < rows; ++r) {
+    const int32_t global_r = row_offset + r;
+    for (int32_t c = 0; c < cols; ++c) {
+      const bool keep = inclusive ? (global_r >= c) : (global_r > c);
+      mask_tile.SetValue(r * cols + c, keep ? static_cast<half>(1.0f)
+                                            : static_cast<half>(0.0f));
+    }
+  }
+}
+
 template <int M, int N, int K, bool TransposeA = false, bool TransposeB = false>
 AICORE inline void GdnMatmulL1(
     TileAcc<float, M, N, M, N> &dst,

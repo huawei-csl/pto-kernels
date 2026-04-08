@@ -99,6 +99,29 @@ def pack_bshd_tensor(
     return out
 
 
+def unpack_packed_bshd_tensor(
+    x_packed: torch.Tensor,
+    *,
+    output_shape: tuple[int, int, int, int],
+    chunk_size: int,
+    cu_seqlens: torch.Tensor | None = None,
+) -> torch.Tensor:
+    batch, total_t, num_heads, hidden = output_shape
+    out = torch.zeros(output_shape, device=x_packed.device, dtype=x_packed.dtype)
+    spans = _seq_spans(total_t, cu_seqlens)
+    if spans is None:
+        spans = [(b, 0, total_t) for b in range(batch)]
+    chunk_offset = 0
+    for seq_idx, bos, eos in spans:
+        batch_idx = seq_idx if cu_seqlens is None else 0
+        for start in range(bos, eos, chunk_size):
+            end = min(start + chunk_size, eos)
+            valid = end - start
+            out[batch_idx, start:end] = x_packed[chunk_offset, :, :valid].permute(1, 0, 2).contiguous()
+            chunk_offset += 1
+    return out
+
+
 @lru_cache(maxsize=None)
 def chunk_cumsum_kernel(num_heads: int, chunk_size: int):
     lib_path = compile_pto_kernel(
@@ -246,6 +269,74 @@ def chunk_h_kernel(num_heads: int, hidden_size: int, chunk_size: int):
         ctypes.c_int64,
     ]
     lib.call_kv_kernel.restype = None
+    return lib
+
+
+@lru_cache(maxsize=None)
+def chunk_o_kernel(num_heads: int, hidden_size: int, chunk_size: int):
+    lib_path = compile_pto_kernel(
+        "chunk_o_kernel.cpp",
+        "chunk_o_dynamic_bsnd.so",
+        num_heads=num_heads,
+        hidden_size=hidden_size,
+        chunk_size=chunk_size,
+    )
+    lib = ctypes.CDLL(os.path.abspath(lib_path))
+    lib.call_qk_kernel.argtypes = [
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_int64,
+        ctypes.c_int64,
+    ]
+    lib.call_qs_kernel.argtypes = [
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_int64,
+        ctypes.c_int64,
+    ]
+    lib.call_gate_qk_kernel.argtypes = [
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_int64,
+        ctypes.c_int64,
+    ]
+    lib.call_qkv_kernel.argtypes = [
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_int64,
+        ctypes.c_int64,
+    ]
+    lib.call_add_store_kernel.argtypes = [
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_int64,
+        ctypes.c_int64,
+    ]
+    lib.call_qk_kernel.restype = None
+    lib.call_qs_kernel.restype = None
+    lib.call_gate_qk_kernel.restype = None
+    lib.call_qkv_kernel.restype = None
+    lib.call_add_store_kernel.restype = None
     return lib
 
 
@@ -451,3 +542,89 @@ def run_chunk_h_kernel(
 
     for seq_idx, state in enumerate(final_states):
         fs_out[seq_idx].copy_(state)
+
+
+def run_chunk_o_kernel(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    s_packed: torch.Tensor,
+    g_packed: torch.Tensor,
+    out: torch.Tensor,
+    *,
+    chunk_size: int,
+    cu_seqlens: torch.Tensor | None = None,
+    batch_size_override: int | None = None,
+    block_dim: int | None = None,
+):
+    if block_dim is None:
+        block_dim = BLOCK_DIM
+    if cu_seqlens is not None:
+        if cu_seqlens.dtype != torch.int32:
+            raise TypeError("cu_seqlens must be int32")
+        if not cu_seqlens.is_contiguous():
+            cu_seqlens = cu_seqlens.contiguous()
+    num_heads = q.shape[2]
+    hidden_size = q.shape[3]
+    batch_size = q.shape[0] if batch_size_override is None else batch_size_override
+    total_chunks = g_packed.shape[0]
+    lib = chunk_o_kernel(num_heads, hidden_size, chunk_size)
+    stream = torch.npu.current_stream()._as_parameter_
+    workspace_qk = torch.zeros((total_chunks, num_heads, chunk_size, chunk_size), device=q.device, dtype=torch.float16)
+    workspace_qs = torch.zeros((total_chunks, num_heads, chunk_size, hidden_size), device=q.device, dtype=torch.float16)
+    workspace_qkv = torch.zeros_like(workspace_qs)
+    q_c = q.contiguous()
+    k_c = k.contiguous()
+    v_c = v.contiguous()
+    s_c = s_packed.contiguous()
+    g_c = g_packed.contiguous()
+    lib.call_qk_kernel(
+        block_dim,
+        stream,
+        torch_to_ctypes(q_c),
+        torch_to_ctypes(k_c),
+        torch_to_ctypes(workspace_qk),
+        optional_torch_to_ctypes(cu_seqlens),
+        batch_size,
+        q.shape[1],
+    )
+    lib.call_qs_kernel(
+        block_dim,
+        stream,
+        torch_to_ctypes(q_c),
+        torch_to_ctypes(s_c),
+        torch_to_ctypes(workspace_qs),
+        optional_torch_to_ctypes(cu_seqlens),
+        batch_size,
+        q.shape[1],
+    )
+    valid_mask = packed_chunk_valid_mask(
+        batch=q.shape[0],
+        total_t=q.shape[1],
+        chunk_size=chunk_size,
+        device=q.device,
+        cu_seqlens=cu_seqlens,
+    )
+    valid_matrix = valid_mask.unsqueeze(1).unsqueeze(-1) & valid_mask.unsqueeze(1).unsqueeze(-2)
+    workspace_qk.copy_(
+        torch.tril(
+            torch.where(
+                valid_matrix,
+                workspace_qk.float()
+                * torch.exp(g_c.unsqueeze(-1) - g_c.unsqueeze(-2)),
+                torch.zeros_like(workspace_qk, dtype=torch.float32),
+            ),
+            diagonal=0,
+        ).to(workspace_qk.dtype)
+    )
+    v_packed = pack_bshd_tensor(v_c, chunk_size=chunk_size, cu_seqlens=cu_seqlens).float()
+    workspace_qkv = torch.matmul(workspace_qk.float(), v_packed)
+    out_packed = workspace_qs.float() * torch.exp(g_c).unsqueeze(-1) + workspace_qkv
+    out.copy_(
+        unpack_packed_bshd_tensor(
+            out_packed.to(out.dtype),
+            output_shape=tuple(out.shape),
+            chunk_size=chunk_size,
+            cu_seqlens=cu_seqlens,
+        )
+    )
