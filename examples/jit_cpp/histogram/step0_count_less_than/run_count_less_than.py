@@ -1,4 +1,3 @@
-import random
 import torch
 import torch_npu  # noqa
 
