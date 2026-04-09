@@ -400,6 +400,35 @@ __global__ AICORE void swiglu_dynamic_fp16(__gm__ void *x, __gm__ void *y,
 #endif
 }
 
+/**
+ * Launch the fp16 SwiGLU kernel.
+ *
+ * The input matrix is interpreted as two contiguous halves along the last
+ * dimension:
+ *   `x = [A | B]`, where `A = x[:, :input_n / 2]` and
+ *   `B = x[:, input_n / 2:]`.
+ *
+ * The kernel computes SwiGLU row-wise:
+ *   `y = silu(A) * B = (A * sigmoid(A)) * B`.
+ *
+ * Implementation notes:
+ * - The output tensor is processed with a 2D tiler over rows and output cols.
+ * - For each tile, the kernel loads matching slices from `A` and `B`,
+ *   computes `silu(A) * B` in UB, then stores the result tile to `y`.
+ * - Tail cols that are not 16-aligned are padded in UB, while GM loads/stores
+ *   use the true element count to avoid reading or writing past the tensor end.
+ *
+ * @param blockDim Number of physical blocks to launch. The kernel expands this
+ *     to `blockDim * 2` logical vector blocks.
+ * @param stream Ascend runtime stream used for the kernel launch.
+ * @param x Input buffer in global memory with shape `[batch, input_n]` and
+ *     dtype `fp16`. `input_n` must be even.
+ * @param y Output buffer in global memory with shape `[batch, input_n / 2]`
+ *     and dtype `fp16`.
+ * @param batch Number of rows in `x` and `y`.
+ * @param input_n Input hidden dimension. The output hidden dimension is
+ *     `input_n / 2`.
+ */
 extern "C" void call_swiglu_kernel(uint32_t blockDim, void *stream, uint8_t *x,
                                    uint8_t *y, uint32_t batch,
                                    uint32_t input_n) {
