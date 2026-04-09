@@ -80,8 +80,7 @@ AICORE void runTCsrGather(__gm__ T* values, __gm__ int32_t* indices,
   TileDataX xTiles(x_size);
   TASSIGN(xTiles, X_T_ADDR);
   TLOAD(xTiles, xGlobal);
-  set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
-  wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+  set_flag(PIPE_MTE2, PIPE_V, EVENT_ID2);
 
   // Unlock first iteration
   set_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
@@ -131,6 +130,10 @@ AICORE void runTCsrGather(__gm__ T* values, __gm__ int32_t* indices,
 
     // Wait for MT2 (current load) to be done
     wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+    wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID2);
+    // This barrier is needed only for the
+    // first iteration when the load of x might not be done yet
+    set_flag(PIPE_MTE2, PIPE_V, EVENT_ID2);
 
     // Wait for mul to be done (previous iteration's computation)
     pipe_barrier(PIPE_V);
@@ -179,6 +182,7 @@ AICORE void runTCsrGather(__gm__ T* values, __gm__ int32_t* indices,
   wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
   wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
   wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID1);
+  wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID2);
 }
 
 extern "C" __global__ AICORE void vcsr_gather_fp16(GM_ADDR values,
