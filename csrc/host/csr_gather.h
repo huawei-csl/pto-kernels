@@ -19,7 +19,7 @@ namespace pto_isa_ops {
 
 /**
  * @brief Runs the CSR gather operation.
- *  z = values[indices] * x
+ *  z = values * x[indices]
  *
  * @param [in] values Input tensor of dtype fp16 or fp32.
  * @param [in] indices Input tensor of dtype int32.

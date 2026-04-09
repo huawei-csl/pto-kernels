@@ -17,7 +17,7 @@ for the full License text.
 
 using namespace pto;
 
-constexpr uint32_t UB_USABLE_BYTES = 184 * 1024;
+constexpr uint32_t UB_USABLE_BYTES = 192 * 1024;
 constexpr uint32_t UB_ZERO_ADDR = 0;
 
 /**
@@ -88,9 +88,11 @@ AICORE void runTCsrGather(__gm__ T* values, __gm__ int32_t* indices,
   set_flag(PIPE_V, PIPE_MTE2, EVENT_ID1);
 
   // Loop for full size tiles
-  for (uint32_t inner_offset = global_offset; inner_offset < indices_size;
+  const uint32_t offset_end =
+      min(global_offset + TILE_SIZE * num_tiles_per_block, indices_size);
+  for (uint32_t inner_offset = global_offset; inner_offset < offset_end;
        inner_offset += TILE_SIZE) {
-    const uint32_t remainder_size = indices_size - inner_offset;
+    const uint32_t remainder_size = offset_end - inner_offset;
     const int32_t remaining_elements =
         remainder_size > TILE_SIZE ? TILE_SIZE : remainder_size;
 
@@ -190,7 +192,7 @@ extern "C" __global__ AICORE void vcsr_gather_fp16(GM_ADDR values,
                                                    GM_ADDR z, uint32_t x_size,
                                                    uint32_t indices_size) {
   constexpr uint32_t TILE_SIZE = 512;
-  constexpr uint32_t TILE_SIZE_X = 2 << 14;
+  constexpr uint32_t TILE_SIZE_X = 1 << 14;
   runTCsrGather<half, TILE_SIZE, TILE_SIZE_X>(
       (__gm__ half*)values, (__gm__ int32_t*)indices, (__gm__ half*)x,
       (__gm__ half*)z, x_size, indices_size);
@@ -201,7 +203,7 @@ extern "C" __global__ AICORE void vcsr_gather_fp32(GM_ADDR values,
                                                    GM_ADDR z, uint32_t x_size,
                                                    uint32_t indices_size) {
   constexpr uint32_t TILE_SIZE = 512;
-  constexpr uint32_t TILE_SIZE_X = 2 << 14;
+  constexpr uint32_t TILE_SIZE_X = 1 << 14;
   runTCsrGather<float, TILE_SIZE, TILE_SIZE_X>(
       (__gm__ float*)values, (__gm__ int32_t*)indices, (__gm__ float*)x,
       (__gm__ float*)z, x_size, indices_size);
