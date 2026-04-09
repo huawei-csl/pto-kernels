@@ -52,10 +52,10 @@ AICORE void runTCsrGather(__gm__ T* values, __gm__ int32_t* indices,
   constexpr uint32_t TILE_SIZE_X_IN_BYTES = TILE_SIZE_X * sizeof(T);
   constexpr uint32_t TILE_SIZE_IDX_IN_BYTES = TILE_SIZE * sizeof(int32_t);
   constexpr uint32_t V_T_ADDR = UB_ZERO_ADDR;
-  constexpr uint32_t W_T_ADDR = V_T_ADDR + TILE_SIZE_IN_BYTES;
-  constexpr uint32_t Z_T_ADDR = W_T_ADDR + TILE_SIZE_IN_BYTES;
-  constexpr uint32_t IDX_T_ADDR = Z_T_ADDR + TILE_SIZE_IN_BYTES;
-  constexpr uint32_t X_T_ADDR = IDX_T_ADDR + TILE_SIZE_IDX_IN_BYTES;
+  constexpr uint32_t W_T_ADDR = V_T_ADDR + 2 * TILE_SIZE_IN_BYTES;
+  constexpr uint32_t Z_T_ADDR = W_T_ADDR + 2 * TILE_SIZE_IN_BYTES;
+  constexpr uint32_t IDX_T_ADDR = Z_T_ADDR + 2 * TILE_SIZE_IN_BYTES;
+  constexpr uint32_t X_T_ADDR = IDX_T_ADDR + 2 * TILE_SIZE_IDX_IN_BYTES;
   static_assert(X_T_ADDR + TILE_SIZE_X_IN_BYTES <= UB_USABLE_BYTES,
                 "CSR gather UB layout exceeds usable UB.");
 
@@ -80,14 +80,19 @@ AICORE void runTCsrGather(__gm__ T* values, __gm__ int32_t* indices,
   TileDataX xTiles(x_size);
   TASSIGN(xTiles, X_T_ADDR);
   TLOAD(xTiles, xGlobal);
-  set_flag(PIPE_MTE2, PIPE_V, EVENT_ID2);
+  set_flag(PIPE_MTE2, PIPE_V, EVENT_ID5);
+  set_flag(PIPE_MTE2, PIPE_V, EVENT_ID7);
 
   // Unlock first iteration
   set_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
   set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
   set_flag(PIPE_V, PIPE_MTE2, EVENT_ID1);
+  set_flag(PIPE_MTE3, PIPE_V, EVENT_ID2);
+  set_flag(PIPE_V, PIPE_MTE2, EVENT_ID2);
+  set_flag(PIPE_V, PIPE_MTE2, EVENT_ID3);
 
   // Loop over tiles
+  bool ping = true;
   const uint32_t offset_end =
       min(global_offset + TILE_SIZE * num_tiles_per_block, indices_size);
   for (uint32_t inner_offset = global_offset; inner_offset < offset_end;
@@ -115,27 +120,32 @@ AICORE void runTCsrGather(__gm__ T* values, __gm__ int32_t* indices,
     TileDataIdx idxTiles(remaining_elements);
 
     // Assign the UB address for each tile
-    TASSIGN(valTiles, V_T_ADDR);
-    TASSIGN(wTiles, W_T_ADDR);
-    TASSIGN(zTiles, Z_T_ADDR);
-    TASSIGN(idxTiles, IDX_T_ADDR);
+    const int8_t shift = ping ? 0 : 1;
+    TASSIGN(valTiles, V_T_ADDR + ping * TILE_SIZE_IN_BYTES);
+    TASSIGN(wTiles, W_T_ADDR + ping * TILE_SIZE_IN_BYTES);
+    TASSIGN(zTiles, Z_T_ADDR + ping * TILE_SIZE_IN_BYTES);
+    TASSIGN(idxTiles, IDX_T_ADDR + ping * TILE_SIZE_IDX_IN_BYTES);
+
+    event_t ev0 = ping ? (event_t)EVENT_ID0 : (event_t)EVENT_ID2;
+    event_t ev1 = ping ? (event_t)EVENT_ID1 : (event_t)EVENT_ID3;
+    event_t ev5 = ping ? (event_t)EVENT_ID5 : (event_t)EVENT_ID7;
 
     // MTE2 (load) wait for gather to be done
     // (previous iteration's computation)
-    wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID1);
+    wait_flag(PIPE_V, PIPE_MTE2, ev1);
 
     // Load data from global memory to UB buffer
     TLOAD(idxTiles, idxGlobal);
 
     // Signal end of current load to vector core
-    set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+    set_flag(PIPE_MTE2, PIPE_V, ev0);
 
     // Wait for MT2 (current load) to be done
-    wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
-    wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID2);
+    wait_flag(PIPE_MTE2, PIPE_V, ev0);
     // This barrier is needed only for the
     // first iteration when the load of x might not be done yet
-    set_flag(PIPE_MTE2, PIPE_V, EVENT_ID2);
+    wait_flag(PIPE_MTE2, PIPE_V, ev5);
+    set_flag(PIPE_MTE2, PIPE_V, ev5);
 
     // Wait for mul to be done (previous iteration's computation)
     pipe_barrier(PIPE_V);
@@ -144,21 +154,21 @@ AICORE void runTCsrGather(__gm__ T* values, __gm__ int32_t* indices,
     TGATHER(wTiles, xTiles, idxTiles);
 
     // Signal end of gather to MTE2 (next load)
-    set_flag(PIPE_V, PIPE_MTE2, EVENT_ID1);
+    set_flag(PIPE_V, PIPE_MTE2, ev1);
 
     // Wait for mul to be done (previous iteration's computation)
-    wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+    wait_flag(PIPE_V, PIPE_MTE2, ev0);
 
     // Load data from global memory to UB buffer
     TLOAD(valTiles, valGlobal);
 
     // Signal end of current load to vector core
-    set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+    set_flag(PIPE_MTE2, PIPE_V, ev0);
 
     // Wait for MT2 (current load) and MT3
     // (previous iteration's store) to be done
-    wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
-    wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
+    wait_flag(PIPE_MTE2, PIPE_V, ev0);
+    wait_flag(PIPE_MTE3, PIPE_V, ev0);
 
     // Wait for gather to be done
     pipe_barrier(PIPE_V);
@@ -168,30 +178,36 @@ AICORE void runTCsrGather(__gm__ T* values, __gm__ int32_t* indices,
 
     // Signal end of computation to MT3 (current store)
     // and to MTE2 (next load)
-    set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
-    set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+    set_flag(PIPE_V, PIPE_MTE3, ev0);
+    set_flag(PIPE_V, PIPE_MTE2, ev0);
 
     // Wait for mul to be done before store
-    wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+    wait_flag(PIPE_V, PIPE_MTE3, ev0);
 
     // Store result from UB buffer to GM
     TSTORE(zGlobal, zTiles);
 
     // Signal end of MTE3 (current store) to vector core
-    set_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
+    set_flag(PIPE_MTE3, PIPE_V, ev0);
+
+    ping = !ping;
   }
   // Cleanup flags
   wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
   wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
   wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID1);
-  wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID2);
+  wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID2);
+  wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID2);
+  wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID3);
+  wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID5);
+  wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID7);
 }
 
 extern "C" __global__ AICORE void vcsr_gather_fp16(GM_ADDR values,
                                                    GM_ADDR indices, GM_ADDR x,
                                                    GM_ADDR z, uint32_t x_size,
                                                    uint32_t indices_size) {
-  constexpr uint32_t TILE_SIZE = 512;
+  constexpr uint32_t TILE_SIZE = 128;
   constexpr uint32_t TILE_SIZE_X = 40960;
   runTCsrGather<half, TILE_SIZE, TILE_SIZE_X>(
       (__gm__ half*)values, (__gm__ int32_t*)indices, (__gm__ half*)x,
@@ -202,7 +218,7 @@ extern "C" __global__ AICORE void vcsr_gather_fp32(GM_ADDR values,
                                                    GM_ADDR indices, GM_ADDR x,
                                                    GM_ADDR z, uint32_t x_size,
                                                    uint32_t indices_size) {
-  constexpr uint32_t TILE_SIZE = 512;
+  constexpr uint32_t TILE_SIZE = 128;
   constexpr uint32_t TILE_SIZE_X = 40960;
   runTCsrGather<float, TILE_SIZE, TILE_SIZE_X>(
       (__gm__ float*)values, (__gm__ int32_t*)indices, (__gm__ float*)x,
