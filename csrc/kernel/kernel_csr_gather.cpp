@@ -87,7 +87,7 @@ AICORE void runTCsrGather(__gm__ T* values, __gm__ int32_t* indices,
   set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
   set_flag(PIPE_V, PIPE_MTE2, EVENT_ID1);
 
-  // Loop for full size tiles
+  // Loop over tiles
   const uint32_t offset_end =
       min(global_offset + TILE_SIZE * num_tiles_per_block, indices_size);
   for (uint32_t inner_offset = global_offset; inner_offset < offset_end;

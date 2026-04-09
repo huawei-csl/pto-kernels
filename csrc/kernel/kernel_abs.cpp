@@ -30,7 +30,7 @@ template <typename T, uint32_t TILE_SIZE>
 AICORE void runTAbs(__gm__ T* x, __gm__ T* z, uint32_t total_size) {
   // Define GM tile type
   using ShapeDim5 = pto::Shape<1, 1, 1, 1, DYNAMIC>;
-  using StrideDim5 = pto::Stride<-1, -1, -1, -1, 1>;
+  using StrideDim5 = pto::Stride<1, 1, 1, 1, 1>;
   using GlobalData = pto::GlobalTensor<T, ShapeDim5, StrideDim5>;
 
   // Define UB tile type
@@ -62,12 +62,8 @@ AICORE void runTAbs(__gm__ T* x, __gm__ T* z, uint32_t total_size) {
         remainder_size > TILE_SIZE ? TILE_SIZE : remainder_size;
 
     // Define tile on GM
-    GlobalData xGlobal(x + inner_offset, {remaining_elements},
-                       {remaining_elements, remaining_elements,
-                        remaining_elements, remaining_elements});
-    GlobalData zGlobal(z + inner_offset, {remaining_elements},
-                       {remaining_elements, remaining_elements,
-                        remaining_elements, remaining_elements});
+    GlobalData xGlobal(x + inner_offset, {remaining_elements});
+    GlobalData zGlobal(z + inner_offset, {remaining_elements});
 
     // Define tile UB buffer
     TileData xTiles(remaining_elements);
