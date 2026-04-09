@@ -258,24 +258,32 @@ def chunk_h_kernel(num_heads: int, hidden_size: int, chunk_size: int):
         chunk_size=chunk_size,
     )
     lib = ctypes.CDLL(os.path.abspath(lib_path))
-    lib.call_ws_kernel.argtypes = [
+@lru_cache(maxsize=None)
+def chunk_h_kernel(num_heads: int, hidden_size: int, chunk_size: int):
+    lib_path = compile_pto_kernel(
+        "chunk_h_kernel.cpp",
+        "chunk_h_dynamic_bsnd.so",
+        num_heads=num_heads,
+        hidden_size=hidden_size,
+        chunk_size=chunk_size,
+    )
+    lib = ctypes.CDLL(os.path.abspath(lib_path))
+    lib.call_kernel.argtypes = [
         ctypes.c_uint32,
         ctypes.c_void_p,
         ctypes.c_void_p,
         ctypes.c_void_p,
         ctypes.c_void_p,
-        ctypes.c_int64,
-    ]
-    lib.call_ws_kernel.restype = None
-    lib.call_kv_kernel.argtypes = [
-        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
         ctypes.c_void_p,
         ctypes.c_void_p,
         ctypes.c_void_p,
         ctypes.c_void_p,
         ctypes.c_int64,
+        ctypes.c_int64,
     ]
-    lib.call_kv_kernel.restype = None
+    lib.call_kernel.restype = None
     return lib
 
 
@@ -439,58 +447,27 @@ def run_chunk_h_kernel(
     lib = chunk_h_kernel(num_heads, hidden_size, chunk_size)
     stream = torch.npu.current_stream()._as_parameter_
 
-    spans = _seq_spans(k.shape[1], cu_seqlens)
-    if spans is None:
-        spans = [(b, 0, k.shape[1]) for b in range(k.shape[0])]
-    chunk_offset = 0
-    final_states = []
-    packed_k = pack_bshd_tensor(k.contiguous(), chunk_size=chunk_size, cu_seqlens=cu_seqlens)
-    for seq_idx, bos, eos in spans:
-        seq_chunk_num = (eos - bos + chunk_size - 1) // chunk_size
-        state = torch.zeros((num_heads, hidden_size, hidden_size), device=k.device, dtype=torch.float32)
-        for local_idx in range(seq_chunk_num):
-            idx = chunk_offset + local_idx
-            s_out[idx].copy_(state.to(s_out.dtype))
-            valid = min(chunk_size, eos - (bos + local_idx * chunk_size))
-            state_chunk = state.unsqueeze(0).to(torch.float16).contiguous()
-            ws_chunk = torch.zeros((1, num_heads, chunk_size, hidden_size), device=k.device, dtype=torch.float32)
-            lib.call_ws_kernel(
-                block_dim,
-                stream,
-                torch_to_ctypes(w_packed[idx : idx + 1].contiguous()),
-                torch_to_ctypes(state_chunk),
-                torch_to_ctypes(ws_chunk),
-                1,
-            )
-            torch.npu.synchronize()
-            ws = ws_chunk[0, :, :valid].float()
-            u = u_packed[idx, :, :valid].float()
-            new_v = u - ws
-            nv_out[idx, :, :valid].copy_(new_v.to(nv_out.dtype))
-            g_chunk = g_packed[idx, :, :valid].float()
-            g_last = g_chunk[:, valid - 1].view(num_heads, 1, 1)
-            coeff = torch.exp(g_last - g_chunk.view(num_heads, valid, 1))
-            k_scaled_chunk = torch.zeros((1, num_heads, chunk_size, hidden_size), device=k.device, dtype=torch.float16)
-            k_scaled_chunk[0, :, :valid].copy_((packed_k[idx, :, :valid].float() * coeff).to(k_scaled_chunk.dtype))
-            kv_chunk = torch.zeros((1, num_heads, hidden_size, hidden_size), device=k.device, dtype=torch.float32)
-            new_v_chunk = torch.zeros((1, num_heads, chunk_size, hidden_size), device=k.device, dtype=torch.float16)
-            new_v_chunk[0, :, :valid].copy_(new_v.to(new_v_chunk.dtype))
-            lib.call_kv_kernel(
-                block_dim,
-                stream,
-                torch_to_ctypes(k_scaled_chunk),
-                torch_to_ctypes(new_v_chunk),
-                torch_to_ctypes(kv_chunk),
-                1,
-            )
-            torch.npu.synchronize()
-            g_last_e = torch.exp(g_chunk[:, valid - 1]).view(num_heads, 1, 1)
-            state = state * g_last_e + kv_chunk[0].float()
-        final_states.append(state.to(fs_out.dtype))
-        chunk_offset += seq_chunk_num
+    workspace = torch.zeros(
+        (block_dim * 3, hidden_size, hidden_size),
+        device=k.device,
+        dtype=torch.float16,
+    )
 
-    for seq_idx, state in enumerate(final_states):
-        fs_out[seq_idx].copy_(state)
+    lib.call_kernel(
+        block_dim,
+        stream,
+        torch_to_ctypes(k.contiguous()),
+        torch_to_ctypes(w_packed.contiguous()),
+        torch_to_ctypes(u_packed.contiguous()),
+        torch_to_ctypes(g_packed.contiguous()),
+        torch_to_ctypes(s_out),
+        torch_to_ctypes(nv_out),
+        torch_to_ctypes(fs_out),
+        torch_to_ctypes(workspace),
+        optional_torch_to_ctypes(cu_seqlens),
+        batch_size,
+        k.shape[1],
+    )
 
 
 def run_chunk_o_kernel(

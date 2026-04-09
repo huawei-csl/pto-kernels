@@ -22,24 +22,22 @@ Current status:
 - All stage checks in `run_gated_delta_dynamic_bsnd.py` currently pass for both fixed-length BSND inputs and packed-varlen BSND inputs where applicable.
 - `chunk_cumsum` is native PTO vector code and passes its fixed and packed-varlen checks.
 - `scaled_dot_kkt` runs through one fused PTO cube+vector kernel. The coefficient build, masking, and packed output store are all kernel-side, and the stage check passes on both fixed and packed-varlen inputs.
-- `wy_fast` is still hybrid. The packed `A1 @ K` and `A2 @ V` matmuls are PTO cube kernels, but the dynamic BSND packing/scaling for `A1/A2` still falls back to exact NPU Torch helper code for correctness. The stage check passes, but this stage is not yet fully de-hybridized and is still far slower than the static reference.
-- `chunk_h` is still hybrid. The dominant `W @ S` and `K^T @ new_v` matmuls use PTO cube kernels, but the chunk-by-chunk recurrence and final state propagation are still orchestrated on the host. The stage check passes for fixed and packed-varlen inputs.
+- `wy_fast` runs as one fused PTO cube+vector kernel. The `A1 = A * (exp(g) * beta)` and `A2 = A * beta` coefficient builds use `TROWEXPANDMUL` for row-wise scaling, and the packed `A1 @ K` / `A2 @ V` matmuls are all kernel-side. The stage check passes on both fixed and packed-varlen inputs.
+- `chunk_h` runs as one fused PTO cube+vector kernel with cross-core synchronization. The chunk-by-chunk recurrence (`state = state * exp(g_last) + K^T @ new_v`) is fully kernel-side with sequential chunks processed per (seq, head) work item. The stage check passes for fixed and packed-varlen inputs.
 - `chunk_o` runs as one fused PTO cube+vector kernel with cross-core synchronization. `qk`, `qs`, gated `qk`, `qkv`, and direct BSND output store are all kernel-side, and the stage check passes on both fixed and packed-varlen inputs with FP16-stage tolerances.
 
 Latest stage-check outputs from `run_gated_delta_dynamic_bsnd.py`:
 
-- `chunk_cumsum`: fixed `0.074 ms`, packed-varlen `0.072 ms`
-- `scaled_dot_kkt`: fixed `0.064 ms, 0.52 TFLOP/s`, packed-varlen `0.062 ms, 0.41 TFLOP/s`
-- `wy_fast`: fixed `1.934 ms, 0.03 TFLOP/s`, packed-varlen `1.645 ms, 0.03 TFLOP/s`
-- `chunk_h`: fixed `4.611 ms`, packed-varlen `3.620 ms`
-- `chunk_o`: fixed `0.167 ms, 0.40 TFLOP/s`, packed-varlen `0.172 ms, 0.29 TFLOP/s`
+- `chunk_cumsum`: fixed `0.064 ms`, packed-varlen `0.063 ms`
+- `scaled_dot_kkt`: fixed `0.066 ms, 0.51 TFLOP/s`, packed-varlen `0.065 ms, 0.39 TFLOP/s`
+- `wy_fast`: fixed `0.167 ms, 0.40 TFLOP/s`, packed-varlen `0.167 ms, 0.30 TFLOP/s`
+- `chunk_h`: fixed `0.144 ms`, packed-varlen `0.146 ms`
+- `chunk_o`: fixed `0.197 ms, 0.34 TFLOP/s`, packed-varlen `0.199 ms, 0.25 TFLOP/s`
 
 Important caveats:
 
 - The current driver is a stage-validation suite, not a fully native end-to-end GDN kernel chain.
-- `wy_fast` and `chunk_h` still rely on Torch-side fallback/orchestration for correctness.
-- The dynamic kernels remain much slower than the original static kernels, so correctness is ahead of performance at the moment.
-- The latest native `wy_fast` debugging still points to the vector-side `A1 = A * (exp(g) * beta)` path as the main unresolved bug. Row-wise `beta` handling for `A2` is much closer than before, but the native `g` / `TEXP` path still corrupts leading rows of a half-chunk, so the public wrapper remains on the host-backed correctness path.
+- All five stages (`chunk_cumsum`, `scaled_dot_kkt`, `wy_fast`, `chunk_h`, `chunk_o`) are now fully fused PTO kernels with no Torch fallback.
 
 Run the implemented stage checks with:
 

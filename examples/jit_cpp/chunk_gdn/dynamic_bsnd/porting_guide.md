@@ -12,8 +12,11 @@ The goal of the port is not only to accept runtime `batch` and `seq_len`, but al
 
 - `chunk_cumsum` is native dynamic BSND PTO code.
 - `scaled_dot_kkt` is a fused cube+vector PTO kernel and passes fixed plus packed-varlen checks.
+- `wy_fast` is a fused cube+vector PTO kernel and passes fixed plus packed-varlen checks.
+- `chunk_h` is a fused cube+vector PTO kernel with cross-core synchronized recurrence and passes fixed plus packed-varlen checks.
 - `chunk_o` is a fused cube+vector PTO kernel and passes fixed plus packed-varlen checks.
-- `wy_fast` and `chunk_h` still pass correctness today, but still rely on host-side fallback/orchestration for part of the algorithm.
+
+All five stages are now fully native PTO kernels with no Torch fallback or host-side orchestration.
 
 ## Porting principles that worked
 
@@ -143,7 +146,7 @@ Lessons:
 - do not assume the extraction pattern from one stage transfers unchanged to another
 - when a tile API behaves unexpectedly, reduce the load path to the simplest possible contiguous block and rebuild the intended vector in UB manually
 
-This was crucial for the `scaled_dot_kkt` fusion effort and remains the key issue in the unfinished native `wy_fast` port.
+This was crucial for the `scaled_dot_kkt` fusion effort and was also important for the `wy_fast` native port.
 
 ### 9. Probe kernels are worth it for hard vector bugs
 
@@ -174,6 +177,29 @@ Recommended order:
 
 Trying to debug the full GDN chain before each stage is stable makes failures much harder to localize.
 
+### 11. Prefer tensor operations over scalar loops for row-wise scaling
+
+The `wy_fast` port hit a persistent bug where scalar `TMULS` loops corrupted the last two rows of each half-chunk (rows 62, 63 and 126, 127). The root cause was pipeline synchronization between the scalar pipe (`GetValue`) and the vector pipe (`TMULS`). Explicit `set_flag(PIPE_V, PIPE_S)` / `wait_flag` partially helped but did not fully resolve the issue across both sub-blocks.
+
+The fix was to replace the scalar loop entirely with `TROWEXPANDMUL`, which performs row-wise scaling as a single tensor operation without any scalar-vector pipe interaction. This pattern should be preferred wherever a 2D tile needs per-row scaling by a 1D coefficient vector.
+
+The `TROWEXPANDMUL` approach requires:
+
+- a `[Rows, Cols]` RowMajor source tile
+- a `[Rows, 1]` ColMajor coefficient tile (aliased at the same UB address as a `[1, Rows]` RowMajor tile)
+
+### 12. Cross-core flag management across work items requires care
+
+For kernels that process multiple work items per block (e.g., `chunk_h` iterating over `(seq, head)` pairs), cross-core flags can leak between work items if not managed carefully.
+
+The safe pattern is:
+
+- only signal a flag when the other side is guaranteed to wait for it
+- do not signal the final handshake flag after the last iteration of an inner loop
+- let the initialization phase of the next work item provide the first signal
+
+In `chunk_h`, flag 3 (vector-to-cube state ready) is signaled before the chunk loop starts and after each non-final chunk, but NOT after the final chunk. This ensures the cube sees exactly `chunk_num` flag-3 signals per work item.
+
 ## Kernel-specific lessons
 
 ### `chunk_cumsum`
@@ -195,21 +221,26 @@ Trying to debug the full GDN chain before each stage is stable makes failures mu
 
 ### `wy_fast`
 
-- the fused kernel structure exists and mostly mirrors the static version
-- the remaining native bug is in the dynamic BSND vector-side coefficient build for `A1/A2`, especially around half-chunk boundaries and row-wise scaling semantics
-- the current correctness path still uses exact Torch helpers for packed `A1/A2`
-- the latest native debugging narrowed the failure further:
-  - row-wise `beta` scaling for `A2` is much closer to correct than the older column-scaling attempt
-  - the most suspicious remaining issue is now the native `g` load plus `TEXP` path for `A1`
-  - identity probes (`beta = 1`, `g = 0`) showed that the native `A1` path can still corrupt leading rows of a half-chunk even when `A2` is otherwise correct
-  - additional scratch-row `TEXP` experiments did not eliminate that leading-row corruption, so the bug is likely deeper than a simple scalar-exp patch
-  - future work should debug native `g` extraction and exponentiation first, before changing the cube matmul path again
+- the fused kernel mirrors the static version's math and sync pattern
+- the key breakthrough was replacing scalar `TMULS` loops for row-wise coefficient scaling with `TROWEXPANDMUL`, which avoids pipeline stall issues that corrupted half-chunk boundary rows
+- the `A1 = A * (exp(g) * beta)` and `A2 = A * beta` coefficient builds are fully kernel-side
+- earlier debugging showed that the scalar `TMULS` loop had systematic corruption at rows 62, 63, 126, 127 (last two rows of each half-chunk), caused by pipeline synchronization issues between the scalar and vector pipes
+- `TROWEXPANDMUL` performs the entire row-wise scaling in a single tensor operation, eliminating the pipeline sync problem
+- `TEXP` on the full-chunk `g_ub` buffer works correctly when the packed `g` tensor is pre-padded with zeros
+- the successful end state is one fused cube+vector kernel with no Torch fallback
 
 ### `chunk_h`
 
-- the cube matmuls are straightforward
-- the hard part is the recurrence: state carry, `new_v`, `K^T @ new_v`, and final-state updates must all be made native while preserving varlen correctness
-- this stage likely needs a more deliberate kernel design rather than only translating the existing host loop line by line
+- the fused kernel uses a 4-point cross-core handshake per chunk iteration (flags 0, 1, 2, 3)
+- cube computes `ws = W @ state` (flag 0) and `kv = k_scaled^T @ new_v` (flag 2)
+- vector computes coefficients, `k_scaled`, `new_v` (flag 1) and updates `state = state * exp(g_last) + kv` (flag 3)
+- each block processes one `(sequence, head)` work item and iterates sequentially over its chunks
+- state is carried between chunks via a per-block half-precision GM workspace
+- the vector side handles both sub-blocks' state portions (64 rows each of the 128x128 state matrix) even when `local_rows == 0` for K/U/new_v
+- cross-core flag 3 is only signaled when there is a subsequent chunk to process, preventing stale flags across work items
+- dynamic L1 tiles with `PadValue::Zero` handle partial chunks: the cube loads only `valid_rows` from k_scaled and new_v workspaces
+- K is loaded from BSND layout with dynamic zero-padded UB tiles; new_v is stored to `nv_out` with dynamic stores to preserve zero-padding for invalid rows
+- the successful end state is one fused cube+vector kernel with no host-side recurrence loop
 
 ## Recommended debugging workflow
 
@@ -229,11 +260,11 @@ Trying to debug the full GDN chain before each stage is stable makes failures mu
   - reducing extra GM traffic
   - shrinking temporary workspace
   - improving vector-side coefficient generation
-  - removing remaining host fallback/orchestration
+  - tuning synchronization granularity
 
 ## Practical advice for future work
 
-- Treat `scaled_dot_kkt` and `chunk_o` as the best current native references in this directory.
+- Treat `scaled_dot_kkt`, `wy_fast`, `chunk_h`, and `chunk_o` as working fused cube+vector references in this directory.
 - Treat `linear_attention.cpp` as the best cross-core fusion reference.
 - Keep new experiments local to one stage at a time.
-- Do not discard the host-backed path for `wy_fast` or `chunk_h` until the native replacement fully passes both fixed and packed-varlen checks.
+- All five stages are now fully native. Future work should focus on performance optimization and large-shape benchmarking.

@@ -1,17 +1,16 @@
 # Dynamic BSND GDN Todo Items
 
-This file is a handoff note for the remaining work in `dynamic_bsnd`.
+This file is a handoff note for the `dynamic_bsnd` port.
 
 It summarizes:
 
 - what currently passes
-- what is still hybrid
-- what the known performance gap is
-- which next debugging and optimization actions are most promising
+- what was completed
+- what the remaining optimization opportunities are
 
 ## What is passing today
 
-As of the latest verification run, the stage-validation driver `run_gated_delta_dynamic_bsnd.py` passes all currently implemented stage checks:
+All five stage kernels are fully native PTO kernels with no Torch fallback or host-side orchestration. The stage-validation driver `run_gated_delta_dynamic_bsnd.py` passes all checks:
 
 - `chunk_cumsum`
 - `scaled_dot_kkt`
@@ -28,179 +27,92 @@ python run_gated_delta_dynamic_bsnd.py
 
 Latest reported outputs:
 
-- `chunk_cumsum`: fixed `0.074 ms`, packed-varlen `0.072 ms`
-- `scaled_dot_kkt`: fixed `0.064 ms, 0.52 TFLOP/s`, packed-varlen `0.062 ms, 0.41 TFLOP/s`
-- `wy_fast`: fixed `1.934 ms, 0.03 TFLOP/s`, packed-varlen `1.645 ms, 0.03 TFLOP/s`
-- `chunk_h`: fixed `4.611 ms`, packed-varlen `3.620 ms`
-- `chunk_o`: fixed `0.167 ms, 0.40 TFLOP/s`, packed-varlen `0.172 ms, 0.29 TFLOP/s`
+- `chunk_cumsum`: fixed `0.064 ms`, packed-varlen `0.063 ms`
+- `scaled_dot_kkt`: fixed `0.066 ms, 0.51 TFLOP/s`, packed-varlen `0.065 ms, 0.39 TFLOP/s`
+- `wy_fast`: fixed `0.167 ms, 0.40 TFLOP/s`, packed-varlen `0.167 ms, 0.30 TFLOP/s`
+- `chunk_h`: fixed `0.144 ms`, packed-varlen `0.146 ms`
+- `chunk_o`: fixed `0.197 ms, 0.34 TFLOP/s`, packed-varlen `0.199 ms, 0.25 TFLOP/s`
 
-## Remaining high-level problems
+## Completed milestones
 
-### 1. `wy_fast` is still hybrid
+### `wy_fast` — fully native (was hybrid)
 
-Current state:
+Previous state:
 
-- PTO cube kernels are used for the packed `A1 @ K` and `A2 @ V` matmuls.
-- Torch/NPU helper code still builds the dynamic BSND packed `A1` and `A2` tensors for correctness.
+- PTO cube kernels handled `A1 @ K` and `A2 @ V` matmuls.
+- Torch/NPU helper code still built the packed `A1` and `A2` coefficient tensors on the host.
+- Performance was ~1.9 ms (0.03 TFLOP/s).
 
-Why this matters:
+What was done:
 
-- this stage is not yet a fully native dynamic BSND PTO kernel
-- the fallback keeps extra host-side logic in the execution path
-- performance remains far below the static reference
+- Replaced the scalar `TMULS` loops for row-wise coefficient scaling with `TROWEXPANDMUL` tensor operations.
+- The scalar loops had systematic corruption at rows 62, 63, 126, 127 (last two rows of each half-chunk) caused by pipeline synchronization issues between the scalar and vector pipes.
+- `TROWEXPANDMUL` performs the entire row-wise scaling in one tensor operation, eliminating the pipeline sync problem.
+- Both `A1 = A * (exp(g) * beta)` and `A2 = A * beta` coefficient builds are now fully kernel-side.
+- The Torch fallback in `dynamic_kernel_libs.py` was removed; the fused `call_kernel` entry point handles everything.
 
-### 2. `chunk_h` is still hybrid
+Result:
 
-Current state:
+- Performance improved from ~1.9 ms to ~0.17 ms (over 10x speedup).
+- Both fixed-BSND and packed-varlen checks pass.
 
-- PTO cube kernels are used for `W @ S` and `K^T @ new_v`
-- the recurrent state update and chunk-by-chunk sequencing are still driven on the host
+### `chunk_h` — fully native (was hybrid)
 
-Why this matters:
+Previous state:
 
-- the recurrence is not yet a native dynamic BSND kernel
-- host orchestration makes the stage much harder to optimize
-- it prevents the chain from becoming a fully kernel-side GDN implementation
+- PTO cube kernels handled `W @ S` and `K^T @ new_v` matmuls.
+- The chunk-by-chunk recurrence, `new_v` computation, coefficient calculation, and final-state propagation were all driven on the host with Python loops and `torch.npu.synchronize()` calls.
+- Performance was ~4.6 ms.
 
-### 3. Dynamic kernels are still much slower than static references
+What was done:
 
-Even the stages that are now native and fused still trail the original static kernels by a large margin.
+- Designed and implemented a single fused PTO cube+vector kernel with a 4-point cross-core handshake per chunk iteration.
+- Cube computes `ws = W @ state` (flag 0) and `kv = k_scaled^T @ new_v` (flag 2).
+- Vector computes coefficients via `TROWEXPANDMUL`, `new_v = U - ws`, and updates `state = state * exp(g_last) + kv` (flags 1, 3).
+- Each block processes one `(sequence, head)` work item and iterates sequentially over all chunks in the sequence.
+- State is carried between chunks via a per-block half-precision GM workspace (3 slots: ws/kv, k_scaled, state).
+- Both vector sub-blocks always process their 64-row portion of the 128x128 state, even when `local_rows == 0` for K/U/new_v data.
+- Cross-core flag 3 is only signaled when there is a next chunk, preventing stale flags across work items.
+- K is loaded from BSND layout with dynamic zero-padded UB tiles; new_v is stored with dynamic stores to preserve zero-padding.
+- The entire host-side loop and per-chunk `synchronize()` calls were removed from `dynamic_kernel_libs.py`.
 
-Known examples:
+Result:
 
-- `scaled_dot_kkt` dynamic fused performance is still far below the static reference on large benchmark shapes
-- `chunk_o` is correct and fused, but current throughput is still far below the expected static-baseline neighborhood
-- `wy_fast` and `chunk_h` are particularly slow because they still retain host-side work
+- Performance improved from ~4.6 ms to ~0.14 ms (over 30x speedup).
+- Both fixed-BSND and packed-varlen checks pass.
 
-Why this matters:
+## Remaining work: performance optimization
 
-- correctness is no longer the only blocker
-- the project still needs a real optimization pass after the remaining hybrid stages are removed
+All five stages are now correct and fully native. The remaining opportunity is closing the performance gap with the static baseline kernels.
 
-## Kernel-specific leftover issues
+### Known optimization targets
 
-### `wy_fast`
+1. **Large-shape benchmarking**: Current timings are from small test shapes. Re-benchmark on production-size inputs to measure the real gap against static baselines.
 
-Status:
+2. **GM traffic reduction**: Several stages still round-trip intermediate data through GM workspaces where on-chip reuse might be possible.
 
-- correctness currently comes from the fallback path in `dynamic_kernel_libs.py`
-- the native fused kernel attempt in `wy_fast_kernel.cpp` is not yet correct enough to replace it
+3. **Workspace sizing**: `chunk_h` allocates `block_dim * 3 * D * D` half elements of workspace. This could potentially be reduced by overlapping slots that are not live at the same time.
 
-Most useful findings from the latest native debugging:
+4. **Synchronization granularity**: Some `pipe_barrier(PIPE_ALL)` calls could be replaced with more targeted pipeline flags to reduce stall time.
 
-- the fused structure itself is plausible and close to the static version
-- the biggest remaining issue is in the vector-side dynamic BSND coefficient build for `A1` and `A2`
-- the earlier native attempt showed half-chunk and tail-row corruption patterns
-- `A2` was brought much closer to correct after fixing row-wise scaling semantics
-- the remaining drift is concentrated in the `A1 = A * (exp(g) * beta)` side
-- the bug appears near half-chunk boundaries and row/tail handling, not in the cube GEMM itself
-- the most recent probe narrowed this further:
-  - native `A2` can be made close to correct with local row-wise `beta` scaling
-  - the most suspicious remaining native issue is the `g` vector load / `TEXP` path used to build `A1`
-  - identity-style probes (`A=1`, `beta=1`, `g=0`) showed that `A1` can still corrupt leading rows of a half-chunk even when `A2` is much healthier
-  - attempts to patch this with scalar exp or alternate contiguous `g` loads either failed to link or regressed the wider kernel, so the current committed path keeps the host-backed correctness wrapper
-  - a scratch-row `TEXP` patch was also tried and still did not remove the leading-row corruption, so the unresolved bug is not yet reduced to a trivial scalar-exp replacement
+5. **Vector-side efficiency**: Coefficient construction paths in `wy_fast` and `chunk_h` could potentially be further streamlined (e.g., precomputing shared values once across sub-blocks).
 
-Practical consequence:
+6. **Dynamic indexing overhead**: The `GdnBsndSeqInfo` helper and per-chunk `valid_rows` / `local_rows` calculations add scalar overhead that doesn't exist in the static kernels.
 
-- the best next work item is to continue debugging the native `wy_fast` vector-side coefficient construction, not the matmul stage
+### Recommended approach
 
-### `chunk_h`
-
-Status:
-
-- the stage passes today with host-side recurrence/orchestration
-- no native in-kernel recurrence replacement exists yet
-
-Main missing pieces:
-
-- persistent chunk-to-chunk state propagation in-kernel
-- native computation and storage of `new_v`
-- native update of `state = state * exp(g_last) + kv`
-- packed-varlen-safe final state writeback
-
-Practical consequence:
-
-- this stage likely needs a dedicated redesign instead of incremental tweaks to the current host loop
-
-## Promising next-step action items
-
-### For `wy_fast`
-
-1. Resume from the fused `wy_fast_kernel.cpp` attempt rather than starting over.
-2. Compare native intermediate tensors against Torch reference in this exact order:
-   - packed local beta vector
-   - packed local `exp(g) * beta` vector
-   - `workspace_a2`
-   - `workspace_a1`
-3. Keep the cube GEMM path unchanged while debugging vector-side coefficient generation.
-4. Reuse the debug-kernel approach that worked for `scaled_dot_kkt`:
-   - one probe for beta extraction
-   - one probe for local `g` extraction
-   - one probe for `A2` row scaling
-   - one probe for `A1` row scaling
-5. Focus especially on:
-   - half-chunk boundary rows
-   - the last rows in each local vector slice
-   - the first row of each half-chunk on the native `g` / `TEXP` path
-   - whether row-wise versus column-wise scaling semantics are correct for packed BSND `A`
-6. Only replace the fallback path in `dynamic_kernel_libs.py` after both fixed and packed-varlen stage checks pass.
-
-### For `chunk_h`
-
-1. Write down the exact native kernel contract first:
-   - inputs
-   - packed workspaces
-   - state handoff
-   - final outputs
-2. Decide whether `chunk_h` should be:
-   - one fused recurrent kernel, or
-   - a small native kernel chain with explicit workspaces and ordering
-3. Prototype the recurrence on fixed-length BSND first.
-4. Add packed-varlen only after fixed-length recurrence is correct.
-5. Reuse the same sequence/chunk metadata helpers already used by `chunk_o` and `scaled_dot_kkt`.
-6. Pay special attention to:
-   - cross-chunk state carry
-   - final-state writeback shape
-   - empty-tail behavior for short varlen chunks
-
-### For performance
-
-1. Re-benchmark native stages on large shapes after every substantial kernel change.
-2. Use the static kernels as the throughput target, not just the small-stage smoke tests.
-3. After correctness is stable, inspect:
-   - unnecessary GM round-trips
-   - oversized temporary workspaces
-   - expensive vector-side scalar loops or repeated `GetValue` paths
-   - synchronization points that may be over-conservative
-4. Prioritize optimizing already-native fused stages first:
-   - `scaled_dot_kkt`
-   - `chunk_o`
-5. Only then try to close the remaining gap on `wy_fast` and `chunk_h`.
-
-## Recommended execution order for future agents
-
-1. Keep the repository in a passing state at all times.
-2. Continue native `wy_fast` debugging until the fallback can be removed safely.
-3. Design and implement a native `chunk_h` recurrence path.
-4. Re-run the full stage driver after each step.
-5. Once all stages are native, do a dedicated performance pass.
+1. Profile each stage individually on large shapes.
+2. Identify whether the bottleneck is compute, memory bandwidth, or launch/sync overhead.
+3. Optimize the highest-impact stage first.
+4. Re-run the full stage driver after each change to guard against regressions.
 
 ## Files to use as primary references
 
-- `dynamic_bsnd/scaled_dot_kkt_kernel.cpp`
-- `dynamic_bsnd/chunk_o_kernel.cpp`
-- `dynamic_bsnd/gdn_seq_info.h`
-- `dynamic_bsnd/gdn_pto_shared.h`
-- `linear_attention/linear_attention.cpp`
-- `chunk_gdn/static_baseline/*.cpp`
-
-## Important guardrail
-
-Do not remove the current `wy_fast` or `chunk_h` fallback/orchestration paths until the native replacements pass:
-
-- fixed-length BSND checks
-- packed-varlen BSND checks
-- the combined stage-validation driver
-
-The current codebase is in a useful state because correctness is passing today, even though the port is not yet fully native.
+- `dynamic_bsnd/wy_fast_kernel.cpp` — fused cube+vector with `TROWEXPANDMUL` coefficient build
+- `dynamic_bsnd/chunk_h_kernel.cpp` — fused cube+vector with cross-core recurrence
+- `dynamic_bsnd/chunk_o_kernel.cpp` — fused cube+vector with BSND output store
+- `dynamic_bsnd/scaled_dot_kkt_kernel.cpp` — fused cube+vector with coefficient masking
+- `dynamic_bsnd/gdn_seq_info.h` — sequence/chunk metadata helpers
+- `dynamic_bsnd/gdn_pto_shared.h` — cross-core sync and tile helpers
+- `linear_attention/linear_attention.cpp` — cross-core fusion reference
+- `chunk_gdn/static_baseline/*.cpp` — static performance targets
