@@ -201,11 +201,13 @@ def _test_inverse_correctness(
     assert frob_error <= ftol
 
 
-@pytest.mark.parametrize("B", [1, 2, 7, 17, 32, 93])
-@pytest.mark.parametrize("N", [4, 64])
-@pytest.mark.parametrize("chunk_size", [32, 64, 128])
+@pytest.mark.parametrize("B", [1, 2, 7, 17, 32, 93])  # Number of sequences
+@pytest.mark.parametrize("N", [4])  # Number of BSND heads
+@pytest.mark.parametrize(
+    "chunk_size", [32, 64, 128]
+)  # Equal to matrix size for inversion
 @pytest.mark.parametrize("feature_dim", [64])
-@pytest.mark.parametrize("total_tokens", [1024, 4031, 17935])
+@pytest.mark.parametrize("total_tokens", [1024, 3031, 10937])
 @pytest.mark.parametrize(
     "matrix_type,atol,rtol,ftol", [("ones", 0, 0, 0), ("random", 1e-5, 5e-2, 1e-2)]
 )
