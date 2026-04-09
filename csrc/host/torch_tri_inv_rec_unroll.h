@@ -25,6 +25,8 @@ namespace pto_isa_ops {
  * in memory, and thus we define num_bsnd_heads=0. If true, then the matrices
  * are stored in "strided mode". In this case we define:
  * num_bsnd_heads=M.size(-2), which is used to do strided load / store ops.
+ * @param cu_seqlens A 1-dimensional torch tensor that contains the lengths
+ * of each input sequence (it is the cummulative sum of the lengths)
  * @return at::Tensor Tensor containing inverses of input matrices.
  */
 at::Tensor run_tri_inv_rec_unroll(

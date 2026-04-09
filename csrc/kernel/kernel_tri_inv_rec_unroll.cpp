@@ -31,9 +31,12 @@ AICORE inline uint32_t GetBSNDFixedTileOffset(uint32_t tile_id,
   return BSND_OFFSET(tile_id, num_bsnd_heads, matrix_size, matrix_size);
 }
 
+/**
+ * @brief Struct containing starting address and size of a single tile
+ */
 struct BSNDVarlenTileInfo {
-  uint32_t bsnd_offset;
-  uint32_t valid_size;
+  uint32_t bsnd_offset; /**< Contains the starting index in the global tensor */
+  uint32_t valid_size;  /**< This is the size (num_rows/cols) of the tile */
 };
 
 /*
@@ -666,21 +669,9 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
         const uint32_t valid_size = bsnd_tile_valid_sizes[tile_id];
         const int row_stride = static_cast<int>(MatrixSize * num_bsnd_heads);
         if (valid_size < MatrixSize) {
-          // const event_t event_0 = static_cast<event_t>(tile_id);
-          // const event_t event_1 =
-          //     static_cast<event_t>(tile_id + NumTilesPerCubeIter);
           TileL0CDynamic c_l0_tail_tile(valid_size, valid_size);
           TASSIGN(c_l0_tail_tile,
                   0x0 + final_c_buffer_index * TileLen * sizeof(OutputT));
-          // if constexpr (final_c_buffer_index == 1) {
-          //   set_flag(PIPE_M, PIPE_FIX, event_1);
-          //   wait_flag(PIPE_M, PIPE_FIX, event_1);
-          // } else {
-          //   set_flag(PIPE_M, PIPE_FIX, event_0);
-          //   wait_flag(PIPE_M, PIPE_FIX, event_0);
-          // }
-          // set_flag(PIPE_FIX, PIPE_MTE3, static_cast<event_t>(tile_id));
-          // wait_flag(PIPE_FIX, PIPE_MTE3, static_cast<event_t>(tile_id));
           GlobalTileDynamicOut M_inv_global_out_dyn(
               M_inv + bsnd_offset,
               {1, 1, 1, static_cast<int>(valid_size),

@@ -12,8 +12,6 @@ import torch.nn.functional as torch_functional
 import pytest
 import numpy as np
 import random
-import time
-from typing import Callable
 from pto_kernels import pto_tri_inv_rec_unroll
 
 random.seed(42)
@@ -206,7 +204,6 @@ def _test_inverse_correctness(
 @pytest.mark.parametrize(
     "chunk_size", [32, 64, 128]
 )  # Equal to matrix size for inversion
-@pytest.mark.parametrize("feature_dim", [64])
 @pytest.mark.parametrize("total_tokens", [1024, 3031, 10937])
 @pytest.mark.parametrize(
     "matrix_type,atol,rtol,ftol", [("ones", 0, 0, 0), ("random", 1e-5, 5e-2, 1e-2)]
@@ -214,7 +211,6 @@ def _test_inverse_correctness(
 def test_tri_inv_rec_unroll_variable_length(
     B: int,
     N: int,
-    feature_dim: int,
     chunk_size: int,
     total_tokens: int,
     matrix_type: str,
@@ -222,12 +218,13 @@ def test_tri_inv_rec_unroll_variable_length(
     rtol: float,
     ftol: float,
 ):
+    default_feature_dim = 64
     seq_lens = generate_random_sequence_lengths(B, total_tokens)
     packed_input, cu_seqlens = build_variable_len_input(
         seq_lens=seq_lens,
         num_heads=N,
         chunk_size=chunk_size,
-        feature_dim=feature_dim,
+        feature_dim=default_feature_dim,
         matrix_type=matrix_type,
     )
     _test_inverse_correctness(packed_input, cu_seqlens, chunk_size, atol, rtol, ftol)
