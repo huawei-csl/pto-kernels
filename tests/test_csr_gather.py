@@ -40,3 +40,7 @@ def test_pto_csr_gather(x_size: int, v_size: int, dtype: torch.dtype):
     cpuout = ref_csr_gather(values, indices, x)
     # Validate the results
     assert torch.allclose(output, cpuout)
+
+
+if __name__ == "__main__":
+    test_pto_csr_gather(16384, 1024, torch.float16)

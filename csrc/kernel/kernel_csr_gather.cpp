@@ -17,6 +17,9 @@ for the full License text.
 
 using namespace pto;
 
+constexpr uint32_t UB_USABLE_BYTES = 184 * 1024;
+constexpr uint32_t UB_ZERO_ADDR = 0;
+
 /**
  * @brief Performs the CSR gather operation on the vector core as described
  * in SEGMV algorithm in [1]
@@ -45,10 +48,16 @@ AICORE void runTCsrGather(__gm__ T* values, __gm__ int32_t* indices,
   set_vector_mask(-1, -1);
 
   // UB zero address and tile sizes
-  constexpr uint32_t UB_ZERO_ADDR = 0;
   constexpr uint32_t TILE_SIZE_IN_BYTES = TILE_SIZE * sizeof(T);
   constexpr uint32_t TILE_SIZE_X_IN_BYTES = TILE_SIZE_X * sizeof(T);
   constexpr uint32_t TILE_SIZE_IDX_IN_BYTES = TILE_SIZE * sizeof(int32_t);
+  constexpr uint32_t V_T_ADDR = UB_ZERO_ADDR;
+  constexpr uint32_t W_T_ADDR = V_T_ADDR + TILE_SIZE_IN_BYTES;
+  constexpr uint32_t Z_T_ADDR = W_T_ADDR + TILE_SIZE_IN_BYTES;
+  constexpr uint32_t IDX_T_ADDR = Z_T_ADDR + TILE_SIZE_IN_BYTES;
+  constexpr uint32_t X_T_ADDR = IDX_T_ADDR + TILE_SIZE_IDX_IN_BYTES;
+  static_assert(X_T_ADDR + TILE_SIZE_X_IN_BYTES <= UB_USABLE_BYTES,
+                "CSR gather UB layout exceeds usable UB.");
 
   const uint32_t num_aiv_cores = get_block_num();
   const uint32_t aiv_core_id = get_block_idx();
@@ -69,8 +78,7 @@ AICORE void runTCsrGather(__gm__ T* values, __gm__ int32_t* indices,
   // Copy full x to UB
   GlobalData xGlobal(x, {static_cast<int32_t>(x_size)});
   TileDataX xTiles(x_size);
-  TASSIGN(xTiles,
-          UB_ZERO_ADDR + 3 * TILE_SIZE_IN_BYTES + TILE_SIZE_IDX_IN_BYTES);
+  TASSIGN(xTiles, X_T_ADDR);
   TLOAD(xTiles, xGlobal);
   set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
   wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
@@ -106,10 +114,10 @@ AICORE void runTCsrGather(__gm__ T* values, __gm__ int32_t* indices,
     TileDataIdx idxTiles(remaining_elements);
 
     // Assign the UB address for each tile
-    TASSIGN(valTiles, UB_ZERO_ADDR);
-    TASSIGN(wTiles, UB_ZERO_ADDR + 1 * TILE_SIZE_IN_BYTES);
-    TASSIGN(zTiles, UB_ZERO_ADDR + 2 * TILE_SIZE_IN_BYTES);
-    TASSIGN(idxTiles, UB_ZERO_ADDR + 3 * TILE_SIZE_IN_BYTES);
+    TASSIGN(valTiles, V_T_ADDR);
+    TASSIGN(wTiles, W_T_ADDR);
+    TASSIGN(zTiles, Z_T_ADDR);
+    TASSIGN(idxTiles, IDX_T_ADDR);
 
     // MTE2 (load) wait for gather to be done
     // (previous iteration's computation)
