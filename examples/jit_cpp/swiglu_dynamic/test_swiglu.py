@@ -7,7 +7,7 @@ import torch_npu  # noqa
 from jit_util_swiglu import jit_compile
 
 DTYPE = torch.float16
-TEST_BATCHES = [1, 3]
+TEST_BATCHES = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]
 TEST_OUTPUT_HIDDEN_DIMS = [128, 1024, 4096, 6144, 16384]
 TEST_SEEDS = [0, 1]
 
