@@ -29,6 +29,7 @@ BLOCK_DIM = int(getattr(torch.npu.get_device_properties("npu:0"), "cube_core_num
 # Compilation
 # ---------------------------------------------------------------------------
 
+
 def compile_cpp(kernel_cpp: str, verbose: bool = False, timeout: int = 180) -> str:
     """Compile *kernel_cpp* with bisheng and return the path to the .so."""
     lib_path = os.path.join(os.path.dirname(kernel_cpp), "fast_inverse_jit.so")
@@ -67,6 +68,7 @@ def compile_cpp(kernel_cpp: str, verbose: bool = False, timeout: int = 180) -> s
 # ---------------------------------------------------------------------------
 # Loading
 # ---------------------------------------------------------------------------
+
 
 def _torch_to_ctypes(tensor: torch.Tensor) -> ctypes.c_void_p:
     return ctypes.c_void_p(tensor.data_ptr())
@@ -117,9 +119,11 @@ def load_lib(lib_path: str):
             matrix_size,
             num_matrices,
             num_bsnd_heads,
-            _torch_to_ctypes(cu_seqlens)
-            if cu_seqlens is not None
-            else ctypes.c_void_p(),
+            (
+                _torch_to_ctypes(cu_seqlens)
+                if cu_seqlens is not None
+                else ctypes.c_void_p()
+            ),
         )
 
     return tri_inv_func
@@ -128,6 +132,7 @@ def load_lib(lib_path: str):
 # ---------------------------------------------------------------------------
 # Convenience: compile + load in one call
 # ---------------------------------------------------------------------------
+
 
 def jit_compile(src_path: str, verbose: bool = True, clean_up: bool = False):
     """Compile *src_path* and return the kernel callable."""

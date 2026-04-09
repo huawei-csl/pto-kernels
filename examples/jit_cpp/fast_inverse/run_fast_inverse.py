@@ -179,10 +179,7 @@ def _build_varlen_bsnd_case(
 
     Each sequence contributes only its true rows in the packed BSND tensor.
     """
-    seq_lens = [
-        cu_seqlens[i + 1] - cu_seqlens[i]
-        for i in range(len(cu_seqlens) - 1)
-    ]
+    seq_lens = [cu_seqlens[i + 1] - cu_seqlens[i] for i in range(len(cu_seqlens) - 1)]
     print(
         f"    varlen sequence lengths: {seq_lens} "
         f"(chunk_size={chunk_size}, num_heads={num_heads})"
@@ -246,9 +243,7 @@ def _test_case(
 
     actual = _run_kernel(tri_inv_func, U_fp16.npu())
 
-    frob = torch.sqrt(
-        torch.sum((golden - actual) ** 2) / torch.sum(golden ** 2)
-    ).item()
+    frob = torch.sqrt(torch.sum((golden - actual) ** 2) / torch.sum(golden**2)).item()
 
     assert np.allclose(
         actual.numpy(),
@@ -287,9 +282,7 @@ def _test_case_bsnd(
     U_bsnd = U_fp16.transpose(1, 2).contiguous().reshape(B, S, N, D)
     actual = _run_kernel_bsnd(tri_inv_func, U_bsnd.npu())
 
-    frob = torch.sqrt(
-        torch.sum((golden - actual) ** 2) / torch.sum(golden ** 2)
-    ).item()
+    frob = torch.sqrt(torch.sum((golden - actual) ** 2) / torch.sum(golden**2)).item()
 
     assert np.allclose(
         actual.numpy(),
@@ -326,9 +319,7 @@ def _test_case_bsnd_varlen(
     )
     actual = actual_varlen
 
-    frob = torch.sqrt(
-        torch.sum((golden - actual) ** 2) / torch.sum(golden ** 2)
-    ).item()
+    frob = torch.sqrt(torch.sum((golden - actual) ** 2) / torch.sum(golden**2)).item()
 
     assert np.allclose(
         actual.numpy(),
