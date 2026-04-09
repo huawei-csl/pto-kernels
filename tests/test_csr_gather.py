@@ -17,7 +17,7 @@ def ref_csr_gather(
     return values * x[indices]
 
 
-x_size = [512, 1024, 2048, 16384]
+x_size = [512, 1024, 2048, 16384, 32768, 40960]
 v_size = [100, 128, 256, 600, 1024, 1200]
 # Sweep only for v < x
 sweep_sizes = [(x, v) for x in x_size for v in v_size if v < x]
@@ -43,4 +43,4 @@ def test_pto_csr_gather(x_size: int, v_size: int, dtype: torch.dtype):
 
 
 if __name__ == "__main__":
-    test_pto_csr_gather(16384, 1024, torch.float16)
+    test_pto_csr_gather(32768, 16384, torch.float16)

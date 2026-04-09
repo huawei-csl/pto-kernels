@@ -192,7 +192,7 @@ extern "C" __global__ AICORE void vcsr_gather_fp16(GM_ADDR values,
                                                    GM_ADDR z, uint32_t x_size,
                                                    uint32_t indices_size) {
   constexpr uint32_t TILE_SIZE = 512;
-  constexpr uint32_t TILE_SIZE_X = 1 << 14;
+  constexpr uint32_t TILE_SIZE_X = 40960;
   runTCsrGather<half, TILE_SIZE, TILE_SIZE_X>(
       (__gm__ half*)values, (__gm__ int32_t*)indices, (__gm__ half*)x,
       (__gm__ half*)z, x_size, indices_size);
@@ -203,7 +203,7 @@ extern "C" __global__ AICORE void vcsr_gather_fp32(GM_ADDR values,
                                                    GM_ADDR z, uint32_t x_size,
                                                    uint32_t indices_size) {
   constexpr uint32_t TILE_SIZE = 512;
-  constexpr uint32_t TILE_SIZE_X = 1 << 14;
+  constexpr uint32_t TILE_SIZE_X = 40960;
   runTCsrGather<float, TILE_SIZE, TILE_SIZE_X>(
       (__gm__ float*)values, (__gm__ int32_t*)indices, (__gm__ float*)x,
       (__gm__ float*)z, x_size, indices_size);

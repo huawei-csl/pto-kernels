@@ -34,9 +34,9 @@ at::Tensor run_csr_gather(const at::Tensor& values, const at::Tensor& indices,
 
   // FIXME: expand to support bigger sizes
   const uint32_t x_size = x.numel();
-  if (x_size > 16384) {
+  if (x_size > 40960) {
     throw std::runtime_error(
-        "Input x size exceeds the maximum supported size of 16384 elements");
+        "Input x size exceeds the maximum supported size of 40960 elements");
   }
 
   // Define the number of blocks of vector core
