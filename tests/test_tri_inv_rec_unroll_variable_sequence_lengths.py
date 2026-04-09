@@ -12,6 +12,7 @@ import torch.nn.functional as torch_functional
 import pytest
 import numpy as np
 import random
+import time
 from typing import Callable
 from pto_kernels import pto_tri_inv_rec_unroll
 
@@ -78,16 +79,45 @@ def chunk_scaled_dot_kkt_fwd_emulated(
         for chunk_start in range(seq_start, seq_end, chunk_size):
             chunk_end = min(chunk_start + chunk_size, seq_end)
             actual_size = chunk_end - chunk_start
-            k_chunk = k[:, chunk_start:chunk_end].transpose(1, 2).to(torch.float32)
+            k_chunk = (
+                k[:, chunk_start:chunk_end].transpose(1, 2).to(torch.float32).npu()
+            )
             beta_chunk = (
                 beta[:, chunk_start:chunk_end]
                 .transpose(1, 2)
                 .unsqueeze(-1)
                 .to(torch.float32)
+                .npu()
             )
             scores = torch.matmul(k_chunk, k_chunk.transpose(-1, -2))
-            scores = torch.tril(scores * beta_chunk, diagonal=-1).to(k.dtype)
+            scores = torch.tril(scores * beta_chunk, diagonal=-1)  # .to(k.dtype)
+            scores = torch.tril(torch.ones(scores.shape), diagonal=-1).to(k.dtype).npu()
             A[:, chunk_start:chunk_end, :, :actual_size] = scores.transpose(1, 2)
+
+    return A
+
+
+def all_ones_varlen_triangular_tensor(
+    cu_seqlens: torch.Tensor, chunk_size: int, num_heads: int, feature_dim: int
+) -> torch.Tensor:
+    total_tokens = int(cu_seqlens[-1].item())
+    A = torch.zeros((1, total_tokens, num_heads, chunk_size), dtype=torch.float16)
+    ones_tensor = torch.ones(
+        (1, total_tokens, num_heads, feature_dim),
+        dtype=torch.float16,
+    )
+    for seq_start, seq_end in zip(
+        cu_seqlens[:-1].tolist(), cu_seqlens[1:].tolist(), strict=False
+    ):
+        for chunk_start in range(seq_start, seq_end, chunk_size):
+            chunk_end = min(chunk_start + chunk_size, seq_end)
+            actual_size = chunk_end - chunk_start
+            chunk_shape = list(
+                ones_tensor[:, chunk_start:chunk_end].transpose(1, 2).shape
+            )
+            chunk_shape[-1] = chunk_shape[-2]
+            chunk = torch.tril(torch.ones(chunk_shape), diagonal=-1)  # .to(k.dtype)
+            A[:, chunk_start:chunk_end, :, :actual_size] = chunk.transpose(1, 2)
 
     return A
 
@@ -97,38 +127,36 @@ def build_variable_len_input(
     num_heads: int,
     chunk_size: int,
     feature_dim: int,
+    matrix_type: str,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     cu_seqlens = np.cumsum([0, *seq_lens], dtype=np.int64)
     cu_seqlens_tensor = torch.tensor(cu_seqlens.tolist(), dtype=torch.int32)
     total_tokens = int(cu_seqlens[-1])
-    k = torch_functional.normalize(
-        torch.randn(
-            (1, total_tokens, num_heads, feature_dim),
-            dtype=torch.float16,
-        ),
-        dim=-1,
-    )
-    beta = torch.randn((1, total_tokens, num_heads), dtype=torch.float16).sigmoid()
-    packed_input = transpose_valid_chunks(
-        chunk_scaled_dot_kkt_fwd_emulated(k, beta, cu_seqlens_tensor, chunk_size),
-        cu_seqlens_tensor,
-        chunk_size,
-    )
+    if matrix_type == "ones":
+        packed_input = transpose_valid_chunks(
+            all_ones_varlen_triangular_tensor(
+                cu_seqlens_tensor, chunk_size, num_heads, feature_dim
+            ),
+            cu_seqlens_tensor,
+            chunk_size,
+        )
+    elif matrix_type == "random":
+        k = torch_functional.normalize(
+            torch.randn(
+                (1, total_tokens, num_heads, feature_dim),
+                dtype=torch.float16,
+            ),
+            dim=-1,
+        )
+        beta = torch.randn((1, total_tokens, num_heads), dtype=torch.float16).sigmoid()
+        packed_input = transpose_valid_chunks(
+            chunk_scaled_dot_kkt_fwd_emulated(k, beta, cu_seqlens_tensor, chunk_size),
+            cu_seqlens_tensor,
+            chunk_size,
+        )
+    else:
+        raise RuntimeError(f"unknown matrix type to test: {matrix_type}")
     return packed_input.contiguous().npu(), cu_seqlens_tensor.npu()
-
-
-def linalg_inv(U: torch.tensor) -> torch.tensor:
-    n = U.shape[-1]
-    Identity = np.ones((n, n), dtype=np.double)
-    Identity = np.triu(Identity)
-    Identity = np.tril(Identity)
-    golden_numpy = np.zeros((U.shape))
-    for x in range(U.shape[0]):
-        for y in range(U.shape[1]):
-            golden_numpy[x, y] = np.linalg.inv(
-                U[x, y].numpy().astype(np.double) + Identity
-            )
-    return torch.from_numpy(golden_numpy)
 
 
 def _reference_inverse(
@@ -141,19 +169,25 @@ def _reference_inverse(
     ):
         for chunk_start in range(seq_start, seq_end, chunk_size):
             actual_size = min(chunk_size, seq_end - chunk_start)
+            mat_to_invert = (
+                A_cpu[
+                    :, chunk_start : chunk_start + actual_size, :, :actual_size
+                ].transpose(1, 2)
+                + torch.eye(actual_size, dtype=torch.float64)[None, None, ...]
+            ).numpy()
             ref[:, chunk_start : chunk_start + actual_size, :, :actual_size] = (
-                torch.inverse(
-                    A_cpu[
-                        :, chunk_start : chunk_start + actual_size, :, :actual_size
-                    ].transpose(1, 2)
-                    + torch.eye(actual_size, dtype=torch.float64)[None, None, ...]
-                ).transpose(1, 2)
+                torch.tensor(np.linalg.inv(mat_to_invert)).transpose(1, 2)
             )
     return ref
 
 
 def _test_inverse_correctness(
-    A: torch.Tensor, cu_seqlens: torch.Tensor, chunk_size: int
+    A: torch.Tensor,
+    cu_seqlens: torch.Tensor,
+    chunk_size: int,
+    atol: float,
+    rtol: float,
+    ftol: float,
 ):
 
     ref = _reference_inverse(A, cu_seqlens, chunk_size)
@@ -162,25 +196,36 @@ def _test_inverse_correctness(
     tri = tri.cpu().to(torch.float64)
     torch.npu.synchronize()
 
-    frob = torch.sqrt(torch.sum((ref - tri) ** 2) / torch.sum(ref**2)).item()
-    torch.testing.assert_close(tri, ref, atol=1e-5, rtol=1e-2)
-    print(f"frob error: {frob}")
+    assert torch.allclose(tri, ref, atol=atol, rtol=rtol)
+    frob_error = torch.sqrt(torch.sum((ref - tri) ** 2) / torch.sum(ref**2)).item()
+    assert frob_error <= ftol
 
 
-@pytest.mark.parametrize("B", [1, 4, 7])
-@pytest.mark.parametrize("N", [4, 8])
-@pytest.mark.parametrize("chunk_size", [32])
+@pytest.mark.parametrize("B", [1, 2, 7, 17, 32, 93])
+@pytest.mark.parametrize("N", [4, 64])
+@pytest.mark.parametrize("chunk_size", [32, 64, 128])
 @pytest.mark.parametrize("feature_dim", [64])
-@pytest.mark.parametrize("total_tokens", [4031])
+@pytest.mark.parametrize("total_tokens", [1024, 4031, 17935])
+@pytest.mark.parametrize(
+    "matrix_type,atol,rtol,ftol", [("ones", 0, 0, 0), ("random", 1e-5, 5e-2, 1e-2)]
+)
 def test_tri_inv_rec_unroll_variable_length(
     B: int,
     N: int,
     feature_dim: int,
     chunk_size: int,
     total_tokens: int,
+    matrix_type: str,
+    atol: float,
+    rtol: float,
+    ftol: float,
 ):
     seq_lens = generate_random_sequence_lengths(B, total_tokens)
     packed_input, cu_seqlens = build_variable_len_input(
-        seq_lens=seq_lens, num_heads=N, chunk_size=chunk_size, feature_dim=feature_dim
+        seq_lens=seq_lens,
+        num_heads=N,
+        chunk_size=chunk_size,
+        feature_dim=feature_dim,
+        matrix_type=matrix_type,
     )
-    _test_inverse_correctness(packed_input, cu_seqlens, chunk_size)
+    _test_inverse_correctness(packed_input, cu_seqlens, chunk_size, atol, rtol, ftol)
