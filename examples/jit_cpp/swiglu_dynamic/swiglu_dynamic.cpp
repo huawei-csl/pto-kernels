@@ -13,16 +13,37 @@ constexpr uint32_t INPUT_ELEMENTS_PER_TILE = (64 * 1024) / sizeof(half);
 constexpr uint32_t ELEMENTS_PER_TILE = Y_BUFFER_BYTES / sizeof(half);
 constexpr uint32_t UB_USABLE_BYTES = 192 * 1024;
 constexpr uint32_t TILE_ALIGNMENT = 16;
+
+#define SWIGLU_FOR_EACH_COL_TILE(X) \
+  X(16)                             \
+  X(32)                             \
+  X(64)                             \
+  X(128)                            \
+  X(256)                            \
+  X(512)                            \
+  X(1024)                           \
+  X(2048)                           \
+  X(4096)                           \
+  X(8192)                           \
+  X(16384)
+
+// Col tile widths tried by chooseTile2DConfig: powers of 2 from TILE_ALIGNMENT
+// up to ELEMENTS_PER_TILE. The 16/32/64 entries handle narrow hidden dims.
+#define SWIGLU_COL_VALUE(width) width,
+constexpr uint32_t COL_CANDIDATES[] = {SWIGLU_FOR_EACH_COL_TILE(SWIGLU_COL_VALUE)};
+#undef SWIGLU_COL_VALUE
+constexpr uint32_t NUM_COL_CANDIDATES =
+    sizeof(COL_CANDIDATES) / sizeof(COL_CANDIDATES[0]);
+
+// Keep the active-tile target fixed at half the available cores.
 constexpr uint32_t TARGET_2D_ACTIVE_TILES_DIVISOR = 2;
-constexpr uint32_t MIN_LONG_ROW_TILE_ELEMENTS = 1024;
-constexpr uint32_t MAX_LONG_ROW_TILES_PER_ROW = 16;
 
 constexpr unsigned X0_PING = 0x00000;
 constexpr unsigned X1_PING = X0_PING + X0_BUFFER_BYTES;
-constexpr unsigned Y_PING = X1_PING + X1_BUFFER_BYTES;
-constexpr unsigned X0_PONG = Y_PING + Y_BUFFER_BYTES;
+constexpr unsigned Y_PING  = X1_PING + X1_BUFFER_BYTES;
+constexpr unsigned X0_PONG = Y_PING  + Y_BUFFER_BYTES;
 constexpr unsigned X1_PONG = X0_PONG + X0_BUFFER_BYTES;
-constexpr unsigned Y_PONG = X1_PONG + X1_BUFFER_BYTES;
+constexpr unsigned Y_PONG  = X1_PONG + X1_BUFFER_BYTES;
 
 static_assert(UB_SLOT_BYTES * 6 == UB_USABLE_BYTES,
               "SwiGLU UB slots must fully pack the usable UB budget.");
@@ -32,12 +53,6 @@ static_assert(Y_PONG + Y_BUFFER_BYTES <= UB_USABLE_BYTES,
               "SwiGLU UB layout exceeds usable UB.");
 
 namespace {
-
-struct Tile1DWork {
-  uint32_t sample_index;
-  uint32_t gm_offset;
-  uint32_t elements;
-};
 
 struct Tile2DConfig {
   uint32_t row_tile_len;
@@ -51,11 +66,26 @@ struct Tile2DWork {
   uint32_t row_offset;
   uint32_t col_offset;
   uint32_t row_count;
-  uint32_t col_count;
+  uint32_t col_count;       // padded to TILE_ALIGNMENT; for UB tile sizing
+  uint32_t col_count_store; // actual output elements; for HBM stores/loads
 };
 
 AICORE inline uint32_t max2DRowsForCols(uint32_t col_tile_len) {
   return ELEMENTS_PER_TILE / col_tile_len;
+}
+
+AICORE inline void initTilePipeFlags() {
+  set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+  set_flag(PIPE_V, PIPE_MTE2, EVENT_ID1);
+  set_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
+  set_flag(PIPE_MTE3, PIPE_V, EVENT_ID1);
+}
+
+AICORE inline void drainTilePipeFlags() {
+  wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+  wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID1);
+  wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
+  wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID1);
 }
 
 AICORE inline Tile2DConfig makeTile2DConfig(uint32_t batch, uint32_t output_n,
@@ -110,51 +140,11 @@ AICORE inline bool preferTile2DConfig(const Tile2DConfig &cand,
 
 AICORE inline Tile2DConfig chooseTile2DConfig(uint32_t batch, uint32_t output_n,
                                               uint32_t num_cores) {
-  Tile2DConfig best = makeTile2DConfig(batch, output_n, num_cores, 128);
-
-  if (output_n >= 256) {
-    const Tile2DConfig cand = makeTile2DConfig(batch, output_n, num_cores, 256);
-    if (preferTile2DConfig(cand, best)) {
-      best = cand;
-    }
-  }
-  if (output_n >= 512) {
-    const Tile2DConfig cand = makeTile2DConfig(batch, output_n, num_cores, 512);
-    if (preferTile2DConfig(cand, best)) {
-      best = cand;
-    }
-  }
-  if (output_n >= 1024) {
+  Tile2DConfig best =
+      makeTile2DConfig(batch, output_n, num_cores, COL_CANDIDATES[0]);
+  for (uint32_t c = 1; c < NUM_COL_CANDIDATES; ++c) {
     const Tile2DConfig cand =
-        makeTile2DConfig(batch, output_n, num_cores, 1024);
-    if (preferTile2DConfig(cand, best)) {
-      best = cand;
-    }
-  }
-  if (output_n >= 2048) {
-    const Tile2DConfig cand =
-        makeTile2DConfig(batch, output_n, num_cores, 2048);
-    if (preferTile2DConfig(cand, best)) {
-      best = cand;
-    }
-  }
-  if (output_n >= 4096) {
-    const Tile2DConfig cand =
-        makeTile2DConfig(batch, output_n, num_cores, 4096);
-    if (preferTile2DConfig(cand, best)) {
-      best = cand;
-    }
-  }
-  if (output_n >= 8192) {
-    const Tile2DConfig cand =
-        makeTile2DConfig(batch, output_n, num_cores, 8192);
-    if (preferTile2DConfig(cand, best)) {
-      best = cand;
-    }
-  }
-  if (output_n >= 16384) {
-    const Tile2DConfig cand =
-        makeTile2DConfig(batch, output_n, num_cores, 16384);
+        makeTile2DConfig(batch, output_n, num_cores, COL_CANDIDATES[c]);
     if (preferTile2DConfig(cand, best)) {
       best = cand;
     }
@@ -171,53 +161,13 @@ AICORE inline Tile2DWork makeTile2DWork(uint32_t global_tile_idx,
   const uint32_t col_tile_idx = global_tile_idx % col_tiles;
   const uint32_t row_offset = row_tile_idx * row_tile_len;
   const uint32_t col_offset = col_tile_idx * col_tile_len;
+  const uint32_t actual_col = min(col_tile_len, output_n - col_offset);
   return Tile2DWork{
       row_offset,
       col_offset,
       min(row_tile_len, batch - row_offset),
-      min(col_tile_len, output_n - col_offset),
-  };
-}
-
-AICORE inline uint32_t pick1DFallbackTileElements(uint32_t batch,
-                                                  uint32_t output_n,
-                                                  uint32_t num_cores) {
-  if (output_n <= ELEMENTS_PER_TILE && batch >= num_cores) {
-    return output_n;
-  }
-
-  uint32_t desired_tiles_per_row =
-      (batch >= num_cores) ? 1U : DIV_ROUNDUP(num_cores, batch);
-  if (desired_tiles_per_row > MAX_LONG_ROW_TILES_PER_ROW) {
-    desired_tiles_per_row = MAX_LONG_ROW_TILES_PER_ROW;
-  }
-
-  uint32_t tile_elements = DIV_ROUNDUP(output_n, desired_tiles_per_row);
-  if (tile_elements < MIN_LONG_ROW_TILE_ELEMENTS &&
-      output_n > MIN_LONG_ROW_TILE_ELEMENTS) {
-    tile_elements = MIN_LONG_ROW_TILE_ELEMENTS;
-  }
-  tile_elements = ALIGN_UP(tile_elements, TILE_ALIGNMENT);
-  if (tile_elements > ELEMENTS_PER_TILE) {
-    tile_elements = ELEMENTS_PER_TILE;
-  }
-  if (tile_elements > output_n) {
-    tile_elements = output_n;
-  }
-  return tile_elements;
-}
-
-AICORE inline Tile1DWork makeTile1DWork(uint32_t global_tile_idx,
-                                        uint32_t tiles_per_row,
-                                        uint32_t tile_elements,
-                                        uint32_t output_n) {
-  const uint32_t sample_index = global_tile_idx / tiles_per_row;
-  const uint32_t gm_offset = (global_tile_idx % tiles_per_row) * tile_elements;
-  const uint32_t remaining = output_n - gm_offset;
-  return Tile1DWork{
-      sample_index,
-      gm_offset,
-      (remaining >= tile_elements) ? tile_elements : remaining,
+      ALIGN_UP(actual_col, TILE_ALIGNMENT),
+      actual_col,
   };
 }
 
@@ -236,32 +186,8 @@ AICORE inline void computeSwiGLUTile(TileData &x0Tile, TileData &x1Tile,
   pipe_barrier(PIPE_V);
 }
 
-template <typename T>
-AICORE void issueTile1DLoad(__gm__ T *x, uint32_t n, const Tile1DWork &tile,
-                            unsigned x0_base, unsigned x1_base, event_t ev) {
-  using ShapeDim5 = pto::Shape<1, 1, 1, 1, ELEMENTS_PER_TILE>;
-  using StridDim5 = pto::Stride<1, 1, 1, 1, 1>;
-  using GlobalData = pto::GlobalTensor<T, ShapeDim5, StridDim5>;
-  using FullTile =
-      Tile<TileType::Vec, T, 1, ELEMENTS_PER_TILE, BLayout::RowMajor, -1, -1>;
-
-  FullTile x0Tile(1, tile.elements);
-  FullTile x1Tile(1, tile.elements);
-  TASSIGN(x0Tile, x0_base);
-  TASSIGN(x1Tile, x1_base);
-
-  GlobalData x0Global(x + tile.gm_offset);
-  GlobalData x1Global(x + n + tile.gm_offset);
-  TASSIGN(x0Global, (x + tile.gm_offset));
-  TASSIGN(x1Global, (x + n + tile.gm_offset));
-
-  wait_flag(PIPE_V, PIPE_MTE2, ev);
-  wait_flag(PIPE_MTE3, PIPE_V, ev);
-  TLOAD(x0Tile, x0Global);
-  TLOAD(x1Tile, x1Global);
-  set_flag(PIPE_MTE2, PIPE_V, ev);
-}
-
+// col_count (padded) used for UB tile sizing; col_count_store (actual) used for
+// GlobalData shape to avoid reading past the end of the HBM buffer.
 template <typename T, uint32_t kTileRows, uint32_t kTileCols>
 AICORE void issueTile2DLoad(__gm__ T *x, uint32_t input_n, uint32_t output_n,
                             const Tile2DWork &tile, unsigned x0_base,
@@ -278,7 +204,7 @@ AICORE void issueTile2DLoad(__gm__ T *x, uint32_t input_n, uint32_t output_n,
   TASSIGN(x1Tile, x1_base);
 
   const uint32_t input_offset = tile.row_offset * input_n + tile.col_offset;
-  const TileShapeND shape(tile.row_count, tile.col_count);
+  const TileShapeND shape(tile.row_count, tile.col_count_store);
   const DynStrideND stride(input_n);
 
   GlobalData x0Global(x + input_offset, shape, stride);
@@ -291,6 +217,8 @@ AICORE void issueTile2DLoad(__gm__ T *x, uint32_t input_n, uint32_t output_n,
   set_flag(PIPE_MTE2, PIPE_V, ev);
 }
 
+// col_count (padded) used for UB tile sizing; col_count_store (actual) used for
+// GlobalData shape to avoid writing past the end of the HBM buffer.
 template <typename T, uint32_t kTileRows, uint32_t kTileCols>
 AICORE void storeTile2D(__gm__ T *y, uint32_t output_n, const Tile2DWork &tile,
                         unsigned y_base, event_t ev) {
@@ -304,7 +232,7 @@ AICORE void storeTile2D(__gm__ T *y, uint32_t output_n, const Tile2DWork &tile,
   TASSIGN(yTile, y_base);
 
   const uint32_t output_offset = tile.row_offset * output_n + tile.col_offset;
-  const TileShapeND shape(tile.row_count, tile.col_count);
+  const TileShapeND shape(tile.row_count, tile.col_count_store);
   const DynStrideND stride(output_n);
   GlobalData yGlobal(y + output_offset, shape, stride);
 
@@ -335,10 +263,7 @@ AICORE void runTSwiGLU2DTiled(__gm__ T *x, __gm__ T *y, uint32_t batch,
   using TileData = Tile<TileType::Vec, T, kTileRows, kTileCols, BLayout::RowMajor,
                         DYNAMIC, DYNAMIC>;
 
-  set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
-  set_flag(PIPE_V, PIPE_MTE2, EVENT_ID1);
-  set_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
-  set_flag(PIPE_MTE3, PIPE_V, EVENT_ID1);
+  initTilePipeFlags();
 
   uint32_t current_tile_idx = vid;
   Tile2DWork current_tile =
@@ -351,11 +276,11 @@ AICORE void runTSwiGLU2DTiled(__gm__ T *x, __gm__ T *y, uint32_t batch,
     const event_t current_ev = ping ? (event_t)EVENT_ID0 : (event_t)EVENT_ID1;
     const unsigned current_x0_base = ping ? X0_PING : X0_PONG;
     const unsigned current_x1_base = ping ? X1_PING : X1_PONG;
-    const unsigned current_y_base = ping ? Y_PING : Y_PONG;
+    const unsigned current_y_base  = ping ? Y_PING  : Y_PONG;
 
     wait_flag(PIPE_MTE2, PIPE_V, current_ev);
 
-    Tile2DWork next_tile{0, 0, 0, 0};
+    Tile2DWork next_tile{0, 0, 0, 0, 0};
     const uint32_t next_tile_idx = current_tile_idx + num_cores;
     const bool has_next = next_tile_idx < total_tiles;
     if (has_next) {
@@ -389,10 +314,7 @@ AICORE void runTSwiGLU2DTiled(__gm__ T *x, __gm__ T *y, uint32_t batch,
     ping = !ping;
   }
 
-  wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
-  wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID1);
-  wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
-  wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID1);
+  drainTilePipeFlags();
 #else
   (void)x;
   (void)y;
@@ -413,138 +335,18 @@ AICORE void runTSwiGLU2DMainTiled(__gm__ T *x, __gm__ T *y, uint32_t batch,
   const Tile2DConfig cfg = chooseTile2DConfig(batch, output_n, num_cores);
 
   switch (cfg.col_tile_len) {
-    case 4096:
-      runTSwiGLU2DTiled<4096, T>(x, y, batch, input_n, num_cores, vid,
-                                 cfg.row_tile_len);
-      break;
-    case 8192:
-      runTSwiGLU2DTiled<8192, T>(x, y, batch, input_n, num_cores, vid,
-                                 cfg.row_tile_len);
-      break;
-    case 16384:
-      runTSwiGLU2DTiled<16384, T>(x, y, batch, input_n, num_cores, vid,
-                                  cfg.row_tile_len);
-      break;
-    case 2048:
-      runTSwiGLU2DTiled<2048, T>(x, y, batch, input_n, num_cores, vid,
-                                 cfg.row_tile_len);
-      break;
-    case 1024:
-      runTSwiGLU2DTiled<1024, T>(x, y, batch, input_n, num_cores, vid,
-                                 cfg.row_tile_len);
-      break;
-    case 512:
-      runTSwiGLU2DTiled<512, T>(x, y, batch, input_n, num_cores, vid,
-                                cfg.row_tile_len);
-      break;
-    case 256:
-      runTSwiGLU2DTiled<256, T>(x, y, batch, input_n, num_cores, vid,
-                                cfg.row_tile_len);
-      break;
+#define SWIGLU_TILE_CASE(width)                                       \
+  case width:                                                         \
+    runTSwiGLU2DTiled<width, T>(x, y, batch, input_n, num_cores, vid, \
+                                cfg.row_tile_len);                    \
+    break;
+      SWIGLU_FOR_EACH_COL_TILE(SWIGLU_TILE_CASE)
+#undef SWIGLU_TILE_CASE
     default:
       runTSwiGLU2DTiled<128, T>(x, y, batch, input_n, num_cores, vid,
                                 cfg.row_tile_len);
       break;
   }
-#else
-  (void)x;
-  (void)y;
-  (void)batch;
-  (void)input_n;
-  (void)num_cores;
-  (void)vid;
-#endif
-}
-
-template <typename T>
-AICORE void runTSwiGLU1DFallbackTiled(__gm__ T *x, __gm__ T *y, uint32_t batch,
-                                      uint32_t input_n, uint32_t num_cores,
-                                      uint32_t vid) {
-#if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
-  const uint32_t output_n = input_n >> 1;
-  const uint32_t tile_elements =
-      pick1DFallbackTileElements(batch, output_n, num_cores);
-  const uint32_t tiles_per_row = DIV_ROUNDUP(output_n, tile_elements);
-  const uint32_t total_tiles = batch * tiles_per_row;
-  if (vid >= total_tiles) {
-    return;
-  }
-
-  using OutShapeDim5 = pto::Shape<1, 1, 1, 1, ELEMENTS_PER_TILE>;
-  using StridDim5 = pto::Stride<1, 1, 1, 1, 1>;
-  using GlobalData = pto::GlobalTensor<T, OutShapeDim5, StridDim5>;
-  using FullTile =
-      Tile<TileType::Vec, T, 1, ELEMENTS_PER_TILE, BLayout::RowMajor, -1, -1>;
-
-  set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
-  set_flag(PIPE_V, PIPE_MTE2, EVENT_ID1);
-  set_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
-  set_flag(PIPE_MTE3, PIPE_V, EVENT_ID1);
-
-  uint32_t current_tile_idx = vid;
-  Tile1DWork current_tile = makeTile1DWork(current_tile_idx, tiles_per_row,
-                                           tile_elements, output_n);
-  bool ping = true;
-
-  __gm__ T *current_sample_x = x + current_tile.sample_index * input_n;
-  issueTile1DLoad(current_sample_x, output_n, current_tile, X0_PING, X1_PING,
-                  (event_t)EVENT_ID0);
-
-  while (true) {
-    const event_t current_ev = ping ? (event_t)EVENT_ID0 : (event_t)EVENT_ID1;
-    const unsigned current_x0_base = ping ? X0_PING : X0_PONG;
-    const unsigned current_x1_base = ping ? X1_PING : X1_PONG;
-    const unsigned current_y_base = ping ? Y_PING : Y_PONG;
-
-    wait_flag(PIPE_MTE2, PIPE_V, current_ev);
-
-    Tile1DWork next_tile{0, 0, 0};
-    const uint32_t next_tile_idx = current_tile_idx + num_cores;
-    const bool has_next = next_tile_idx < total_tiles;
-    if (has_next) {
-      next_tile = makeTile1DWork(next_tile_idx, tiles_per_row, tile_elements,
-                                 output_n);
-
-      const event_t next_ev = ping ? (event_t)EVENT_ID1 : (event_t)EVENT_ID0;
-      const unsigned next_x0_base = ping ? X0_PONG : X0_PING;
-      const unsigned next_x1_base = ping ? X1_PONG : X1_PING;
-      __gm__ T *next_sample_x = x + next_tile.sample_index * input_n;
-      issueTile1DLoad(next_sample_x, output_n, next_tile, next_x0_base,
-                      next_x1_base, next_ev);
-    }
-
-    FullTile x0Tile(1, current_tile.elements);
-    FullTile x1Tile(1, current_tile.elements);
-    FullTile yTile(1, current_tile.elements);
-    TASSIGN(x0Tile, current_x0_base);
-    TASSIGN(x1Tile, current_x1_base);
-    TASSIGN(yTile, current_y_base);
-
-    __gm__ T *current_sample_y = y + current_tile.sample_index * output_n;
-    GlobalData yGlobal(current_sample_y + current_tile.gm_offset);
-    TASSIGN(yGlobal, (current_sample_y + current_tile.gm_offset));
-
-    computeSwiGLUTile<FullTile, T>(x0Tile, x1Tile, yTile);
-
-    set_flag(PIPE_V, PIPE_MTE3, current_ev);
-    wait_flag(PIPE_V, PIPE_MTE3, current_ev);
-    TSTORE(yGlobal, yTile);
-    set_flag(PIPE_MTE3, PIPE_V, current_ev);
-    set_flag(PIPE_V, PIPE_MTE2, current_ev);
-
-    if (!has_next) {
-      break;
-    }
-
-    current_tile = next_tile;
-    current_tile_idx = next_tile_idx;
-    ping = !ping;
-  }
-
-  wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
-  wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID1);
-  wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
-  wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID1);
 #else
   (void)x;
   (void)y;
@@ -566,15 +368,10 @@ AICORE void runTSwiGLU(__gm__ T *x, __gm__ T *y, uint32_t batch,
     return;
   }
 
-  const uint32_t output_n = input_n >> 1;
-
-  // Main path: PTO-native equivalent of the AscendC queue/DataCopy tiler.
-  // Fallback: one generic 1D tiled path for widths that do not fit the 2D path.
-  if ((output_n & (TILE_ALIGNMENT - 1U)) == 0) {
-    runTSwiGLU2DMainTiled(x, y, batch, input_n, num_cores, vid);
-  } else {
-    runTSwiGLU1DFallbackTiled(x, y, batch, input_n, num_cores, vid);
-  }
+  // The 2D path handles all shapes including non-16-aligned output_n via
+  // col_count_store: UB tiles are padded to TILE_ALIGNMENT, HBM
+  // loads/stores use the actual element count.
+  runTSwiGLU2DMainTiled(x, y, batch, input_n, num_cores, vid);
 #else
   (void)x;
   (void)y;
