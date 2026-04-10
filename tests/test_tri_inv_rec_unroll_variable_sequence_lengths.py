@@ -179,7 +179,7 @@ def _reference_inverse(
     return ref
 
 
-def _test_inverse_correctness(
+def _test_inverse_accuracy(
     A: torch.Tensor,
     cu_seqlens: torch.Tensor,
     chunk_size: int,
@@ -199,8 +199,8 @@ def _test_inverse_correctness(
     assert frob_error <= ftol
 
 
-@pytest.mark.parametrize("B", [1, 2, 7, 17, 32, 93])  # Number of sequences
-@pytest.mark.parametrize("N", [4])  # Number of BSND heads
+@pytest.mark.parametrize("B", [1, 2, 7, 17, 32, 93])
+@pytest.mark.parametrize("N", [4])
 @pytest.mark.parametrize(
     "chunk_size", [32, 64, 128]
 )  # Equal to matrix size for inversion
@@ -218,6 +218,17 @@ def test_tri_inv_rec_unroll_variable_length(
     rtol: float,
     ftol: float,
 ):
+    """
+    Args:
+        B: Number of sequences
+        N: Number of BSND heads
+        chunk_size: Equal to matrix size for inversion
+        total_tokens: Total number of tokens (sum of sequence lengths)
+        matrix_type: Type of matrix to test
+        atol: Max abs tolerance for torch.allclose
+        rtol: Max rel tolerance for torch.allclose
+        ftol: Frobenius norm-wise relative error tolerance
+    """
     default_feature_dim = 64
     seq_lens = generate_random_sequence_lengths(B, total_tokens)
     packed_input, cu_seqlens = build_variable_len_input(
@@ -227,4 +238,4 @@ def test_tri_inv_rec_unroll_variable_length(
         feature_dim=default_feature_dim,
         matrix_type=matrix_type,
     )
-    _test_inverse_correctness(packed_input, cu_seqlens, chunk_size, atol, rtol, ftol)
+    _test_inverse_accuracy(packed_input, cu_seqlens, chunk_size, atol, rtol, ftol)
