@@ -53,8 +53,8 @@ AICORE void runTCsrGather(__gm__ T* values, __gm__ int32_t* indices,
   constexpr uint32_t TILE_SIZE_IDX_IN_BYTES = TILE_SIZE * sizeof(int32_t);
   constexpr uint32_t V_T_ADDR = UB_ZERO_ADDR;
   constexpr uint32_t W_T_ADDR = V_T_ADDR + 2 * TILE_SIZE_IN_BYTES;
-  constexpr uint32_t Z_T_ADDR =
-      W_T_ADDR + 2 * TILE_SIZE_IDX_IN_BYTES;  // GATHER uses 32 bit tmp
+  // PTO-ISA 8.5.0 bug, gather uses dst address for a tmp of size index.
+  constexpr uint32_t Z_T_ADDR = W_T_ADDR + 2 * 2 * TILE_SIZE_IDX_IN_BYTES;
   constexpr uint32_t IDX_T_ADDR = Z_T_ADDR + 2 * TILE_SIZE_IN_BYTES;
   constexpr uint32_t X_T_ADDR = IDX_T_ADDR + 2 * TILE_SIZE_IDX_IN_BYTES;
   static_assert(X_T_ADDR + TILE_SIZE_X_IN_BYTES <= UB_USABLE_BYTES,
@@ -81,7 +81,6 @@ AICORE void runTCsrGather(__gm__ T* values, __gm__ int32_t* indices,
   TileDataX xTiles(x_size);
   TASSIGN(xTiles, X_T_ADDR);
   TLOAD(xTiles, xGlobal);
-  set_flag(PIPE_MTE2, PIPE_V, EVENT_ID5);
   set_flag(PIPE_MTE2, PIPE_V, EVENT_ID7);
 
   // Unlock first iteration
@@ -121,15 +120,13 @@ AICORE void runTCsrGather(__gm__ T* values, __gm__ int32_t* indices,
     TileDataIdx idxTiles(remaining_elements);
 
     // Assign the UB address for each tile
-    const int8_t shift = ping ? 0 : 1;
     TASSIGN(valTiles, V_T_ADDR + ping * TILE_SIZE_IN_BYTES);
-    TASSIGN(wTiles, W_T_ADDR + ping * TILE_SIZE_IDX_IN_BYTES);
+    TASSIGN(wTiles, W_T_ADDR + ping * 2 * TILE_SIZE_IDX_IN_BYTES);
     TASSIGN(zTiles, Z_T_ADDR + ping * TILE_SIZE_IN_BYTES);
     TASSIGN(idxTiles, IDX_T_ADDR + ping * TILE_SIZE_IDX_IN_BYTES);
 
     event_t ev0 = ping ? (event_t)EVENT_ID0 : (event_t)EVENT_ID2;
     event_t ev1 = ping ? (event_t)EVENT_ID1 : (event_t)EVENT_ID3;
-    event_t ev5 = ping ? (event_t)EVENT_ID5 : (event_t)EVENT_ID7;
 
     // MTE2 (load) wait for gather to be done
     // (previous iteration's computation)
@@ -145,8 +142,8 @@ AICORE void runTCsrGather(__gm__ T* values, __gm__ int32_t* indices,
     wait_flag(PIPE_MTE2, PIPE_V, ev0);
     // This barrier is needed only for the
     // first iteration when the load of x might not be done yet
-    wait_flag(PIPE_MTE2, PIPE_V, ev5);
-    set_flag(PIPE_MTE2, PIPE_V, ev5);
+    wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID7);
+    set_flag(PIPE_MTE2, PIPE_V, EVENT_ID7);
 
     // Wait for mul to be done (previous iteration's computation)
     pipe_barrier(PIPE_V);
@@ -200,7 +197,6 @@ AICORE void runTCsrGather(__gm__ T* values, __gm__ int32_t* indices,
   wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID2);
   wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID2);
   wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID3);
-  wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID5);
   wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID7);
 }
 
