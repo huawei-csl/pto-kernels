@@ -22,6 +22,7 @@ v_size = [100, 128, 256, 600, 1024, 1200, 8192, 16384]
 # Sweep only for v < x
 sweep_sizes = [(x, v) for x in x_size for v in v_size]
 
+
 @pytest.mark.parametrize("x_size, v_size", sweep_sizes)
 @pytest.mark.parametrize("dtype", [torch.float16, torch.float32], ids=str)
 def test_pto_csr_gather(x_size: int, v_size: int, dtype: torch.dtype):
@@ -40,5 +41,6 @@ def test_pto_csr_gather(x_size: int, v_size: int, dtype: torch.dtype):
     # Validate the results
     assert torch.allclose(output, cpuout)
 
+
 if __name__ == "__main__":
-    test_pto_csr_gather(32768, 16384, torch.float16)
+    test_pto_csr_gather(32768, 131072, torch.float16)

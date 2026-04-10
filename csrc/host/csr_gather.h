@@ -41,8 +41,8 @@ at::Tensor run_csr_gather(const at::Tensor& values, const at::Tensor& indices,
 
   // Define the number of blocks of vector core
   const uint32_t indices_size = indices.numel();
-  // FIXME: tile length is fixed to 128 for now
-  constexpr uint32_t TILE_SIZE = 128;
+  // FIXME: tile length is fixed to 512 for now
+  constexpr uint32_t TILE_SIZE = 512;
 
   // Persistent kernel launch parameter
   uint32_t total_tiles = (indices_size + TILE_SIZE - 1) / TILE_SIZE;
