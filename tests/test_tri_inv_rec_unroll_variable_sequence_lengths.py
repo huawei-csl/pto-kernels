@@ -23,8 +23,8 @@ def generate_random_sequence_lengths(
     num_sequences: int, total_tokens: int
 ) -> list[int]:
     """
-    Generates an list of integers with length num_sequences.
-    These
+    Generates a list of num_sequences integers in the range (1, total_tokens).
+    These integers denote the index where each "input sequence" ends.
     """
     if total_tokens < num_sequences:
         raise ValueError("total_tokens must be >= num_sequences.")
