@@ -53,7 +53,8 @@ AICORE void runTCsrGather(__gm__ T* values, __gm__ int32_t* indices,
   constexpr uint32_t TILE_SIZE_IDX_IN_BYTES = TILE_SIZE * sizeof(int32_t);
   constexpr uint32_t V_T_ADDR = UB_ZERO_ADDR;
   constexpr uint32_t W_T_ADDR = V_T_ADDR + 2 * TILE_SIZE_IN_BYTES;
-  constexpr uint32_t Z_T_ADDR = W_T_ADDR + 2 * TILE_SIZE_IN_BYTES;
+  constexpr uint32_t Z_T_ADDR =
+      W_T_ADDR + 2 * TILE_SIZE_IDX_IN_BYTES;  // GATHER uses 32 bit tmp
   constexpr uint32_t IDX_T_ADDR = Z_T_ADDR + 2 * TILE_SIZE_IN_BYTES;
   constexpr uint32_t X_T_ADDR = IDX_T_ADDR + 2 * TILE_SIZE_IDX_IN_BYTES;
   static_assert(X_T_ADDR + TILE_SIZE_X_IN_BYTES <= UB_USABLE_BYTES,
@@ -122,7 +123,7 @@ AICORE void runTCsrGather(__gm__ T* values, __gm__ int32_t* indices,
     // Assign the UB address for each tile
     const int8_t shift = ping ? 0 : 1;
     TASSIGN(valTiles, V_T_ADDR + ping * TILE_SIZE_IN_BYTES);
-    TASSIGN(wTiles, W_T_ADDR + ping * TILE_SIZE_IN_BYTES);
+    TASSIGN(wTiles, W_T_ADDR + ping * TILE_SIZE_IDX_IN_BYTES);
     TASSIGN(zTiles, Z_T_ADDR + ping * TILE_SIZE_IN_BYTES);
     TASSIGN(idxTiles, IDX_T_ADDR + ping * TILE_SIZE_IDX_IN_BYTES);
 
