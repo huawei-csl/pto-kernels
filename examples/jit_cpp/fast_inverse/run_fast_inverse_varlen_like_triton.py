@@ -19,7 +19,7 @@ import os
 import numpy as np
 import torch
 import torch.nn.functional as F
-import torch_npu  # noqa: F401
+import torch_npu  # noqa
 
 from jit_util_fast_inverse import jit_compile
 

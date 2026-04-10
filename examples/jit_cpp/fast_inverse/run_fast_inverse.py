@@ -18,7 +18,7 @@ and tests/test_tri_inv_rec_unroll_variable_sequence_lengths.py
 
 import numpy as np
 import torch
-import torch_npu  # noqa: F401 – registers the NPU backend
+import torch_npu  # noqa
 
 from jit_util_fast_inverse import jit_compile
 
