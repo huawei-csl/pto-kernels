@@ -31,9 +31,9 @@ for the full License text.
  *                    boundaries for the packed BSND tensor.
  */
 extern "C" void call_kernel(uint32_t blockDim, void* stream, void* tensor_out,
-                             void* tensor_in, void* minus_identity_in,
-                             uint32_t matrix_size, uint32_t num_matrices,
-                             uint32_t num_bsnd_heads, void* cu_seqlens) {
+                            void* tensor_in, void* minus_identity_in,
+                            uint32_t matrix_size, uint32_t num_matrices,
+                            uint32_t num_bsnd_heads, void* cu_seqlens) {
   tri_inv_rec_unroll_fp16<<<blockDim, nullptr, stream>>>(
       tensor_out, tensor_in, minus_identity_in, matrix_size, num_matrices,
       num_bsnd_heads, cu_seqlens);

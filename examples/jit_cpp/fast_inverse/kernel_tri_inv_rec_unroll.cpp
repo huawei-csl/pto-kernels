@@ -148,10 +148,9 @@ AICORE inline void CopyOddOrEvenBlocksL1ToL0(SrcL1TileT src, DstL0TileT dst,
   for (uint32_t i = 0; i < num_fractals_per_block; ++i) {
     for (uint32_t j = 0; j < num_fractals_per_block; ++j) {
       for (uint32_t b = starting_block_index; b < num_blocks; b += 2) {
-        const uint32_t offset =
-            b * (MatrixSize + FractalSize) * block_size +
-            i * MatrixSize * FractalSize +
-            j * FractalSize * FractalSize;
+        const uint32_t offset = b * (MatrixSize + FractalSize) * block_size +
+                                i * MatrixSize * FractalSize +
+                                j * FractalSize * FractalSize;
         TASSIGN(fractals[b], starting_address + offset * sizeof(InputT));
         TEXTRACT(fractals[b], src, b * block_size + i * FractalSize,
                  b * block_size + j * FractalSize);
@@ -355,9 +354,8 @@ AICORE inline void InvertSingleTile(TileL1AB X_l1_tile, TileL1AB I_l1_tile,
     set_flag(PIPE_MTE1, PIPE_M, event_0);
 
     wait_flag(PIPE_FIX, PIPE_MTE1, event_1);
-    CopyOddOrEvenBlocksL1ToL0<InputT, FractalSize, MatrixSize>(X_l1_tile,
-                                                               a_l0_tile[1],
-                                                               block_size);
+    CopyOddOrEvenBlocksL1ToL0<InputT, FractalSize, MatrixSize>(
+        X_l1_tile, a_l0_tile[1], block_size);
     set_flag(PIPE_MTE1, PIPE_M, event_1);
 
     wait_flag(PIPE_MTE1, PIPE_M, event_0);
@@ -380,9 +378,8 @@ AICORE inline void InvertSingleTile(TileL1AB X_l1_tile, TileL1AB I_l1_tile,
 
     wait_flag(PIPE_M, PIPE_MTE1, event_1);
     TMOV(b_l0_tile[0], Zero_l1_tile);
-    CopyOddOrEvenBlocksL1ToL0<InputT, FractalSize, MatrixSize>(X_l1_tile,
-                                                               b_l0_tile[0],
-                                                               block_size);
+    CopyOddOrEvenBlocksL1ToL0<InputT, FractalSize, MatrixSize>(
+        X_l1_tile, b_l0_tile[0], block_size);
 
     wait_flag(PIPE_M, PIPE_MTE1, event_0);
     wait_flag(PIPE_FIX, PIPE_MTE1, event_0);
@@ -450,15 +447,15 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
       Stride<1, 1, 1, -1, 1>>::type;
   using GlobalTileOut = GlobalTensor<OutputT, GlobalTileShapeOut,
                                      GlobalTileStridesOut, Layout::ND>;
-  using GlobalTileOutDyn =
-      GlobalTensor<OutputT, GlobalTileDynShape, GlobalTileDynStride, Layout::ND>;
+  using GlobalTileOutDyn = GlobalTensor<OutputT, GlobalTileDynShape,
+                                        GlobalTileDynStride, Layout::ND>;
 
   using TileL1AB =
       Tile<TileType::Mat, InputT, MatrixSize, MatrixSize, BLayout::ColMajor,
            MatrixSize, MatrixSize, SLayout::RowMajor, 512>;
-  using TileL1ABDyn = Tile<TileType::Mat, InputT, MatrixSize, MatrixSize,
-                           BLayout::ColMajor, DYNAMIC, DYNAMIC,
-                           SLayout::RowMajor, 512, PadValue::Zero>;
+  using TileL1ABDyn =
+      Tile<TileType::Mat, InputT, MatrixSize, MatrixSize, BLayout::ColMajor,
+           DYNAMIC, DYNAMIC, SLayout::RowMajor, 512, PadValue::Zero>;
   using TileL0CDyn = TileAcc<OutputT, MatrixSize, MatrixSize, DYNAMIC, DYNAMIC>;
 
   using TileL0A = TileLeft<InputT, MatrixSize, MatrixSize>;
@@ -525,13 +522,14 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
       if constexpr (IsBSND) {
         const uint32_t global_tile_id = global_index + tile_id;
         if (cu_seqlens != nullptr) {
-          const BSNDVarlenTileInfo tile_info = GetBSNDVarlenTileInfoFromCuSeqlens(
-              global_tile_id, num_bsnd_heads, MatrixSize, cu_seqlens);
+          const BSNDVarlenTileInfo tile_info =
+              GetBSNDVarlenTileInfoFromCuSeqlens(global_tile_id, num_bsnd_heads,
+                                                 MatrixSize, cu_seqlens);
           bsnd_tile_offsets[tile_id] = tile_info.bsnd_offset;
           bsnd_tile_valid_sizes[tile_id] = tile_info.valid_size;
         } else {
-          bsnd_tile_offsets[tile_id] =
-              GetBSNDFixedTileOffset(global_tile_id, num_bsnd_heads, MatrixSize);
+          bsnd_tile_offsets[tile_id] = GetBSNDFixedTileOffset(
+              global_tile_id, num_bsnd_heads, MatrixSize);
           bsnd_tile_valid_sizes[tile_id] = MatrixSize;
         }
         const uint32_t bsnd_offset = bsnd_tile_offsets[tile_id];
@@ -544,7 +542,8 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
                   0x0 + (5 + tile_id) * TileLen * sizeof(InputT));
           GlobalTileInDyn M_global_in_dyn(
               M + bsnd_offset,
-              {1, 1, 1, static_cast<int>(valid_size), static_cast<int>(valid_size)},
+              {1, 1, 1, static_cast<int>(valid_size),
+               static_cast<int>(valid_size)},
               {1, 1, 1, row_stride, 1});
           TLOAD(Y_dyn_l1_tile, M_global_in_dyn);
           set_flag(PIPE_MTE2, PIPE_MTE1, static_cast<event_t>(tile_id));
@@ -598,12 +597,12 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
           wait_flag(PIPE_FIX, PIPE_MTE3, static_cast<event_t>(tile_id));
           GlobalTileOutDyn M_inv_global_out_dyn(
               M_inv + bsnd_offset,
-              {1, 1, 1, static_cast<int>(valid_size), static_cast<int>(valid_size)},
+              {1, 1, 1, static_cast<int>(valid_size),
+               static_cast<int>(valid_size)},
               {1, 1, 1, row_stride, 1});
           TSTORE(M_inv_global_out_dyn, c_l0_tail_tile);
         } else {
-          GlobalTileOut M_inv_global_out(M_inv + bsnd_offset, {},
-                                         {row_stride});
+          GlobalTileOut M_inv_global_out(M_inv + bsnd_offset, {}, {row_stride});
           TSTORE(M_inv_global_out, c_l0_tile[final_c_buffer_index]);
         }
       } else {
@@ -659,8 +658,8 @@ AICORE inline void TriInvRecUnrollKernelBSNDVarlen(
   using GlobalTileDynStride = Stride<1, 1, 1, DYNAMIC, 1>;
   using GlobalTileInDyn =
       GlobalTensor<InputT, GlobalTileDynShape, GlobalTileDynStride, Layout::ND>;
-  using GlobalTileOutDyn =
-      GlobalTensor<OutputT, GlobalTileDynShape, GlobalTileDynStride, Layout::ND>;
+  using GlobalTileOutDyn = GlobalTensor<OutputT, GlobalTileDynShape,
+                                        GlobalTileDynStride, Layout::ND>;
 
   using GlobalTileStridesINeg =
       BaseShape2D<InputT, MatrixSize, MatrixSize, Layout::ND>;
@@ -676,9 +675,9 @@ AICORE inline void TriInvRecUnrollKernelBSNDVarlen(
   using TileL1AB =
       Tile<TileType::Mat, InputT, MatrixSize, MatrixSize, BLayout::ColMajor,
            MatrixSize, MatrixSize, SLayout::RowMajor, 512>;
-  using TileL1ABDyn = Tile<TileType::Mat, InputT, MatrixSize, MatrixSize,
-                           BLayout::ColMajor, DYNAMIC, DYNAMIC,
-                           SLayout::RowMajor, 512, PadValue::Zero>;
+  using TileL1ABDyn =
+      Tile<TileType::Mat, InputT, MatrixSize, MatrixSize, BLayout::ColMajor,
+           DYNAMIC, DYNAMIC, SLayout::RowMajor, 512, PadValue::Zero>;
 
   using TileL0A = TileLeft<InputT, MatrixSize, MatrixSize>;
   using TileL0B = TileRight<InputT, MatrixSize, MatrixSize>;
@@ -749,8 +748,7 @@ AICORE inline void TriInvRecUnrollKernelBSNDVarlen(
         wait_flag(PIPE_MTE2, PIPE_MTE1, static_cast<event_t>(tile_id));
       } else {
         TileL1ABDyn Y_dyn_l1_tile(valid_size, valid_size);
-        TASSIGN(Y_dyn_l1_tile,
-                0x0 + (5 + tile_id) * TileLen * sizeof(InputT));
+        TASSIGN(Y_dyn_l1_tile, 0x0 + (5 + tile_id) * TileLen * sizeof(InputT));
         GlobalTileInDyn M_global_in_dyn(M + bsnd_offset,
                                         {1, 1, 1, valid_size, valid_size},
                                         {1, 1, 1, row_stride, 1});
@@ -770,7 +768,8 @@ AICORE inline void TriInvRecUnrollKernelBSNDVarlen(
         TSTORE(M_inv_global_out, c_l0_tile[final_c_buffer_index]);
       } else {
         const event_t event_0 = static_cast<event_t>(tile_id);
-        const event_t event_1 = static_cast<event_t>(tile_id + NumTilesPerCubeIter);
+        const event_t event_1 =
+            static_cast<event_t>(tile_id + NumTilesPerCubeIter);
         TileL0CDyn c_l0_tail_tile(valid_size, valid_size);
         TASSIGN(c_l0_tail_tile,
                 0x0 + final_c_buffer_index * TileLen * sizeof(OutputT));
@@ -783,9 +782,9 @@ AICORE inline void TriInvRecUnrollKernelBSNDVarlen(
         }
         set_flag(PIPE_FIX, PIPE_MTE3, static_cast<event_t>(tile_id));
         wait_flag(PIPE_FIX, PIPE_MTE3, static_cast<event_t>(tile_id));
-        GlobalTileOutDyn M_inv_global_out_dyn(
-            M_inv + bsnd_offset, {1, 1, 1, valid_size, valid_size},
-            {1, 1, 1, row_stride, 1});
+        GlobalTileOutDyn M_inv_global_out_dyn(M_inv + bsnd_offset,
+                                              {1, 1, 1, valid_size, valid_size},
+                                              {1, 1, 1, row_stride, 1});
         TSTORE(M_inv_global_out_dyn, c_l0_tail_tile);
       }
     }
@@ -820,23 +819,23 @@ AICORE void run_tri_inv_rec_unroll(__gm__ float* tensor_out,
   switch (matrix_size) {
     case 16:
       runKernelTriInvRecUnroll<InputT, float, 16, NumTilesPerCubeIter, IsBSND>(
-          tensor_out, tensor_in, minus_identity_in, num_matrices, num_bsnd_heads,
-          cu_seqlens);
+          tensor_out, tensor_in, minus_identity_in, num_matrices,
+          num_bsnd_heads, cu_seqlens);
       break;
     case 32:
       runKernelTriInvRecUnroll<InputT, float, 32, NumTilesPerCubeIter, IsBSND>(
-          tensor_out, tensor_in, minus_identity_in, num_matrices, num_bsnd_heads,
-          cu_seqlens);
+          tensor_out, tensor_in, minus_identity_in, num_matrices,
+          num_bsnd_heads, cu_seqlens);
       break;
     case 64:
       runKernelTriInvRecUnroll<InputT, float, 64, NumTilesPerCubeIter, IsBSND>(
-          tensor_out, tensor_in, minus_identity_in, num_matrices, num_bsnd_heads,
-          cu_seqlens);
+          tensor_out, tensor_in, minus_identity_in, num_matrices,
+          num_bsnd_heads, cu_seqlens);
       break;
     case 128:
       runKernelTriInvRecUnroll<InputT, float, 128, NumTilesPerCubeIter, IsBSND>(
-          tensor_out, tensor_in, minus_identity_in, num_matrices, num_bsnd_heads,
-          cu_seqlens);
+          tensor_out, tensor_in, minus_identity_in, num_matrices,
+          num_bsnd_heads, cu_seqlens);
       break;
   }
 }

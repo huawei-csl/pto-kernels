@@ -41,7 +41,9 @@ def _make_minus_identity(matrix_size: int, device: torch.device) -> torch.Tensor
 def _count_varlen_chunks(cu_seqlens: torch.Tensor, chunk_size: int) -> int:
     return sum(
         (int(eos) - int(bos) + chunk_size - 1) // chunk_size
-        for bos, eos in zip(cu_seqlens[:-1].tolist(), cu_seqlens[1:].tolist(), strict=False)
+        for bos, eos in zip(
+            cu_seqlens[:-1].tolist(), cu_seqlens[1:].tolist(), strict=False
+        )
     )
 
 
@@ -55,7 +57,9 @@ def _chunk_scaled_dot_kkt_fwd_emulated(
     num_heads = k.shape[2]
     A = torch.zeros((1, t_total, num_heads, chunk_size), dtype=k.dtype, device=k.device)
 
-    for bos, eos in zip(cu_seqlens[:-1].tolist(), cu_seqlens[1:].tolist(), strict=False):
+    for bos, eos in zip(
+        cu_seqlens[:-1].tolist(), cu_seqlens[1:].tolist(), strict=False
+    ):
         for chunk_start in range(bos, eos, chunk_size):
             chunk_end = min(chunk_start + chunk_size, eos)
             actual_size = chunk_end - chunk_start
@@ -73,16 +77,24 @@ def _chunk_scaled_dot_kkt_fwd_emulated(
     return A
 
 
-def _reference_inverse(A: torch.Tensor, cu_seqlens: torch.Tensor, chunk_size: int) -> torch.Tensor:
+def _reference_inverse(
+    A: torch.Tensor, cu_seqlens: torch.Tensor, chunk_size: int
+) -> torch.Tensor:
     A_cpu = A.cpu().to(torch.float64)
     ref = torch.zeros_like(A_cpu, dtype=torch.float64)
-    for bos, eos in zip(cu_seqlens[:-1].tolist(), cu_seqlens[1:].tolist(), strict=False):
+    for bos, eos in zip(
+        cu_seqlens[:-1].tolist(), cu_seqlens[1:].tolist(), strict=False
+    ):
         for chunk_start in range(bos, eos, chunk_size):
             actual_size = min(chunk_size, eos - chunk_start)
-            ref[:, chunk_start : chunk_start + actual_size, :, :actual_size] = torch.inverse(
-                A_cpu[:, chunk_start : chunk_start + actual_size, :, :actual_size].transpose(1, 2)
-                + torch.eye(actual_size, dtype=torch.float64)[None, None, ...]
-            ).transpose(1, 2)
+            ref[:, chunk_start : chunk_start + actual_size, :, :actual_size] = (
+                torch.inverse(
+                    A_cpu[
+                        :, chunk_start : chunk_start + actual_size, :, :actual_size
+                    ].transpose(1, 2)
+                    + torch.eye(actual_size, dtype=torch.float64)[None, None, ...]
+                ).transpose(1, 2)
+            )
     return ref
 
 
@@ -92,17 +104,21 @@ def _transpose_valid_chunks(
     chunk_size: int,
 ) -> torch.Tensor:
     transposed = torch.zeros_like(A)
-    for bos, eos in zip(cu_seqlens[:-1].tolist(), cu_seqlens[1:].tolist(), strict=False):
+    for bos, eos in zip(
+        cu_seqlens[:-1].tolist(), cu_seqlens[1:].tolist(), strict=False
+    ):
         for chunk_start in range(bos, eos, chunk_size):
             actual_size = min(chunk_size, eos - chunk_start)
             chunk = A[:, chunk_start : chunk_start + actual_size, :, :actual_size]
-            transposed[:, chunk_start : chunk_start + actual_size, :, :actual_size] = chunk.transpose(
-                1, 3
+            transposed[:, chunk_start : chunk_start + actual_size, :, :actual_size] = (
+                chunk.transpose(1, 3)
             )
     return transposed
 
 
-def _run_pto_varlen(tri_inv_func, A: torch.Tensor, cu_seqlens: torch.Tensor) -> torch.Tensor:
+def _run_pto_varlen(
+    tri_inv_func, A: torch.Tensor, cu_seqlens: torch.Tensor
+) -> torch.Tensor:
     chunk_size = A.shape[-1]
     num_heads = A.shape[-2]
     num_matrices = _count_varlen_chunks(cu_seqlens, chunk_size) * num_heads
@@ -138,7 +154,9 @@ def _run_case(
     cu_seqlens = torch.tensor(cu_seqlens_list, dtype=torch.int32, device=device)
 
     # Match the Triton varlen test structure, using fp16 instead of bf16.
-    k = F.normalize(torch.randn((1, T, H, D), dtype=torch.float16, device=device), dim=-1)
+    k = F.normalize(
+        torch.randn((1, T, H, D), dtype=torch.float16, device=device), dim=-1
+    )
     beta = torch.randn((1, T, H), dtype=torch.float16, device=device).sigmoid()
     A = _chunk_scaled_dot_kkt_fwd_emulated(
         k=k,
@@ -155,7 +173,7 @@ def _run_case(
     )
     tri = _transpose_valid_chunks(tri, cu_seqlens, chunk_size)
 
-    frob = torch.sqrt(torch.sum((ref - tri) ** 2) / torch.sum(ref ** 2)).item()
+    frob = torch.sqrt(torch.sum((ref - tri) ** 2) / torch.sum(ref**2)).item()
     torch.testing.assert_close(tri, ref, atol=atol, rtol=rtol)
     assert frob <= ftol, f"Frobenius error {frob:.2e} > {ftol:.2e}"
 

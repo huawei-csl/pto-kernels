@@ -60,7 +60,9 @@ def parse_int_list(spec: str) -> tuple[int, ...]:
     try:
         return tuple(int(p, 10) for p in parts)
     except ValueError as exc:
-        raise argparse.ArgumentTypeError(f"invalid integer list {spec!r}: {exc}") from exc
+        raise argparse.ArgumentTypeError(
+            f"invalid integer list {spec!r}: {exc}"
+        ) from exc
 
 
 def make_minus_identity(matrix_size: int, device: str) -> torch.Tensor:
@@ -93,9 +95,13 @@ def chunk_scaled_dot_kkt_fwd_emulated(
 ) -> torch.Tensor:
     total_tokens = int(cu_seqlens[-1].item())
     num_heads = k.shape[2]
-    A = torch.zeros((1, total_tokens, num_heads, chunk_size), dtype=k.dtype, device=k.device)
+    A = torch.zeros(
+        (1, total_tokens, num_heads, chunk_size), dtype=k.dtype, device=k.device
+    )
 
-    for bos, eos in zip(cu_seqlens[:-1].tolist(), cu_seqlens[1:].tolist(), strict=False):
+    for bos, eos in zip(
+        cu_seqlens[:-1].tolist(), cu_seqlens[1:].tolist(), strict=False
+    ):
         for chunk_start in range(bos, eos, chunk_size):
             chunk_end = min(chunk_start + chunk_size, eos)
             actual_size = chunk_end - chunk_start
@@ -119,12 +125,14 @@ def transpose_valid_chunks(
     chunk_size: int,
 ) -> torch.Tensor:
     transposed = torch.zeros_like(A)
-    for bos, eos in zip(cu_seqlens[:-1].tolist(), cu_seqlens[1:].tolist(), strict=False):
+    for bos, eos in zip(
+        cu_seqlens[:-1].tolist(), cu_seqlens[1:].tolist(), strict=False
+    ):
         for chunk_start in range(bos, eos, chunk_size):
             actual_size = min(chunk_size, eos - chunk_start)
             chunk = A[:, chunk_start : chunk_start + actual_size, :, :actual_size]
-            transposed[:, chunk_start : chunk_start + actual_size, :, :actual_size] = chunk.transpose(
-                1, 3
+            transposed[:, chunk_start : chunk_start + actual_size, :, :actual_size] = (
+                chunk.transpose(1, 3)
             )
     return transposed
 
@@ -146,10 +154,16 @@ def build_fixed_bsnd_input(
         device=device,
     )
     k = F.normalize(
-        torch.randn((1, total_tokens, num_heads, feature_dim), dtype=torch.float16, device=device),
+        torch.randn(
+            (1, total_tokens, num_heads, feature_dim),
+            dtype=torch.float16,
+            device=device,
+        ),
         dim=-1,
     )
-    beta = torch.randn((1, total_tokens, num_heads), dtype=torch.float16, device=device).sigmoid()
+    beta = torch.randn(
+        (1, total_tokens, num_heads), dtype=torch.float16, device=device
+    ).sigmoid()
     A = transpose_valid_chunks(
         chunk_scaled_dot_kkt_fwd_emulated(k, beta, cu_seqlens, chunk_size),
         cu_seqlens,
@@ -165,7 +179,9 @@ def build_uniform_varlen_input(
     chunk_size: int,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     total_tokens = batch_size * seqlen
-    packed_input = fixed_input.reshape(1, total_tokens, fixed_input.shape[2], chunk_size).contiguous()
+    packed_input = fixed_input.reshape(
+        1, total_tokens, fixed_input.shape[2], chunk_size
+    ).contiguous()
     cu_seqlens = torch.arange(
         0,
         total_tokens + 1,
@@ -204,13 +220,21 @@ def build_true_varlen_input(
     device: str,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     cu_seqlens = np.cumsum([0, *seq_lens], dtype=np.int64)
-    cu_seqlens_tensor = torch.tensor(cu_seqlens.tolist(), dtype=torch.int32, device=device)
+    cu_seqlens_tensor = torch.tensor(
+        cu_seqlens.tolist(), dtype=torch.int32, device=device
+    )
     total_tokens = int(cu_seqlens[-1])
     k = F.normalize(
-        torch.randn((1, total_tokens, num_heads, feature_dim), dtype=torch.float16, device=device),
+        torch.randn(
+            (1, total_tokens, num_heads, feature_dim),
+            dtype=torch.float16,
+            device=device,
+        ),
         dim=-1,
     )
-    beta = torch.randn((1, total_tokens, num_heads), dtype=torch.float16, device=device).sigmoid()
+    beta = torch.randn(
+        (1, total_tokens, num_heads), dtype=torch.float16, device=device
+    ).sigmoid()
     packed_input = transpose_valid_chunks(
         chunk_scaled_dot_kkt_fwd_emulated(k, beta, cu_seqlens_tensor, chunk_size),
         cu_seqlens_tensor,
@@ -294,14 +318,18 @@ def benchmark_ms(
     return times_ms
 
 
-def add_bandwidth_fields(row: dict[str, float | int | str], input_dtype_bytes: int = 2) -> None:
+def add_bandwidth_fields(
+    row: dict[str, float | int | str], input_dtype_bytes: int = 2
+) -> None:
     size_elems = int(row.get("valid_numel", row["numel"]))
     mem_bytes = size_elems * (input_dtype_bytes + 4)
     row["mem_bytes"] = mem_bytes
     row["bw_gbs"] = (mem_bytes / 1e9) / (float(row["time_us"]) / 1e6)
 
 
-def accuracy_metrics(reference: torch.Tensor, candidate: torch.Tensor) -> tuple[float, float]:
+def accuracy_metrics(
+    reference: torch.Tensor, candidate: torch.Tensor
+) -> tuple[float, float]:
     ref = reference.detach().cpu().to(torch.float64)
     cand = candidate.detach().cpu().to(torch.float64)
     diff = ref - cand
@@ -339,7 +367,13 @@ def write_csv(csv_path: Path, rows: list[dict[str, float | int | str]]) -> None:
             writer.writerow(row)
 
 
-def plot_bandwidth(plot_path: Path, rows: list[dict[str, float | int | str]], batch_size: int, num_heads: int, chunk_size: int) -> None:
+def plot_bandwidth(
+    plot_path: Path,
+    rows: list[dict[str, float | int | str]],
+    batch_size: int,
+    num_heads: int,
+    chunk_size: int,
+) -> None:
     plot_path.parent.mkdir(parents=True, exist_ok=True)
     fixed_rows = [row for row in rows if row["inverse_type"] == "bsnd-fixed"]
     varlen_rows = [row for row in rows if row["inverse_type"] == "bsnd-varlen-uniform"]
@@ -402,7 +436,9 @@ def plot_true_varlen_scatter(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Benchmark standalone BSND fast-inverse kernel.")
+    parser = argparse.ArgumentParser(
+        description="Benchmark standalone BSND fast-inverse kernel."
+    )
     parser.add_argument("--warmup", type=int, default=5)
     parser.add_argument("--repeats", type=int, default=20)
     parser.add_argument("--B", type=int, default=32, help="Dense BSND batch size.")
@@ -477,12 +513,14 @@ def main() -> None:
     true_varlen_csv_path = (
         Path(args.true_varlen_csv)
         if args.true_varlen_csv
-        else RESULTS_DIR / f"bench_results_bsnd_fast_inverse_true_varlen_{args.chunk_size}.csv"
+        else RESULTS_DIR
+        / f"bench_results_bsnd_fast_inverse_true_varlen_{args.chunk_size}.csv"
     )
     true_varlen_plot_path = (
         Path(args.true_varlen_plot)
         if args.true_varlen_plot
-        else RESULTS_DIR / f"bench_results_bsnd_fast_inverse_true_varlen_bw_{args.chunk_size}.png"
+        else RESULTS_DIR
+        / f"bench_results_bsnd_fast_inverse_true_varlen_bw_{args.chunk_size}.png"
     )
 
     rows: list[dict[str, float | int | str]] = []
@@ -536,8 +574,12 @@ def main() -> None:
             uniform_cu_seqlens,
             args.chunk_size,
         )
-        packed_varlen_out = transpose_valid_chunks(varlen_out, cu_seqlens, args.chunk_size)
-        max_abs_diff, rel_frob_diff = accuracy_metrics(packed_fixed_out, packed_varlen_out)
+        packed_varlen_out = transpose_valid_chunks(
+            varlen_out, cu_seqlens, args.chunk_size
+        )
+        max_abs_diff, rel_frob_diff = accuracy_metrics(
+            packed_fixed_out, packed_varlen_out
+        )
         print(
             f"  accuracy vs fixed: max_abs_diff={max_abs_diff:.3e}, "
             f"rel_frob_diff={rel_frob_diff:.3e}"
