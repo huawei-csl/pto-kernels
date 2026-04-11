@@ -14,9 +14,11 @@ for the full License text.
 
 #include "utils.h"
 
-extern "C" void vabs_fp16(void* x, void* y, uint32_t num_elements);
+extern "C" void call_vabs_fp16(uint32_t blockDim, aclrtStream stream, void* x,
+                               void* y, uint32_t num_elements);
 
-extern "C" void vabs_fp32(void* x, void* y, uint32_t num_elements);
+extern "C" void call_vabs_fp32(uint32_t blockDim, aclrtStream stream, void* x,
+                               void* y, uint32_t num_elements);
 
 namespace pto_isa_ops {
 /**
