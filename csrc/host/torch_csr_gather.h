@@ -11,8 +11,8 @@ for the full License text.
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
-#include "aclrtlaunch_vcsr_gather_fp16.h"
-#include "aclrtlaunch_vcsr_gather_fp32.h"
+#include "aclrtlaunch_csr_gather_fp16.h"
+#include "aclrtlaunch_csr_gather_fp32.h"
 #include "utils.h"
 
 namespace pto_isa_ops {
@@ -53,11 +53,11 @@ at::Tensor run_csr_gather(const at::Tensor& values, const at::Tensor& indices,
   }
 
   if (dtype == at::kHalf) {
-    EXEC_KERNEL_CMD(vcsr_gather_fp16, block_dim, values, indices, x, z, x_size,
+    EXEC_KERNEL_CMD(csr_gather_fp16, block_dim, values, indices, x, z, x_size,
                     indices_size);
 
   } else if (dtype == at::kFloat) {
-    EXEC_KERNEL_CMD(vcsr_gather_fp32, block_dim, values, indices, x, z, x_size,
+    EXEC_KERNEL_CMD(csr_gather_fp32, block_dim, values, indices, x, z, x_size,
                     indices_size);
 
   } else {

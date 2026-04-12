@@ -208,7 +208,7 @@ AICORE void runTCsrGather(__gm__ T* values, __gm__ int32_t* indices,
   wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID7);
 }
 
-extern "C" __global__ AICORE void vcsr_gather_fp16(GM_ADDR values,
+extern "C" __global__ AICORE void csr_gather_fp16(GM_ADDR values,
                                                    GM_ADDR indices, GM_ADDR x,
                                                    GM_ADDR z, uint32_t x_size,
                                                    uint32_t indices_size) {
@@ -219,7 +219,7 @@ extern "C" __global__ AICORE void vcsr_gather_fp16(GM_ADDR values,
       (__gm__ half*)z, x_size, indices_size);
 }
 
-extern "C" __global__ AICORE void vcsr_gather_fp32(GM_ADDR values,
+extern "C" __global__ AICORE void csr_gather_fp32(GM_ADDR values,
                                                    GM_ADDR indices, GM_ADDR x,
                                                    GM_ADDR z, uint32_t x_size,
                                                    uint32_t indices_size) {
