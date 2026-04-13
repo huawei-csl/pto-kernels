@@ -24,7 +24,13 @@ Until all three succeed, the task is **not finished**. Do not treat "code writte
 
 The environment is assumed capable of compiling and running on NPU; lack of access is not a reason to skip the steps above—surface the failure and what blocked you instead of delegating execution to the user.
 
-## Pick free NPUs for execution
+---
+
+## Highly recommended practices
+
+> **Highly recommended — not mandatory:** The subsections below are **strong default guidance** for NPU kernels (resources, PTO-ISA layout, buffer limits, core topology, synchronization, performance, and timing). They are **not** part of the mandatory definition of done in **Mandatory requirements for NPU kernel tasks**; follow them when they apply unless you have a documented reason to diverge.
+
+### Pick free NPUs for execution
 
 `npu-smi info` prints NPU availability like:
 
@@ -50,7 +56,7 @@ The environment is assumed capable of compiling and running on NPU; lack of acce
 Pick an NPU id with "No running processes", and avoid NPU id with other processes running on, to avoid resource contention. For example, to switch to NPU id 7, set `torch.npu.set_device("npu:7")` at the very beginning of the Python test script.
 
 
-## Find pto-isa doc, implementation, and unit tests
+### Find pto-isa doc, implementation, and unit tests
 
 The kernels should be implemented using APIs in "PTO-ISA" C++ library, just like other existing kernel samples under `examples/jit_cpp` or `csrc/kernel` of this repo.
 
@@ -62,7 +68,7 @@ The "PTO-ISA" library source code is usually located in `/workdir/pto-isa-master
 (the `a2a3` subdirectory name refers to current `910B` hardware; future `950` hardware uses `a5` subdirectory)
 
 
-## Plan buffer space usage
+### Plan buffer space usage
 
 `Tile` variables live in local SRAM buffer, with limited size. 
 
@@ -100,7 +106,7 @@ The most important pieces of information are:
 
 Make effective use of those SRAM buffers. Too little usage leads to low hardware utilization, while too much usage leads to overflow error.
 
-## Number of Cube and Vector cores
+### Number of Cube and Vector cores
 
 The `910B2` hardware contains 24 "Cube cores" for matrix multiplications, and 48 "Vector cores" for all the rest of vector operations.
 
@@ -120,11 +126,11 @@ l2_size=201326592
 
 For complex "mix" kernels that use both Cube cores and Vector cores, one cube core is coordinated with two vector cores. `get_block_idx()` gives the logical id of Cube cores, while Vector core id is usually given by `const uint32_t vid = get_block_idx() * get_subblockdim() + get_subblockid();`
 
-## Synchronization for concurrent executions
+### Synchronization for concurrent executions
 
 Data movement instructions (e.g. `TLOAD`/`TSTORE`/`TMOV`) and compute instructions (e.g. `TADD`, `TMATMUL`) are asynchronous. To avoid data hazards during software pipelining, need `SetFlag` & `WaitFlag` instructions in between. Check existing kernel samples under `examples/jit_cpp` or `csrc/kernel` of this repo for typical synchronization patterns.
 
-## Performance optimization practices
+### Performance optimization practices
 
 - Avoid heavy use of scalar computations + scalar for loops, as they use the very slow "Scalar core" in NPU. Use SIMD instructions like `TLOAD`, `TADD`.
 - General rule of thumb: Use wide SIMD length, and use "double buffers" (with two sync event ids) to overlap compute with data movement.
@@ -132,7 +138,7 @@ Data movement instructions (e.g. `TLOAD`/`TSTORE`/`TMOV`) and compute instructio
     - A kernel with less than 10% of roofline is concerning: it might be bottlenecked by scalar cores, or uses wrong benchmark timer settings. 
     - A kernel that reaches much beyond roofline means not timing async kernel launch correctly, or has L2 cache reuse across iterations (if exceeds bandwidth peak but not FLOP peak).
 
-## NPU benchmark timer settings and caveats
+### NPU benchmark timer settings and caveats
 
 A typical timing code using `torch.npu.Event` (similar to `torch.cuda.Event`) looks like:
 
