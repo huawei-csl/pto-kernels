@@ -43,5 +43,5 @@ def test_swiglu_matches_reference_and_torch_npu(
     ref = swiglu_ref(x.cpu())
     torch_npu_ref = torch_npu.npu_swiglu(x, dim=-1)
 
-    torch.testing.assert_close(y.cpu(), ref, rtol=3e-2, atol=3e-2)
-    torch.testing.assert_close(y, torch_npu_ref, rtol=3e-2, atol=3e-2)
+    torch.testing.assert_close(y.cpu(), ref, rtol=1e-2, atol=1e-5)
+    torch.testing.assert_close(y, torch_npu_ref, rtol=1e-2, atol=1e-5)
