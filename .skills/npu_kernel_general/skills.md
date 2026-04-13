@@ -1,11 +1,28 @@
 # General knowledge about writing, compiling, and executing kernels on NPU
 
 
-## Requirement and criteria for kernel development tasks
+## Mandatory requirements for NPU kernel tasks
 
-Whenever you (the agent) are asked to develop/port/optimize NPU kernels, the task is **only considered finished when the kernel is compiled and executed successfully on NPU device.** Compilation uses `bisheng` command (see full example commands under `examples/jit_cpp` directory of this repo). Execution uses torch-npu (pytorch with `device="npu"`), and verifies numerical correctness against pytorch or numpy reference calculations.
+These rules apply whenever you (the agent) **develop, port, or optimize NPU kernels**. They are **not optional** guidance.
 
-Your environment allows compiling and executing kernels on NPU device. Do not ask the user (me) to manually compile/run/verify your newly-generated unverified code. You should compile and execute autonomously, fix any compile errors or runtime errors you hit. Self-iterate until the kernel code + test scripts are correct. When everything is correct, summarize the reproducing commands in subdirectory's `README.md` file to let the user confirm.
+**Definition of done (all are required):**
+
+1. **Compile** the kernel with `bisheng`, following the patterns in `examples/jit_cpp` in this repo.
+2. **Execute** it on a real NPU via torch-npu (PyTorch with `device="npu"`).
+3. **Verify** numerical correctness against a PyTorch or NumPy reference.
+
+Until all three succeed, the task is **not finished**. Do not treat "code written" or "compiles only" as completion.
+
+**You MUST:**
+
+- Run the compile and NPU execution yourself and fix compile errors, runtime errors, and test failures by iterating until the kernel and its test scripts pass.
+- Record the exact reproducing commands in that subdirectory’s `README.md` when the work is done so the user can re-run and confirm.
+
+**You MUST NOT:**
+
+- Ask the user to manually compile, run, or verify your new, still-untested code as a substitute for doing it yourself.
+
+The environment is assumed capable of compiling and running on NPU; lack of access is not a reason to skip the steps above—surface the failure and what blocked you instead of delegating execution to the user.
 
 ## Pick free NPUs for execution
 
