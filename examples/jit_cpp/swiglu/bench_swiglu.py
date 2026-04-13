@@ -163,11 +163,11 @@ def main():
 
     torch.npu.set_device(args.npu)
     base = Path(__file__).resolve().parent
-    kernel_path = base / "swiglu_dynamic.cpp"
+    kernel_path = base / "swiglu.cpp"
     csv_dir = resolve_dir_arg(base, args.csv_dir)
 
     print(f"Using device: {args.npu}")
-    print("Compiling swiglu_dynamic.cpp ...")
+    print("Compiling swiglu.cpp ...")
     swiglu_func = jit_compile(
         str(kernel_path),
         verbose=True,

@@ -1,7 +1,11 @@
-# SwiGLU Dynamic
+# SwiGLU
 
-This directory contains a standalone PTO `SwiGLU` kernel and a small validation
-workflow against `torch_npu.npu_swiglu`.
+This directory contains a JIT demo for the PTO `SwiGLU` kernel and a small
+validation workflow against `torch_npu.npu_swiglu`.
+
+The source file here is a symlink to
+`../../../csrc/kernel/swiglu.cpp`, so edits made from the demo
+directory also update the CMake/pybind kernel source.
 
 Outputs:
 - benchmark CSVs: `outputs/csv/`

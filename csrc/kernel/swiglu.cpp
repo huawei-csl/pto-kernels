@@ -1,4 +1,19 @@
+/**
+Copyright (c) 2026 Huawei Technologies Co., Ltd.
+All rights reserved.
+
+See LICENSE in the root of the software repository:
+https://github.com/huawei-csl/pto-kernels/
+for the full License text.
+*/
+
+#ifndef MEMORY_BASE
+#define MEMORY_BASE
+#endif
+
 #include <pto/pto-inst.hpp>
+
+#define GM_ADDR __gm__ uint8_t*  // To avoid #include "kernel_operator.h"
 
 using namespace pto;
 
@@ -52,6 +67,8 @@ static_assert(ELEMENTS_PER_TILE <= MAX_INPUT_N / 2,
               "SwiGLU tile size exceeds kernel max output tile.");
 static_assert(Y_PONG + Y_BUFFER_BYTES <= UB_USABLE_BYTES,
               "SwiGLU UB layout exceeds usable UB.");
+
+#if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
 
 namespace {
 
@@ -384,8 +401,11 @@ AICORE void runTSwiGLU(__gm__ T *x, __gm__ T *y, uint32_t batch,
 
 }  // namespace
 
-__global__ AICORE void swiglu_dynamic_fp16(__gm__ void *x, __gm__ void *y,
-                                           uint32_t batch, uint32_t input_n) {
+#endif
+
+extern "C" __global__ AICORE void swiglu_fp16(GM_ADDR x, GM_ADDR y,
+                                              uint32_t batch,
+                                              uint32_t input_n) {
 #if defined(__DAV_VEC__)
   const uint32_t num_cores = get_block_num() * get_subblockdim();
   const uint32_t vid = get_block_idx() * get_subblockdim() + get_subblockid();
@@ -399,37 +419,8 @@ __global__ AICORE void swiglu_dynamic_fp16(__gm__ void *x, __gm__ void *y,
 #endif
 }
 
-/**
- * Launch the fp16 SwiGLU kernel.
- *
- * The input matrix is interpreted as two contiguous halves along the last
- * dimension:
- *   `x = [A | B]`, where `A = x[:, :input_n / 2]` and
- *   `B = x[:, input_n / 2:]`.
- *
- * The kernel computes SwiGLU row-wise:
- *   `y = silu(A) * B = (A * sigmoid(A)) * B`.
- *
- * Implementation notes:
- * - The output tensor is processed with a 2D tiler over rows and output cols.
- * - For each tile, the kernel loads matching slices from `A` and `B`,
- *   computes `silu(A) * B` in UB, then stores the result tile to `y`.
- * - Tail cols that are not 16-aligned are padded in UB, while GM loads/stores
- *   use the true element count to avoid reading or writing past the tensor end.
- *
- * @param blockDim Number of physical blocks to launch. The kernel expands this
- *     to `blockDim * 2` logical vector blocks.
- * @param stream Ascend runtime stream used for the kernel launch.
- * @param x Input buffer in global memory with shape `[batch, input_n]` and
- *     dtype `fp16`. `input_n` must be even.
- * @param y Output buffer in global memory with shape `[batch, input_n / 2]`
- *     and dtype `fp16`.
- * @param batch Number of rows in `x` and `y`.
- * @param input_n Input hidden dimension. The output hidden dimension is
- *     `input_n / 2`.
- */
 extern "C" void call_swiglu_kernel(uint32_t blockDim, void *stream, uint8_t *x,
                                    uint8_t *y, uint32_t batch,
                                    uint32_t input_n) {
-  swiglu_dynamic_fp16<<<blockDim * 2, nullptr, stream>>>(x, y, batch, input_n);
+  swiglu_fp16<<<blockDim * 2, nullptr, stream>>>(x, y, batch, input_n);
 }

@@ -87,6 +87,8 @@ def jit_compile(
     device: str | int = DEFAULT_DEVICE,
     block_dim=None,
 ):
+    if so_dir is None:
+        so_dir = THIS_DIR / "outputs" / "so"
     return jit_compile_with_loader(
         src_path,
         load_lib,
