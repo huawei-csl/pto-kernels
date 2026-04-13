@@ -28,10 +28,10 @@ from jit_util_swiglu import jit_compile
 
 DEFAULT_WARMUP = 10
 DEFAULT_REPEATS = 100
-FLOPS_PER_OUTPUT_ELEMENT = 6.0
+EFFECTIVE_OPS_PER_OUTPUT_ELEMENT = 5.0
 CSV_HEADER = (
     "batch,N,pto_duration_us,torch_npu_duration_us,"
-    "pto_tflops,torch_npu_tflops,pto_speedup_vs_torch_npu,"
+    "pto_effective_tops,torch_npu_effective_tops,pto_speedup_vs_torch_npu,"
     "trials,pto_duration_mean_us,pto_duration_std_us,pto_duration_min_us,"
     "pto_duration_max_us,pto_duration_cv_pct,torch_npu_duration_mean_us,"
     "torch_npu_duration_std_us,torch_npu_duration_min_us,"
@@ -50,11 +50,11 @@ def _parse_args():
     ).parse_args()
 
 
-def _effective_tflops(batch, n, duration_us):
+def _effective_tops(batch, n, duration_us):
     if duration_us <= 0:
         return 0.0
-    total_flops = batch * n * FLOPS_PER_OUTPUT_ELEMENT
-    return total_flops / (duration_us * 1e6)
+    total_ops = batch * n * EFFECTIVE_OPS_PER_OUTPUT_ELEMENT
+    return total_ops / (duration_us * 1e6)
 
 
 def _make_shape_pools(batch, n, warmup, repeats, device):
@@ -92,7 +92,7 @@ def benchmark(
     header = (
         f"{'batch':>6s}  {'N':>6s}"
         f"  {'pto_us':>10s}  {'torch_npu_us':>13s}"
-        f"  {'pto_tflops':>12s}  {'torch_npu_tflops':>17s}  {'pto_speedup':>11s}"
+        f"  {'pto_eff_tops':>12s}  {'torch_eff_tops':>16s}  {'pto_speedup':>11s}"
     )
     print(header)
     print("-" * len(header))
@@ -127,20 +127,21 @@ def benchmark(
 
             pto_us = pto_stats["median_us"]
             torch_npu_us = torch_npu_stats["median_us"]
-            pto_tflops = _effective_tflops(batch, n, pto_us)
-            torch_npu_tflops = _effective_tflops(batch, n, torch_npu_us)
+            pto_effective_tops = _effective_tops(batch, n, pto_us)
+            torch_npu_effective_tops = _effective_tops(batch, n, torch_npu_us)
             pto_speedup = torch_npu_us / pto_us if pto_us > 0 else 0.0
 
             print(
                 f"{batch:>6d}  {n:>6d}"
                 f"  {pto_us:>10.2f}  {torch_npu_us:>13.2f}"
-                f"  {pto_tflops:>12.4f}  {torch_npu_tflops:>17.4f}"
+                f"  {pto_effective_tops:>12.4f}  {torch_npu_effective_tops:>16.4f}"
                 f"  {pto_speedup:>11.3f}"
             )
 
             records.append(
                 f"{batch},{n},{pto_us:.4f},{torch_npu_us:.4f},"
-                f"{pto_tflops:.6f},{torch_npu_tflops:.6f},{pto_speedup:.4f},"
+                f"{pto_effective_tops:.6f},{torch_npu_effective_tops:.6f},"
+                f"{pto_speedup:.4f},"
                 f"{trials},{pto_stats['mean_us']:.4f},{pto_stats['std_us']:.4f},"
                 f"{pto_stats['min_us']:.4f},{pto_stats['max_us']:.4f},"
                 f"{pto_stats['cv_pct']:.4f},{torch_npu_stats['mean_us']:.4f},"
