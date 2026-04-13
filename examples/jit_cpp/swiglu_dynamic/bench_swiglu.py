@@ -28,7 +28,7 @@ from jit_util_swiglu import jit_compile
 
 DEFAULT_WARMUP = 10
 DEFAULT_REPEATS = 100
-SWIGLU_FLOPS_PER_OUTPUT = 6.0
+FLOPS_PER_OUTPUT_ELEMENT = 6.0
 CSV_HEADER = (
     "batch,N,pto_duration_us,torch_npu_duration_us,"
     "pto_tflops,torch_npu_tflops,pto_speedup_vs_torch_npu,"
@@ -53,11 +53,11 @@ def _parse_args():
 def _effective_tflops(batch, n, duration_us):
     if duration_us <= 0:
         return 0.0
-    total_flops = batch * n * SWIGLU_FLOPS_PER_OUTPUT
+    total_flops = batch * n * FLOPS_PER_OUTPUT_ELEMENT
     return total_flops / (duration_us * 1e6)
 
 
-def _make_pools(batch, n, warmup, repeats, device):
+def _make_shape_pools(batch, n, warmup, repeats, device):
     return {
         "x": make_buffer_pool(
             warmup,
@@ -91,8 +91,8 @@ def benchmark(
     print(f"{'=' * 96}")
     header = (
         f"{'batch':>6s}  {'N':>6s}"
-        f"  {'pto_us':>10s}  {'torch_us':>10s}"
-        f"  {'pto_tflops':>12s}  {'torch_tflops':>14s}  {'pto_speedup':>11s}"
+        f"  {'pto_us':>10s}  {'torch_npu_us':>13s}"
+        f"  {'pto_tflops':>12s}  {'torch_npu_tflops':>17s}  {'pto_speedup':>11s}"
     )
     print(header)
     print("-" * len(header))
@@ -100,7 +100,7 @@ def benchmark(
     records = []
     for batch in batches:
         for n in hidden_dims:
-            pools = _make_pools(batch, n, warmup, repeats, device)
+            pools = _make_shape_pools(batch, n, warmup, repeats, device)
             x_list = pools["x"]
             y_list = pools["y"]
 
@@ -116,7 +116,7 @@ def benchmark(
                     ),
                 ),
             )
-            torch_stats = benchmark_trials_us(
+            torch_npu_stats = benchmark_trials_us(
                 trials,
                 lambda x_list=x_list: benchmark_npu_us(
                     warmup,
@@ -126,25 +126,28 @@ def benchmark(
             )
 
             pto_us = pto_stats["median_us"]
-            torch_us = torch_stats["median_us"]
+            torch_npu_us = torch_npu_stats["median_us"]
             pto_tflops = _effective_tflops(batch, n, pto_us)
-            torch_tflops = _effective_tflops(batch, n, torch_us)
-            pto_speedup = torch_us / pto_us if pto_us > 0 else 0.0
+            torch_npu_tflops = _effective_tflops(batch, n, torch_npu_us)
+            pto_speedup = torch_npu_us / pto_us if pto_us > 0 else 0.0
 
             print(
                 f"{batch:>6d}  {n:>6d}"
-                f"  {pto_us:>10.2f}  {torch_us:>10.2f}"
-                f"  {pto_tflops:>12.4f}  {torch_tflops:>14.4f}  {pto_speedup:>11.3f}"
+                f"  {pto_us:>10.2f}  {torch_npu_us:>13.2f}"
+                f"  {pto_tflops:>12.4f}  {torch_npu_tflops:>17.4f}"
+                f"  {pto_speedup:>11.3f}"
             )
 
             records.append(
-                f"{batch},{n},{pto_us:.4f},{torch_us:.4f},"
-                f"{pto_tflops:.6f},{torch_tflops:.6f},{pto_speedup:.4f},"
+                f"{batch},{n},{pto_us:.4f},{torch_npu_us:.4f},"
+                f"{pto_tflops:.6f},{torch_npu_tflops:.6f},{pto_speedup:.4f},"
                 f"{trials},{pto_stats['mean_us']:.4f},{pto_stats['std_us']:.4f},"
                 f"{pto_stats['min_us']:.4f},{pto_stats['max_us']:.4f},"
-                f"{pto_stats['cv_pct']:.4f},{torch_stats['mean_us']:.4f},"
-                f"{torch_stats['std_us']:.4f},{torch_stats['min_us']:.4f},"
-                f"{torch_stats['max_us']:.4f},{torch_stats['cv_pct']:.4f}"
+                f"{pto_stats['cv_pct']:.4f},{torch_npu_stats['mean_us']:.4f},"
+                f"{torch_npu_stats['std_us']:.4f},"
+                f"{torch_npu_stats['min_us']:.4f},"
+                f"{torch_npu_stats['max_us']:.4f},"
+                f"{torch_npu_stats['cv_pct']:.4f}"
             )
 
     csv_path = output_dir / f"swiglu_compare_bd{block_dim}.csv"
@@ -158,12 +161,13 @@ def main():
 
     torch.npu.set_device(args.npu)
     base = Path(__file__).resolve().parent
+    kernel_path = base / "swiglu_dynamic.cpp"
     csv_dir = resolve_dir_arg(base, args.csv_dir)
 
     print(f"Using device: {args.npu}")
     print("Compiling swiglu_dynamic.cpp ...")
     swiglu_func = jit_compile(
-        str(base / "swiglu_dynamic.cpp"),
+        str(kernel_path),
         verbose=True,
         device=args.npu,
     )

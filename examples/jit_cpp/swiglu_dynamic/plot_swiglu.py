@@ -14,6 +14,9 @@ from plot_common import (
     resolve_dir_arg,
 )
 
+CSV_PREFIX = "swiglu_compare_bd"
+CSV_PATTERN = f"{CSV_PREFIX}*.csv"
+
 LINE_PLOTS = (
     {
         "filename": "swiglu_duration_bd{block_dim}.png",
@@ -56,7 +59,7 @@ def plot_swiglu(csv_path: Path, plot_dir: Path):
     plot_comparison_csv(
         csv_path,
         plot_dir,
-        prefix="swiglu_compare_bd",
+        prefix=CSV_PREFIX,
         line_plots=LINE_PLOTS,
         heatmaps=HEATMAPS,
     )
@@ -71,8 +74,8 @@ def main():
     plot_csv_collection(
         csv_dir,
         plot_dir,
-        pattern="swiglu_compare_bd*.csv",
-        prefix="swiglu_compare_bd",
+        pattern=CSV_PATTERN,
+        prefix=CSV_PREFIX,
         warning="no SwiGLU benchmark CSV files found",
         plot_csv_fn=plot_swiglu,
     )

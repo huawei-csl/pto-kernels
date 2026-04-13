@@ -20,14 +20,24 @@ from jit_util_common import (
     torch_to_ctypes,
 )
 
-MAX_OUTPUT_HIDDEN_DIM = 16384
+MAX_SWIGLU_N = 16384
+SWIGLU_ARGTYPES = [
+    ctypes.c_uint32,  # blockDim
+    ctypes.c_void_p,  # stream
+    ctypes.c_void_p,  # x
+    ctypes.c_void_p,  # y
+    ctypes.c_uint32,  # batch
+    ctypes.c_uint32,  # input_n
+]
 
 
 def _validate_swiglu_io(x, y):
     if x.dim() != 2 or y.dim() != 2:
         raise ValueError("x and y must be 2D tensors.")
-    if x.dtype != torch.float16 or y.dtype != torch.float16:
-        raise TypeError("x and y must use torch.float16.")
+    if x.dtype != torch.float16:
+        raise TypeError("x must use torch.float16.")
+    if y.dtype != torch.float16:
+        raise TypeError("y must use torch.float16.")
     if x.device != y.device:
         raise ValueError("x and y must be on the same device.")
     if not x.is_contiguous() or not y.is_contiguous():
@@ -36,29 +46,21 @@ def _validate_swiglu_io(x, y):
         raise ValueError("x and y must have the same batch size.")
     if x.shape[1] <= 0 or (x.shape[1] & 1):
         raise ValueError("x.shape[1] must be a positive even integer.")
-    if x.shape[1] // 2 > MAX_OUTPUT_HIDDEN_DIM:
-        raise ValueError(
-            f"x.shape[1] // 2 must be <= {MAX_OUTPUT_HIDDEN_DIM} for this kernel."
-        )
-    if y.shape[1] != x.shape[1] // 2:
+    output_n = x.shape[1] // 2
+    if output_n > MAX_SWIGLU_N:
+        raise ValueError(f"x.shape[1] // 2 must be <= {MAX_SWIGLU_N}.")
+    if y.shape[1] != output_n:
         raise ValueError("y must have shape [batch, x.shape[1] // 2].")
 
 
-def load_lib(lib_path, block_dim=None):
+def load_lib(lib_path, block_dim=BLOCK_DIM):
     lib = load_cdll(lib_path)
-    resolved_block_dim = max(1, int(BLOCK_DIM if block_dim is None else block_dim))
+    resolved_block_dim = max(1, int(block_dim))
 
     kernel = load_required_symbol(
         lib,
         "call_swiglu_kernel",
-        [
-            ctypes.c_uint32,
-            ctypes.c_void_p,
-            ctypes.c_void_p,
-            ctypes.c_void_p,
-            ctypes.c_uint32,
-            ctypes.c_uint32,
-        ],
+        SWIGLU_ARGTYPES,
     )
 
     def swiglu_func(x, y, *, block_dim=resolved_block_dim, stream_ptr=None):
