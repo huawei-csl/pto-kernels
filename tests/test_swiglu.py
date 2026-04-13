@@ -4,8 +4,19 @@ import torch_npu  # noqa
 
 from pto_kernels import pto_swiglu
 
-
 DTYPE = torch.float16
+TEST_SEEDS = [0, 1]
+TEST_BATCHES = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]
+TEST_HIDDEN_DIMS = [128, 256, 512, 1024, 4096, 6144, 16384, 32768, 65536, 262144]
+TEST_LARGE_HIDDEN_DIM_MIN = 16384
+TEST_LARGE_HIDDEN_DIM_MAX_BATCH = 64
+TEST_CASES = [
+    (batch, hidden_dim)
+    for batch in TEST_BATCHES
+    for hidden_dim in TEST_HIDDEN_DIMS
+    if hidden_dim < TEST_LARGE_HIDDEN_DIM_MIN
+    or batch <= TEST_LARGE_HIDDEN_DIM_MAX_BATCH
+]
 
 
 def swiglu_ref(x):
@@ -13,9 +24,8 @@ def swiglu_ref(x):
     return (gate * torch.sigmoid(gate) * up).to(x.dtype)
 
 
-@pytest.mark.parametrize("seed", [0, 1])
-@pytest.mark.parametrize("batch", [1, 8, 128])
-@pytest.mark.parametrize("hidden_dim", [128, 1024, 4096, 16384])
+@pytest.mark.parametrize("seed", TEST_SEEDS)
+@pytest.mark.parametrize("batch,hidden_dim", TEST_CASES)
 def test_pto_swiglu_matches_reference_and_torch_npu(
     npu_device,
     seed,

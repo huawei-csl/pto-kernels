@@ -18,8 +18,6 @@ for the full License text.
 
 namespace pto_isa_ops {
 
-constexpr uint32_t kMaxSwiGLUOutputN = 16384;
-
 /**
  * @brief Runs fp16 SwiGLU over the last dimension of a 2D tensor.
  *
@@ -55,9 +53,6 @@ at::Tensor run_swiglu(const at::Tensor& x, int64_t dim = -1) {
   }
 
   const auto output_n_i64 = input_n_i64 / 2;
-  if (output_n_i64 > kMaxSwiGLUOutputN) {
-    throw std::runtime_error("`pto_swiglu` requires N <= 16384.");
-  }
   if (batch_i64 > std::numeric_limits<uint32_t>::max() ||
       input_n_i64 > std::numeric_limits<uint32_t>::max()) {
     throw std::runtime_error("`pto_swiglu` dimensions exceed uint32_t range.");

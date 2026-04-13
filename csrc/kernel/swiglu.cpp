@@ -13,7 +13,7 @@ for the full License text.
 
 #include <pto/pto-inst.hpp>
 
-#define GM_ADDR __gm__ uint8_t *  // To avoid #include "kernel_operator.h"
+#define GM_ADDR __gm__ uint8_t*  // To avoid #include "kernel_operator.h"
 
 using namespace pto;
 
@@ -25,7 +25,6 @@ constexpr uint32_t X0_BUFFER_BYTES = UB_SLOT_BYTES;
 constexpr uint32_t X1_BUFFER_BYTES = UB_SLOT_BYTES;
 constexpr uint32_t Y_BUFFER_BYTES = UB_SLOT_BYTES;
 constexpr uint32_t ELEMENTS_PER_TILE = Y_BUFFER_BYTES / sizeof(half);
-constexpr uint32_t MAX_INPUT_N = 2 * ELEMENTS_PER_TILE;
 constexpr uint32_t UB_USABLE_BYTES = 192 * 1024;
 constexpr uint32_t TILE_ALIGNMENT = 16;
 
@@ -63,8 +62,6 @@ constexpr unsigned Y_PONG = X1_PONG + X1_BUFFER_BYTES;
 
 static_assert(UB_SLOT_BYTES * 6 == UB_USABLE_BYTES,
               "SwiGLU UB slots must fully pack the usable UB budget.");
-static_assert(ELEMENTS_PER_TILE <= MAX_INPUT_N / 2,
-              "SwiGLU tile size exceeds kernel max output tile.");
 static_assert(Y_PONG + Y_BUFFER_BYTES <= UB_USABLE_BYTES,
               "SwiGLU UB layout exceeds usable UB.");
 
@@ -381,7 +378,7 @@ AICORE void runTSwiGLU(__gm__ T *x, __gm__ T *y, uint32_t batch,
   set_mask_norm();
   set_vector_mask(-1, -1);
 
-  if (input_n == 0 || (input_n & 1U) != 0 || input_n > MAX_INPUT_N) {
+  if (input_n == 0 || (input_n & 1U) != 0) {
     return;
   }
 

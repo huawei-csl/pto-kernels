@@ -21,7 +21,7 @@ from jit_util_common import (  # noqa: E402
     torch_to_ctypes,
 )
 
-MAX_SWIGLU_N = 16384
+UINT32_MAX = (1 << 32) - 1
 SWIGLU_ARGTYPES = [
     ctypes.c_uint32,  # blockDim
     ctypes.c_void_p,  # stream
@@ -47,9 +47,9 @@ def _validate_swiglu_io(x, y):
         raise ValueError("x and y must have the same batch size.")
     if x.shape[1] <= 0 or (x.shape[1] & 1):
         raise ValueError("x.shape[1] must be a positive even integer.")
+    if x.shape[0] > UINT32_MAX or x.shape[1] > UINT32_MAX:
+        raise ValueError("x dimensions must fit uint32_t kernel arguments.")
     output_n = x.shape[1] // 2
-    if output_n > MAX_SWIGLU_N:
-        raise ValueError(f"x.shape[1] // 2 must be <= {MAX_SWIGLU_N}.")
     if y.shape[1] != output_n:
         raise ValueError("y must have shape [batch, x.shape[1] // 2].")
 
