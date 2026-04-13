@@ -1,3 +1,4 @@
+# pylint: disable=wrong-import-position
 import argparse
 import sys
 from pathlib import Path
@@ -10,7 +11,7 @@ FAST_HADAMARD_DIR = THIS_DIR.parent / "fast_hadamard"
 if str(FAST_HADAMARD_DIR) not in sys.path:
     sys.path.insert(0, str(FAST_HADAMARD_DIR))
 
-from bench_common import (
+from bench_common import (  # noqa: E402
     add_common_benchmark_args,
     benchmark_batches,
     benchmark_hidden_dims,
@@ -24,7 +25,7 @@ from bench_common import (
     write_csv_records,
 )
 
-from jit_util_swiglu import jit_compile
+from jit_util_swiglu import jit_compile  # noqa: E402
 
 DEFAULT_WARMUP = 10
 DEFAULT_REPEATS = 100

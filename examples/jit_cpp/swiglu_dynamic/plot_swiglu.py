@@ -1,3 +1,4 @@
+# pylint: disable=wrong-import-position
 import argparse
 import sys
 from pathlib import Path
@@ -7,7 +8,7 @@ FAST_HADAMARD_DIR = THIS_DIR.parent / "fast_hadamard"
 if str(FAST_HADAMARD_DIR) not in sys.path:
     sys.path.insert(0, str(FAST_HADAMARD_DIR))
 
-from plot_common import (
+from plot_common import (  # noqa: E402
     add_common_plot_args,
     block_dim_from_path,
     ensure_matplotlib,

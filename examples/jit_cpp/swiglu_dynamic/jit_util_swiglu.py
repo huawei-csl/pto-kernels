@@ -1,3 +1,4 @@
+# pylint: disable=wrong-import-position
 import ctypes
 import sys
 from pathlib import Path
@@ -9,7 +10,7 @@ FAST_HADAMARD_DIR = THIS_DIR.parent / "fast_hadamard"
 if str(FAST_HADAMARD_DIR) not in sys.path:
     sys.path.insert(0, str(FAST_HADAMARD_DIR))
 
-from jit_util_common import (
+from jit_util_common import (  # noqa: E402
     BLOCK_DIM,
     DEFAULT_DEVICE,
     jit_compile_with_loader,
