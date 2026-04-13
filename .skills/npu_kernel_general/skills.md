@@ -1,9 +1,9 @@
-# General knowledge about writing, compiling, execution kernels on NPU
+# General knowledge about writing, compiling, and executing kernels on NPU
 
 
 ## Requirement and criteria for kernel development tasks
 
-Whenever you (the agent) are asked to develop/port/optimize NPU ernels, the task is **only considered finished when the kernel is compiled and executed successfully on NPU device.**. Compilation uses `bisheng` command (see full example commands under `examples/jit_cpp` directory of this repo). Execution uses torch-npu (pytorch with `device="npu"`), and verifies numerical correctness against pytorch or numpy reference calculations.
+Whenever you (the agent) are asked to develop/port/optimize NPU kernels, the task is **only considered finished when the kernel is compiled and executed successfully on NPU device.** Compilation uses `bisheng` command (see full example commands under `examples/jit_cpp` directory of this repo). Execution uses torch-npu (pytorch with `device="npu"`), and verifies numerical correctness against pytorch or numpy reference calculations.
 
 Your environment allows compiling and executing kernels on NPU device. Do not ask the user (me) to manually compile/run/verify your newly-generated unverified code. You should compile and execute autonomously, fix any compile errors or runtime errors you hit. Self-iterate until the kernel code + test scripts are correct. When everything is correct, summarize the reproducing commands in subdirectory's `README.md` file to let the user confirm.
 
@@ -37,8 +37,8 @@ Pick an NPU id with "No running processes", and avoid NPU id with other processe
 
 The kernels should be implemented using APIs in "PTO-ISA" C++ library, just like other existing kernel samples under `examples/jit_cpp` or `csrc/kernel` of this repo.
 
-The "PTO-ISA" library source code is usually located in `/workdir/pto-isa-master` or `/sources/pto-isa` path. Prompt the user to check if those directories doest not exist in your environment. The most important subdirectories under `pto-isa` / `pto-isa-master` are:
-- ISA documentaton: `docs/isa`
+The "PTO-ISA" library source code is usually located in `/workdir/pto-isa-master` or `/sources/pto-isa` path. Prompt the user to check if those directories do not exist in your environment. The most important subdirectories under `pto-isa` / `pto-isa-master` are:
+- ISA documentation: `docs/isa`
 - C++ header implementation: `include/pto/npu/a2a3`
 - Unit tests: `tests/npu/a2a3/src/st/testcase` 
 
@@ -81,17 +81,16 @@ The most important pieces of information are:
 - l0_a_size=l0_b_size=64 KiB, for `TileLeft` and `TileRight`
 - l0_c_size=128 KiB, for `TileAcc`
 
-Make effective uses of those SRAM buffers. Too few usage leads to low hardware utilization, while too much usage leads to overflow error.
+Make effective use of those SRAM buffers. Too little usage leads to low hardware utilization, while too much usage leads to overflow error.
 
 ## Number of Cube and Vector cores
 
-The `910B2` hardware contains 24 "Cube cores" for matrix multipilications, and 48 "Vector cores" for all the rest of vector operations.
+The `910B2` hardware contains 24 "Cube cores" for matrix multiplications, and 48 "Vector cores" for all the rest of vector operations.
 
 Confirm by command `grep -A 8 "SoCInfo" ${ASCEND_HOME_PATH}/arm64-linux/data/platform_config/Ascend910B2.ini`:
 
 ```
 [SoCInfo]
-ai_[SoCInfo]
 ai_core_cnt=24
 cube_core_cnt=24
 vector_core_cnt=48
@@ -102,9 +101,9 @@ l2_type=0
 l2_size=201326592
 ```
 
-For complex "mix" kernels that use both Cube cores and Vector cores, one cube cores is coordinated with two vector cores. `get_block_idx()` gives the logical id of Cube cores, while Vector core id is usually given by `const uint32_t vid = get_block_idx() * get_subblockdim() + get_subblockid();`
+For complex "mix" kernels that use both Cube cores and Vector cores, one cube core is coordinated with two vector cores. `get_block_idx()` gives the logical id of Cube cores, while Vector core id is usually given by `const uint32_t vid = get_block_idx() * get_subblockdim() + get_subblockid();`
 
-## Synchronization for concurrent executions 
+## Synchronization for concurrent executions
 
 Data movement instructions (e.g. `TLOAD`/`TSTORE`/`TMOV`) and compute instructions (e.g. `TADD`, `TMATMUL`) are asynchronous. To avoid data hazards during software pipelining, need `SetFlag` & `WaitFlag` instructions in between. Check existing kernel samples under `examples/jit_cpp` or `csrc/kernel` of this repo for typical synchronization patterns.
 
