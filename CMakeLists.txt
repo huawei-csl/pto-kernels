@@ -118,7 +118,7 @@ ascendc_library(
   csrc/kernel/kernel_batch_matrix_square.cpp
   csrc/kernel/kernel_tri_inv_rec_unroll.cpp
   csrc/kernel/kernel_tri_inv_trick.cpp
-  csrc/kernel/swiglu.cpp)
+  csrc/kernel/kernel_swiglu.cpp)
 
 ascendc_include_directories(
   no_workspace_kernel PRIVATE ${libpto_isa_headers_SOURCE_DIR}/include

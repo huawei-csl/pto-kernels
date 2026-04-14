@@ -4,7 +4,7 @@ This directory contains JIT and CMake/pybind demos for the PTO `SwiGLU`
 kernel, plus validation and benchmark workflows against `torch_npu.npu_swiglu`.
 
 The source file here is a symlink to
-`../../../csrc/kernel/swiglu.cpp`, so edits made from the demo
+`../../../csrc/kernel/kernel_swiglu.cpp`, so edits made from the demo
 directory also update the CMake/pybind kernel source.
 
 Outputs:
