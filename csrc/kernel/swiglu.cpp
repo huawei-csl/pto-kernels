@@ -11,7 +11,9 @@ for the full License text.
 
 #include <pto/pto-inst.hpp>
 
+// clang-format off: so it does not get wrongfully flagged by linter
 #define GM_ADDR __gm__ uint8_t*  // To avoid #include "kernel_operator.h"
+// clang-format on
 
 using namespace pto;
 
