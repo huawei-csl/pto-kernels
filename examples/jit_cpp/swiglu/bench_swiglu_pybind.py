@@ -7,9 +7,12 @@ import torch
 import torch_npu  # noqa
 
 THIS_DIR = Path(__file__).resolve().parent
+REPO_ROOT = THIS_DIR.parents[2]
+PYTHON_DIR = REPO_ROOT / "python"
 FAST_HADAMARD_DIR = THIS_DIR.parent / "fast_hadamard"
-if str(FAST_HADAMARD_DIR) not in sys.path:
-    sys.path.insert(0, str(FAST_HADAMARD_DIR))
+for path in (PYTHON_DIR, FAST_HADAMARD_DIR):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 
 from bench_common import (  # noqa: E402
     add_common_benchmark_args,
@@ -24,12 +27,11 @@ from bench_common import (  # noqa: E402
     validate_benchmark_args,
     write_csv_records,
 )
-
-from jit_util_common import get_current_stream_ptr  # noqa: E402
-from jit_util_swiglu import jit_compile  # noqa: E402
+from pto_kernels import get_aic_cores, pto_swiglu  # noqa: E402
 
 DEFAULT_WARMUP = 10
 DEFAULT_REPEATS = 100
+DEFAULT_CSV_DIR = Path("outputs") / "csv" / "pybind"
 EFFECTIVE_OPS_PER_OUTPUT_ELEMENT = 5.0
 CSV_HEADER = (
     "batch,N,pto_duration_us,torch_npu_duration_us,"
@@ -43,18 +45,21 @@ CSV_HEADER = (
 
 def _parse_args():
     parser = argparse.ArgumentParser(
-        description="Benchmark PTO SwiGLU against torch_npu.npu_swiglu."
+        description="Benchmark CMake/pybind PTO SwiGLU against torch_npu.npu_swiglu."
     )
-    parser.add_argument(
-        "--cache-stream",
-        action="store_true",
-        help="Resolve the current NPU stream once and reuse it for PTO launches.",
-    )
-    return add_common_benchmark_args(
+    parser = add_common_benchmark_args(
         parser,
         default_warmup=DEFAULT_WARMUP,
         default_repeats=DEFAULT_REPEATS,
-    ).parse_args()
+    )
+    parser.set_defaults(csv_dir=str(DEFAULT_CSV_DIR))
+    return parser.parse_args()
+
+
+def _device_id(device: str) -> int:
+    if str(device).startswith("npu:"):
+        return int(str(device).split(":", 1)[1])
+    return int(device)
 
 
 def _effective_tops(batch, n, duration_us):
@@ -64,23 +69,15 @@ def _effective_tops(batch, n, duration_us):
     return total_ops / (duration_us * 1e6)
 
 
-def _make_shape_pools(batch, n, warmup, repeats, device):
-    return {
-        "x": make_buffer_pool(
-            warmup,
-            repeats,
-            lambda: torch.randn(batch, 2 * n, device=device, dtype=torch.float16),
-        ),
-        "y": make_buffer_pool(
-            warmup,
-            repeats,
-            lambda: torch.empty(batch, n, device=device, dtype=torch.float16),
-        ),
-    }
+def _make_input_pool(batch, n, warmup, repeats, device):
+    return make_buffer_pool(
+        warmup,
+        repeats,
+        lambda: torch.randn(batch, 2 * n, device=device, dtype=torch.float16),
+    )
 
 
 def benchmark(
-    swiglu_func,
     *,
     warmup: int,
     repeats: int,
@@ -89,13 +86,12 @@ def benchmark(
     device: str,
     batches,
     hidden_dims,
-    stream_ptr=None,
+    block_dim: int,
 ):
     ensure_output_dir(output_dir)
-    block_dim = swiglu_func.block_dim
 
     print(f"\n{'=' * 96}")
-    print(f"SWIGLU BENCHMARK (BLOCK_DIM={block_dim})")
+    print(f"SWIGLU PYBIND BENCHMARK (BLOCK_DIM={block_dim})")
     print(f"{'=' * 96}")
     header = (
         f"{'batch':>6s}  {'N':>6s}"
@@ -108,21 +104,14 @@ def benchmark(
     records = []
     for batch in batches:
         for n in hidden_dims:
-            pools = _make_shape_pools(batch, n, warmup, repeats, device)
-            x_list = pools["x"]
-            y_list = pools["y"]
+            x_list = _make_input_pool(batch, n, warmup, repeats, device)
 
             pto_stats = benchmark_trials_us(
                 trials,
-                lambda x_list=x_list, y_list=y_list: benchmark_npu_us(
+                lambda x_list=x_list: benchmark_npu_us(
                     warmup,
                     repeats,
-                    lambda i: swiglu_func(
-                        pool_item(x_list, i),
-                        pool_item(y_list, i),
-                        block_dim=block_dim,
-                        stream_ptr=stream_ptr,
-                    ),
+                    lambda i: pto_swiglu(pool_item(x_list, i), dim=-1),
                 ),
             )
             torch_npu_stats = benchmark_trials_us(
@@ -170,23 +159,13 @@ def main():
     validate_benchmark_args(args)
 
     torch.npu.set_device(args.npu)
-    base = Path(__file__).resolve().parent
-    kernel_path = base / "swiglu.cpp"
-    csv_dir = resolve_dir_arg(base, args.csv_dir)
+    csv_dir = resolve_dir_arg(THIS_DIR, args.csv_dir)
+    block_dim = get_aic_cores(_device_id(args.npu))
 
     print(f"Using device: {args.npu}")
-    print("Compiling swiglu.cpp ...")
-    swiglu_func = jit_compile(
-        str(kernel_path),
-        verbose=True,
-        device=args.npu,
-    )
-    stream_ptr = get_current_stream_ptr() if args.cache_stream else None
-    if stream_ptr is not None:
-        print("Using cached NPU stream pointer for PTO launches.")
+    print("Using CMake/pybind pto_kernels.pto_swiglu")
 
     benchmark(
-        swiglu_func,
         warmup=args.warmup,
         repeats=args.repeats,
         trials=args.trials,
@@ -194,7 +173,7 @@ def main():
         device=args.npu,
         batches=benchmark_batches(args),
         hidden_dims=benchmark_hidden_dims(args),
-        stream_ptr=stream_ptr,
+        block_dim=block_dim,
     )
 
 
