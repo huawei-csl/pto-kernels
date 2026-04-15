@@ -99,10 +99,9 @@ def test_scan(tile_size=64, n_tiles=64):
         raise AssertionError(
             f"Scan mismatch for tile_size={tile_size}, total_len={total_len} ({n_tiles} tiles)"
         )
-    else:
-        print("All results matched. Scan test passed successfully.")
 
-    print()
+    print("All results matched. Scan test passed successfully.\n")
+
     clean_up("kernel_scan_single_core.cpp", tile_size)
 
 
