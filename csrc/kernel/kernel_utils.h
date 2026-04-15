@@ -10,6 +10,7 @@ for the full License text.
 
 #define MEMORY_BASE
 #include <pto/pto-inst.hpp>
+#include <type_traits>
 
 namespace kernel_utils {
 /**
