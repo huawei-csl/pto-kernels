@@ -23,6 +23,7 @@ AICORE void runTCountLessThan(__gm__ T *x, __gm__ int32_t *z,
 #if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
   set_mask_norm();
   set_vector_mask(-1, -1);
+  set_atomic_add();
 
   // --- Define Global Tensors ---
   using InputGlobalData = pto::GlobalTensor<T, pto::Shape<1, 1, 1, 1, DYNAMIC>,
@@ -132,7 +133,7 @@ AICORE void runTCountLessThan(__gm__ T *x, __gm__ int32_t *z,
 
     set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
     wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
-    // DOesn't do atomic adds
+    // Doesn't do atomic adds
     TSTORE<OutTile, OutGlobalData, AtomicType::AtomicAdd>(z_gm, local_out);
     set_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
     wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);

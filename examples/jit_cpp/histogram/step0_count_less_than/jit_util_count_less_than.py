@@ -5,7 +5,7 @@ import ctypes
 import torch
 
 ASCEND_TOOLKIT_HOME = os.environ["ASCEND_TOOLKIT_HOME"]
-PTO_LIB_PATH = os.environ["PTO_LIB_PATH"]
+PTO_LIB_PATH = os.environ.get("PTO_LIB_PATH", ASCEND_TOOLKIT_HOME)
 
 
 def compile_cpp(kernel_cpp: str, verbose: bool = False, timeout: int = 120) -> str:
@@ -35,7 +35,10 @@ def compile_cpp(kernel_cpp: str, verbose: bool = False, timeout: int = 120) -> s
             stderr=subprocess.STDOUT,
         )
     except Exception as e:
-        raise RuntimeError(f"Compile failed: {e}") from e
+        output = e.stdout.decode("utf-8", errors="replace") if e.stdout else ""
+        raise RuntimeError(
+            f"Compile failed with exit code {e.returncode}:\n{output}"
+        ) from e
 
     if verbose:
         print(f"generated {lib_path}")
