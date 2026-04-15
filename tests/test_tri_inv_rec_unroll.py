@@ -19,7 +19,7 @@ torch.manual_seed(42)
 np.random.seed(42)
 
 
-def random_triu_matrix(n, block_dim_x, block_dim_y, scale=0.1):
+def random_triu_matrix(n, block_dim_x, block_dim_y, scale=0.01):
     U = scale * torch.triu(torch.rand((block_dim_x, block_dim_y, n, n)), diagonal=1)
     return U
 
@@ -42,7 +42,7 @@ def block_ones_triu_matrix(n, block_dim_x, block_dim_y):
     return torch.from_numpy(np.triu(U, 1))
 
 
-def block_random_triu_matrix(n, block_dim_x, block_dim_y, scale=0.2):
+def block_random_triu_matrix(n, block_dim_x, block_dim_y, scale=0.02):
     U_ = scale * np.random.rand(16, 16)
     U_ = np.triu(U_, k=1)
     U = np.zeros((block_dim_x, block_dim_y, n, n))
@@ -62,7 +62,7 @@ def linalg_inv(U: torch.tensor) -> torch.tensor:
     for x in range(U.shape[0]):
         for y in range(U.shape[1]):
             golden_numpy[x, y] = np.linalg.inv(
-                U[x, y].numpy().astype(np.double) + Identity
+                U[x, y].double().numpy().astype(np.double) + Identity
             )
     return torch.from_numpy(golden_numpy)
 
