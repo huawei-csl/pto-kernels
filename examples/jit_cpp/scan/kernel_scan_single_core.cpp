@@ -51,33 +51,24 @@ AICORE void run_scan_single_core_pto(
 
   if (get_block_idx() != 0) return;  // Only process on a single core
 
-  using TileL1A =
+  using TileL1 =
       Tile<TileType::Mat, InputT, TILE_SIZE, TILE_SIZE, BLayout::ColMajor,
            TILE_SIZE, TILE_SIZE, SLayout::RowMajor, 512>;
-  using TileL1U =
-      Tile<TileType::Mat, InputT, TILE_SIZE, TILE_SIZE, BLayout::RowMajor,
-           TILE_SIZE, TILE_SIZE, SLayout::ColMajor, 512>;
-  TileL1A aTileL1;
-  TileL1U uTileL1;
+  TileL1 aTileL1;
+  TileL1 uTileL1;
   TASSIGN(aTileL1, 0x0);
   TASSIGN(uTileL1, 0x0 + TILE_SIZE * TILE_SIZE * sizeof(InputT));
 
-  // Use Matmul specific shapes to satisfy the compiler
-  using NDValidShapeA = TileShape2D<InputT, TILE_SIZE, TILE_SIZE, Layout::ND>;
-  using NDWholeShapeA = BaseShape2D<InputT, TILE_SIZE, TILE_SIZE, Layout::ND>;
-  using GlobalDataMatA =
-      GlobalTensor<InputT, NDValidShapeA, NDWholeShapeA, Layout::ND>;
+  using TensorShape = TileShape2D<InputT, TILE_SIZE, TILE_SIZE, Layout::ND>;
+  using TensorStrides = BaseShape2D<InputT, TILE_SIZE, TILE_SIZE, Layout::ND>;
+  using GlobalDataIn =
+      GlobalTensor<InputT, TensorShape, TensorStrides, Layout::ND>;
 
-  using NDValidShapeU = TileShape2D<InputT, TILE_SIZE, TILE_SIZE, Layout::DN>;
-  using NDWholeShapeU = BaseShape2D<InputT, TILE_SIZE, TILE_SIZE, Layout::DN>;
-  using GlobalDataU =
-      GlobalTensor<InputT, NDValidShapeU, NDWholeShapeU, Layout::DN>;
-
-  GlobalDataU uGM(u);
+  GlobalDataIn uGM(u);
 
   using NDValidShapeC = TileShape2D<AccT, TILE_SIZE, TILE_SIZE, Layout::ND>;
   using NDWholeShapeC = BaseShape2D<AccT, TILE_SIZE, TILE_SIZE, Layout::ND>;
-  using GlobalDataMatC =
+  using GlobalDataOut =
       GlobalTensor<AccT, NDValidShapeC, NDWholeShapeC, Layout::ND>;
 
   using TileA = TileLeft<InputT, TILE_SIZE, TILE_SIZE>;
@@ -104,8 +95,8 @@ AICORE void run_scan_single_core_pto(
 
   for (uint32_t offset = 0; offset < total_len;
        offset += TILE_SIZE * TILE_SIZE) {
-    GlobalDataMatA gm_x_mat(x + offset);
-    GlobalDataMatC gm_out_mat(y + offset);
+    GlobalDataIn gm_x_mat(x + offset);
+    GlobalDataOut gm_out_mat(y + offset);
 
     // 1. Load A
     TLOAD(aTileL1, gm_x_mat);

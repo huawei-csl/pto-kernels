@@ -3,58 +3,21 @@ import torch_npu  # noqa
 from jit_util_scan import jit_compile, clean_up
 
 
-def reference_scan(
-    x: torch.Tensor, u_s: torch.Tensor, tile_size: int = 64
-) -> torch.Tensor:
-    """
-    Torch reference implementation of the NPU scan algorithm.
-    It uses matrix multiplication for inta-block (row-wise) prefix sums,
-    followed by a sequential running sum accumulation across rows.
-    Avoids using torch.cumsum.
-    """
-    total_len = x.numel()
-    num_rows = total_len // tile_size
-
-    # 1. Reshape x into blocks. Each block is a row.
-    x_matrix = x.view(num_rows, tile_size)
-
-    # u_s was transposed for the NPU kernel (DN layout). We transpose it back for standard Matmul
-    U = u_s.t()
-
-    # 2. Cube Phase: Matrix multiplication (row-wise prefix sum)
-    # [num_rows, tile_size] @ [tile_size, tile_size] -> [num_rows, tile_size]
-    row_sums = torch.matmul(x_matrix, U)
-
-    # 3. Vector Phase: Sequential accumulation across rows
-    result = torch.empty_like(row_sums)
-    running_sum = torch.zeros((1,), device=x.device, dtype=x.dtype)
-
-    for i in range(num_rows):
-        current_row = row_sums[i] + running_sum
-        result[i] = current_row
-        running_sum = current_row[-1]
-
-    return result.view(-1)
-
-
 def test_scan(tile_size=64, n_tiles=64):
     total_len = tile_size * tile_size * n_tiles
     device = "npu:1"
     dtype = torch.float32
     torch.npu.set_device(device)
-    torch.set_printoptions(sci_mode=False)
 
     # Prepare Inputs
     # x = torch.rand(size=(total_len,), device="npu", dtype=dtype).contiguous()
     x = torch.arange(1, total_len + 1, device="npu", dtype=dtype).contiguous()
     y = torch.zeros_like(x)
 
-    # Generate upper triangular matrix of 1s (s x s) -> Transpose to represent Column-Major Down-Normal memory layout
-    u_s = (
-        torch.triu(torch.ones((tile_size, tile_size), device="npu", dtype=dtype))
-        .t()
-        .contiguous()
-    )
+    # Generate upper triangular matrix of 1s (s x s)
+    u = torch.triu(
+        torch.ones((tile_size, tile_size), device="npu", dtype=dtype)
+    ).contiguous()
 
     # Expected PyTorch computation
     expected_scan = torch.cumsum(x.cpu(), dim=0)
@@ -71,7 +34,7 @@ def test_scan(tile_size=64, n_tiles=64):
     actual_scan = []
     for _ in range(repeat_runs):
         y.zero_()
-        scan_func(x, y, u_s, total_len)
+        scan_func(x, y, u, total_len)
         actual_scan.append(y.cpu().clone())
 
     torch.npu.synchronize()
