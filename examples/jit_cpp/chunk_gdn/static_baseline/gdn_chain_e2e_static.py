@@ -5,9 +5,8 @@ Matches the pipeline in tilelang-ascend ``opt_gdn_full.py``:
   cumsum -> KKT -> solve_tril -> wy_fast -> chunk_h -> chunk_o
 
 ``solve_tril`` for C==128 uses ``(I+A)^{-1}`` with strict-lower A from KKT.
-We implement that via ``pto_tri_inv_rec_unroll`` (upper triangular U = A^T), same as
-``inv(I+A^T)`` transposed = ``inv(I+A)``. If ``pto_kernels`` is not importable, falls
-back to batched ``torch.linalg.inv`` (mathematically identical).
+That step uses a CPU ``torch.linalg.inv(I + A)`` on float32 blocks (numerically stable
+for unit lower-triangular matrices).
 
 Reference: ``ref_seq_gdn`` from ``opt_gdn_full.py`` (sequential formulation).
 
@@ -17,8 +16,6 @@ Fixed shapes must match the extracted ``*_kernel.cpp`` specializations:
 from __future__ import annotations
 
 import ctypes
-import os
-import sys
 
 import torch
 import torch.nn.functional as F
@@ -38,23 +35,6 @@ torch_npu = torch.npu  # noqa: F401
 B, H, L, DK, DV, C = 16, 16, 16384, 128, 128, 128
 CHUNK_NUM = (L + C - 1) // C
 BV_NUM = (DV + DV - 1) // DV
-
-_PTO_KERNELS_REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))
-_PTO_PYTHON = os.path.join(_PTO_KERNELS_REPO, "python")
-if os.path.isdir(_PTO_PYTHON) and _PTO_PYTHON not in sys.path:
-    sys.path.insert(0, _PTO_PYTHON)
-
-
-def _try_import_pto_tri_inv():
-    try:
-        from pto_kernels import pto_tri_inv_rec_unroll  # type: ignore
-
-        return pto_tri_inv_rec_unroll
-    except Exception:
-        return None
-
-
-pto_tri_inv_rec_unroll = _try_import_pto_tri_inv()
 
 
 def ref_seq_gdn(q, k, v, g, beta):
@@ -90,26 +70,18 @@ def solve_tril_inv_lower(a: torch.Tensor, idt: torch.Tensor) -> torch.Tensor:
     O = (I + A)^{-1} with A strict lower per C×C block along L.
     ``a``: [B,H,L,C] fp16 — rows of each block; ``idt``: unused (identity implicit).
 
-    PTO path: ``pto_tri_inv_rec_unroll(U)`` with ``U = A^T`` (upper), then transpose.
-    Fallback: float64 CPU ``inv(I+A)`` for numerical stability (matches test_tri_inv).
+    CPU float32 ``torch.linalg.inv(I + A)`` per block; result moved back to ``a.device``.
     """
-    del idt  # TileLang passes I; PTO builds I_neg internally
+    del idt  # TileLang passes I; identity added explicitly below
     b_, h_, l_, c_ = a.shape
     assert l_ % c_ == 0
     chunk = l_ // c_
     # [B*H*chunk, C, C] — rows of each KKT block; enforce strict lower (fp16 noise on diag).
     blocks = a.view(b_, h_, chunk, c_, c_).reshape(b_ * h_ * chunk, c_, c_)
     blocks = torch.tril(blocks, diagonal=-1)
-    if pto_tri_inv_rec_unroll is not None:
-        u = blocks.transpose(-2, -1).contiguous().to(torch.float16)
-        inv_upper = pto_tri_inv_rec_unroll(u.npu(), is_bsnd_format=False)
-        torch.npu.synchronize()
-        o = inv_upper.transpose(-2, -1).to(dtype=torch.float16, device=a.device)
-    else:
-        # CPU float32 inverse: I + A with A strict lower is unit lower-triangular; well-conditioned.
-        blk = blocks.float().cpu()
-        m_ = torch.eye(c_, dtype=torch.float32) + blk
-        o = torch.linalg.inv(m_).to(torch.float16).to(device=a.device)
+    blk = blocks.float().cpu()
+    m_ = torch.eye(c_, dtype=torch.float32) + blk
+    o = torch.linalg.inv(m_).to(torch.float16).to(device=a.device)
     return o.reshape(b_, h_, l_, c_)
 
 
@@ -233,8 +205,7 @@ def main():
     ref_o = ref_seq_gdn(q, k, v, g_log, beta)
 
     torch.testing.assert_close(o.cpu(), ref_o.cpu(), rtol=1e-3, atol=1e-3)
-    mode = "pto_tri_inv_rec_unroll" if pto_tri_inv_rec_unroll is not None else "torch.linalg.inv"
-    print(f"GDN e2e static chain OK (solve_tril: {mode}).")
+    print("GDN e2e static chain OK (solve_tril: torch.linalg.inv on CPU).")
 
 
 if __name__ == "__main__":

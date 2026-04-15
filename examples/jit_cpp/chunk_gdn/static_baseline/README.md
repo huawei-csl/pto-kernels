@@ -48,7 +48,7 @@ Or run a single test, e.g. `python3 run_chunk_o_static.py`.
 
 `gdn_chain_e2e_static.py` runs: `cumsum → KKT → solve_tril → wy_fast → chunk_h → chunk_o` with the same fixed shapes as the static kernels.
 
-- **solve\_tril** (C=128): prefers `pto_tri_inv_rec_unroll` from the `pto_kernels` package; otherwise CPU `torch.linalg.inv(I + A)` with strict-lower `A`.
+- **solve\_tril** (C=128): CPU `torch.linalg.inv(I + A)` on float32 blocks with strict-lower `A` (see `solve_tril_inv_lower` in `gdn_chain_e2e_static.py`).
 
 ```bash
 python3 gdn_chain_e2e_static.py
