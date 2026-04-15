@@ -1,4 +1,10 @@
 import os
+import sys
+
+_KERNEL_DIR = os.path.dirname(os.path.abspath(__file__))
+_ROOT_DIR = os.path.dirname(_KERNEL_DIR)
+if _ROOT_DIR not in sys.path:
+    sys.path.insert(0, _ROOT_DIR)
 
 import tilelang
 from tilelang import language as T
@@ -7,7 +13,7 @@ from tilelang.jit.adapter.libgen import LibraryGenerator
 
 from patch_libgen import get_patched_compile_lib
 
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_SCRIPT_DIR = _KERNEL_DIR
 patched_compile_lib = get_patched_compile_lib(
     src_dump_path="opt_gdn_wy_fast.cpp",
     output_dir=_SCRIPT_DIR,

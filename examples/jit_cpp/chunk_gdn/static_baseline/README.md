@@ -55,7 +55,7 @@ To use the PTO tri-inv kernel, install/build the `pto-kernels` Python extension 
 
 ## Regenerating `*_kernel.cpp` from TileLang
 
-From `../tilelang_codegen/opt_gdn_*.cpp`:
+From `../tilelang_codegen/kernels/opt_gdn_*.cpp`:
 
 1. Copy into the matching `*_kernel.cpp` name in this directory.
 2. `#include "tl_templates/pto/common.h"` → `#include "common.h"`.

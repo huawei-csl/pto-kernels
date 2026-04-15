@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/../kernels"
 for py in \
   opt_gdn_chunk_cumsum.py \
   opt_gdn_chunk_h.py \
