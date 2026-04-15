@@ -11,7 +11,7 @@ from pto_static_common import compile_pto_kernel
 
 torch_npu = torch.npu  # noqa: F401
 
-B, H, L, DK, DV, C = 2, 16, 16384, 128, 128, 128
+B, H, L, DK, DV, C = 16, 16, 16384, 128, 128, 128
 
 
 def ref_wy_fast(k, v, beta, g, a, C_):
@@ -41,6 +41,7 @@ def ref_wy_fast(k, v, beta, g, a, C_):
 def main():
     torch.manual_seed(0)
     torch.npu.set_device("npu:0")
+    stream = torch.npu.current_stream()._as_parameter_
 
     lib_path = compile_pto_kernel("wy_fast_kernel.cpp", "wy_fast_static.so")
     lib = ctypes.CDLL(os.path.abspath(lib_path))
@@ -57,7 +58,6 @@ def main():
     w_out = torch.empty((B, H, L, DK), device="npu", dtype=torch.float16)
     u_out = torch.empty((B, H, L, DV), device="npu", dtype=torch.float16)
 
-    stream = torch.npu.current_stream()._as_parameter_
     lib.call(
         ctypes.c_void_p(k.data_ptr()),
         ctypes.c_void_p(v.data_ptr()),

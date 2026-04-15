@@ -252,7 +252,7 @@ if __name__ == "__main__":
     torch.set_printoptions(threshold=float("inf"), sci_mode=True)
 
     test_configs = [
-        (2, 16, 16384, 128, 128, 128),
+        (16, 16, 16384, 128, 128, 128),
     ]
 
     for B, H, L, DK, DV, C in test_configs:

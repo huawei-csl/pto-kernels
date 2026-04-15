@@ -45,26 +45,26 @@ AICORE void main_kernel(__gm__ half *Q_handle, __gm__ half *K_handle, __gm__ hal
   TASSIGN(o_ub, 512);
   auto vid = get_subblockid();
 #if defined(__DAV_C220_CUBE__)
-    chunk_gdn_pto::copy_gm_to_l1<half, half, 1, 1, 1, 128, 128, 67108864, 33554432, 2097152, 128, 1, 128, 128>(Q_handle + (cid * 16384), 0, 0, 128, 128);
-    chunk_gdn_pto::copy_gm_to_l1<half, half, 1, 1, 1, 128, 128, 67108864, 33554432, 2097152, 128, 1, 128, 128>(K_handle + (cid * 16384), 32768, 0, 128, 128);
+    chunk_gdn_pto::copy_gm_to_l1<half, half, 1, 1, 1, 128, 128, 536870912, 33554432, 2097152, 128, 1, 128, 128>(Q_handle + (cid * 16384), 0, 0, 128, 128);
+    chunk_gdn_pto::copy_gm_to_l1<half, half, 1, 1, 1, 128, 128, 536870912, 33554432, 2097152, 128, 1, 128, 128>(K_handle + (cid * 16384), 32768, 0, 128, 128);
     chunk_gdn_pto::gemm_v0<half, float, 128, 128, 128, 128, 128, 128, 128, false, true>(q_l1, k_l1, qk_l0, (bool)1);
-    chunk_gdn_pto::copy_gm_to_l1<half, half, 1, 1, 1, 128, 128, 67108864, 33554432, 2097152, 128, 1, 128, 128>(Q_handle + (cid * 16384), 0, 0, 128, 128);
+    chunk_gdn_pto::copy_gm_to_l1<half, half, 1, 1, 1, 128, 128, 536870912, 33554432, 2097152, 128, 1, 128, 128>(Q_handle + (cid * 16384), 0, 0, 128, 128);
     chunk_gdn_pto::copy_gm_to_l1<half, half, 1, 1, 1, 128, 128, 33554432, 2097152, 16384, 128, 1, 128, 128>(S_handle + (cid * 16384), 65536, 0, 128, 128);
     chunk_gdn_pto::gemm_v0<half, float, 128, 128, 128, 128, 128, 128, 128, false, false>(q_l1, s_l1, qs_l0, (bool)1);
-    chunk_gdn_pto::copy_l0c_to_gm<half, float, 1, 1, 1, 128, 128, 1, 67108864, 16384, 128, 1, 128, 128>(workspace_1_handle + (cid * 16384), 0, 0, 128, 128);
-    chunk_gdn_pto::copy_l0c_to_gm<half, float, 1, 1, 1, 128, 128, 1, 67108864, 16384, 128, 1, 128, 128>(workspace_2_handle + (cid * 16384), 65536, 0, 128, 128);
+    chunk_gdn_pto::copy_l0c_to_gm<half, float, 1, 1, 1, 128, 128, 1, 536870912, 16384, 128, 1, 128, 128>(workspace_1_handle + (cid * 16384), 0, 0, 128, 128);
+    chunk_gdn_pto::copy_l0c_to_gm<half, float, 1, 1, 1, 128, 128, 1, 536870912, 16384, 128, 1, 128, 128>(workspace_2_handle + (cid * 16384), 65536, 0, 128, 128);
     chunk_gdn_pto::set_cross_flag<PIPE_FIX>(0, 2);
     chunk_gdn_pto::wait_cross_flag(1);
-    chunk_gdn_pto::copy_gm_to_l1<half, half, 1, 1, 1, 128, 128, 1, 67108864, 16384, 128, 1, 128, 128>(workspace_3_handle + (cid * 16384), 98304, 0, 128, 128);
-    chunk_gdn_pto::copy_gm_to_l1<half, half, 1, 1, 1, 128, 128, 67108864, 33554432, 2097152, 128, 1, 128, 128>(V_handle + (cid * 16384), 131072, 0, 128, 128);
+    chunk_gdn_pto::copy_gm_to_l1<half, half, 1, 1, 1, 128, 128, 1, 536870912, 16384, 128, 1, 128, 128>(workspace_3_handle + (cid * 16384), 98304, 0, 128, 128);
+    chunk_gdn_pto::copy_gm_to_l1<half, half, 1, 1, 1, 128, 128, 536870912, 33554432, 2097152, 128, 1, 128, 128>(V_handle + (cid * 16384), 131072, 0, 128, 128);
     chunk_gdn_pto::gemm_v0<half, float, 128, 128, 128, 128, 128, 128, 128, false, false>(qk_l1, v_l1, qkv_l0, (bool)1);
-    chunk_gdn_pto::copy_l0c_to_gm<half, float, 1, 1, 1, 128, 128, 1, 67108864, 16384, 128, 1, 128, 128>(workspace_2_handle + (cid * 16384), 0, 0, 128, 128);
+    chunk_gdn_pto::copy_l0c_to_gm<half, float, 1, 1, 1, 128, 128, 1, 536870912, 16384, 128, 1, 128, 128>(workspace_2_handle + (cid * 16384), 0, 0, 128, 128);
     chunk_gdn_pto::set_cross_flag<PIPE_FIX>(2, 2);
 #endif
 #if defined(__DAV_C220_VEC__)
     set_mask_norm();
     set_vector_mask(-1, -1);
-    chunk_gdn_pto::copy_gm_to_ub<float, float, 1, 1, 1, 1, 128, 1, 1, 1, 524288, 1, 1, 128, pto::PadValue::Zero>(G_handle + (cid * 128), 0, 0, 1, 128);
+    chunk_gdn_pto::copy_gm_to_ub<float, float, 1, 1, 1, 1, 128, 1, 1, 1, 4194304, 1, 1, 128, pto::PadValue::Zero>(G_handle + (cid * 128), 0, 0, 1, 128);
     chunk_gdn_pto::copy_gm_to_ub<float, float, 1, 1, 1, 64, 128, 1, 1, 16384, 128, 1, 64, 128, pto::PadValue::Zero>(Msk_handle + (vid * 8192), 512, 0, 64, 128);
     chunk_gdn_pto::set_flag_pipeline<PIPE_MTE2, PIPE_V> (0);
     chunk_gdn_pto::wait_flag_pipeline<PIPE_MTE2, PIPE_V> (0);
@@ -114,19 +114,19 @@ AICORE void main_kernel(__gm__ half *Q_handle, __gm__ half *K_handle, __gm__ hal
     TEXP(coeff_ub, coeff_ub);
     TEXP(g_v_ub, g_v_ub);
     chunk_gdn_pto::wait_cross_flag(0);
-    chunk_gdn_pto::copy_gm_to_ub<half, half, 1, 1, 1, 64, 128, 1, 67108864, 16384, 128, 1, 64, 128, pto::PadValue::Zero>(workspace_1_handle + ((cid * 16384) + (vid * 8192)), 99072, 0, 64, 128);
+    chunk_gdn_pto::copy_gm_to_ub<half, half, 1, 1, 1, 64, 128, 1, 536870912, 16384, 128, 1, 64, 128, pto::PadValue::Zero>(workspace_1_handle + ((cid * 16384) + (vid * 8192)), 99072, 0, 64, 128);
     chunk_gdn_pto::set_flag_pipeline<PIPE_MTE2, PIPE_V> (0);
     chunk_gdn_pto::wait_flag_pipeline<PIPE_MTE2, PIPE_V> (0);
     TCVT(qk_ub, qk_ub_half, pto::RoundMode::CAST_NONE);
     chunk_gdn_pto::set_flag_pipeline<PIPE_V, PIPE_MTE2> (0);
     chunk_gdn_pto::wait_flag_pipeline<PIPE_V, PIPE_MTE2> (0);
-    chunk_gdn_pto::copy_gm_to_ub<half, half, 1, 1, 1, 64, 128, 1, 67108864, 16384, 128, 1, 64, 128, pto::PadValue::Zero>(workspace_2_handle + ((cid * 16384) + (vid * 8192)), 115456, 0, 64, 128);
+    chunk_gdn_pto::copy_gm_to_ub<half, half, 1, 1, 1, 64, 128, 1, 536870912, 16384, 128, 1, 64, 128, pto::PadValue::Zero>(workspace_2_handle + ((cid * 16384) + (vid * 8192)), 115456, 0, 64, 128);
     TMUL(qk_ub, qk_ub, coeff_ub);
     TMUL(qk_ub, qk_ub, msk_ub);
     TCVT(qk_ub_half, qk_ub, pto::RoundMode::CAST_NONE);
     chunk_gdn_pto::set_flag_pipeline<PIPE_V, PIPE_MTE3> (0);
     chunk_gdn_pto::wait_flag_pipeline<PIPE_V, PIPE_MTE3> (0);
-    chunk_gdn_pto::copy_ub_to_gm<half, half, 1, 1, 1, 64, 128, 1, 67108864, 16384, 128, 1, 64, 128>(workspace_3_handle + ((cid * 16384) + (vid * 8192)), 99072, 0, 64, 128);
+    chunk_gdn_pto::copy_ub_to_gm<half, half, 1, 1, 1, 64, 128, 1, 536870912, 16384, 128, 1, 64, 128>(workspace_3_handle + ((cid * 16384) + (vid * 8192)), 99072, 0, 64, 128);
     chunk_gdn_pto::set_cross_flag<PIPE_MTE3>(1, 2);
     chunk_gdn_pto::set_flag_pipeline<PIPE_MTE2, PIPE_V> (0);
     chunk_gdn_pto::wait_flag_pipeline<PIPE_MTE2, PIPE_V> (0);
@@ -167,7 +167,7 @@ AICORE void main_kernel(__gm__ half *Q_handle, __gm__ half *K_handle, __gm__ hal
       TMULS(qs_ub_temp_7, qs_ub_temp_6, g_v_ub_scalar_temp_7);
     }
     chunk_gdn_pto::wait_cross_flag(2);
-    chunk_gdn_pto::copy_gm_to_ub<half, half, 1, 1, 1, 64, 128, 1, 67108864, 16384, 128, 1, 64, 128, pto::PadValue::Zero>(workspace_2_handle + ((cid * 16384) + (vid * 8192)), 164608, 0, 64, 128);
+    chunk_gdn_pto::copy_gm_to_ub<half, half, 1, 1, 1, 64, 128, 1, 536870912, 16384, 128, 1, 64, 128, pto::PadValue::Zero>(workspace_2_handle + ((cid * 16384) + (vid * 8192)), 164608, 0, 64, 128);
     chunk_gdn_pto::set_flag_pipeline<PIPE_MTE2, PIPE_V> (0);
     chunk_gdn_pto::wait_flag_pipeline<PIPE_MTE2, PIPE_V> (0);
     TCVT(o_ub, o_ub_half, pto::RoundMode::CAST_NONE);
@@ -175,7 +175,7 @@ AICORE void main_kernel(__gm__ half *Q_handle, __gm__ half *K_handle, __gm__ hal
     TCVT(o_ub_half, o_ub, pto::RoundMode::CAST_NONE);
     chunk_gdn_pto::set_flag_pipeline<PIPE_V, PIPE_MTE3> (0);
     chunk_gdn_pto::wait_flag_pipeline<PIPE_V, PIPE_MTE3> (0);
-    chunk_gdn_pto::copy_ub_to_gm<half, half, 1, 1, 1, 64, 128, 67108864, 33554432, 2097152, 128, 1, 64, 128>(O_handle + ((cid * 16384) + (vid * 8192)), 164608, 0, 64, 128);
+    chunk_gdn_pto::copy_ub_to_gm<half, half, 1, 1, 1, 64, 128, 536870912, 33554432, 2097152, 128, 1, 64, 128>(O_handle + ((cid * 16384) + (vid * 8192)), 164608, 0, 64, 128);
 #endif
 }
 
@@ -199,5 +199,5 @@ extern "C" void call(uint8_t *Q_handle, uint8_t *K_handle, uint8_t *V_handle, ui
     uint32_t fftsLen{0};
     uint64_t fftsAddr{0};
     rtGetC2cCtrlAddr(&fftsAddr, &fftsLen);
-    launch_kernel<<<4096, nullptr, stream>>>(Q_handle, K_handle, V_handle, S_handle, G_handle, Msk_handle, workspace_1_handle, workspace_2_handle, workspace_3_handle, O_handle, fftsAddr);
+    launch_kernel<<<32768, nullptr, stream>>>(Q_handle, K_handle, V_handle, S_handle, G_handle, Msk_handle, workspace_1_handle, workspace_2_handle, workspace_3_handle, O_handle, fftsAddr);
 }

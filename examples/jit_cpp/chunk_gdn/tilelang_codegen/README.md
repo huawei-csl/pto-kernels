@@ -82,11 +82,11 @@ Shape: `(B,H,L,DK,DV,C) = (16,16,16384,128,128,128)` — same as `tilelang-ascen
 | Kernel | Latency (ms) | #ops (approx) | TFLOPS |
 | :-- | --: | --: | --: |
 | chunk_cumsum | 1.39 | 4.19e+06 | 0.0030 |
-| chunk_scaled_dot_kkt | 9.13 | 6.87e+10 | 7.5282 |
-| wy_fast | 9.26 | 1.37e+11 | 14.8358 |
-| chunk_h | 9.19 | 2.75e+11 | 29.9012 |
-| chunk_o | 11.60 | 3.44e+11 | 29.6160 |
-| **total** | **40.58** | **8.25e+11** | **20.3219** |
+| chunk_scaled_dot_kkt | 9.70 | 6.87e+10 | 7.0824 |
+| wy_fast | 9.76 | 1.37e+11 | 14.0816 |
+| chunk_h | 9.01 | 2.75e+11 | 30.4938 |
+| chunk_o | 11.71 | 3.44e+11 | 29.3311 |
+| **total** | **41.58** | **8.25e+11** | **19.8306** |
 
 ## Recompiling a dumped `.cpp` manually
 

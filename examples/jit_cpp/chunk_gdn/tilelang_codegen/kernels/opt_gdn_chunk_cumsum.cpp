@@ -19,7 +19,7 @@ AICORE void main_kernel(__gm__ float *G_handle, __gm__ float *S_handle, uint64_t
     set_flag(PIPE_V, PIPE_S, EVENT_ID0);
     wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
     TEXPANDS(s_ub, 0.000000e+00f);
-    tl::ascend_pto::copy_gm_to_ub<float, float, 1, 1, 1, 1, 1024, 1, 1, 1, 524288, 1, 1, 1024, pto::PadValue::Zero>(G_handle + ((((cid / 16) * 32768) + (vid * 16384)) + ((cid % 16) * 1024)), 4096, 0, 1, 1024);
+    tl::ascend_pto::copy_gm_to_ub<float, float, 1, 1, 1, 1, 1024, 1, 1, 1, 4194304, 1, 1, 1024, pto::PadValue::Zero>(G_handle + ((((cid / 16) * 32768) + (vid * 16384)) + ((cid % 16) * 1024)), 4096, 0, 1, 1024);
     tl::ascend_pto::set_flag_pipeline<PIPE_MTE2, PIPE_V> (0);
     tl::ascend_pto::wait_flag_pipeline<PIPE_MTE2, PIPE_V> (0);
 
@@ -34,7 +34,7 @@ AICORE void main_kernel(__gm__ float *G_handle, __gm__ float *S_handle, uint64_t
       }
       tl::ascend_pto::set_flag_pipeline<PIPE_V, PIPE_MTE3> (0);
       tl::ascend_pto::wait_flag_pipeline<PIPE_V, PIPE_MTE3> (0);
-      tl::ascend_pto::copy_ub_to_gm<float, float, 1, 1, 1, 1, 1024, 1, 1, 1, 524288, 1, 1, 1024>(S_handle + ((((cid / 16) * 32768) + (vid * 16384)) + ((cid % 16) * 1024)), 0, 0, 1, 1024);
+      tl::ascend_pto::copy_ub_to_gm<float, float, 1, 1, 1, 1, 1024, 1, 1, 1, 4194304, 1, 1, 1024>(S_handle + ((((cid / 16) * 32768) + (vid * 16384)) + ((cid % 16) * 1024)), 0, 0, 1, 1024);
     }
 #endif
 }
@@ -51,5 +51,5 @@ extern "C" void call(uint8_t *G_handle, uint8_t *S_handle, void *stream)
     uint32_t fftsLen{0};
     uint64_t fftsAddr{0};
     rtGetC2cCtrlAddr(&fftsAddr, &fftsLen);
-    launch_kernel<<<256, nullptr, stream>>>(G_handle, S_handle, fftsAddr);
+    launch_kernel<<<2048, nullptr, stream>>>(G_handle, S_handle, fftsAddr);
 }

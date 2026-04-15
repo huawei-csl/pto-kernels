@@ -11,7 +11,7 @@ from pto_static_common import compile_pto_kernel
 
 torch_npu = torch.npu  # noqa: F401
 
-B, H, L, C = 2, 16, 16384, 128
+B, H, L, C = 16, 16, 16384, 128
 
 
 def ref_chunk_cumsum(g, C_):
@@ -25,6 +25,7 @@ def ref_chunk_cumsum(g, C_):
 def main():
     torch.manual_seed(0)
     torch.npu.set_device("npu:0")
+    stream = torch.npu.current_stream()._as_parameter_
 
     lib_path = compile_pto_kernel("chunk_cumsum_kernel.cpp", "chunk_cumsum_static.so")
     lib = ctypes.CDLL(os.path.abspath(lib_path))
@@ -33,7 +34,6 @@ def main():
 
     g = torch.randn((B, H, L), device="npu", dtype=torch.float32)
     s_out = torch.empty_like(g)
-    stream = torch.npu.current_stream()._as_parameter_
     lib.call(
         ctypes.c_void_p(g.data_ptr()),
         ctypes.c_void_p(s_out.data_ptr()),

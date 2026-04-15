@@ -12,7 +12,7 @@ from pto_static_common import compile_pto_kernel
 
 torch_npu = torch.npu  # noqa: F401
 
-B, H, L, DK, DV, C = 2, 16, 16384, 128, 128, 128
+B, H, L, DK, DV, C = 16, 16, 16384, 128, 128, 128
 CHUNK_NUM = (L + C - 1) // C
 
 
@@ -46,6 +46,7 @@ def ref_chunk_o(q, k, v, s, g, C_):
 def main():
     torch.manual_seed(0)
     torch.npu.set_device("npu:0")
+    stream = torch.npu.current_stream()._as_parameter_
 
     lib_path = compile_pto_kernel("chunk_o_kernel.cpp", "chunk_o_static.so")
     lib = ctypes.CDLL(os.path.abspath(lib_path))
@@ -68,7 +69,6 @@ def main():
     workspace_3 = torch.zeros((nblk, C, C), device="npu", dtype=torch.float16)
     o = torch.empty((B, H, L, DV), device="npu", dtype=torch.float16)
 
-    stream = torch.npu.current_stream()._as_parameter_
     lib.call(
         ctypes.c_void_p(q.data_ptr()),
         ctypes.c_void_p(k.data_ptr()),

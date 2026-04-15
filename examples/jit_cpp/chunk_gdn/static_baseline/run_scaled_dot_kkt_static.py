@@ -11,7 +11,7 @@ from pto_static_common import compile_pto_kernel
 
 torch_npu = torch.npu  # noqa: F401
 
-B, H, L, DK, C = 2, 16, 16384, 128, 128
+B, H, L, DK, C = 16, 16, 16384, 128, 128
 
 
 def ref_kkt(k, beta, g, C_):
@@ -36,6 +36,7 @@ def ref_kkt(k, beta, g, C_):
 def main():
     torch.manual_seed(0)
     torch.npu.set_device("npu:0")
+    stream = torch.npu.current_stream()._as_parameter_
 
     lib_path = compile_pto_kernel("scaled_dot_kkt_kernel.cpp", "scaled_dot_kkt_static.so")
     lib = ctypes.CDLL(os.path.abspath(lib_path))
@@ -49,7 +50,6 @@ def main():
     workspace = torch.zeros((B, H, L, C), device="npu", dtype=torch.float16)
     a_out = torch.empty((B, H, L, C), device="npu", dtype=torch.float16)
 
-    stream = torch.npu.current_stream()._as_parameter_
     lib.call(
         ctypes.c_void_p(k.data_ptr()),
         ctypes.c_void_p(beta.data_ptr()),

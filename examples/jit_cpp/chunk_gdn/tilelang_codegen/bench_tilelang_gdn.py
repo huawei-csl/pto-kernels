@@ -17,14 +17,24 @@ from __future__ import annotations
 
 import os
 import sys
-from typing import Callable, Literal
-
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
+_CHUNK_GDN = os.path.dirname(_ROOT)
+if _CHUNK_GDN not in sys.path:
+    sys.path.insert(0, _CHUNK_GDN)
 
 import torch
 import torch.nn.functional as F
+
+from gdn_bench_common import (
+    KERNEL_ORDER,
+    approx_ops_gdn,
+    do_bench,
+    format_ms,
+    format_ops,
+    format_tflops,
+)
 
 from kernels.opt_gdn_chunk_cumsum import cumsum_ker
 from kernels.opt_gdn_chunk_h import chunk_h_ker
@@ -33,80 +43,6 @@ from kernels.opt_gdn_chunk_scaled_dot_kkt import kkt_ker
 from kernels.opt_gdn_wy_fast import wy_fast_ker
 
 NPU_DEVICE = os.getenv("GDN_TRI_INVERSE_NPU_DEVICE", "npu:0")
-
-KERNEL_ORDER = [
-    "chunk_cumsum",
-    "chunk_scaled_dot_kkt",
-    "wy_fast",
-    "chunk_h",
-    "chunk_o",
-]
-
-
-def do_bench(
-    fn: Callable[[], object],
-    warmup_iters: int = 5,
-    benchmark_iters: int = 15,
-    aggregation: Literal["mean", "none"] = "mean",
-    unit: Literal["s", "ms", "us", "ns"] = "ms",
-    flush_cache: bool = True,
-) -> float | list[float]:
-    import torch_npu
-
-    start_events = [torch.npu.Event(enable_timing=True) for _ in range(benchmark_iters)]
-    end_events = [torch.npu.Event(enable_timing=True) for _ in range(benchmark_iters)]
-
-    cache = None
-    if flush_cache:
-        cache = torch.empty((256 * 1024 * 1024,), dtype=torch.int8).npu()
-
-    for _ in range(warmup_iters):
-        fn()
-    torch_npu.npu.synchronize()
-
-    for i in range(benchmark_iters):
-        if cache is not None:
-            cache.zero_()
-        start_events[i].record()
-        fn()
-        end_events[i].record()
-
-    torch_npu.npu.synchronize()
-    factor = {"s": 1e-3, "ms": 1e0, "us": 1e3, "ns": 1e6}[unit]
-    times = [
-        factor * start.elapsed_time(end) for start, end in zip(start_events, end_events)
-    ]
-    if aggregation == "mean":
-        return sum(times) / len(times)
-    return times
-
-
-def format_ops(ops: int) -> str:
-    return f"{ops:.2e}"
-
-
-def format_ms(ms: float) -> str:
-    return f"{ms:.2f}"
-
-
-def format_tflops(ops: int, ms: float) -> str:
-    return f"{ops / (ms * 1e9):.4f}"
-
-
-def approx_ops_gdn(
-    B: int, H: int, L: int, DK: int, DV: int, C: int
-) -> dict[str, int]:
-    """Same approximate op counts as tilelang-ascend GDN README (linear_attention_and_rnn/README.md)."""
-    return {
-        "chunk_cumsum": B * H * L,
-        "chunk_scaled_dot_kkt": B * H * L * C * DK,
-        "solve_tril": B * H * L * C * C // 3,
-        "wy_fast": B * H * L * C * (DK + DV),
-        "chunk_h": 4 * B * H * L * DK * DV,
-        # README uses 5 * B * H * L * DK * DV (not B*H*L*(C*DK+DK*DV+C*DV)).
-        "chunk_o": 5 * B * H * L * DK * DV,
-    }
-
 
 # Latency (ms) from tilelang-ascend/examples/linear_attention_and_rnn/README.md (Optimize Results).
 REF_README_MS = {

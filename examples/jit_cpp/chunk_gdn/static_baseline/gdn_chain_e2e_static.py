@@ -12,7 +12,7 @@ back to batched ``torch.linalg.inv`` (mathematically identical).
 Reference: ``ref_seq_gdn`` from ``opt_gdn_full.py`` (sequential formulation).
 
 Fixed shapes must match the extracted ``*_kernel.cpp`` specializations:
-  B=2, H=16, L=16384, DK=128, DV=128, C=128.
+  B=16, H=16, L=16384, DK=128, DV=128, C=128.
 """
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ from static_kernel_libs import (
 torch_npu = torch.npu  # noqa: F401
 
 # Must match static kernel cpp
-B, H, L, DK, DV, C = 2, 16, 16384, 128, 128, 128
+B, H, L, DK, DV, C = 16, 16, 16384, 128, 128, 128
 CHUNK_NUM = (L + C - 1) // C
 BV_NUM = (DV + DV - 1) // DV
 

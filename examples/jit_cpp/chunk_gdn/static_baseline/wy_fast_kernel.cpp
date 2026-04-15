@@ -47,10 +47,10 @@ AICORE void main_kernel(__gm__ half *K_handle, __gm__ half *V_handle, __gm__ hal
 #if defined(__DAV_C220_VEC__)
     set_mask_norm();
     set_vector_mask(-1, -1);
-    chunk_gdn_pto::copy_gm_to_ub<half, half, 1, 1, 1, 1, 128, 1, 1, 1, 524288, 1, 1, 128, pto::PadValue::Zero>(Beta_handle + (cid * 128), 0, 0, 1, 128);
+    chunk_gdn_pto::copy_gm_to_ub<half, half, 1, 1, 1, 1, 128, 1, 1, 1, 4194304, 1, 1, 128, pto::PadValue::Zero>(Beta_handle + (cid * 128), 0, 0, 1, 128);
     chunk_gdn_pto::set_flag_pipeline<PIPE_MTE2, PIPE_V> (0);
     chunk_gdn_pto::wait_flag_pipeline<PIPE_MTE2, PIPE_V> (0);
-    chunk_gdn_pto::copy_gm_to_ub<half, half, 1, 1, 1, 64, 128, 67108864, 33554432, 2097152, 128, 1, 64, 128, pto::PadValue::Zero>(A_handle + ((cid * 16384) + (vid * 8192)), 256, 0, 64, 128);
+    chunk_gdn_pto::copy_gm_to_ub<half, half, 1, 1, 1, 64, 128, 536870912, 33554432, 2097152, 128, 1, 64, 128, pto::PadValue::Zero>(A_handle + ((cid * 16384) + (vid * 8192)), 256, 0, 64, 128);
     TCVT(beta_ub, beta_ub_half, pto::RoundMode::CAST_NONE);
     pipe_barrier(PIPE_V);
     TMOV(beta_r_ub, beta_ub);
@@ -63,9 +63,9 @@ AICORE void main_kernel(__gm__ half *K_handle, __gm__ half *V_handle, __gm__ hal
     TCVT(a2_ub_half, a2_ub, pto::RoundMode::CAST_NONE);
     chunk_gdn_pto::set_flag_pipeline<PIPE_V, PIPE_MTE3> (0);
     chunk_gdn_pto::wait_flag_pipeline<PIPE_V, PIPE_MTE3> (0);
-    chunk_gdn_pto::copy_ub_to_gm<half, half, 1, 1, 1, 64, 128, 67108864, 33554432, 2097152, 128, 1, 64, 128>(workspace_a2_handle + ((cid * 16384) + (vid * 8192)), 140544, 0, 64, 128);
+    chunk_gdn_pto::copy_ub_to_gm<half, half, 1, 1, 1, 64, 128, 536870912, 33554432, 2097152, 128, 1, 64, 128>(workspace_a2_handle + ((cid * 16384) + (vid * 8192)), 140544, 0, 64, 128);
     chunk_gdn_pto::set_cross_flag<PIPE_MTE3>(2, 2);
-    chunk_gdn_pto::copy_gm_to_ub<float, float, 1, 1, 1, 1, 128, 1, 1, 1, 524288, 1, 1, 128, pto::PadValue::Zero>(G_handle + (cid * 128), 156928, 0, 1, 128);
+    chunk_gdn_pto::copy_gm_to_ub<float, float, 1, 1, 1, 1, 128, 1, 1, 1, 4194304, 1, 1, 128, pto::PadValue::Zero>(G_handle + (cid * 128), 156928, 0, 1, 128);
     chunk_gdn_pto::set_flag_pipeline<PIPE_MTE2, PIPE_V> (0);
     chunk_gdn_pto::wait_flag_pipeline<PIPE_MTE2, PIPE_V> (0);
     TEXP(g_ub, g_ub);
@@ -79,20 +79,20 @@ AICORE void main_kernel(__gm__ half *K_handle, __gm__ half *V_handle, __gm__ hal
     TCVT(a1_ub_half, a1_ub, pto::RoundMode::CAST_NONE);
     chunk_gdn_pto::set_flag_pipeline<PIPE_V, PIPE_MTE3> (0);
     chunk_gdn_pto::wait_flag_pipeline<PIPE_V, PIPE_MTE3> (0);
-    chunk_gdn_pto::copy_ub_to_gm<half, half, 1, 1, 1, 64, 128, 67108864, 33554432, 2097152, 128, 1, 64, 128>(workspace_a1_handle + ((cid * 16384) + (vid * 8192)), 256, 0, 64, 128);
+    chunk_gdn_pto::copy_ub_to_gm<half, half, 1, 1, 1, 64, 128, 536870912, 33554432, 2097152, 128, 1, 64, 128>(workspace_a1_handle + ((cid * 16384) + (vid * 8192)), 256, 0, 64, 128);
     chunk_gdn_pto::set_cross_flag<PIPE_MTE3>(1, 2);
 #endif
 #if defined(__DAV_C220_CUBE__)
-    chunk_gdn_pto::copy_gm_to_l1<half, half, 1, 1, 1, 128, 128, 67108864, 33554432, 2097152, 128, 1, 128, 128>(K_handle + (cid * 16384), 0, 0, 128, 128);
-    chunk_gdn_pto::copy_gm_to_l1<half, half, 1, 1, 1, 128, 128, 67108864, 33554432, 2097152, 128, 1, 128, 128>(V_handle + (cid * 16384), 32768, 0, 128, 128);
+    chunk_gdn_pto::copy_gm_to_l1<half, half, 1, 1, 1, 128, 128, 536870912, 33554432, 2097152, 128, 1, 128, 128>(K_handle + (cid * 16384), 0, 0, 128, 128);
+    chunk_gdn_pto::copy_gm_to_l1<half, half, 1, 1, 1, 128, 128, 536870912, 33554432, 2097152, 128, 1, 128, 128>(V_handle + (cid * 16384), 32768, 0, 128, 128);
     chunk_gdn_pto::wait_cross_flag(2);
-    chunk_gdn_pto::copy_gm_to_l1<half, half, 1, 1, 1, 128, 128, 67108864, 33554432, 2097152, 128, 1, 128, 128>(workspace_a2_handle + (cid * 16384), 65536, 0, 128, 128);
+    chunk_gdn_pto::copy_gm_to_l1<half, half, 1, 1, 1, 128, 128, 536870912, 33554432, 2097152, 128, 1, 128, 128>(workspace_a2_handle + (cid * 16384), 65536, 0, 128, 128);
     chunk_gdn_pto::gemm_v0<half, float, 128, 128, 128, 128, 128, 128, 128, false, false>(a2_l1, v_l1, u_l0, (bool)1);
-    chunk_gdn_pto::copy_l0c_to_gm<half, float, 1, 1, 1, 128, 128, 67108864, 33554432, 2097152, 128, 1, 128, 128>(U_handle + (cid * 16384), 0, 0, 128, 128);
+    chunk_gdn_pto::copy_l0c_to_gm<half, float, 1, 1, 1, 128, 128, 536870912, 33554432, 2097152, 128, 1, 128, 128>(U_handle + (cid * 16384), 0, 0, 128, 128);
     chunk_gdn_pto::wait_cross_flag(1);
-    chunk_gdn_pto::copy_gm_to_l1<half, half, 1, 1, 1, 128, 128, 67108864, 33554432, 2097152, 128, 1, 128, 128>(workspace_a1_handle + (cid * 16384), 98304, 0, 128, 128);
+    chunk_gdn_pto::copy_gm_to_l1<half, half, 1, 1, 1, 128, 128, 536870912, 33554432, 2097152, 128, 1, 128, 128>(workspace_a1_handle + (cid * 16384), 98304, 0, 128, 128);
     chunk_gdn_pto::gemm_v0<half, float, 128, 128, 128, 128, 128, 128, 128, false, false>(a1_l1, k_l1, w_l0, (bool)1);
-    chunk_gdn_pto::copy_l0c_to_gm<half, float, 1, 1, 1, 128, 128, 67108864, 33554432, 2097152, 128, 1, 128, 128>(W_handle + (cid * 16384), 65536, 0, 128, 128);
+    chunk_gdn_pto::copy_l0c_to_gm<half, float, 1, 1, 1, 128, 128, 536870912, 33554432, 2097152, 128, 1, 128, 128>(W_handle + (cid * 16384), 65536, 0, 128, 128);
 #endif
 }
 
@@ -115,5 +115,5 @@ extern "C" void call(uint8_t *K_handle, uint8_t *V_handle, uint8_t *Beta_handle,
     uint32_t fftsLen{0};
     uint64_t fftsAddr{0};
     rtGetC2cCtrlAddr(&fftsAddr, &fftsLen);
-    launch_kernel<<<4096, nullptr, stream>>>(K_handle, V_handle, Beta_handle, G_handle, A_handle, workspace_a1_handle, workspace_a2_handle, W_handle, U_handle, fftsAddr);
+    launch_kernel<<<32768, nullptr, stream>>>(K_handle, V_handle, Beta_handle, G_handle, A_handle, workspace_a1_handle, workspace_a2_handle, W_handle, U_handle, fftsAddr);
 }

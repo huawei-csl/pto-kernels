@@ -1,38 +1,27 @@
 """
 Compile the static chunk_h PTO kernel, load it, and compare to the PyTorch reference.
 
-Shapes are fixed to match the generated TileLang specialization:
-B=2, H=16, L=16384, DK=128, DV=128, C=128 (chunk_num=128).
+Shapes match the TileLang dump used for benchmarking:
+B=16, H=16, L=16384, DK=128, DV=128, C=128 (chunk_num=128).
 """
 from __future__ import annotations
 
 import ctypes
-import os
-from functools import lru_cache
 
 import torch
 import torch.nn.functional as F
 
 import pto_static_common  # noqa: F401 — env validation
-from pto_static_common import compile_pto_kernel
+from static_kernel_libs import lib_chunk_h
 
 torch_npu = torch.npu  # noqa: F401 — register NPU
 
-# Matches tilelang test / generated kernel
-B, H, L, DK, DV, C = 2, 16, 16384, 128, 128, 128
+# Matches tilelang_codegen bench / generated kernel specialization
+B, H, L, DK, DV, C = 16, 16, 16384, 128, 128, 128
 CHUNK_NUM = (L + C - 1) // C
 BV_NUM = (DV + DV - 1) // DV
 assert CHUNK_NUM == 128
-assert B * H * BV_NUM == 32
-
-
-@lru_cache(maxsize=1)
-def get_lib():
-    lib_path = compile_pto_kernel("chunk_h_kernel.cpp", "chunk_h_static.so")
-    lib = ctypes.CDLL(os.path.abspath(lib_path))
-    lib.call.argtypes = [ctypes.c_void_p] * 11 + [ctypes.c_void_p]
-    lib.call.restype = None
-    return lib
+assert BV_NUM == 1
 
 
 def ref_chunk_h(k, w, u, g, C_):
@@ -88,9 +77,9 @@ def run_chunk_h(
     s: torch.Tensor,
     v_out: torch.Tensor,
     fs_out: torch.Tensor,
+    stream,
 ):
-    lib = get_lib()
-    stream = torch.npu.current_stream()._as_parameter_
+    lib = lib_chunk_h()
     lib.call(
         ctypes.c_void_p(k.data_ptr()),
         ctypes.c_void_p(w.data_ptr()),
@@ -111,6 +100,8 @@ def main():
     torch.manual_seed(0)
     torch.npu.set_device("npu:0")
 
+    stream = torch.npu.current_stream()._as_parameter_
+
     k = torch.randn((B, H, L, DK), device="npu", dtype=torch.float16)
     w = torch.randn((B, H, L, DK), device="npu", dtype=torch.float16)
     u = torch.randn((B, H, L, DV), device="npu", dtype=torch.float16)
@@ -128,7 +119,9 @@ def main():
     v_out = torch.empty((B, H, L, DV), device="npu", dtype=torch.float16)
     fs_out = torch.empty((B, H, DK, DV), device="npu", dtype=torch.float16)
 
-    run_chunk_h(k, w, u, g, workspace_1, workspace_2, workspace_3, workspace_4, s, v_out, fs_out)
+    run_chunk_h(
+        k, w, u, g, workspace_1, workspace_2, workspace_3, workspace_4, s, v_out, fs_out, stream
+    )
     torch.npu.synchronize()
 
     ref_s, ref_new_v, ref_final_s = ref_chunk_h(k, w, u, g, C)

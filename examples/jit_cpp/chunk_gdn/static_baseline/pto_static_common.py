@@ -26,9 +26,11 @@ COMPILED_DIR = os.path.join(_HERE, "compiled_lib")
 _DRIVER_INC = "/usr/local/Ascend/driver/kernel/inc"
 
 
-@lru_cache(maxsize=32)
-def compile_pto_kernel(kernel_cpp_basename: str, so_basename: str) -> str:
-    """Compile ``kernel_cpp_basename`` under this directory to ``compiled_lib/so_basename``."""
+@lru_cache(maxsize=64)
+def _compile_pto_kernel_cached(
+    kernel_cpp_basename: str, so_basename: str, cpp_mtime_ns: int
+) -> str:
+    """Internal: ``cpp_mtime_ns`` busts the cache when the source file changes."""
     os.makedirs(COMPILED_DIR, exist_ok=True)
     cpp_path = os.path.join(_HERE, kernel_cpp_basename)
     lib_path = os.path.join(COMPILED_DIR, so_basename)
@@ -66,3 +68,10 @@ def compile_pto_kernel(kernel_cpp_basename: str, so_basename: str) -> str:
         print("compile:", " ".join(cmd))
     subprocess.run(cmd, check=True, timeout=300)
     return lib_path
+
+
+def compile_pto_kernel(kernel_cpp_basename: str, so_basename: str) -> str:
+    """Compile ``kernel_cpp_basename`` to ``compiled_lib/so_basename`` (rebuilds if ``*.cpp`` changed)."""
+    cpp_path = os.path.join(_HERE, kernel_cpp_basename)
+    mtime_ns = os.stat(cpp_path).st_mtime_ns
+    return _compile_pto_kernel_cached(kernel_cpp_basename, so_basename, mtime_ns)

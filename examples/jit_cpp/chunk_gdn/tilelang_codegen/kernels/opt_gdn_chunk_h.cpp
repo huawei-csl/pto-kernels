@@ -48,16 +48,16 @@ AICORE void main_kernel(__gm__ half *K_handle, __gm__ half *W_handle, __gm__ hal
 #if defined(__DAV_C220_CUBE__)
 
   for (int32_t i = 0; i < 128; ++i) {
-      tl::ascend_pto::copy_gm_to_l1<half, half, 1, 1, 1, 128, 128, 1, 524288, 16384, 128, 1, 128, 128>(workspace_3_handle + (cid * 16384), 0, 0, 128, 128);
-      tl::ascend_pto::copy_gm_to_l1<half, half, 1, 1, 1, 128, 128, 67108864, 33554432, 2097152, 128, 1, 128, 128>(W_handle + ((cid * 2097152) + (i * 16384)), 32768, 0, 128, 128);
+      tl::ascend_pto::copy_gm_to_l1<half, half, 1, 1, 1, 128, 128, 1, 4194304, 16384, 128, 1, 128, 128>(workspace_3_handle + (cid * 16384), 0, 0, 128, 128);
+      tl::ascend_pto::copy_gm_to_l1<half, half, 1, 1, 1, 128, 128, 536870912, 33554432, 2097152, 128, 1, 128, 128>(W_handle + ((cid * 2097152) + (i * 16384)), 32768, 0, 128, 128);
       tl::ascend_pto::gemm_v0<half, float, 128, 128, 128, 128, 128, 128, 128, false, false>(w_l1, s_l1, ws_l0, (bool)1);
-      tl::ascend_pto::copy_l0c_to_gm<half, float, 1, 1, 1, 128, 128, 1, 524288, 16384, 128, 1, 128, 128>(workspace_1_handle + (cid * 16384), 0, 0, 128, 128);
+      tl::ascend_pto::copy_l0c_to_gm<half, float, 1, 1, 1, 128, 128, 1, 4194304, 16384, 128, 1, 128, 128>(workspace_1_handle + (cid * 16384), 0, 0, 128, 128);
       tl::ascend_pto::set_cross_flag<PIPE_FIX>(0, 2);
       tl::ascend_pto::wait_cross_flag(1);
-      tl::ascend_pto::copy_gm_to_l1<half, half, 1, 1, 1, 128, 128, 1, 524288, 16384, 128, 1, 128, 128>(workspace_2_handle + (cid * 16384), 65536, 0, 128, 128);
-      tl::ascend_pto::copy_gm_to_l1<half, half, 1, 1, 1, 128, 128, 67108864, 33554432, 2097152, 128, 1, 128, 128>(V_handle + ((cid * 2097152) + (i * 16384)), 98304, 0, 128, 128);
+      tl::ascend_pto::copy_gm_to_l1<half, half, 1, 1, 1, 128, 128, 1, 4194304, 16384, 128, 1, 128, 128>(workspace_2_handle + (cid * 16384), 65536, 0, 128, 128);
+      tl::ascend_pto::copy_gm_to_l1<half, half, 1, 1, 1, 128, 128, 536870912, 33554432, 2097152, 128, 1, 128, 128>(V_handle + ((cid * 2097152) + (i * 16384)), 98304, 0, 128, 128);
       tl::ascend_pto::gemm_v0<half, float, 128, 128, 128, 128, 128, 128, 128, true, false>(k_l1, v_l1, kv_l0, (bool)1);
-      tl::ascend_pto::copy_l0c_to_gm<half, float, 1, 1, 1, 128, 128, 1, 524288, 16384, 128, 1, 128, 128>(workspace_4_handle + (cid * 16384), 65536, 0, 128, 128);
+      tl::ascend_pto::copy_l0c_to_gm<half, float, 1, 1, 1, 128, 128, 1, 4194304, 16384, 128, 1, 128, 128>(workspace_4_handle + (cid * 16384), 65536, 0, 128, 128);
       tl::ascend_pto::set_cross_flag<PIPE_FIX>(2, 2);
       tl::ascend_pto::wait_cross_flag(3);
     }
@@ -71,15 +71,15 @@ AICORE void main_kernel(__gm__ half *K_handle, __gm__ half *W_handle, __gm__ hal
     set_flag(PIPE_V, PIPE_S, EVENT_ID0);
     wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
     TEXPANDS(s_ub, 0.000000e+00f);
-    tl::ascend_pto::copy_gm_to_ub<half, half, 1, 1, 1, 64, 128, 67108864, 33554432, 2097152, 128, 1, 64, 128, pto::PadValue::Zero>(K_handle + ((cid * 2097152) + (vid * 8192)), 33024, 0, 64, 128);
-    tl::ascend_pto::copy_gm_to_ub<float, float, 1, 1, 1, 1, 128, 1, 1, 1, 524288, 1, 1, 128, pto::PadValue::Zero>(G_handle + (cid * 16384), 49408, 0, 1, 128);
+    tl::ascend_pto::copy_gm_to_ub<half, half, 1, 1, 1, 64, 128, 536870912, 33554432, 2097152, 128, 1, 64, 128, pto::PadValue::Zero>(K_handle + ((cid * 2097152) + (vid * 8192)), 33024, 0, 64, 128);
+    tl::ascend_pto::copy_gm_to_ub<float, float, 1, 1, 1, 1, 128, 1, 1, 1, 4194304, 1, 1, 128, pto::PadValue::Zero>(G_handle + (cid * 16384), 49408, 0, 1, 128);
     tl::ascend_pto::set_flag_pipeline<PIPE_MTE2, PIPE_V> (0);
     tl::ascend_pto::wait_flag_pipeline<PIPE_MTE2, PIPE_V> (0);
     tl::ascend_pto::set_flag_pipeline<PIPE_V, PIPE_S> (0);
     tl::ascend_pto::wait_flag_pipeline<PIPE_V, PIPE_S> (0);
 
   for (int32_t i_1 = 0; i_1 < 128; ++i_1) {
-      tl::ascend_pto::copy_gm_to_ub<half, half, 1, 1, 1, 64, 128, 67108864, 33554432, 2097152, 128, 1, 64, 128, pto::PadValue::Zero>(U_handle + (((cid * 2097152) + (i_1 * 16384)) + (vid * 8192)), 49920, 0, 64, 128);
+      tl::ascend_pto::copy_gm_to_ub<half, half, 1, 1, 1, 64, 128, 536870912, 33554432, 2097152, 128, 1, 64, 128, pto::PadValue::Zero>(U_handle + (((cid * 2097152) + (i_1 * 16384)) + (vid * 8192)), 49920, 0, 64, 128);
       TCVT(k_ub, k_ub_half, pto::RoundMode::CAST_NONE);
       tl::ascend_pto::TileUbDataND<float, 1, 64, 1, 64> g_ub_temp_0;
       TASSIGN(g_ub_temp_0, 49408 + (vid * 64) * 4);
@@ -130,7 +130,7 @@ AICORE void main_kernel(__gm__ half *K_handle, __gm__ half *W_handle, __gm__ hal
         TMULS(k_ub_temp_7, k_ub_temp_6, coeff_ub_scalar_temp_3);
       }
       tl::ascend_pto::wait_cross_flag(0);
-      tl::ascend_pto::copy_gm_to_ub<half, half, 1, 1, 1, 64, 128, 1, 524288, 16384, 128, 1, 64, 128, pto::PadValue::Zero>(workspace_1_handle + ((cid * 16384) + (vid * 8192)), 49920, 0, 64, 128);
+      tl::ascend_pto::copy_gm_to_ub<half, half, 1, 1, 1, 64, 128, 1, 4194304, 16384, 128, 1, 64, 128, pto::PadValue::Zero>(workspace_1_handle + ((cid * 16384) + (vid * 8192)), 49920, 0, 64, 128);
       tl::ascend_pto::set_flag_pipeline<PIPE_MTE2, PIPE_V> (0);
       tl::ascend_pto::wait_flag_pipeline<PIPE_MTE2, PIPE_V> (0);
       TCVT(ws_ub, u_ub_half, pto::RoundMode::CAST_NONE);
@@ -139,8 +139,8 @@ AICORE void main_kernel(__gm__ half *K_handle, __gm__ half *W_handle, __gm__ hal
       TCVT(k_ub_half, k_ub, pto::RoundMode::CAST_NONE);
       tl::ascend_pto::set_flag_pipeline<PIPE_V, PIPE_MTE3> (0);
       tl::ascend_pto::wait_flag_pipeline<PIPE_V, PIPE_MTE3> (0);
-      tl::ascend_pto::copy_ub_to_gm<half, half, 1, 1, 1, 64, 128, 67108864, 33554432, 2097152, 128, 1, 64, 128>(V_handle + (((cid * 2097152) + (i_1 * 16384)) + (vid * 8192)), 49920, 0, 64, 128);
-      tl::ascend_pto::copy_ub_to_gm<half, half, 1, 1, 1, 64, 128, 1, 524288, 16384, 128, 1, 64, 128>(workspace_2_handle + ((cid * 16384) + (vid * 8192)), 33024, 0, 64, 128);
+      tl::ascend_pto::copy_ub_to_gm<half, half, 1, 1, 1, 64, 128, 536870912, 33554432, 2097152, 128, 1, 64, 128>(V_handle + (((cid * 2097152) + (i_1 * 16384)) + (vid * 8192)), 49920, 0, 64, 128);
+      tl::ascend_pto::copy_ub_to_gm<half, half, 1, 1, 1, 64, 128, 1, 4194304, 16384, 128, 1, 64, 128>(workspace_2_handle + ((cid * 16384) + (vid * 8192)), 33024, 0, 64, 128);
       tl::ascend_pto::set_cross_flag<PIPE_MTE3>(1, 2);
       tl::ascend_pto::set_flag_pipeline<PIPE_MTE3, PIPE_S> (0);
       tl::ascend_pto::wait_flag_pipeline<PIPE_MTE3, PIPE_S> (0);
@@ -149,11 +149,11 @@ AICORE void main_kernel(__gm__ half *K_handle, __gm__ half *W_handle, __gm__ hal
       tl::ascend_pto::set_flag_pipeline<PIPE_V, PIPE_MTE2> (0);
       tl::ascend_pto::wait_flag_pipeline<PIPE_V, PIPE_MTE2> (0);
       if (i_1 < 127) {
-        tl::ascend_pto::copy_gm_to_ub<half, half, 1, 1, 1, 64, 128, 67108864, 33554432, 2097152, 128, 1, 64, 128, pto::PadValue::Zero>(K_handle + ((((cid * 2097152) + (i_1 * 16384)) + (vid * 8192)) + 16384), 33024, 0, 64, 128);
-        tl::ascend_pto::copy_gm_to_ub<float, float, 1, 1, 1, 1, 128, 1, 1, 1, 524288, 1, 1, 128, pto::PadValue::Zero>(G_handle + (((cid * 16384) + (i_1 * 128)) + 128), 49408, 0, 1, 128);
+        tl::ascend_pto::copy_gm_to_ub<half, half, 1, 1, 1, 64, 128, 536870912, 33554432, 2097152, 128, 1, 64, 128, pto::PadValue::Zero>(K_handle + ((((cid * 2097152) + (i_1 * 16384)) + (vid * 8192)) + 16384), 33024, 0, 64, 128);
+        tl::ascend_pto::copy_gm_to_ub<float, float, 1, 1, 1, 1, 128, 1, 1, 1, 4194304, 1, 1, 128, pto::PadValue::Zero>(G_handle + (((cid * 16384) + (i_1 * 128)) + 128), 49408, 0, 1, 128);
       }
       tl::ascend_pto::wait_cross_flag(2);
-      tl::ascend_pto::copy_gm_to_ub<half, half, 1, 1, 1, 64, 128, 1, 524288, 16384, 128, 1, 64, 128, pto::PadValue::Zero>(workspace_4_handle + ((cid * 16384) + (vid * 8192)), 165120, 0, 64, 128);
+      tl::ascend_pto::copy_gm_to_ub<half, half, 1, 1, 1, 64, 128, 1, 4194304, 16384, 128, 1, 64, 128, pto::PadValue::Zero>(workspace_4_handle + ((cid * 16384) + (vid * 8192)), 165120, 0, 64, 128);
       tl::ascend_pto::set_flag_pipeline<PIPE_MTE2, PIPE_V> (0);
       tl::ascend_pto::wait_flag_pipeline<PIPE_MTE2, PIPE_V> (0);
       TCVT(kv_ub, s_ub_half, pto::RoundMode::CAST_NONE);
@@ -163,14 +163,14 @@ AICORE void main_kernel(__gm__ half *K_handle, __gm__ half *W_handle, __gm__ hal
       if (i_1 < 127) {
         tl::ascend_pto::set_flag_pipeline<PIPE_V, PIPE_MTE3> (0);
         tl::ascend_pto::wait_flag_pipeline<PIPE_V, PIPE_MTE3> (0);
-        tl::ascend_pto::copy_ub_to_gm<half, half, 1, 1, 1, 64, 128, 1, 524288, 16384, 128, 1, 64, 128>(workspace_3_handle + ((cid * 16384) + (vid * 8192)), 165120, 0, 64, 128);
+        tl::ascend_pto::copy_ub_to_gm<half, half, 1, 1, 1, 64, 128, 1, 4194304, 16384, 128, 1, 64, 128>(workspace_3_handle + ((cid * 16384) + (vid * 8192)), 165120, 0, 64, 128);
         tl::ascend_pto::copy_ub_to_gm<half, half, 1, 1, 1, 64, 128, 33554432, 2097152, 16384, 128, 1, 64, 128>(S_handle + ((((cid * 2097152) + (i_1 * 16384)) + (vid * 8192)) + 16384), 165120, 0, 64, 128);
       }
       tl::ascend_pto::set_cross_flag<PIPE_MTE3>(3, 2);
     }
     tl::ascend_pto::set_flag_pipeline<PIPE_V, PIPE_MTE3> (0);
     tl::ascend_pto::wait_flag_pipeline<PIPE_V, PIPE_MTE3> (0);
-    tl::ascend_pto::copy_ub_to_gm<half, half, 1, 1, 1, 64, 128, 524288, 262144, 16384, 128, 1, 64, 128>(FS_handle + ((cid * 16384) + (vid * 8192)), 165120, 0, 64, 128);
+    tl::ascend_pto::copy_ub_to_gm<half, half, 1, 1, 1, 64, 128, 4194304, 262144, 16384, 128, 1, 64, 128>(FS_handle + ((cid * 16384) + (vid * 8192)), 165120, 0, 64, 128);
 #endif
 }
 
@@ -195,5 +195,5 @@ extern "C" void call(uint8_t *K_handle, uint8_t *W_handle, uint8_t *U_handle, ui
     uint32_t fftsLen{0};
     uint64_t fftsAddr{0};
     rtGetC2cCtrlAddr(&fftsAddr, &fftsLen);
-    launch_kernel<<<32, nullptr, stream>>>(K_handle, W_handle, U_handle, G_handle, workspace_1_handle, workspace_2_handle, workspace_3_handle, workspace_4_handle, S_handle, V_handle, FS_handle, fftsAddr);
+    launch_kernel<<<256, nullptr, stream>>>(K_handle, W_handle, U_handle, G_handle, workspace_1_handle, workspace_2_handle, workspace_3_handle, workspace_4_handle, S_handle, V_handle, FS_handle, fftsAddr);
 }
