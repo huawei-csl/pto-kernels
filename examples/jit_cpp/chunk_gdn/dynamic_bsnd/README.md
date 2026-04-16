@@ -40,12 +40,12 @@ BSND with `T=262144`.
 
 | Kernel | Latency (ms) | TFLOPS |
 |:--|--:|--:|
-| chunk_cumsum | 2.03 | 0.00 |
-| chunk_scaled_dot_kkt | 22.80 | 3.01 |
-| wy_fast | 14.11 | 9.74 |
-| chunk_h | 14.31 | 19.21 |
-| chunk_o | 16.71 | 20.56 |
-| **total** | **69.96** | **11.79** |
+| chunk_cumsum | 2.03 | 4.19e+06 | 0.0021 |
+| chunk_scaled_dot_kkt | 25.54 | 6.87e+10 | 2.6905 |
+| wy_fast | 18.26 | 1.37e+11 | 7.5265 |
+| chunk_h | 14.28 | 2.75e+11 | 19.2484 |
+| chunk_o | 26.64 | 3.44e+11 | 12.8975 |
+| total | 86.75 | 8.25e+11 | 9.5055 |
 
 ## Design notes
 

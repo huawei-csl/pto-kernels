@@ -130,6 +130,8 @@ AICORE void chunk_h_kernel(
           W_handle + w_offset, D * D * static_cast<int32_t>(sizeof(half)), 0,
           static_cast<int32_t>(valid), D);
 
+      set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+      wait_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
       chunk_gdn_pto::gemm_v0<half, float, C, D, D, C, D, D, D, false, false>(w_l1, s_l1, ws_l0, (bool)1);
 
       chunk_gdn_pto::copy_l0c_to_gm<half, float, 1, 1, 1, C, D, 1, 1, 1, D, 1, C, D>(
@@ -146,6 +148,8 @@ AICORE void chunk_h_kernel(
           V_handle + v_offset, (DD + C * D + D * C) * static_cast<int32_t>(sizeof(half)), 0,
           static_cast<int32_t>(valid), D);
 
+      set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+      wait_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
       chunk_gdn_pto::gemm_v0<half, float, D, D, C, D, D, C, C, true, false>(k_l1, v_l1, kv_l0, (bool)1);
 
       chunk_gdn_pto::copy_l0c_to_gm<half, float, 1, 1, 1, D, D, 1, 1, 1, D, 1, D, D>(

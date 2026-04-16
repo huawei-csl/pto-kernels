@@ -437,6 +437,8 @@ AICORE void wy_fast_kernel(
               static_cast<int64_t>(cid) * WsA2Size,
           65536, 0, ChunkSize, ChunkSize);
 
+      set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+      wait_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
       chunk_gdn_pto::gemm_v0<half, float,
           ChunkSize, HiddenSize, ChunkSize,
           ChunkSize, HiddenSize, ChunkSize,
@@ -458,6 +460,8 @@ AICORE void wy_fast_kernel(
               static_cast<int64_t>(cid) * WsA1Size,
           98304, 0, ChunkSize, ChunkSize);
 
+      set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+      wait_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
       chunk_gdn_pto::gemm_v0<half, float,
           ChunkSize, HiddenSize, ChunkSize,
           ChunkSize, HiddenSize, ChunkSize,
@@ -513,6 +517,8 @@ AICORE void wy_fast_kernel(
                     static_cast<int64_t>(cid) * WsA2Size,
                 65536, 0, ChunkSize, ChunkSize);
 
+            set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+            wait_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
             chunk_gdn_pto::gemm_v0<half, float,
                 ChunkSize, HiddenSize, ChunkSize,
                 ChunkSize, HiddenSize, ChunkSize,
@@ -534,6 +540,8 @@ AICORE void wy_fast_kernel(
                     static_cast<int64_t>(cid) * WsA1Size,
                 98304, 0, ChunkSize, ChunkSize);
 
+            set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+            wait_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
             chunk_gdn_pto::gemm_v0<half, float,
                 ChunkSize, HiddenSize, ChunkSize,
                 ChunkSize, HiddenSize, ChunkSize,
