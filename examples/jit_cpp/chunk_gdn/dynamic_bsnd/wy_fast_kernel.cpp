@@ -121,6 +121,7 @@ AICORE void wy_fast_kernel(
 
   if (cu_seqlens == nullptr) {
     int64_t chunks_per_seq = (seq_len + ChunkSize - 1) / ChunkSize;
+    bool first_iter = true;
     for (int64_t work_idx = static_cast<int64_t>(cid);
          work_idx < total_work;
          work_idx += static_cast<int64_t>(block_num)) {
@@ -187,6 +188,7 @@ AICORE void wy_fast_kernel(
       TMUL(a2_ub, a1_ub, beta_2d_ub);
       TCVT(a2_ub_half, a2_ub, pto::RoundMode::CAST_NONE);
 
+      if (!first_iter) wait_flag_dev(3);
       set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
       wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
       chunk_gdn_pto::copy_ub_to_gm<half, half,
@@ -236,6 +238,7 @@ AICORE void wy_fast_kernel(
       TMUL(a1_ub, a1_ub, g_2d_ub);
       TCVT(a1_ub_half, a1_ub, pto::RoundMode::CAST_NONE);
 
+      if (!first_iter) wait_flag_dev(4);
       set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
       wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
       chunk_gdn_pto::copy_ub_to_gm<half, half,
@@ -247,9 +250,11 @@ AICORE void wy_fast_kernel(
               static_cast<int64_t>(vid) * HalfChunk * ChunkSize,
           A1HalfUbAddr, 0, HalfChunk, ChunkSize);
       chunk_gdn_pto::set_cross_flag<PIPE_MTE3>(1, 2);
+      first_iter = false;
     }
   } else {
     int64_t gi = 0;
+    bool first_iter_v = true;
     for (int64_t si = 0; si < num_seqs; ++si) {
       int64_t bos = static_cast<int64_t>(cu_seqlens[si]);
       int64_t eos = static_cast<int64_t>(cu_seqlens[si + 1]);
@@ -317,6 +322,7 @@ AICORE void wy_fast_kernel(
             TMUL(a2_ub, a1_ub, beta_2d_ub);
             TCVT(a2_ub_half, a2_ub, pto::RoundMode::CAST_NONE);
 
+            if (!first_iter_v) wait_flag_dev(3);
             set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             chunk_gdn_pto::copy_ub_to_gm<half, half,
@@ -367,6 +373,7 @@ AICORE void wy_fast_kernel(
             TMUL(a1_ub, a1_ub, g_2d_ub);
             TCVT(a1_ub_half, a1_ub, pto::RoundMode::CAST_NONE);
 
+            if (!first_iter_v) wait_flag_dev(4);
             set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             chunk_gdn_pto::copy_ub_to_gm<half, half,
@@ -378,6 +385,7 @@ AICORE void wy_fast_kernel(
                     static_cast<int64_t>(vid) * HalfChunk * ChunkSize,
                 A1HalfUbAddr, 0, HalfChunk, ChunkSize);
             chunk_gdn_pto::set_cross_flag<PIPE_MTE3>(1, 2);
+            first_iter_v = false;
           }
           gi++;
         }
@@ -439,6 +447,7 @@ AICORE void wy_fast_kernel(
           1, 1, 1, NumHeads * HiddenSize, 1,
           ChunkSize, HiddenSize>(
           U_handle + kv_offset, 0, 0, valid_rows, HiddenSize);
+      chunk_gdn_pto::set_cross_flag<PIPE_FIX>(3, 2);
 
       wait_flag_dev(1);
       chunk_gdn_pto::copy_gm_to_l1<half, half,
@@ -459,6 +468,7 @@ AICORE void wy_fast_kernel(
           1, 1, 1, NumHeads * HiddenSize, 1,
           ChunkSize, HiddenSize>(
           W_handle + kv_offset, 65536, 0, valid_rows, HiddenSize);
+      chunk_gdn_pto::set_cross_flag<PIPE_FIX>(4, 2);
     }
   } else {
     int64_t gi = 0;
@@ -513,6 +523,7 @@ AICORE void wy_fast_kernel(
                 1, 1, 1, NumHeads * HiddenSize, 1,
                 ChunkSize, HiddenSize>(
                 U_handle + kv_offset, 0, 0, valid_rows, HiddenSize);
+            chunk_gdn_pto::set_cross_flag<PIPE_FIX>(3, 2);
 
             wait_flag_dev(1);
             chunk_gdn_pto::copy_gm_to_l1<half, half,
@@ -533,6 +544,7 @@ AICORE void wy_fast_kernel(
                 1, 1, 1, NumHeads * HiddenSize, 1,
                 ChunkSize, HiddenSize>(
                 W_handle + kv_offset, 65536, 0, valid_rows, HiddenSize);
+            chunk_gdn_pto::set_cross_flag<PIPE_FIX>(4, 2);
           }
           gi++;
         }

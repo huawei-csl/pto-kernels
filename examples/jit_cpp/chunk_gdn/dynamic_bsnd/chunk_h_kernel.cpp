@@ -116,6 +116,8 @@ AICORE void chunk_h_kernel(
     int64_t ws_base = static_cast<int64_t>(cid) * WS_PER_CORE;
 
     for (int32_t ci = 0; ci < num_chunks; ++ci) {
+      wait_flag_dev(3);
+
       int64_t chunk_start = bos + static_cast<int64_t>(ci) * C;
       int64_t valid = slen - static_cast<int64_t>(ci) * C;
       if (valid > C) valid = C;
@@ -149,8 +151,6 @@ AICORE void chunk_h_kernel(
       chunk_gdn_pto::copy_l0c_to_gm<half, float, 1, 1, 1, D, D, 1, 1, 1, D, 1, D, D>(
           workspace_handle + ws_base + WS_KV, C * D * static_cast<int32_t>(sizeof(float)), 0, D, D);
       chunk_gdn_pto::set_cross_flag<PIPE_FIX>(2, 2);
-
-      wait_flag_dev(3);
     }
   }
 #endif
@@ -190,6 +190,16 @@ AICORE void chunk_h_kernel(
     set_flag(PIPE_V, PIPE_S, EVENT_ID0);
     wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
     TEXPANDS(s_ub, 0.0f);
+
+    TCVT(s_ub_half, s_ub, pto::RoundMode::CAST_NONE);
+    set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+    wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+    chunk_gdn_pto::copy_ub_to_gm<half, half, 1, 1, 1, HalfC, D,
+        1, 1, 1, D, 1,
+        HalfC, D>(
+        workspace_handle + ws_base * sizeof(half) + WS_S * sizeof(half) + vid * HalfC * D * sizeof(half),
+        S_UB_HALF, 0, HalfC, D);
+    chunk_gdn_pto::set_cross_flag<PIPE_MTE3>(3, 2);
 
     int64_t chunk_start_0 = bos;
     int64_t k_offset_0 = (chunk_start_0 * H + head) * D + vid * HalfC * BSND_QKV_STRIDE;
@@ -365,9 +375,8 @@ AICORE void chunk_h_kernel(
             1, 1, 1, D, 1,
             HalfC, D>(
             S_handle + s_out_offset + vid * HalfC * D, S_UB_HALF, 0, HalfC, D);
+        chunk_gdn_pto::set_cross_flag<PIPE_MTE3>(3, 2);
       }
-
-      chunk_gdn_pto::set_cross_flag<PIPE_MTE3>(3, 2);
 
       if (ci + 1 < static_cast<int32_t>(num_chunks)) {
         set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
