@@ -1,4 +1,5 @@
-#include "common.h"
+#include <pto/pto-inst.hpp>
+#include <type_traits>
 #include "acl/acl.h"
 #include <runtime/rt_ffts.h>
 using namespace pto;
@@ -13,6 +14,171 @@ using namespace pto;
 
 #ifndef GDN_C
 #define GDN_C 128
+#endif
+
+#ifdef __CCE_AICORE__
+
+namespace {
+
+using GmShape2D = pto::Shape<1, 1, 1, pto::DYNAMIC, pto::DYNAMIC>;
+using GmStride2D = pto::Stride<1, 1, 1, pto::DYNAMIC, 1>;
+
+template <typename T>
+using GmTensor2D = pto::GlobalTensor<T, GmShape2D, GmStride2D>;
+
+template <typename T, int Rows, int Cols, int RowValid = Rows,
+          int ColValid = Cols>
+using TileMatL1 = pto::Tile<pto::TileType::Mat, T, Rows, Cols,
+                            pto::BLayout::ColMajor, RowValid, ColValid,
+                            pto::SLayout::RowMajor, 512, pto::PadValue::Zero>;
+
+template <typename T, int Rows, int Cols, int RowValid = Rows,
+          int ColValid = Cols>
+using TileMatL1ZN = pto::Tile<pto::TileType::Mat, T, Rows, Cols,
+                              pto::BLayout::RowMajor, RowValid, ColValid,
+                              pto::SLayout::ColMajor, 512,
+                              pto::PadValue::Zero>;
+
+template <typename T, int Rows, int Cols, int RowValid = Rows,
+          int ColValid = Cols>
+using TileMatL0A = pto::Tile<pto::TileType::Left, T, Rows, Cols,
+                             pto::BLayout::RowMajor, RowValid, ColValid,
+                             pto::SLayout::RowMajor, 512, pto::PadValue::Zero>;
+
+template <typename T, int Rows, int Cols, int RowValid = Rows,
+          int ColValid = Cols>
+using TileMatL0B = pto::Tile<pto::TileType::Right, T, Rows, Cols,
+                             pto::BLayout::RowMajor, RowValid, ColValid,
+                             pto::SLayout::ColMajor, 512, pto::PadValue::Zero>;
+
+template <typename T, int Rows, int Cols, int RowValid = Rows,
+          int ColValid = Cols, pto::PadValue PadVal = pto::PadValue::Null>
+using TileUbDataND =
+    pto::Tile<pto::TileType::Vec, T, Rows, Cols, pto::BLayout::RowMajor,
+              RowValid, ColValid, pto::SLayout::NoneBox, 512, PadVal>;
+
+template <typename T, int Rows, int Cols, int RowValid = Rows,
+          int ColValid = Cols, pto::PadValue PadVal = pto::PadValue::Null>
+using TileUbDataDN =
+    pto::Tile<pto::TileType::Vec, T, Rows, Cols, pto::BLayout::ColMajor,
+              RowValid, ColValid, pto::SLayout::NoneBox, 512, PadVal>;
+
+template <typename T, int32_t Rows, int32_t Cols>
+using DynMatL1 = TileMatL1<T, Rows, Cols, pto::DYNAMIC, pto::DYNAMIC>;
+
+template <typename T, int32_t Rows, int32_t Cols,
+          pto::PadValue PadVal = pto::PadValue::Null>
+using DynVecTile =
+    TileUbDataND<T, Rows, Cols, pto::DYNAMIC, pto::DYNAMIC, PadVal>;
+
+template <typename T, int32_t Rows, int32_t Cols>
+using DynAccTile = pto::TileAcc<T, Rows, Cols, pto::DYNAMIC, pto::DYNAMIC>;
+
+template <typename T1, typename T2, uint32_t M, uint32_t N, uint32_t K,
+          uint32_t validM = M, uint32_t validN = N, uint32_t validK = K,
+          uint32_t KTail, bool TransposeA = false, bool TransposeB = false>
+AICORE PTO_INLINE void gemm_v0(
+    std::conditional_t<TransposeA, TileMatL1<T1, K, M, validK, validM>,
+                       TileMatL1<T1, M, K, validM, validK>> &a,
+    std::conditional_t<TransposeB, TileMatL1<T1, N, K, validN, validK>,
+                       TileMatL1<T1, K, N, validK, validN>> &b,
+    pto::TileAcc<T2, M, N, validM, validN> &c, bool clear)
+{
+  constexpr uint32_t KL0Size = 128;
+  const uint32_t k_l0_split = (K + KL0Size - 1) / KL0Size;
+
+  auto war_event_id = (event_t)(((int)EVENT_ID0 + 1) % 8);
+  set_flag(PIPE_MTE2, PIPE_MTE1, war_event_id);
+  wait_flag(PIPE_MTE2, PIPE_MTE1, war_event_id);
+
+  for (uint32_t k_l0_idx = 0; k_l0_idx < k_l0_split; ++k_l0_idx) {
+    const bool init_flag = clear && (k_l0_idx == 0);
+    const bool is_tail_block = (k_l0_idx == k_l0_split - 1);
+
+    if (is_tail_block) {
+      TileMatL0A<T1, M, KTail, M, KTail> l0a;
+      TileMatL0B<T1, KTail, N, KTail, N> l0b;
+      pto::TASSIGN(l0a, 0x0);
+      pto::TASSIGN(l0b, 0x0);
+
+      set_flag(PIPE_M, PIPE_MTE1, war_event_id);
+      wait_flag(PIPE_M, PIPE_MTE1, war_event_id);
+
+      if constexpr (!TransposeA) {
+        pto::TEXTRACT(l0a, a, 0, k_l0_idx * KTail);
+      } else {
+        TileMatL1ZN<T1, M, K, validM, validK> a_t;
+        pto::TRESHAPE(a_t, a);
+        pto::TEXTRACT(l0a, a_t, 0, k_l0_idx * KTail);
+      }
+
+      if constexpr (!TransposeB) {
+        pto::TEXTRACT(l0b, b, k_l0_idx * KTail, 0);
+      } else {
+        TileMatL1ZN<T1, K, N, validK, validN> b_t;
+        pto::TRESHAPE(b_t, b);
+        pto::TEXTRACT(l0b, b_t, k_l0_idx * KTail, 0);
+      }
+
+      set_flag(PIPE_MTE1, PIPE_M, war_event_id);
+      wait_flag(PIPE_MTE1, PIPE_M, war_event_id);
+
+      if (init_flag) {
+        pto::TMATMUL(c, l0a, l0b);
+      } else {
+        pto::TMATMUL_ACC(c, c, l0a, l0b);
+      }
+    } else {
+      TileMatL0A<T1, M, KL0Size, M, KL0Size> l0a;
+      TileMatL0B<T1, KL0Size, N, KL0Size, N> l0b;
+      pto::TASSIGN(l0a, 0x0);
+      pto::TASSIGN(l0b, 0x0);
+
+      set_flag(PIPE_M, PIPE_MTE1, war_event_id);
+      wait_flag(PIPE_M, PIPE_MTE1, war_event_id);
+
+      set_flag(PIPE_FIX, PIPE_M, war_event_id);
+      wait_flag(PIPE_FIX, PIPE_M, war_event_id);
+
+      if constexpr (!TransposeA) {
+        pto::TEXTRACT(l0a, a, 0, k_l0_idx * KL0Size);
+      } else {
+        TileMatL1ZN<T1, M, K, validM, validK> a_t;
+        pto::TRESHAPE(a_t, a);
+        pto::TEXTRACT(l0a, a_t, 0, k_l0_idx * KL0Size);
+      }
+
+      if constexpr (!TransposeB) {
+        pto::TEXTRACT(l0b, b, k_l0_idx * KL0Size, 0);
+      } else {
+        TileMatL1ZN<T1, K, N, validK, validN> b_t;
+        pto::TRESHAPE(b_t, b);
+        pto::TEXTRACT(l0b, b_t, k_l0_idx * KL0Size, 0);
+      }
+
+      set_flag(PIPE_MTE1, PIPE_M, war_event_id);
+      wait_flag(PIPE_MTE1, PIPE_M, war_event_id);
+
+      if (init_flag) {
+        pto::TMATMUL(c, l0a, l0b);
+      } else {
+        pto::TMATMUL_ACC(c, c, l0a, l0b);
+      }
+
+      set_flag(PIPE_MTE1, PIPE_MTE2, war_event_id);
+      wait_flag(PIPE_MTE1, PIPE_MTE2, war_event_id);
+    }
+  }
+
+  set_flag(PIPE_MTE1, PIPE_MTE2, war_event_id);
+  wait_flag(PIPE_MTE1, PIPE_MTE2, war_event_id);
+
+  set_flag(PIPE_M, PIPE_FIX, war_event_id);
+  wait_flag(PIPE_M, PIPE_FIX, war_event_id);
+}
+
+} // namespace
+
 #endif
 
 template <int32_t NumHeads, int32_t HiddenSize, int32_t ChunkSize>
@@ -52,41 +218,35 @@ AICORE void kkt_kernel(
   int64_t num_seqs = batch_size;
   int64_t total_work = num_seqs * NumHeads;
 
-  chunk_gdn_pto::TileMatL1<half, ChunkSize, HiddenSize,
-                            ChunkSize, HiddenSize> k_l1;
+  TileMatL1<half, ChunkSize, HiddenSize, ChunkSize, HiddenSize> k_l1;
   TASSIGN(k_l1, 0);
   TileAcc<float, ChunkSize, ChunkSize, ChunkSize, ChunkSize> a_l0;
   TASSIGN(a_l0, 0);
 
-  chunk_gdn_pto::TileUbDataND<float, 1, ChunkSize, 1, ChunkSize> g_ub;
+  TileUbDataND<float, 1, ChunkSize, 1, ChunkSize, pto::PadValue::Zero> g_ub;
   TASSIGN(g_ub, GUbAddr);
-  chunk_gdn_pto::TileUbDataND<half, 1, HalfChunk, 1, HalfChunk> beta_ub_half;
+  TileUbDataND<half, 1, HalfChunk, 1, HalfChunk, pto::PadValue::Zero>
+      beta_ub_half;
   TASSIGN(beta_ub_half, BetaHalfUbAddr);
-  chunk_gdn_pto::TileUbDataND<float, 1, HalfChunk, 1, HalfChunk> beta_ub;
+  TileUbDataND<float, 1, HalfChunk, 1, HalfChunk> beta_ub;
   TASSIGN(beta_ub, BetaUbAddr);
-  chunk_gdn_pto::TileUbDataND<float, 1, HalfChunk, 1, HalfChunk> g_v_ub;
+  TileUbDataND<float, 1, HalfChunk, 1, HalfChunk> g_v_ub;
   TASSIGN(g_v_ub, GvUbAddr);
-  chunk_gdn_pto::TileUbDataND<float, HalfChunk, ChunkSize,
-                               HalfChunk, ChunkSize> a_ub;
+  TileUbDataND<float, HalfChunk, ChunkSize, HalfChunk, ChunkSize> a_ub;
   TASSIGN(a_ub, AUbAddr);
-  chunk_gdn_pto::TileUbDataND<float, 1, HalfChunk, 1, HalfChunk> g_r_ub;
+  TileUbDataND<float, 1, HalfChunk, 1, HalfChunk> g_r_ub;
   TASSIGN(g_r_ub, GRUbAddr);
-  chunk_gdn_pto::TileUbDataND<float, 1, ChunkSize, 1, ChunkSize> g_c_ub;
+  TileUbDataND<float, 1, ChunkSize, 1, ChunkSize> g_c_ub;
   TASSIGN(g_c_ub, GCUbAddr);
-  chunk_gdn_pto::TileUbDataND<float, HalfChunk, ChunkSize,
-                               HalfChunk, ChunkSize> msk_ub;
+  TileUbDataND<float, HalfChunk, ChunkSize, HalfChunk, ChunkSize> msk_ub;
   TASSIGN(msk_ub, MskUbAddr);
-  chunk_gdn_pto::TileUbDataND<float, HalfChunk, ChunkSize,
-                               HalfChunk, ChunkSize> g_r_2d_ub;
+  TileUbDataND<float, HalfChunk, ChunkSize, HalfChunk, ChunkSize> g_r_2d_ub;
   TASSIGN(g_r_2d_ub, GR2dUbAddr);
-  chunk_gdn_pto::TileUbDataND<float, HalfChunk, ChunkSize,
-                               HalfChunk, ChunkSize> g_c_2d_ub;
+  TileUbDataND<float, HalfChunk, ChunkSize, HalfChunk, ChunkSize> g_c_2d_ub;
   TASSIGN(g_c_2d_ub, GC2dUbAddr);
-  chunk_gdn_pto::TileUbDataND<float, HalfChunk, ChunkSize,
-                               HalfChunk, ChunkSize> coeff_ub;
+  TileUbDataND<float, HalfChunk, ChunkSize, HalfChunk, ChunkSize> coeff_ub;
   TASSIGN(coeff_ub, CoeffUbAddr);
-  chunk_gdn_pto::TileUbDataND<half, HalfChunk, ChunkSize,
-                               HalfChunk, ChunkSize> a_ub_half;
+  TileUbDataND<half, HalfChunk, ChunkSize, HalfChunk, ChunkSize> a_ub_half;
   TASSIGN(a_ub_half, AUbHalfAddr);
 
 #if defined(__DAV_C220_CUBE__)
@@ -123,26 +283,37 @@ AICORE void kkt_kernel(
           ((bos + chunk_start) * NumHeads + head_idx) *
           static_cast<int64_t>(HiddenSize);
 
-      chunk_gdn_pto::copy_gm_to_l1<half, half,
-          1, 1, 1, ChunkSize, HiddenSize,
-          1, 1, 1, NumHeads * HiddenSize, 1,
-          ChunkSize, HiddenSize>(
-          K_handle + k_offset, 0, 0, valid_rows, HiddenSize);
+      {
+        GmShape2D k_shape(valid_rows, HiddenSize);
+        GmStride2D k_stride(NumHeads * HiddenSize);
+        GmTensor2D<half> k_global(K_handle + k_offset, k_shape, k_stride);
+        DynMatL1<half, ChunkSize, HiddenSize> k_l1_load(valid_rows, HiddenSize);
+        TASSIGN(k_l1_load, 0);
+        TLOAD(k_l1_load, k_global);
+        if (valid_rows != ChunkSize) {
+          TFILLPAD(k_l1_load, k_l1_load);
+        }
+      }
 
-      chunk_gdn_pto::gemm_v0<half, float,
-          ChunkSize, ChunkSize, HiddenSize,
-          ChunkSize, ChunkSize, HiddenSize,
-          KTail, false, true>(k_l1, k_l1, a_l0, true);
+      // Compute the dense intra-chunk score matrix A = K * K^T.
+      gemm_v0<half, float,
+              ChunkSize, ChunkSize, HiddenSize,
+              ChunkSize, ChunkSize, HiddenSize,
+              KTail, false, true>(k_l1, k_l1, a_l0, true);
 
-      chunk_gdn_pto::copy_l0c_to_gm<half, float,
-          1, 1, 1, ChunkSize, ChunkSize,
-          1, 1, 1, ChunkSize, 1,
-          ChunkSize, ChunkSize>(
-          workspace_handle +
-              (static_cast<int64_t>(cid) * 2 + slot) * ChunkSquare,
-          0, 0, ChunkSize, ChunkSize);
+      {
+        GmShape2D a_shape(ChunkSize, ChunkSize);
+        GmStride2D a_stride(ChunkSize);
+        GmTensor2D<half> workspace_global(
+            workspace_handle +
+                (static_cast<int64_t>(cid) * 2 + slot) * ChunkSquare,
+            a_shape, a_stride);
+        DynAccTile<float, ChunkSize, ChunkSize> a_store(ChunkSize, ChunkSize);
+        TASSIGN(a_store, 0);
+        TSTORE(workspace_global, a_store);
+      }
 
-      chunk_gdn_pto::set_cross_flag<PIPE_FIX>(slot, 2);
+      ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (slot << 8));
     }
   }
 #endif
@@ -151,18 +322,19 @@ AICORE void kkt_kernel(
   set_mask_norm();
   set_vector_mask(-1, -1);
 
-  chunk_gdn_pto::copy_gm_to_ub<float, float,
-      1, 1, 1, HalfChunk, ChunkSize,
-      1, 1, 1, ChunkSize, 1,
-      HalfChunk, ChunkSize, pto::PadValue::Zero>(
-      Msk_handle +
-          static_cast<int64_t>(vid) * HalfChunk * ChunkSize,
-      MskUbAddr, 0, HalfChunk, ChunkSize);
+  {
+    GmShape2D msk_shape(HalfChunk, ChunkSize);
+    GmStride2D msk_stride(ChunkSize);
+    GmTensor2D<float> msk_global(
+        Msk_handle + static_cast<int64_t>(vid) * HalfChunk * ChunkSize,
+        msk_shape, msk_stride);
+    TLOAD(msk_ub, msk_global);
+  }
   set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
   wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
-  chunk_gdn_pto::set_cross_flag<PIPE_MTE3>(2, 2);
-  chunk_gdn_pto::set_cross_flag<PIPE_MTE3>(3, 2);
+  ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (2 << 8));
+  ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (3 << 8));
 
   for (int64_t work_idx = 0;
        work_idx < (total_work + block_num - 1) / block_num; ++work_idx) {
@@ -198,28 +370,43 @@ AICORE void kkt_kernel(
               : 0;
 
       if (local_valid > 0) {
-        chunk_gdn_pto::copy_gm_to_ub<float, float,
-            1, 1, 1, 1, ChunkSize,
-            1, 1, 1, 1, 1,
-            1, ChunkSize, pto::PadValue::Zero>(
-            G_handle + static_cast<int64_t>(head_idx) * total_tokens +
-                (bos + chunk_start),
-            GUbAddr, 0, 1, valid_rows);
+        {
+          GmShape2D g_shape(1, valid_rows);
+          GmStride2D g_stride(1);
+          GmTensor2D<float> g_global(
+              G_handle + static_cast<int64_t>(head_idx) * total_tokens +
+                  (bos + chunk_start),
+              g_shape, g_stride);
+          DynVecTile<float, 1, ChunkSize, pto::PadValue::Zero> g_load(
+              1, valid_rows);
+          TASSIGN(g_load, GUbAddr);
+          TLOAD(g_load, g_global);
+          if (valid_rows != ChunkSize) {
+            TFILLPAD_INPLACE(g_ub, g_load);
+          }
+        }
 
-        chunk_gdn_pto::copy_gm_to_ub<half, half,
-            1, 1, 1, 1, HalfChunk,
-            1, 1, 1, 1, 1,
-            1, HalfChunk, pto::PadValue::Zero>(
-            Beta_handle + static_cast<int64_t>(head_idx) * total_tokens +
-                (bos + chunk_start + row_offset),
-            BetaHalfUbAddr, 0, 1, local_valid);
+        {
+          GmShape2D beta_shape(1, local_valid);
+          GmStride2D beta_stride(1);
+          GmTensor2D<half> beta_global(
+              Beta_handle + static_cast<int64_t>(head_idx) * total_tokens +
+                  (bos + chunk_start + row_offset),
+              beta_shape, beta_stride);
+          DynVecTile<half, 1, HalfChunk, pto::PadValue::Zero> beta_load(
+              1, local_valid);
+          TASSIGN(beta_load, BetaHalfUbAddr);
+          TLOAD(beta_load, beta_global);
+          if (local_valid != HalfChunk) {
+            TFILLPAD_INPLACE(beta_ub_half, beta_load);
+          }
+        }
 
         set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
         wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
         TCVT(beta_ub, beta_ub_half, pto::RoundMode::CAST_NONE);
-        chunk_gdn_pto::TileUbDataND<float, 1, HalfChunk, 1, HalfChunk>
-            g_ub_temp;
+        TileUbDataND<float, 1, HalfChunk, 1, HalfChunk> g_ub_temp;
         TASSIGN(g_ub_temp,
                 GUbAddr + row_offset *
                               static_cast<int32_t>(sizeof(float)));
@@ -234,8 +421,7 @@ AICORE void kkt_kernel(
         TMOV(g_c_ub, g_ub);
         pipe_barrier(PIPE_V);
 
-        chunk_gdn_pto::TileUbDataDN<float, HalfChunk, 1,
-                                     HalfChunk, 1> g_r_ub_temp;
+        TileUbDataDN<float, HalfChunk, 1, HalfChunk, 1> g_r_ub_temp;
         TASSIGN(g_r_ub_temp, GRUbAddr);
         TROWEXPAND(g_r_2d_ub, g_r_ub_temp);
         TCOLEXPAND(g_c_2d_ub, g_c_ub);
@@ -254,18 +440,21 @@ AICORE void kkt_kernel(
         set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
         wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
 
-        chunk_gdn_pto::copy_gm_to_ub<half, half,
-            1, 1, 1, HalfChunk, ChunkSize,
-            1, 1, 1, ChunkSize, 1,
-            HalfChunk, ChunkSize, pto::PadValue::Zero>(
-            workspace_handle +
-                (static_cast<int64_t>(cid) * 2 + slot) * ChunkSquare +
-                static_cast<int64_t>(vid) * HalfChunk * ChunkSize,
-            AUbHalfAddr, 0, HalfChunk, ChunkSize);
+        {
+          GmShape2D a_shape(HalfChunk, ChunkSize);
+          GmStride2D a_stride(ChunkSize);
+          GmTensor2D<half> a_workspace_global(
+              workspace_handle +
+                  (static_cast<int64_t>(cid) * 2 + slot) * ChunkSquare +
+                  static_cast<int64_t>(vid) * HalfChunk * ChunkSize,
+              a_shape, a_stride);
+          TLOAD(a_ub_half, a_workspace_global);
+        }
 
         set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
         wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
+        // Apply the gate exp(g_i + log(beta_j) - g_j) and causal mask to A.
         TCVT(a_ub, a_ub_half, pto::RoundMode::CAST_NONE);
         TMUL(a_ub, a_ub, coeff_ub);
         TMUL(a_ub, a_ub, msk_ub);
@@ -279,16 +468,20 @@ AICORE void kkt_kernel(
              head_idx) *
             static_cast<int64_t>(ChunkSize);
 
-        chunk_gdn_pto::copy_ub_to_gm<half, half,
-            1, 1, 1, HalfChunk, ChunkSize,
-            1, 1, 1, NumHeads * ChunkSize, 1,
-            HalfChunk, ChunkSize>(
-            A_handle + a_gm_offset, AUbHalfAddr, 0,
-            local_valid, ChunkSize);
+        {
+          GmShape2D a_out_shape(local_valid, ChunkSize);
+          GmStride2D a_out_stride(NumHeads * ChunkSize);
+          GmTensor2D<half> a_out_global(A_handle + a_gm_offset, a_out_shape,
+                                        a_out_stride);
+          DynVecTile<half, HalfChunk, ChunkSize, pto::PadValue::Zero>
+              a_out_tile(local_valid, ChunkSize);
+          TASSIGN(a_out_tile, AUbHalfAddr);
+          TSTORE(a_out_global, a_out_tile);
+        }
       }
 
       pipe_barrier(PIPE_ALL);
-      chunk_gdn_pto::set_cross_flag<PIPE_MTE3>(2 + slot, 2);
+      ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | ((2 + slot) << 8));
     }
   }
 #endif
