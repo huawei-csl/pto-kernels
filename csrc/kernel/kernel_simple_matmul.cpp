@@ -164,8 +164,8 @@ extern "C" __global__ AICORE void simple_matmul_bf16(__gm__ void* a,
                                                      __gm__ void* b,
                                                      __gm__ void* c,
                                                      uint32_t matrix_size) {
-  run_simple_matmul<half>((__gm__ bfloat16_t*)a, (__gm__ bfloat16_t*)b,
-                          (__gm__ float*)c, matrix_size);
+  run_simple_matmul<bfloat16_t>((__gm__ bfloat16_t*)a, (__gm__ bfloat16_t*)b,
+                                (__gm__ float*)c, matrix_size);
 }
 
 extern "C" __global__ AICORE void simple_matmul_fp32(__gm__ void* a,

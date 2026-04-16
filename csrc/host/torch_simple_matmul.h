@@ -30,9 +30,10 @@ at::Tensor run_simple_matmul(const at::Tensor& a, const at::Tensor& b) {
   const auto dtype = a.options().dtype();
   const auto dtype_out = at::kFloat;
 
-  if (!(dtype == at::kHalf or dtype == at::kFloat)) {
+  if (!(dtype == at::kHalf or dtype == at::kFloat or dtype == at::kBFloat16)) {
     throw std::runtime_error(
-        "Unsupported dtype for simple_matmul kernel. Supports only fp16/fp32");
+        "Unsupported dtype for simple_matmul kernel. Supports only "
+        "fp16/bf16/fp32");
   }
 
   const uint32_t matrix_size = static_cast<uint32_t>(a.size(-1));
@@ -48,7 +49,7 @@ at::Tensor run_simple_matmul(const at::Tensor& a, const at::Tensor& b) {
 
   if (dtype == at::kHalf) {
     EXEC_KERNEL_CMD(simple_matmul_fp16, block_dim, a, b, c, matrix_size);
-  } else if (dtype == at::KBFloat16) {
+  } else if (dtype == at::kBFloat16) {
     EXEC_KERNEL_CMD(simple_matmul_bf16, block_dim, a, b, c, matrix_size);
   } else if (dtype == at::kFloat) {
     EXEC_KERNEL_CMD(simple_matmul_fp32, block_dim, a, b, c, matrix_size);
