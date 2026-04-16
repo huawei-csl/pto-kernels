@@ -6,8 +6,8 @@ import torch
 
 from jit_util_common import DEFAULT_DEVICE, chmod_output_path, normalize_npu_device
 
-BENCH_BATCHES = [1, 5, 8, 10, 16, 20, 32, 40, 64, 128, 256, 512, 1024]
-BENCH_HIDDEN_DIMS = [128, 256, 512, 1024, 2048, 4096, 8192, 16384]
+BENCH_BATCHES = [1, 2, 5, 8, 10, 16, 20, 32, 40, 64, 128, 256, 512, 1024, 2048, 4096]
+BENCH_HIDDEN_DIMS = [128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144]
 
 DTYPE = torch.float16
 DEFAULT_SCALE = 9.0
