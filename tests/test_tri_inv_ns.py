@@ -81,7 +81,6 @@ def _test_tri_inv_ns(
     atol: float,
     rtol: float,
     ftol: float,
-    scale_value: float = 0.0,
 ):
     U = U.to(torch.half)
     golden_cpu = linalg_inv(U)
@@ -90,11 +89,7 @@ def _test_tri_inv_ns(
 
     torch.npu.synchronize()
     num_iters = int(4.0 * math.ceil(math.log2(U.shape[-1])))
-    actual = pto_tri_inv_ns(
-        U_npu,
-        num_iters=num_iters,
-        scale_value=scale_value,
-    )
+    actual = pto_tri_inv_ns(U_npu, num_iters=num_iters)
     torch.npu.synchronize()
 
     actual_cpu = actual.cpu().to(torch.float64)
@@ -135,4 +130,4 @@ def test_tri_inv_ns(
     ftol: float,
 ):
     U = matrix_gen(n, block_dim_x, block_dim_y)
-    _test_tri_inv_ns(U, atol, rtol, ftol, scale_value=0)
+    _test_tri_inv_ns(U, atol, rtol, ftol)
