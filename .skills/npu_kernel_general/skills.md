@@ -126,6 +126,9 @@ l2_size=201326592
 
 For complex "mix" kernels that use both Cube cores and Vector cores, one cube core is coordinated with two vector cores. `get_block_idx()` gives the logical id of Cube cores, while Vector core id is usually given by `const uint32_t vid = get_block_idx() * get_subblockdim() + get_subblockid();`
 
+For the `block_dim` parameter needed by kernel launch `<<< >>>`, set it to the number of cores like `BLOCK_DIM = int(getattr(torch.npu.get_device_properties("npu:0"), "cube_core_num", 20))`, such that one "block" is binded to one physical core. Avoid a large data-size-dependent `block_dim` like normal CUDA kernels. For NPU kernels, the kernel launch is similar to a "persistent kernel" in CUDA/triton that uses `block_dim=num_cores` and manually loops over the dynamic-sized input data side the kernel using for loops.
+
+
 ### Synchronization for concurrent executions
 
 Data movement instructions (e.g. `TLOAD`/`TSTORE`/`TMOV`) and compute instructions (e.g. `TADD`, `TMATMUL`) are asynchronous. To avoid data hazards during software pipelining, need `SetFlag` & `WaitFlag` instructions in between. Check existing kernel samples under `examples/jit_cpp` or `csrc/kernel` of this repo for typical synchronization patterns.
