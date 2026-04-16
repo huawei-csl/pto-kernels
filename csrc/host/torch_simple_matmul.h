@@ -11,6 +11,7 @@ for the full License text.
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
+#include "aclrtlaunch_simple_matmul_bf16.h"
 #include "aclrtlaunch_simple_matmul_fp16.h"
 #include "aclrtlaunch_simple_matmul_fp32.h"
 #include "utils.h"
@@ -47,6 +48,8 @@ at::Tensor run_simple_matmul(const at::Tensor& a, const at::Tensor& b) {
 
   if (dtype == at::kHalf) {
     EXEC_KERNEL_CMD(simple_matmul_fp16, block_dim, a, b, c, matrix_size);
+  } else if (dtype == at::KBFloat16) {
+    EXEC_KERNEL_CMD(simple_matmul_bf16, block_dim, a, b, c, matrix_size);
   } else if (dtype == at::kFloat) {
     EXEC_KERNEL_CMD(simple_matmul_fp32, block_dim, a, b, c, matrix_size);
   }

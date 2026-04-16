@@ -12,7 +12,7 @@ from pto_kernels import pto_simple_matmul
 
 
 @pytest.mark.parametrize("matrix_size", [16, 32, 64, 96, 128])
-@pytest.mark.parametrize("dtype", [torch.float16, torch.float32], ids=str)
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=str)
 def test_pto_simple_matmul(matrix_size: int, dtype: torch.dtype):
     m, k, n = matrix_size, matrix_size, matrix_size
     a = torch.rand((m, k), device="cpu", dtype=dtype)
