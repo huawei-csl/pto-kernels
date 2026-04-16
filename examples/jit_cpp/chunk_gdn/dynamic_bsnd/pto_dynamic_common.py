@@ -22,9 +22,13 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 INCLUDE_DIR = os.path.join(_HERE, "include")
 COMPILED_DIR = os.path.join(_HERE, "compiled_lib")
 _DRIVER_INC = "/usr/local/Ascend/driver/kernel/inc"
-BLOCK_DIM = int(
-    getattr(torch.npu.get_device_properties("npu:0"), "cube_core_num", 20)
-)
+_npu_dev = os.environ.get("GDN_NPU_DEVICE", "npu:0")
+try:
+    BLOCK_DIM = int(
+        getattr(torch.npu.get_device_properties(_npu_dev), "cube_core_num", 20)
+    )
+except RuntimeError:
+    BLOCK_DIM = 24
 
 
 def torch_to_ctypes(tensor: torch.Tensor) -> ctypes.c_void_p:

@@ -34,8 +34,6 @@ AICORE void chunk_o_kernel(
   constexpr uint32_t CTail =
       (ChunkSize % 128 == 0) ? 128 : (ChunkSize % 128);
 
-  constexpr int32_t GHeadTileCols = ((NumHeads + 7) / 8) * 8;
-
   constexpr int32_t WsQKSize = ChunkSize * ChunkSize;
   constexpr int32_t WsQSSize = ChunkSize * HiddenSize;
   constexpr int32_t WsGatedSize = ChunkSize * ChunkSize;
@@ -49,9 +47,7 @@ AICORE void chunk_o_kernel(
   constexpr int32_t QSHalfUbAddr = 115456;
   constexpr int32_t QSUbAddr     = 131840;
   constexpr int32_t OHalfUbAddr  = 164608;
-  constexpr int32_t OUbAddr      = 512;
-
-  constexpr int32_t GBlockUbAddr = QKUbAddr;
+  constexpr int32_t OUbAddr      = QKUbAddr;
 
   set_ffts_base_addr(ffts_addr);
   auto cid = get_block_idx();
@@ -158,7 +154,6 @@ AICORE void chunk_o_kernel(
           static_cast<int64_t>(HiddenSize) *
           static_cast<int64_t>(HiddenSize);
 
-      // Step 1: Q @ K^T -> workspace_qk
       chunk_gdn_pto::copy_gm_to_l1<half, half,
           1, 1, 1, ChunkSize, HiddenSize,
           1, 1, 1, NumHeads * HiddenSize, 1,
@@ -175,12 +170,6 @@ AICORE void chunk_o_kernel(
           ChunkSize, ChunkSize, HiddenSize,
           KTail, false, true>(q_l1, k_l1, qk_l0, true);
 
-      // Step 2: Q @ S -> workspace_qs
-      chunk_gdn_pto::copy_gm_to_l1<half, half,
-          1, 1, 1, ChunkSize, HiddenSize,
-          1, 1, 1, NumHeads * HiddenSize, 1,
-          ChunkSize, HiddenSize>(
-          Q_handle + qkv_offset, 0, 0, valid_rows, HiddenSize);
       chunk_gdn_pto::copy_gm_to_l1<half, half,
           1, 1, 1, HiddenSize, HiddenSize,
           1, 1, 1, HiddenSize, 1,
@@ -192,7 +181,6 @@ AICORE void chunk_o_kernel(
           ChunkSize, HiddenSize, HiddenSize,
           KTail, false, false>(q_l1, s_l1, qs_l0, true);
 
-      // Store QK and QS to workspace (per-core)
       chunk_gdn_pto::copy_l0c_to_gm<half, float,
           1, 1, 1, ChunkSize, ChunkSize,
           1, 1, 1, ChunkSize, 1,
@@ -211,14 +199,11 @@ AICORE void chunk_o_kernel(
 
       chunk_gdn_pto::set_cross_flag<PIPE_FIX>(0, 2);
 
-      // Wait for vec to finish gating QK
       wait_flag_dev(1);
 
-      // L0C hazard: ensure copy_l0c_to_gm from L0C[0..] done before writing
       set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
       wait_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
 
-      // Step 3: gated_QK @ V -> workspace_qkv
       chunk_gdn_pto::copy_gm_to_l1<half, half,
           1, 1, 1, ChunkSize, ChunkSize,
           1, 1, 1, ChunkSize, 1,
@@ -237,7 +222,6 @@ AICORE void chunk_o_kernel(
           ChunkSize, HiddenSize, ChunkSize,
           CTail, false, false>(qk_gated_l1, v_l1, qkv_l0, true);
 
-      // Store QKV to workspace (reuse qs_qkv workspace)
       chunk_gdn_pto::copy_l0c_to_gm<half, float,
           1, 1, 1, ChunkSize, HiddenSize,
           1, 1, 1, HiddenSize, 1,
@@ -298,11 +282,6 @@ AICORE void chunk_o_kernel(
                 ChunkSize, ChunkSize, HiddenSize,
                 KTail, false, true>(q_l1, k_l1, qk_l0, true);
 
-            chunk_gdn_pto::copy_gm_to_l1<half, half,
-                1, 1, 1, ChunkSize, HiddenSize,
-                1, 1, 1, NumHeads * HiddenSize, 1,
-                ChunkSize, HiddenSize>(
-                Q_handle + qkv_offset, 0, 0, valid_rows, HiddenSize);
             chunk_gdn_pto::copy_gm_to_l1<half, half,
                 1, 1, 1, HiddenSize, HiddenSize,
                 1, 1, 1, HiddenSize, 1,
@@ -378,6 +357,19 @@ AICORE void chunk_o_kernel(
   set_mask_norm();
   set_vector_mask(-1, -1);
 
+  int64_t total_tokens = (cu_seqlens != nullptr)
+      ? seq_len : batch_size * seq_len;
+
+  chunk_gdn_pto::copy_gm_to_ub<float, float,
+      1, 1, 1, HalfChunk, ChunkSize,
+      1, 1, 1, ChunkSize, 1,
+      HalfChunk, ChunkSize, pto::PadValue::Zero>(
+      Msk_handle +
+          static_cast<int64_t>(vid) * HalfChunk * ChunkSize,
+      MskUbAddr, 0, HalfChunk, ChunkSize);
+  set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+  wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+
   if (cu_seqlens == nullptr) {
     int64_t chunks_per_seq = (seq_len + ChunkSize - 1) / ChunkSize;
 
@@ -397,43 +389,17 @@ AICORE void chunk_o_kernel(
           remaining < ChunkSize ? remaining : ChunkSize);
       int64_t chunk_token_start = bos + chunk_start;
 
-      // Load g_sum from BSND [B,S,H] into g_ub [1, ChunkSize]
-      chunk_gdn_pto::TileUbDataND<float, ChunkSize, GHeadTileCols,
-                                   ChunkSize, GHeadTileCols> g_block_ub;
-      TASSIGN(g_block_ub, GBlockUbAddr);
+      int64_t g_offset = static_cast<int64_t>(head_idx) * total_tokens
+                         + chunk_token_start;
       chunk_gdn_pto::copy_gm_to_ub<float, float,
-          1, 1, 1, ChunkSize, GHeadTileCols,
-          1, 1, 1, NumHeads, 1,
-          ChunkSize, GHeadTileCols, pto::PadValue::Zero>(
-          G_handle + chunk_token_start * NumHeads,
-          GBlockUbAddr, 0, valid_rows, NumHeads);
-
-      // Load mask [HalfChunk, ChunkSize] (vid selects half)
-      chunk_gdn_pto::copy_gm_to_ub<float, float,
-          1, 1, 1, HalfChunk, ChunkSize,
-          1, 1, 1, ChunkSize, 1,
-          HalfChunk, ChunkSize, pto::PadValue::Zero>(
-          Msk_handle +
-              static_cast<int64_t>(vid) * HalfChunk * ChunkSize,
-          MskUbAddr, 0, HalfChunk, ChunkSize);
+          1, 1, 1, 1, ChunkSize,
+          1, 1, 1, 1, 1,
+          1, ChunkSize, pto::PadValue::Zero>(
+          G_handle + g_offset, GUbAddr, 0, 1, valid_rows);
 
       set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
       wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
-      set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-      wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-
-      for (int32_t i = 0; i < valid_rows; ++i) {
-        g_ub.SetValue(i,
-            g_block_ub.GetValue(i * GHeadTileCols + head_idx));
-      }
-      for (int32_t i = valid_rows; i < ChunkSize; ++i) {
-        g_ub.SetValue(i, 0.0f);
-      }
-
-      pipe_barrier(PIPE_ALL);
-
-      TEXPANDS(qk_ub, 0.0f);
       chunk_gdn_pto::TileUbDataND<float, 1, HalfChunk,
                                    1, HalfChunk> g_ub_temp_0;
       TASSIGN(g_ub_temp_0,
@@ -441,74 +407,25 @@ AICORE void chunk_o_kernel(
                             static_cast<int32_t>(sizeof(float)));
       TMOV(g_v_ub, g_ub_temp_0);
 
-      // Build gating coefficient matrix: exp(g_row - g_col)
-      for (int32_t i = 0; i < HalfChunk / 4; ++i) {
-        set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-        wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-        auto g_val_0 = g_v_ub.GetValue(i * 4);
-        chunk_gdn_pto::TileUbDataND<float, 1, ChunkSize,
-                                     1, ChunkSize> g_ub_t0;
-        TASSIGN(g_ub_t0, GUbAddr);
-        chunk_gdn_pto::TileUbDataND<float, 1, ChunkSize,
-                                     1, ChunkSize> coeff_t0;
-        TASSIGN(coeff_t0,
-                CoeffUbAddr +
-                    (i * 4 * ChunkSize) *
-                        static_cast<int32_t>(sizeof(float)));
-        TADDS(coeff_t0, g_ub_t0, -g_val_0);
-
-        set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-        wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-        auto g_val_1 = g_v_ub.GetValue(i * 4 + 1);
-        chunk_gdn_pto::TileUbDataND<float, 1, ChunkSize,
-                                     1, ChunkSize> g_ub_t1;
-        TASSIGN(g_ub_t1, GUbAddr);
-        chunk_gdn_pto::TileUbDataND<float, 1, ChunkSize,
-                                     1, ChunkSize> coeff_t1;
-        TASSIGN(coeff_t1,
-                CoeffUbAddr +
-                    ((i * 4 + 1) * ChunkSize) *
-                        static_cast<int32_t>(sizeof(float)));
-        TADDS(coeff_t1, g_ub_t1, -g_val_1);
-
-        set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-        wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-        auto g_val_2 = g_v_ub.GetValue(i * 4 + 2);
-        chunk_gdn_pto::TileUbDataND<float, 1, ChunkSize,
-                                     1, ChunkSize> g_ub_t2;
-        TASSIGN(g_ub_t2, GUbAddr);
-        chunk_gdn_pto::TileUbDataND<float, 1, ChunkSize,
-                                     1, ChunkSize> coeff_t2;
-        TASSIGN(coeff_t2,
-                CoeffUbAddr +
-                    ((i * 4 + 2) * ChunkSize) *
-                        static_cast<int32_t>(sizeof(float)));
-        TADDS(coeff_t2, g_ub_t2, -g_val_2);
-
-        set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-        wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-        auto g_val_3 = g_v_ub.GetValue(i * 4 + 3);
-        chunk_gdn_pto::TileUbDataND<float, 1, ChunkSize,
-                                     1, ChunkSize> g_ub_t3;
-        TASSIGN(g_ub_t3, GUbAddr);
-        chunk_gdn_pto::TileUbDataND<float, 1, ChunkSize,
-                                     1, ChunkSize> coeff_t3;
-        TASSIGN(coeff_t3,
-                CoeffUbAddr +
-                    ((i * 4 + 3) * ChunkSize) *
-                        static_cast<int32_t>(sizeof(float)));
-        TADDS(coeff_t3, g_ub_t3, -g_val_3);
-      }
-
-      TSUB(coeff_ub, qk_ub, coeff_ub);
-      TMUL(coeff_ub, coeff_ub, msk_ub);
+      chunk_gdn_pto::TileUbDataND<float, HalfChunk, ChunkSize,
+                                   HalfChunk, ChunkSize> g_r_2d;
+      TASSIGN(g_r_2d, QSUbAddr);
+      chunk_gdn_pto::TileUbDataDN<float, HalfChunk, 1,
+                                   HalfChunk, 1> g_v_col;
+      TASSIGN(g_v_col, GvUbAddr);
+      TROWEXPAND(g_r_2d, g_v_col);
+      TCOLEXPAND(coeff_ub, g_ub);
+      TSUB(coeff_ub, g_r_2d, coeff_ub);
+      pipe_barrier(PIPE_V);
+      TMINS(coeff_ub, coeff_ub, 0.0f);
+      pipe_barrier(PIPE_V);
       TEXP(coeff_ub, coeff_ub);
+      pipe_barrier(PIPE_V);
+      TMUL(coeff_ub, coeff_ub, msk_ub);
       TEXP(g_v_ub, g_v_ub);
 
-      // Wait for cube to finish QK and QS
       wait_flag_dev(0);
 
-      // Load QK from workspace
       chunk_gdn_pto::copy_gm_to_ub<half, half,
           1, 1, 1, HalfChunk, ChunkSize,
           1, 1, 1, ChunkSize, 1,
@@ -525,7 +442,6 @@ AICORE void chunk_o_kernel(
       set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
       wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
 
-      // Load QS from workspace
       chunk_gdn_pto::copy_gm_to_ub<half, half,
           1, 1, 1, HalfChunk, HiddenSize,
           1, 1, 1, HiddenSize, 1,
@@ -535,12 +451,9 @@ AICORE void chunk_o_kernel(
               static_cast<int64_t>(vid) * HalfChunk * HiddenSize,
           QSHalfUbAddr, 0, HalfChunk, HiddenSize);
 
-      // Apply gating: QK * coeff * mask
       TMUL(qk_ub, qk_ub, coeff_ub);
-      TMUL(qk_ub, qk_ub, msk_ub);
       TCVT(qk_ub_half, qk_ub, pto::RoundMode::CAST_NONE);
 
-      // Store gated QK to workspace for cube
       set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
       wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
       chunk_gdn_pto::copy_ub_to_gm<half, half,
@@ -553,86 +466,21 @@ AICORE void chunk_o_kernel(
           QKHalfUbAddr, 0, HalfChunk, ChunkSize);
       chunk_gdn_pto::set_cross_flag<PIPE_MTE3>(1, 2);
 
-      // Convert QS to float
       set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
       wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
       TCVT(qs_ub, qs_ub_half, pto::RoundMode::CAST_NONE);
+      chunk_gdn_pto::TileUbDataND<float, HalfChunk, HiddenSize,
+                                   HalfChunk, HiddenSize> g_exp_2d;
+      TASSIGN(g_exp_2d, CoeffUbAddr);
+      chunk_gdn_pto::TileUbDataDN<float, HalfChunk, 1,
+                                   HalfChunk, 1> g_v_col2;
+      TASSIGN(g_v_col2, GvUbAddr);
+      TROWEXPAND(g_exp_2d, g_v_col2);
+      pipe_barrier(PIPE_V);
+      TMUL(qs_ub, qs_ub, g_exp_2d);
 
-      // Apply exp(g) row-wise scaling to QS
-      for (int32_t i = 0; i < HalfChunk / 4; ++i) {
-        set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-        wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-        auto gv0 = g_v_ub.GetValue(i * 4);
-        chunk_gdn_pto::TileUbDataND<float, 1, HiddenSize,
-                                     1, HiddenSize> qs_r0;
-        TASSIGN(qs_r0,
-                QSUbAddr +
-                    (i * 4 * HiddenSize) *
-                        static_cast<int32_t>(sizeof(float)));
-        chunk_gdn_pto::TileUbDataND<float, 1, HiddenSize,
-                                     1, HiddenSize> qs_d0;
-        TASSIGN(qs_d0,
-                QSUbAddr +
-                    (i * 4 * HiddenSize) *
-                        static_cast<int32_t>(sizeof(float)));
-        TMULS(qs_d0, qs_r0, gv0);
-
-        set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-        wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-        auto gv1 = g_v_ub.GetValue(i * 4 + 1);
-        chunk_gdn_pto::TileUbDataND<float, 1, HiddenSize,
-                                     1, HiddenSize> qs_r1;
-        TASSIGN(qs_r1,
-                QSUbAddr +
-                    ((i * 4 + 1) * HiddenSize) *
-                        static_cast<int32_t>(sizeof(float)));
-        chunk_gdn_pto::TileUbDataND<float, 1, HiddenSize,
-                                     1, HiddenSize> qs_d1;
-        TASSIGN(qs_d1,
-                QSUbAddr +
-                    ((i * 4 + 1) * HiddenSize) *
-                        static_cast<int32_t>(sizeof(float)));
-        TMULS(qs_d1, qs_r1, gv1);
-
-        set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-        wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-        auto gv2 = g_v_ub.GetValue(i * 4 + 2);
-        chunk_gdn_pto::TileUbDataND<float, 1, HiddenSize,
-                                     1, HiddenSize> qs_r2;
-        TASSIGN(qs_r2,
-                QSUbAddr +
-                    ((i * 4 + 2) * HiddenSize) *
-                        static_cast<int32_t>(sizeof(float)));
-        chunk_gdn_pto::TileUbDataND<float, 1, HiddenSize,
-                                     1, HiddenSize> qs_d2;
-        TASSIGN(qs_d2,
-                QSUbAddr +
-                    ((i * 4 + 2) * HiddenSize) *
-                        static_cast<int32_t>(sizeof(float)));
-        TMULS(qs_d2, qs_r2, gv2);
-
-        set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-        wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-        auto gv3 = g_v_ub.GetValue(i * 4 + 3);
-        chunk_gdn_pto::TileUbDataND<float, 1, HiddenSize,
-                                     1, HiddenSize> qs_r3;
-        TASSIGN(qs_r3,
-                QSUbAddr +
-                    ((i * 4 + 3) * HiddenSize) *
-                        static_cast<int32_t>(sizeof(float)));
-        chunk_gdn_pto::TileUbDataND<float, 1, HiddenSize,
-                                     1, HiddenSize> qs_d3;
-        TASSIGN(qs_d3,
-                QSUbAddr +
-                    ((i * 4 + 3) * HiddenSize) *
-                        static_cast<int32_t>(sizeof(float)));
-        TMULS(qs_d3, qs_r3, gv3);
-      }
-
-      // Wait for cube to finish QKV
       wait_flag_dev(2);
 
-      // Load QKV from workspace
       chunk_gdn_pto::copy_gm_to_ub<half, half,
           1, 1, 1, HalfChunk, HiddenSize,
           1, 1, 1, HiddenSize, 1,
@@ -645,12 +493,10 @@ AICORE void chunk_o_kernel(
       set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
       wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
-      // O = QS_gated + QKV
       TCVT(o_ub, o_ub_half, pto::RoundMode::CAST_NONE);
       TADD(o_ub, qs_ub, o_ub);
       TCVT(o_ub_half, o_ub, pto::RoundMode::CAST_NONE);
 
-      // Store O to BSND
       set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
       wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
 
@@ -670,7 +516,6 @@ AICORE void chunk_o_kernel(
     }
   } else {
     int64_t gi = 0;
-    int64_t chunk_global_idx = 0;
     for (int64_t si = 0; si < num_seqs; ++si) {
       int64_t bos = static_cast<int64_t>(cu_seqlens[si]);
       int64_t eos = static_cast<int64_t>(cu_seqlens[si + 1]);
@@ -688,42 +533,17 @@ AICORE void chunk_o_kernel(
             int64_t chunk_token_start = bos + chunk_start;
             int32_t head_idx = h;
 
-            chunk_gdn_pto::TileUbDataND<float, ChunkSize, GHeadTileCols,
-                                         ChunkSize, GHeadTileCols>
-                g_block_ub;
-            TASSIGN(g_block_ub, GBlockUbAddr);
+            int64_t g_offset = static_cast<int64_t>(head_idx) * total_tokens
+                               + chunk_token_start;
             chunk_gdn_pto::copy_gm_to_ub<float, float,
-                1, 1, 1, ChunkSize, GHeadTileCols,
-                1, 1, 1, NumHeads, 1,
-                ChunkSize, GHeadTileCols, pto::PadValue::Zero>(
-                G_handle + chunk_token_start * NumHeads,
-                GBlockUbAddr, 0, valid_rows, NumHeads);
-
-            chunk_gdn_pto::copy_gm_to_ub<float, float,
-                1, 1, 1, HalfChunk, ChunkSize,
-                1, 1, 1, ChunkSize, 1,
-                HalfChunk, ChunkSize, pto::PadValue::Zero>(
-                Msk_handle +
-                    static_cast<int64_t>(vid) * HalfChunk * ChunkSize,
-                MskUbAddr, 0, HalfChunk, ChunkSize);
+                1, 1, 1, 1, ChunkSize,
+                1, 1, 1, 1, 1,
+                1, ChunkSize, pto::PadValue::Zero>(
+                G_handle + g_offset, GUbAddr, 0, 1, valid_rows);
 
             set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
             wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
-            set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-            wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-
-            for (int32_t i = 0; i < valid_rows; ++i) {
-              g_ub.SetValue(i,
-                  g_block_ub.GetValue(i * GHeadTileCols + head_idx));
-            }
-            for (int32_t i = valid_rows; i < ChunkSize; ++i) {
-              g_ub.SetValue(i, 0.0f);
-            }
-
-            pipe_barrier(PIPE_ALL);
-
-            TEXPANDS(qk_ub, 0.0f);
             chunk_gdn_pto::TileUbDataND<float, 1, HalfChunk,
                                          1, HalfChunk> g_ub_temp_v;
             TASSIGN(g_ub_temp_v,
@@ -732,67 +552,21 @@ AICORE void chunk_o_kernel(
                             static_cast<int32_t>(sizeof(float)));
             TMOV(g_v_ub, g_ub_temp_v);
 
-            for (int32_t i = 0; i < HalfChunk / 4; ++i) {
-              set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-              wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-              auto gv0 = g_v_ub.GetValue(i * 4);
-              chunk_gdn_pto::TileUbDataND<float, 1, ChunkSize,
-                                           1, ChunkSize> gt0;
-              TASSIGN(gt0, GUbAddr);
-              chunk_gdn_pto::TileUbDataND<float, 1, ChunkSize,
-                                           1, ChunkSize> ct0;
-              TASSIGN(ct0,
-                      CoeffUbAddr +
-                          (i * 4 * ChunkSize) *
-                              static_cast<int32_t>(sizeof(float)));
-              TADDS(ct0, gt0, -gv0);
-
-              set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-              wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-              auto gv1 = g_v_ub.GetValue(i * 4 + 1);
-              chunk_gdn_pto::TileUbDataND<float, 1, ChunkSize,
-                                           1, ChunkSize> gt1;
-              TASSIGN(gt1, GUbAddr);
-              chunk_gdn_pto::TileUbDataND<float, 1, ChunkSize,
-                                           1, ChunkSize> ct1;
-              TASSIGN(ct1,
-                      CoeffUbAddr +
-                          ((i * 4 + 1) * ChunkSize) *
-                              static_cast<int32_t>(sizeof(float)));
-              TADDS(ct1, gt1, -gv1);
-
-              set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-              wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-              auto gv2 = g_v_ub.GetValue(i * 4 + 2);
-              chunk_gdn_pto::TileUbDataND<float, 1, ChunkSize,
-                                           1, ChunkSize> gt2;
-              TASSIGN(gt2, GUbAddr);
-              chunk_gdn_pto::TileUbDataND<float, 1, ChunkSize,
-                                           1, ChunkSize> ct2;
-              TASSIGN(ct2,
-                      CoeffUbAddr +
-                          ((i * 4 + 2) * ChunkSize) *
-                              static_cast<int32_t>(sizeof(float)));
-              TADDS(ct2, gt2, -gv2);
-
-              set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-              wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-              auto gv3 = g_v_ub.GetValue(i * 4 + 3);
-              chunk_gdn_pto::TileUbDataND<float, 1, ChunkSize,
-                                           1, ChunkSize> gt3;
-              TASSIGN(gt3, GUbAddr);
-              chunk_gdn_pto::TileUbDataND<float, 1, ChunkSize,
-                                           1, ChunkSize> ct3;
-              TASSIGN(ct3,
-                      CoeffUbAddr +
-                          ((i * 4 + 3) * ChunkSize) *
-                              static_cast<int32_t>(sizeof(float)));
-              TADDS(ct3, gt3, -gv3);
-            }
-
-            TSUB(coeff_ub, qk_ub, coeff_ub);
-            TMUL(coeff_ub, coeff_ub, msk_ub);
+            chunk_gdn_pto::TileUbDataND<float, HalfChunk, ChunkSize,
+                                         HalfChunk, ChunkSize> g_r_2d_v;
+            TASSIGN(g_r_2d_v, QSUbAddr);
+            chunk_gdn_pto::TileUbDataDN<float, HalfChunk, 1,
+                                         HalfChunk, 1> g_v_col_v;
+            TASSIGN(g_v_col_v, GvUbAddr);
+            TROWEXPAND(g_r_2d_v, g_v_col_v);
+            TCOLEXPAND(coeff_ub, g_ub);
+            TSUB(coeff_ub, g_r_2d_v, coeff_ub);
+            pipe_barrier(PIPE_V);
+            TMINS(coeff_ub, coeff_ub, 0.0f);
+            pipe_barrier(PIPE_V);
             TEXP(coeff_ub, coeff_ub);
+            pipe_barrier(PIPE_V);
+            TMUL(coeff_ub, coeff_ub, msk_ub);
             TEXP(g_v_ub, g_v_ub);
 
             wait_flag_dev(0);
@@ -823,7 +597,6 @@ AICORE void chunk_o_kernel(
                 QSHalfUbAddr, 0, HalfChunk, HiddenSize);
 
             TMUL(qk_ub, qk_ub, coeff_ub);
-            TMUL(qk_ub, qk_ub, msk_ub);
             TCVT(qk_ub_half, qk_ub, pto::RoundMode::CAST_NONE);
 
             set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
@@ -842,75 +615,15 @@ AICORE void chunk_o_kernel(
             wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
             TCVT(qs_ub, qs_ub_half, pto::RoundMode::CAST_NONE);
 
-            for (int32_t i = 0; i < HalfChunk / 4; ++i) {
-              set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-              wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-              auto gv0 = g_v_ub.GetValue(i * 4);
-              chunk_gdn_pto::TileUbDataND<float, 1, HiddenSize,
-                                           1, HiddenSize> qsr0;
-              TASSIGN(qsr0,
-                      QSUbAddr +
-                          (i * 4 * HiddenSize) *
-                              static_cast<int32_t>(sizeof(float)));
-              chunk_gdn_pto::TileUbDataND<float, 1, HiddenSize,
-                                           1, HiddenSize> qsd0;
-              TASSIGN(qsd0,
-                      QSUbAddr +
-                          (i * 4 * HiddenSize) *
-                              static_cast<int32_t>(sizeof(float)));
-              TMULS(qsd0, qsr0, gv0);
-
-              set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-              wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-              auto gv1 = g_v_ub.GetValue(i * 4 + 1);
-              chunk_gdn_pto::TileUbDataND<float, 1, HiddenSize,
-                                           1, HiddenSize> qsr1;
-              TASSIGN(qsr1,
-                      QSUbAddr +
-                          ((i * 4 + 1) * HiddenSize) *
-                              static_cast<int32_t>(sizeof(float)));
-              chunk_gdn_pto::TileUbDataND<float, 1, HiddenSize,
-                                           1, HiddenSize> qsd1;
-              TASSIGN(qsd1,
-                      QSUbAddr +
-                          ((i * 4 + 1) * HiddenSize) *
-                              static_cast<int32_t>(sizeof(float)));
-              TMULS(qsd1, qsr1, gv1);
-
-              set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-              wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-              auto gv2 = g_v_ub.GetValue(i * 4 + 2);
-              chunk_gdn_pto::TileUbDataND<float, 1, HiddenSize,
-                                           1, HiddenSize> qsr2;
-              TASSIGN(qsr2,
-                      QSUbAddr +
-                          ((i * 4 + 2) * HiddenSize) *
-                              static_cast<int32_t>(sizeof(float)));
-              chunk_gdn_pto::TileUbDataND<float, 1, HiddenSize,
-                                           1, HiddenSize> qsd2;
-              TASSIGN(qsd2,
-                      QSUbAddr +
-                          ((i * 4 + 2) * HiddenSize) *
-                              static_cast<int32_t>(sizeof(float)));
-              TMULS(qsd2, qsr2, gv2);
-
-              set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-              wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-              auto gv3 = g_v_ub.GetValue(i * 4 + 3);
-              chunk_gdn_pto::TileUbDataND<float, 1, HiddenSize,
-                                           1, HiddenSize> qsr3;
-              TASSIGN(qsr3,
-                      QSUbAddr +
-                          ((i * 4 + 3) * HiddenSize) *
-                              static_cast<int32_t>(sizeof(float)));
-              chunk_gdn_pto::TileUbDataND<float, 1, HiddenSize,
-                                           1, HiddenSize> qsd3;
-              TASSIGN(qsd3,
-                      QSUbAddr +
-                          ((i * 4 + 3) * HiddenSize) *
-                              static_cast<int32_t>(sizeof(float)));
-              TMULS(qsd3, qsr3, gv3);
-            }
+            chunk_gdn_pto::TileUbDataND<float, HalfChunk, HiddenSize,
+                                         HalfChunk, HiddenSize> g_exp_2d_v;
+            TASSIGN(g_exp_2d_v, CoeffUbAddr);
+            chunk_gdn_pto::TileUbDataDN<float, HalfChunk, 1,
+                                         HalfChunk, 1> g_v_col2_v;
+            TASSIGN(g_v_col2_v, GvUbAddr);
+            TROWEXPAND(g_exp_2d_v, g_v_col2_v);
+            pipe_barrier(PIPE_V);
+            TMUL(qs_ub, qs_ub, g_exp_2d_v);
 
             wait_flag_dev(2);
 
@@ -950,7 +663,6 @@ AICORE void chunk_o_kernel(
           }
           gi++;
         }
-        chunk_global_idx++;
       }
     }
   }

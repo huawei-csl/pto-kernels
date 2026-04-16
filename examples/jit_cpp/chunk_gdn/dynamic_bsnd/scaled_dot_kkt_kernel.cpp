@@ -29,9 +29,6 @@ AICORE void kkt_kernel(
   constexpr uint32_t KTail =
       (HiddenSize % 128 == 0) ? 128 : (HiddenSize % 128);
 
-  constexpr int32_t GHeadTileCols = ((NumHeads + 7) / 8) * 8;
-  constexpr int32_t BetaHeadTileCols = ((NumHeads + 15) / 16) * 16;
-
   constexpr int32_t GUbAddr      = 0;
   constexpr int32_t BetaHalfUbAddr = 512;
   constexpr int32_t BetaUbAddr   = 640;
@@ -45,9 +42,6 @@ AICORE void kkt_kernel(
   constexpr int32_t CoeffUbAddr  = 157568;
   constexpr int32_t AUbHalfAddr  = GR2dUbAddr;
 
-  constexpr int32_t GBlockUbAddr    = AUbAddr;
-  constexpr int32_t BetaBlockUbAddr = GR2dUbAddr;
-
   set_ffts_base_addr(ffts_addr);
   auto cid = get_block_idx();
   auto block_num = get_block_num();
@@ -55,6 +49,8 @@ AICORE void kkt_kernel(
 
   int64_t num_seqs = batch_size;
   int64_t total_work = num_seqs * NumHeads;
+  int64_t total_tokens = (cu_seqlens != nullptr) ? seq_len
+                                                  : batch_size * seq_len;
 
   chunk_gdn_pto::TileMatL1<half, ChunkSize, HiddenSize,
                             ChunkSize, HiddenSize> k_l1;
@@ -114,7 +110,8 @@ AICORE void kkt_kernel(
     int64_t num_chunks = (slen + ChunkSize - 1) / ChunkSize;
 
     for (int64_t ci = 0; ci < num_chunks; ++ci) {
-      wait_flag_dev(1);
+      int32_t slot = static_cast<int32_t>(ci & 1);
+      wait_flag_dev(2 + slot);
       pipe_barrier(PIPE_ALL);
 
       int64_t chunk_start = ci * ChunkSize;
@@ -142,10 +139,10 @@ AICORE void kkt_kernel(
           1, 1, 1, ChunkSize, 1,
           ChunkSize, ChunkSize>(
           workspace_handle +
-              static_cast<int64_t>(cid) * ChunkSquare,
+              (static_cast<int64_t>(cid) * 2 + slot) * ChunkSquare,
           0, 0, ChunkSize, ChunkSize);
 
-      chunk_gdn_pto::set_cross_flag<PIPE_FIX>(0, 2);
+      chunk_gdn_pto::set_cross_flag<PIPE_FIX>(slot, 2);
     }
   }
 #endif
@@ -164,7 +161,8 @@ AICORE void kkt_kernel(
   set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
   wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
-  chunk_gdn_pto::set_cross_flag<PIPE_MTE3>(1, 2);
+  chunk_gdn_pto::set_cross_flag<PIPE_MTE3>(2, 2);
+  chunk_gdn_pto::set_cross_flag<PIPE_MTE3>(3, 2);
 
   for (int64_t work_idx = 0;
        work_idx < (total_work + block_num - 1) / block_num; ++work_idx) {
@@ -186,7 +184,8 @@ AICORE void kkt_kernel(
     int64_t num_chunks = (slen + ChunkSize - 1) / ChunkSize;
 
     for (int64_t ci = 0; ci < num_chunks; ++ci) {
-      wait_flag_dev(0);
+      int32_t slot = static_cast<int32_t>(ci & 1);
+      wait_flag_dev(slot);
       pipe_barrier(PIPE_ALL);
 
       int64_t chunk_start = ci * ChunkSize;
@@ -202,60 +201,24 @@ AICORE void kkt_kernel(
               : 0;
 
       if (local_valid > 0) {
-        // -- Phase 1: Load g_sum [C,H] and beta [HalfC,H], extract head --
-
-        int64_t g_gm_offset = (bos + chunk_start) * NumHeads;
-        chunk_gdn_pto::TileUbDataND<float, ChunkSize, GHeadTileCols,
-                                     ChunkSize, GHeadTileCols> g_block_ub;
-        TASSIGN(g_block_ub, GBlockUbAddr);
-
         chunk_gdn_pto::copy_gm_to_ub<float, float,
-            1, 1, 1, ChunkSize, GHeadTileCols,
-            1, 1, 1, NumHeads, 1,
-            ChunkSize, GHeadTileCols, pto::PadValue::Zero>(
-            G_handle + g_gm_offset, GBlockUbAddr, 0,
-            valid_rows, NumHeads);
-
-        int64_t beta_gm_offset =
-            (bos + chunk_start + row_offset) * NumHeads;
-        chunk_gdn_pto::TileUbDataND<half, HalfChunk, BetaHeadTileCols,
-                                     HalfChunk, BetaHeadTileCols>
-            beta_block_ub;
-        TASSIGN(beta_block_ub, BetaBlockUbAddr);
+            1, 1, 1, 1, ChunkSize,
+            1, 1, 1, 1, 1,
+            1, ChunkSize, pto::PadValue::Zero>(
+            G_handle + static_cast<int64_t>(head_idx) * total_tokens +
+                bos + chunk_start,
+            GUbAddr, 0, 1, valid_rows);
 
         chunk_gdn_pto::copy_gm_to_ub<half, half,
-            1, 1, 1, HalfChunk, BetaHeadTileCols,
-            1, 1, 1, NumHeads, 1,
-            HalfChunk, BetaHeadTileCols, pto::PadValue::Zero>(
-            Beta_handle + beta_gm_offset, BetaBlockUbAddr, 0,
-            local_valid, NumHeads);
+            1, 1, 1, 1, HalfChunk,
+            1, 1, 1, 1, 1,
+            1, HalfChunk, pto::PadValue::Zero>(
+            Beta_handle + static_cast<int64_t>(head_idx) * total_tokens +
+                bos + chunk_start + row_offset,
+            BetaHalfUbAddr, 0, 1, local_valid);
 
         set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
         wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
-
-        set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-        wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-
-        for (int32_t i = 0; i < valid_rows; ++i) {
-          g_ub.SetValue(i,
-              g_block_ub.GetValue(i * GHeadTileCols + head_idx));
-        }
-        for (int32_t i = valid_rows; i < ChunkSize; ++i) {
-          g_ub.SetValue(i, 0.0f);
-        }
-
-        for (int32_t i = 0; i < local_valid; ++i) {
-          beta_ub_half.SetValue(i,
-              beta_block_ub.GetValue(
-                  i * BetaHeadTileCols + head_idx));
-        }
-        for (int32_t i = local_valid; i < HalfChunk; ++i) {
-          beta_ub_half.SetValue(i, static_cast<half>(0.0f));
-        }
-
-        pipe_barrier(PIPE_ALL);
-
-        // -- Phase 2: Gating coefficients (same as static baseline) --
 
         TCVT(beta_ub, beta_ub_half, pto::RoundMode::CAST_NONE);
         chunk_gdn_pto::TileUbDataND<float, 1, HalfChunk, 1, HalfChunk>
@@ -264,8 +227,7 @@ AICORE void kkt_kernel(
                 GUbAddr + row_offset *
                               static_cast<int32_t>(sizeof(float)));
         TMOV(g_v_ub, g_ub_temp);
-        set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-        wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
+        pipe_barrier(PIPE_V);
 
         TEXPANDS(a_ub, 0.0f);
         TLOG(beta_ub, beta_ub);
@@ -274,12 +236,14 @@ AICORE void kkt_kernel(
         pipe_barrier(PIPE_V);
         TMOV(g_r_ub, g_v_ub);
         TMOV(g_c_ub, g_ub);
+        pipe_barrier(PIPE_V);
 
         chunk_gdn_pto::TileUbDataDN<float, HalfChunk, 1,
                                      HalfChunk, 1> g_r_ub_temp;
         TASSIGN(g_r_ub_temp, GRUbAddr);
         TROWEXPAND(g_r_2d_ub, g_r_ub_temp);
         TCOLEXPAND(g_c_2d_ub, g_c_ub);
+        pipe_barrier(PIPE_V);
         TSUB(coeff_ub, g_r_2d_ub, g_c_2d_ub);
         pipe_barrier(PIPE_V);
         TSUB(coeff_ub, a_ub, coeff_ub);
@@ -290,8 +254,6 @@ AICORE void kkt_kernel(
         pipe_barrier(PIPE_V);
         TEXP(coeff_ub, coeff_ub);
 
-        // -- Phase 3: Apply gating to K@K^T from workspace --
-
         set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
         wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
 
@@ -300,7 +262,7 @@ AICORE void kkt_kernel(
             1, 1, 1, ChunkSize, 1,
             HalfChunk, ChunkSize, pto::PadValue::Zero>(
             workspace_handle +
-                static_cast<int64_t>(cid) * ChunkSquare +
+                (static_cast<int64_t>(cid) * 2 + slot) * ChunkSquare +
                 static_cast<int64_t>(vid) * HalfChunk * ChunkSize,
             AUbHalfAddr, 0, HalfChunk, ChunkSize);
 
@@ -311,8 +273,6 @@ AICORE void kkt_kernel(
         TMUL(a_ub, a_ub, coeff_ub);
         TMUL(a_ub, a_ub, msk_ub);
         TCVT(a_ub_half, a_ub, pto::RoundMode::CAST_NONE);
-
-        // -- Phase 4: Store A to BSND [B,S,H,C] --
 
         set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
         wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
@@ -331,7 +291,7 @@ AICORE void kkt_kernel(
       }
 
       pipe_barrier(PIPE_ALL);
-      chunk_gdn_pto::set_cross_flag<PIPE_MTE3>(1, 2);
+      chunk_gdn_pto::set_cross_flag<PIPE_MTE3>(2 + slot, 2);
     }
   }
 #endif

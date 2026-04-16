@@ -87,7 +87,7 @@ def main():
 
     g_sum = torch.empty(1, T, H, device=dev, dtype=torch.float32)
     msk1 = torch.tril(torch.ones(C, C, device=dev), diagonal=-1).float()
-    workspace_kkt = torch.zeros(bd, C, C, device=dev, dtype=torch.float16)
+    workspace_kkt = torch.zeros(bd * 2, C, C, device=dev, dtype=torch.float16)
     A = torch.empty(1, T, H, C, device=dev, dtype=torch.float16)
 
     workspace_a1 = torch.zeros(bd, C, C, device=dev, dtype=torch.float16)
@@ -111,7 +111,10 @@ def main():
     seq_arg = T
 
     l_cumsum.call_kernel(bd, stream, _vp(g), _vp(g_sum), cu_p, batch_arg, seq_arg)
-    l_kkt.call_kernel(bd, stream, _vp(k), _vp(beta), _vp(g_sum), _vp(msk1),
+    torch.npu.synchronize()
+    g_sum_t = g_sum.reshape(-1, H).permute(1, 0).contiguous()
+    beta_t = beta.reshape(-1, H).permute(1, 0).contiguous()
+    l_kkt.call_kernel(bd, stream, _vp(k), _vp(beta_t), _vp(g_sum_t), _vp(msk1),
                        _vp(workspace_kkt), _vp(A), cu_p, batch_arg, seq_arg)
     l_wy.call_kernel(bd, stream, _vp(k), _vp(v), _vp(beta), _vp(g_sum), _vp(A),
                       _vp(workspace_a1), _vp(workspace_a2), _vp(w), _vp(u),
@@ -119,7 +122,7 @@ def main():
     l_h.call_kernel(bd, stream, _vp(k), _vp(w), _vp(u), _vp(g_sum),
                      _vp(s), _vp(nv), _vp(fs), _vp(workspace_h),
                      cu_p, batch_arg, seq_arg)
-    l_o.call_kernel(bd, stream, _vp(q), _vp(k), _vp(nv), _vp(s), _vp(g_sum),
+    l_o.call_kernel(bd, stream, _vp(q), _vp(k), _vp(nv), _vp(s), _vp(g_sum_t),
                      _vp(msk2), _vp(workspace_o1), _vp(workspace_o2), _vp(workspace_o3),
                      _vp(o), cu_p, batch_arg, seq_arg)
     torch.npu.synchronize()
@@ -139,7 +142,7 @@ def main():
         ),
         "chunk_scaled_dot_kkt": bench_stage(
             "chunk_scaled_dot_kkt",
-            lambda: l_kkt.call_kernel(bd, stream, _vp(k), _vp(beta), _vp(g_sum),
+            lambda: l_kkt.call_kernel(bd, stream, _vp(k), _vp(beta_t), _vp(g_sum_t),
                                        _vp(msk1), _vp(workspace_kkt), _vp(A),
                                        cu_p, batch_arg, seq_arg),
         ),
@@ -159,7 +162,7 @@ def main():
         "chunk_o": bench_stage(
             "chunk_o",
             lambda: l_o.call_kernel(bd, stream, _vp(q), _vp(k), _vp(nv), _vp(s),
-                                     _vp(g_sum), _vp(msk2),
+                                     _vp(g_sum_t), _vp(msk2),
                                      _vp(workspace_o1), _vp(workspace_o2),
                                      _vp(workspace_o3), _vp(o),
                                      cu_p, batch_arg, seq_arg),
