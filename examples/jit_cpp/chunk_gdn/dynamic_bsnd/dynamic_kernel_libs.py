@@ -92,13 +92,11 @@ def run_scaled_dot_kkt(k, beta, g_sum, mask, workspace, A_out, *,
     stream = torch.npu.current_stream()._as_parameter_
     if cu_seqlens is not None and cu_seqlens.dtype != torch.int32:
         cu_seqlens = cu_seqlens.to(torch.int32)
-    g_t = g_sum.reshape(-1, g_sum.shape[-1]).permute(1, 0).contiguous()
-    beta_t = beta.reshape(-1, beta.shape[-1]).permute(1, 0).contiguous()
     workspace = torch.zeros((bd * 2, chunk_size, chunk_size),
                             device=k.device, dtype=torch.float16)
     torch.npu.current_stream().synchronize()
     lib.call_kernel(bd, stream,
-                    _vp(k), _vp(beta_t), _vp(g_t), _vp(mask),
+                    _vp(k), _vp(beta), _vp(g_sum), _vp(mask),
                     _vp(workspace), _vp(A_out), _vp(cu_seqlens),
                     batch, k.shape[1])
 
@@ -188,13 +186,12 @@ def run_chunk_o(q, k, v, s, g_sum, mask, o_out, *,
     stream = torch.npu.current_stream()._as_parameter_
     if cu_seqlens is not None and cu_seqlens.dtype != torch.int32:
         cu_seqlens = cu_seqlens.to(torch.int32)
-    g_t = g_sum.reshape(-1, g_sum.shape[-1]).permute(1, 0).contiguous()
     workspace_qk = torch.zeros((bd, C, C), device=q.device, dtype=torch.float16)
     workspace_qs_qkv = torch.zeros((bd, C, D), device=q.device, dtype=torch.float16)
     workspace_qk_gated = torch.zeros((bd, C, C), device=q.device, dtype=torch.float16)
     torch.npu.current_stream().synchronize()
     lib.call_kernel(bd, stream,
-                    _vp(q), _vp(k), _vp(v), _vp(s), _vp(g_t), _vp(mask),
+                    _vp(q), _vp(k), _vp(v), _vp(s), _vp(g_sum), _vp(mask),
                     _vp(workspace_qk), _vp(workspace_qs_qkv), _vp(workspace_qk_gated),
                     _vp(o_out), _vp(cu_seqlens),
                     batch, q.shape[1])

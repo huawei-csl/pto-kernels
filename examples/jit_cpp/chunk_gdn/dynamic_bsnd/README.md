@@ -41,11 +41,11 @@ BSND with `T=262144`.
 | Kernel | Latency (ms) | #ops (approx) | TFLOPS |
 | :-- | --: | --: | --: |
 | chunk_cumsum | 2.03 | 4.19e+06 | 0.0021 |
-| chunk_scaled_dot_kkt | 5.29 | 6.87e+10 | 12.9929 |
-| wy_fast | 18.16 | 1.37e+11 | 7.5678 |
-| chunk_h | 14.19 | 2.75e+11 | 19.3733 |
-| chunk_o | 11.42 | 3.44e+11 | 30.0933 |
-| total | 51.09 | 8.25e+11 | 16.1415 |
+| chunk_scaled_dot_kkt | 15.52 | 6.87e+10 | 4.4271 |
+| wy_fast | 16.78 | 1.37e+11 | 8.1920 |
+| chunk_h | 14.18 | 2.75e+11 | 19.3812 |
+| chunk_o | 26.20 | 3.44e+11 | 13.1162 |
+| total | 74.71 | 8.25e+11 | 11.0375 |
 
 ## Design notes
 
@@ -55,10 +55,12 @@ BSND with `T=262144`.
 - **Variable-length sequences**: `cu_seqlens` (int32) provides cumulative
   sequence boundaries. When non-null, `batch_size` is the number of
   sequences and `seq_len` is ignored.
-- **Head-first G/beta layout**: `g_sum` and `beta` are pre-transposed from
-  `[1, T, H]` to `[H, T]` in the Python wrapper before passing to
-  `scaled_dot_kkt` and `chunk_o` kernels, enabling contiguous DMA loads
-  per-head and eliminating scalar extraction loops.
+- **In-kernel G/beta column extraction**: `g_sum` and `beta` are accepted
+  in the original `[1, T, H]` layout (same API as Triton kernels). Each
+  kernel loads a `[C, H]` chunk via DMA, then extracts the per-head
+  column with scalar `GetValue`/`SetValue` loops (matching `chunk_h`'s
+  pattern). This avoids Python-side pre-transpose and keeps PTO kernels
+  as drop-in replacements for Triton.
 - **Grid-stride loop**: Each physical core iterates over multiple logical
   work items to handle dynamic workloads.
 - **Per-core workspace**: Intermediate buffers (e.g., K@K^T, state matrices)

@@ -47,6 +47,7 @@ AICORE void chunk_o_kernel(
   constexpr int32_t QSHalfUbAddr = 115456;
   constexpr int32_t QSUbAddr     = 131840;
   constexpr int32_t OHalfUbAddr  = 164608;
+  constexpr int32_t GBlockUbAddr = QKUbAddr;
   constexpr int32_t OUbAddr      = QKUbAddr;
 
   set_ffts_base_addr(ffts_addr);
@@ -357,9 +358,6 @@ AICORE void chunk_o_kernel(
   set_mask_norm();
   set_vector_mask(-1, -1);
 
-  int64_t total_tokens = (cu_seqlens != nullptr)
-      ? seq_len : batch_size * seq_len;
-
   chunk_gdn_pto::copy_gm_to_ub<float, float,
       1, 1, 1, HalfChunk, ChunkSize,
       1, 1, 1, ChunkSize, 1,
@@ -389,16 +387,27 @@ AICORE void chunk_o_kernel(
           remaining < ChunkSize ? remaining : ChunkSize);
       int64_t chunk_token_start = bos + chunk_start;
 
-      int64_t g_offset = static_cast<int64_t>(head_idx) * total_tokens
-                         + chunk_token_start;
       chunk_gdn_pto::copy_gm_to_ub<float, float,
-          1, 1, 1, 1, ChunkSize,
-          1, 1, 1, 1, 1,
-          1, ChunkSize, pto::PadValue::Zero>(
-          G_handle + g_offset, GUbAddr, 0, 1, valid_rows);
-
+          1, 1, 1, ChunkSize, NumHeads,
+          1, 1, 1, NumHeads, 1,
+          ChunkSize, NumHeads, pto::PadValue::Zero>(
+          G_handle + chunk_token_start * NumHeads,
+          GBlockUbAddr, 0, valid_rows, NumHeads);
       set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
       wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+      {
+          chunk_gdn_pto::TileUbDataND<float, ChunkSize, NumHeads,
+                                       ChunkSize, NumHeads> g_block;
+          TASSIGN(g_block, GBlockUbAddr);
+          set_flag(PIPE_V, PIPE_S, EVENT_ID0);
+          wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
+          for (int32_t gi = 0; gi < ChunkSize; ++gi) {
+              g_ub.SetValue(gi, g_block.GetValue(
+                  gi * NumHeads + head_idx));
+          }
+      }
+      set_flag(PIPE_V, PIPE_S, EVENT_ID0);
+      wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
 
       chunk_gdn_pto::TileUbDataND<float, 1, HalfChunk,
                                    1, HalfChunk> g_ub_temp_0;
@@ -533,16 +542,27 @@ AICORE void chunk_o_kernel(
             int64_t chunk_token_start = bos + chunk_start;
             int32_t head_idx = h;
 
-            int64_t g_offset = static_cast<int64_t>(head_idx) * total_tokens
-                               + chunk_token_start;
             chunk_gdn_pto::copy_gm_to_ub<float, float,
-                1, 1, 1, 1, ChunkSize,
-                1, 1, 1, 1, 1,
-                1, ChunkSize, pto::PadValue::Zero>(
-                G_handle + g_offset, GUbAddr, 0, 1, valid_rows);
-
+                1, 1, 1, ChunkSize, NumHeads,
+                1, 1, 1, NumHeads, 1,
+                ChunkSize, NumHeads, pto::PadValue::Zero>(
+                G_handle + chunk_token_start * NumHeads,
+                GBlockUbAddr, 0, valid_rows, NumHeads);
             set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
             wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+            {
+                chunk_gdn_pto::TileUbDataND<float, ChunkSize, NumHeads,
+                                             ChunkSize, NumHeads> g_block;
+                TASSIGN(g_block, GBlockUbAddr);
+                set_flag(PIPE_V, PIPE_S, EVENT_ID0);
+                wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
+                for (int32_t gi = 0; gi < ChunkSize; ++gi) {
+                    g_ub.SetValue(gi, g_block.GetValue(
+                        gi * NumHeads + head_idx));
+                }
+            }
+            set_flag(PIPE_V, PIPE_S, EVENT_ID0);
+            wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
 
             chunk_gdn_pto::TileUbDataND<float, 1, HalfChunk,
                                          1, HalfChunk> g_ub_temp_v;

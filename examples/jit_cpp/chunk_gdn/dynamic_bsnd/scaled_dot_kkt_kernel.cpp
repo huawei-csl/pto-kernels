@@ -41,6 +41,8 @@ AICORE void kkt_kernel(
   constexpr int32_t GC2dUbAddr   = 124800;
   constexpr int32_t CoeffUbAddr  = 157568;
   constexpr int32_t AUbHalfAddr  = GR2dUbAddr;
+  constexpr int32_t GBlockUbAddr = AUbAddr;
+  constexpr int32_t BetaBlockUbAddr = CoeffUbAddr;
 
   set_ffts_base_addr(ffts_addr);
   auto cid = get_block_idx();
@@ -49,8 +51,6 @@ AICORE void kkt_kernel(
 
   int64_t num_seqs = batch_size;
   int64_t total_work = num_seqs * NumHeads;
-  int64_t total_tokens = (cu_seqlens != nullptr) ? seq_len
-                                                  : batch_size * seq_len;
 
   chunk_gdn_pto::TileMatL1<half, ChunkSize, HiddenSize,
                             ChunkSize, HiddenSize> k_l1;
@@ -202,23 +202,44 @@ AICORE void kkt_kernel(
 
       if (local_valid > 0) {
         chunk_gdn_pto::copy_gm_to_ub<float, float,
-            1, 1, 1, 1, ChunkSize,
-            1, 1, 1, 1, 1,
-            1, ChunkSize, pto::PadValue::Zero>(
-            G_handle + static_cast<int64_t>(head_idx) * total_tokens +
-                bos + chunk_start,
-            GUbAddr, 0, 1, valid_rows);
+            1, 1, 1, ChunkSize, NumHeads,
+            1, 1, 1, NumHeads, 1,
+            ChunkSize, NumHeads, pto::PadValue::Zero>(
+            G_handle + (bos + chunk_start) * NumHeads,
+            GBlockUbAddr, 0, valid_rows, NumHeads);
 
         chunk_gdn_pto::copy_gm_to_ub<half, half,
-            1, 1, 1, 1, HalfChunk,
-            1, 1, 1, 1, 1,
-            1, HalfChunk, pto::PadValue::Zero>(
-            Beta_handle + static_cast<int64_t>(head_idx) * total_tokens +
-                bos + chunk_start + row_offset,
-            BetaHalfUbAddr, 0, 1, local_valid);
+            1, 1, 1, HalfChunk, NumHeads,
+            1, 1, 1, NumHeads, 1,
+            HalfChunk, NumHeads, pto::PadValue::Zero>(
+            Beta_handle + (bos + chunk_start + row_offset) * NumHeads,
+            BetaBlockUbAddr, 0, local_valid, NumHeads);
 
         set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
         wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+
+        {
+            chunk_gdn_pto::TileUbDataND<float, ChunkSize, NumHeads,
+                                         ChunkSize, NumHeads> g_block;
+            TASSIGN(g_block, GBlockUbAddr);
+            set_flag(PIPE_V, PIPE_S, EVENT_ID0);
+            wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
+            for (int32_t gi = 0; gi < ChunkSize; ++gi) {
+                g_ub.SetValue(gi, g_block.GetValue(
+                    gi * NumHeads + head_idx));
+            }
+        }
+        {
+            chunk_gdn_pto::TileUbDataND<half, HalfChunk, NumHeads,
+                                         HalfChunk, NumHeads> b_block;
+            TASSIGN(b_block, BetaBlockUbAddr);
+            for (int32_t bi = 0; bi < HalfChunk; ++bi) {
+                beta_ub_half.SetValue(bi, b_block.GetValue(
+                    bi * NumHeads + head_idx));
+            }
+        }
+        set_flag(PIPE_V, PIPE_S, EVENT_ID0);
+        wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
 
         TCVT(beta_ub, beta_ub_half, pto::RoundMode::CAST_NONE);
         chunk_gdn_pto::TileUbDataND<float, 1, HalfChunk, 1, HalfChunk>
