@@ -13,7 +13,8 @@ for the full License text.
 
 #include <limits>
 
-#include "aclrtlaunch_swiglu_fp16.h"
+extern "C" uint32_t swiglu_fp16(void* x, void* y, uint32_t batch,
+                                uint32_t input_n);
 #include "utils.h"
 
 namespace pto_isa_ops {

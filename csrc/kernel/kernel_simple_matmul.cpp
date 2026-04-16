@@ -6,30 +6,9 @@ See LICENSE in the root of the software repository:
 https://github.com/huawei-csl/pto-kernels/
 for the full License text.
 */
-#if defined __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
-
-// Placeholder for VEC compilation (the real kernel is CUBE-only).
-#define MEMORY_BASE
-#include <pto/common/type.hpp>
-
-extern "C" __global__ AICORE void simple_matmul_fp16(__gm__ void* a,
-                                                     __gm__ void* b,
-                                                     __gm__ void* c,
-                                                     uint32_t matrix_size) {}
-
-extern "C" __global__ AICORE void simple_matmul_fp32(__gm__ void* a,
-                                                     __gm__ void* b,
-                                                     __gm__ void* c,
-                                                     uint32_t matrix_size) {}
-
-#elif (__CHECK_FEATURE_AT_PRECOMPILE) || \
-    (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))
 
 #define MEMORY_BASE
-
 #include <pto/pto-inst.hpp>
-
-#define GM_ADDR __gm__ uint8_t*  // To avoid #include "kernel_operator.h"
 
 using namespace pto;
 
@@ -124,6 +103,9 @@ AICORE void run_simple_matmul(__gm__ T* a, __gm__ T* b, __gm__ float* c,
   static_assert(std::is_same_v<T, half> or std::is_same_v<T, float>,
                 "simple_matmul supports only fp16/fp32.");
 
+#if (__CHECK_FEATURE_AT_PRECOMPILE) || \
+    (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))  // Cube compilation
+
   switch (matrix_size) {
     case 16:
       runKernelSimpleMatMul<T, float, 16>(a, b, c);
@@ -144,22 +126,31 @@ AICORE void run_simple_matmul(__gm__ T* a, __gm__ T* b, __gm__ float* c,
       runKernelSimpleMatMul<T, float, 128>(a, b, c);
       break;
   }
+#endif
 }
 
-extern "C" __global__ AICORE void simple_matmul_fp16(__gm__ void* a,
-                                                     __gm__ void* b,
-                                                     __gm__ void* c,
-                                                     uint32_t matrix_size) {
+__global__ AICORE void simple_matmul_fp16(__gm__ void* a, __gm__ void* b,
+                                          __gm__ void* c,
+                                          uint32_t matrix_size) {
   run_simple_matmul<half>((__gm__ half*)a, (__gm__ half*)b, (__gm__ float*)c,
                           matrix_size);
 }
 
-extern "C" __global__ AICORE void simple_matmul_fp32(__gm__ void* a,
-                                                     __gm__ void* b,
-                                                     __gm__ void* c,
-                                                     uint32_t matrix_size) {
+__global__ AICORE void simple_matmul_fp32(__gm__ void* a, __gm__ void* b,
+                                          __gm__ void* c,
+                                          uint32_t matrix_size) {
   run_simple_matmul<float>((__gm__ float*)a, (__gm__ float*)b, (__gm__ float*)c,
                            matrix_size);
 }
 
-#endif
+extern "C" void call_simple_matmul_fp16(uint32_t block_dim, void* stream,
+                                        uint8_t* a, uint8_t* b, uint8_t* c,
+                                        uint32_t matrix_size) {
+  simple_matmul_fp16<<<block_dim, nullptr, stream>>>(a, b, c, matrix_size);
+}
+
+extern "C" void call_simple_matmul_fp32(uint32_t block_dim, void* stream,
+                                        uint8_t* a, uint8_t* b, uint8_t* c,
+                                        uint32_t matrix_size) {
+  simple_matmul_fp32<<<block_dim, nullptr, stream>>>(a, b, c, matrix_size);
+}

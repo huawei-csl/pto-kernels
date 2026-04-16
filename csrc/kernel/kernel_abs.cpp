@@ -6,9 +6,6 @@ See LICENSE in the root of the software repository:
 https://github.com/huawei-csl/pto-kernels/
 for the full License text.
 */
-
-#if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
-
 #define MEMORY_BASE
 
 #include <pto/pto-inst.hpp>
@@ -26,8 +23,10 @@ using namespace pto;
  * @param z Output tensor
  * @param total_size Number of elements
  */
-template <typename T, uint32_t TILE_SIZE>
+template <typename T, unsigned TILE_SIZE>
 AICORE void runTAbs(__gm__ T* x, __gm__ T* z, uint32_t total_size) {
+#if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
+
   // Define GM tile type
   using ShapeDim5 = pto::Shape<1, 1, 1, 1, DYNAMIC>;
   using StrideDim5 = pto::Stride<1, 1, 1, 1, 1>;
@@ -106,21 +105,17 @@ AICORE void runTAbs(__gm__ T* x, __gm__ T* z, uint32_t total_size) {
     set_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
   }
 
-  // Cleanup flags
-  wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
-  wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
+#endif
 }
 
 extern "C" __global__ AICORE void vabs_fp16(GM_ADDR x, GM_ADDR z,
                                             uint32_t in_length) {
-  constexpr uint32_t TILE_LEN = 128;
+  constexpr unsigned TILE_LEN = 128;
   runTAbs<half, TILE_LEN>((__gm__ half*)x, (__gm__ half*)z, in_length);
 }
 
 extern "C" __global__ AICORE void vabs_fp32(GM_ADDR x, GM_ADDR z,
                                             uint32_t in_length) {
-  constexpr uint32_t TILE_LEN = 128;
+  constexpr unsigned TILE_LEN = 128;
   runTAbs<float, TILE_LEN>((__gm__ float*)x, (__gm__ float*)z, in_length);
 }
-
-#endif

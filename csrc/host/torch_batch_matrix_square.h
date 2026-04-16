@@ -9,11 +9,17 @@ for the full License text.
 #pragma once
 
 #include <ATen/ATen.h>
+#include <acl/acl.h>
 #include <torch/library.h>
 
-#include "aclrtlaunch_batch_matrix_square_fp16.h"
-#include "aclrtlaunch_batch_matrix_square_fp32.h"
 #include "utils.h"
+
+extern "C" void call_batch_matrix_square_fp16(uint32_t blockDim,
+                                              aclrtStream stream, void* z,
+                                              void* x, uint32_t matrix_size);
+extern "C" void call_batch_matrix_square_fp32(uint32_t blockDim,
+                                              aclrtStream stream, void* z,
+                                              void* x, uint32_t matrix_size);
 
 namespace pto_isa_ops {
 
@@ -46,10 +52,13 @@ at::Tensor run_batch_matrix_square(const at::Tensor& x) {
       at::zeros({block_dim, matrix_size, matrix_size},
                 at::TensorOptions().dtype(dtype_out).device(device));
 
+  auto acl_stream = c10_npu::getCurrentNPUStream().stream(true);
   if (dtype == at::kHalf) {
-    EXEC_KERNEL_CMD(batch_matrix_square_fp16, block_dim, z, x, matrix_size);
+    call_batch_matrix_square_fp16(block_dim, acl_stream, ConvertType(z),
+                                  ConvertType(x), matrix_size);
   } else if (dtype == at::kFloat) {
-    EXEC_KERNEL_CMD(batch_matrix_square_fp32, block_dim, z, x, matrix_size);
+    call_batch_matrix_square_fp32(block_dim, acl_stream, ConvertType(z),
+                                  ConvertType(x), matrix_size);
   }
 
   return z;

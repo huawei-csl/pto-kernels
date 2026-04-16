@@ -11,8 +11,12 @@ for the full License text.
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
-#include "aclrtlaunch_tri_inv_trick_fp16.h"
 #include "utils.h"
+
+extern "C" void call_tri_inv_trick_fp16(uint32_t blockDim, aclrtStream stream,
+                                        void* M_inv, void* M, void* I_neg,
+                                        uint32_t matrix_size,
+                                        uint32_t max_block_size);
 
 namespace pto_isa_ops {
 
@@ -48,9 +52,12 @@ at::Tensor run_tri_inv_trick(const at::Tensor& M) {
       at::zeros({matrix_size, matrix_size},
                 at::TensorOptions().dtype(dtype).device(device));
   I_neg.fill_diagonal_(-1);
+
+  auto acl_stream = c10_npu::getCurrentNPUStream().stream(true);
   if (dtype == at::kHalf) {
-    EXEC_KERNEL_CMD(tri_inv_trick_fp16, block_dim, M_inv, M, I_neg, matrix_size,
-                    max_block_size);
+    call_tri_inv_trick_fp16(block_dim, acl_stream, ConvertType(M_inv),
+                            ConvertType(M), ConvertType(I_neg), matrix_size,
+                            max_block_size);
   }
 
   return M_inv;

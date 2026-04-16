@@ -11,9 +11,19 @@ for the full License text.
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
-#include "aclrtlaunch_triv_inv_col_sweep_fp16.h"
-#include "aclrtlaunch_triv_inv_col_sweep_fp32.h"
 #include "utils.h"
+
+extern "C" aclError call_triv_inv_col_sweep_fp16(uint32_t blockDim,
+                                                 aclrtStream stream,
+                                                 void* M_inv, void* M,
+                                                 uint32_t num_elems,
+                                                 uint32_t matrix_size);
+
+extern "C" aclError call_triv_inv_col_sweep_fp32(uint32_t blockDim,
+                                                 aclrtStream stream,
+                                                 void* M_inv, void* M,
+                                                 uint32_t num_elems,
+                                                 uint32_t matrix_size);
 
 namespace pto_isa_ops {
 
@@ -48,16 +58,16 @@ at::Tensor run_tri_inv(const at::Tensor& x) {
 
   const at::Tensor z = at::empty_like(x);
 
+  auto acl_stream = c10_npu::getCurrentNPUStream().stream(true);
   if (dtype == at::kHalf) {
-    EXEC_KERNEL_CMD(triv_inv_col_sweep_fp16, block_dim, x, z, num_elems,
-                    matrix_size);
-
+    call_triv_inv_col_sweep_fp16(block_dim, acl_stream, ConvertType(z),
+                                 ConvertType(x), num_elems, matrix_size);
   } else if (dtype == at::kFloat) {
-    EXEC_KERNEL_CMD(triv_inv_col_sweep_fp32, block_dim, x, z, num_elems,
-                    matrix_size);
-
+    call_triv_inv_col_sweep_fp32(block_dim, acl_stream, ConvertType(z),
+                                 ConvertType(x), num_elems, matrix_size);
   } else {
-    throw std::runtime_error("Unsupported dtype for `tri_inv` kernel");
+    throw std::runtime_error(
+        "Unsupported dtype for `triv_inv_col_sweep` kernel");
   }
 
   return z;

@@ -108,13 +108,25 @@ AICORE void run_batch_matrix_square(__gm__ float* z, __gm__ InputT* x,
   }
 }
 
-extern "C" __global__ AICORE void batch_matrix_square_fp16(
-    __gm__ void* z, __gm__ void* x, uint32_t matrix_size) {
+__global__ AICORE void batch_matrix_square_fp16(__gm__ void* z, __gm__ void* x,
+                                                uint32_t matrix_size) {
   run_batch_matrix_square<half>((__gm__ float*)z, (__gm__ half*)x, matrix_size);
 }
 
-extern "C" __global__ AICORE void batch_matrix_square_fp32(
-    __gm__ void* z, __gm__ void* x, uint32_t matrix_size) {
+__global__ AICORE void batch_matrix_square_fp32(__gm__ void* z, __gm__ void* x,
+                                                uint32_t matrix_size) {
   run_batch_matrix_square<float>((__gm__ float*)z, (__gm__ float*)x,
                                  matrix_size);
+}
+
+extern "C" void call_batch_matrix_square_fp16(uint32_t block_dim, void* stream,
+                                              uint8_t* z, uint8_t* x,
+                                              uint32_t matrix_size) {
+  batch_matrix_square_fp16<<<block_dim, nullptr, stream>>>(z, x, matrix_size);
+}
+
+extern "C" void call_batch_matrix_square_fp32(uint32_t block_dim, void* stream,
+                                              uint8_t* z, uint8_t* x,
+                                              uint32_t matrix_size) {
+  batch_matrix_square_fp32<<<block_dim, nullptr, stream>>>(z, x, matrix_size);
 }

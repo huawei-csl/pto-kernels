@@ -9,14 +9,16 @@ for the full License text.
 #pragma once
 
 #include <ATen/ATen.h>
+#include <acl/acl.h>
 #include <torch/library.h>
 
-#include "aclrtlaunch_vabs_fp16.h"
-#include "aclrtlaunch_vabs_fp32.h"
 #include "utils.h"
 
-namespace pto_isa_ops {
+extern "C" void vabs_fp16(void* x, void* y, uint32_t num_elements);
 
+extern "C" void vabs_fp32(void* x, void* y, uint32_t num_elements);
+
+namespace pto_isa_ops {
 /**
  * @brief Runs element-wise absolute value.
  *
@@ -40,12 +42,11 @@ at::Tensor run_abs(const at::Tensor& x) {
     block_dim = total_tiles;
   }
 
+  auto acl_stream = c10_npu::getCurrentNPUStream().stream(true);
   if (dtype == at::kHalf) {
     EXEC_KERNEL_CMD(vabs_fp16, block_dim, x, z, total_size);
-
   } else if (dtype == at::kFloat) {
     EXEC_KERNEL_CMD(vabs_fp32, block_dim, x, z, total_size);
-
   } else {
     throw std::runtime_error("Unsupported dtype for `pto_abs` kernel");
   }

@@ -55,26 +55,8 @@ add_link_options(-s -Wl,-z,relro -Wl,-z,now)
 set(CMAKE_CPP_COMPILE_OPTIONS -xc++ "SHELL:-include stdint.h"
                               "SHELL:-include stddef.h")
 
-include_directories(${ASCEND_HOME_PATH}/include
+include_directories(${ASCEND_CANN_PACKAGE_PATH}/include
                     ${ASCEND_DRIVER_PATH}/kernel/inc)
-
-if(EXISTS ${ASCEND_CANN_PACKAGE_PATH}/tools/tikcpp/ascendc_kernel_cmake)
-  set(ASCENDC_CMAKE_DIR
-      ${ASCEND_CANN_PACKAGE_PATH}/tools/tikcpp/ascendc_kernel_cmake)
-elseif(EXISTS ${ASCEND_CANN_PACKAGE_PATH}/compiler/tikcpp/ascendc_kernel_cmake)
-  set(ASCENDC_CMAKE_DIR
-      ${ASCEND_CANN_PACKAGE_PATH}/compiler/tikcpp/ascendc_kernel_cmake)
-elseif(EXISTS ${ASCEND_CANN_PACKAGE_PATH}/ascendc_devkit/tikcpp/samples/cmake)
-  set(ASCENDC_CMAKE_DIR
-      ${ASCEND_CANN_PACKAGE_PATH}/ascendc_devkit/tikcpp/samples/cmake)
-else()
-  message(
-    FATAL_ERROR
-      "ascendc_kernel_cmake does not exist, please check whether the cann package is installed."
-  )
-endif()
-
-include(${ASCENDC_CMAKE_DIR}/ascendc.cmake)
 
 include(FetchContent)
 
@@ -108,21 +90,36 @@ message("* TORCH_NPU_PATH           : ${TORCH_NPU_PATH}")
 message("* TORCH_LIBRARIES          : ${TORCH_LIBRARIES}")
 message("***********************************************************")
 
-ascendc_library(
-  no_workspace_kernel
-  SHARED
-  csrc/kernel/kernel_tri_inv_col_sweep.cpp
-  csrc/kernel/kernel_abs.cpp
-  csrc/kernel/kernel_csr_gather.cpp
-  csrc/kernel/kernel_simple_matmul.cpp
-  csrc/kernel/kernel_batch_matrix_square.cpp
-  csrc/kernel/kernel_tri_inv_rec_unroll.cpp
-  csrc/kernel/kernel_tri_inv_trick.cpp
-  csrc/kernel/kernel_swiglu.cpp)
+set(KERNEL_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/csrc/kernel/kernel_tri_inv_col_sweep.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/csrc/kernel/kernel_abs.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/csrc/kernel/kernel_simple_matmul.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/csrc/kernel/kernel_batch_matrix_square.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/csrc/kernel/kernel_tri_inv_rec_unroll.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/csrc/kernel/kernel_tri_inv_trick.cpp
+#    ${CMAKE_CURRENT_SOURCE_DIR}/csrc/kernel/kernel_csr_gather.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/csrc/kernel/kernel_swiglu.cpp
+)
 
-ascendc_include_directories(
-  no_workspace_kernel PRIVATE ${libpto_isa_headers_SOURCE_DIR}/include
-  ${libpto_isa_headers_SOURCE_DIR}/include/pto/common)
+set(NO_WORKSPACE_KERNEL_LIB
+    ${CMAKE_CURRENT_BINARY_DIR}/libno_workspace_kernel.so)
+
+add_custom_command(
+  OUTPUT ${NO_WORKSPACE_KERNEL_LIB}
+  COMMAND
+    bisheng -fPIC -shared -xcce -O2 -std=c++17 --npu-arch=dav-2201
+    -I${libpto_isa_headers_SOURCE_DIR}/include ${KERNEL_SOURCES} -o
+    ${NO_WORKSPACE_KERNEL_LIB}
+  DEPENDS ${KERNEL_SOURCES}
+  COMMENT "Building no_workspace_kernel with bisheng compiler")
+
+add_custom_target(no_workspace_kernel_build ALL
+                  DEPENDS ${NO_WORKSPACE_KERNEL_LIB})
+
+add_library(no_workspace_kernel SHARED IMPORTED GLOBAL)
+set_target_properties(no_workspace_kernel PROPERTIES IMPORTED_LOCATION
+                                                     ${NO_WORKSPACE_KERNEL_LIB})
+add_dependencies(no_workspace_kernel no_workspace_kernel_build)
 
 pybind11_add_module(pto_kernels_ops csrc/host/pybind11.cpp)
 
@@ -154,7 +151,7 @@ if(PIP_INSTALL)
                LINK_FLAGS "-Wl,-rpath,\${ORIGIN}/lib")
 
   # install dynamic libraries under site-packages/pto_kernels/libs
-  install(TARGETS no_workspace_kernel LIBRARY DESTINATION pto_kernels/lib)
+  install(FILES ${NO_WORKSPACE_KERNEL_LIB} DESTINATION pto_kernels/lib)
 else()
   message(STATUS ">>>======================================================")
   message(STATUS ">>> Ignoring dynamic libraries COPY inside Python wheel.")
