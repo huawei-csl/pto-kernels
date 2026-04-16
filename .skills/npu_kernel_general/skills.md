@@ -130,6 +130,16 @@ For complex "mix" kernels that use both Cube cores and Vector cores, one cube co
 
 Data movement instructions (e.g. `TLOAD`/`TSTORE`/`TMOV`) and compute instructions (e.g. `TADD`, `TMATMUL`) are asynchronous. To avoid data hazards during software pipelining, need `SetFlag` & `WaitFlag` instructions in between. Check existing kernel samples under `examples/jit_cpp` or `csrc/kernel` of this repo for typical synchronization patterns.
 
+Insufficient synchronization can lead to **indeterministic bugs** that are hard to locate. Typical error patterns:
+- Same kernel sometimes deadlocks, sometimes runs through
+- Same kernel sometimes passes numerical check, sometimes not.
+Those are due the asynchronous nature of the execution units in hardware.
+
+Good practices:
+- Always run the same verification scripts 3~5 times, not just one time.
+- Be prepared that a test script might hang -- time-out until waiting for 20~30 seconds, to avoid the agent session being stucked forever.
+
+
 ### Performance optimization practices
 
 - Avoid heavy use of scalar computations + scalar for loops, as they use the very slow "Scalar core" in NPU. Use SIMD instructions like `TLOAD`, `TADD`.
