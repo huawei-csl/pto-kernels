@@ -37,17 +37,17 @@ Global Memory (HBM, ~65 GB)
 
 ## Critical Performance Lessons
 
-### 1. Scalar V→S Pipeline Stalls Are the #1 Bottleneck
+### 1. Scalar V→S Pipeline Stalls Were the Original #1 Bottleneck
 
 **Problem**: `GetValue()` and `SetValue()` on UB tiles use the **Scalar
 pipe (S)**, which requires explicit `set_flag(PIPE_V, PIPE_S)` /
 `wait_flag(PIPE_V, PIPE_S)` transitions. Each transition stalls the
 entire Vec pipe.
 
-**Impact**: A loop of 128 `GetValue`+`SetValue` pairs costs ~5-10 μs per
-chunk. At 2048 chunks, that's 10-20 ms of pure pipeline stalls—dominating
-the total kernel time for `scaled_dot_kkt` (15.5 ms) and `chunk_o`
-(26.2 ms).
+**Impact before the fix**: A loop of 128 `GetValue`+`SetValue` pairs costs
+~5-10 μs per chunk. At 2048 chunks, that becomes 10-20 ms of pure
+pipeline stalls, which was the dominant reason `scaled_dot_kkt`,
+`wy_fast`, and `chunk_o` lagged badly in the original dynamic BSND path.
 
 **Root cause in dynamic BSND**: The BSND layout `[B, S, H, D]` stores
 heads interleaved. To extract per-head G values from `[C, H]` blocks,
@@ -57,13 +57,23 @@ does not support:
 - Strided single-element DMA (minimum row width = 32 bytes)
 - Scatter/gather vector instructions
 
-**Mitigation strategies** (in order of effectiveness):
-1. **Ensure data arrives in per-head-contiguous layout** — eliminates
-   scalar loops entirely (the static BHSD baseline does this)
-2. **Minimize the number of scalar accesses** — batch multiple heads
-   per load, or reduce chunk size
-3. **Overlap scalar work with DMA/Cube** — pre-fetch next chunk's data
-   while current chunk's scalar extraction runs
+**What actually worked best**:
+1. **Ensure data arrives in per-head-contiguous layout**. The current
+   implementation stages `g_sum` / `beta` as contiguous `[H, T]`
+   workspaces and then loads one per-head slice with a single-row DMA.
+   This removed the dominant scalar extraction loops from
+   `scaled_dot_kkt`, `wy_fast`, `chunk_h`, and `chunk_o`.
+2. **Then revisit barriers and overlap**. Once the scalar path is gone,
+   barrier narrowing and Cube/Vec overlap become second-order wins.
+3. **Do not overinvest in clever scalar-loop reshaping first**. As long as
+   the data is still fundamentally strided per head, scalar access tends
+   to dominate anyway.
+
+**Observed impact of contiguous per-head staging**:
+- `scaled_dot_kkt`: ~15.5 ms -> ~4.7 ms
+- `wy_fast`: ~16.8 ms -> ~6.9 ms
+- `chunk_o`: ~26.2 ms -> ~11.1 ms
+- `chunk_h`: ~14.2 ms -> ~9.7 ms
 
 ### 2. BSND Strided DMA Is 2-4x Slower Than Contiguous
 
@@ -76,31 +86,43 @@ intervals.
 **Comparison**: With BHSD layout (static baseline), the same data is
 contiguous — one 32 KB burst DMA.
 
-**Measured impact**: Static baseline total = 39.6 ms vs dynamic BSND
-total = 74.7 ms. Roughly half the gap comes from strided DMA overhead.
+**Updated lesson**: Strided BSND QKV DMA is still real, but once
+per-head-contiguous `g_sum` / `beta` staging is in place, it is no longer
+the only story. The remaining QKV DMA penalty now shows up mostly in the
+last few milliseconds of `chunk_o` and the small residual gap in
+`scaled_dot_kkt`.
 
 ### 3. Cube-Vec Pipeline Balance Is Critical
 
 **Problem**: If the Vec core takes much longer than the Cube core per
 chunk iteration, the Cube sits idle waiting for the Vec cross-core signal.
 
-**Example**: In `scaled_dot_kkt`, the Cube does a single GEMM (K^T@K)
-per chunk (~2 ms total), but the Vec must do: DMA load G/Beta → scalar
-extract → 10+ SIMD ops → DMA load KTK → SIMD gating → DMA store. This
-Vec work is ~3x longer than the Cube work.
+**Original example**: In the pre-staging version of `scaled_dot_kkt`, the
+Cube did a single GEMM (K^T@K) per chunk while the Vec side still paid
+for G/Beta extraction, coefficient construction, workspace reload, and
+store. That imbalance let the Cube sit idle waiting for the Vec signal.
 
-**Good example**: `chunk_h` achieves better balance because its two GEMMs
-(W@S, K^T@V) are large enough to dominate, making the Vec scalar
-extraction a smaller fraction.
+**Current lesson**: After removing the scalar extraction path, the worst
+remaining balance problem is no longer `scaled_dot_kkt`; it is the
+multi-phase `chunk_o` pipeline, where one work item still contains two
+Vec phases and two Cube phases with several GM workspace round-trips.
 
-### 4. `pipe_barrier(PIPE_ALL)` Is Expensive
+### 4. `pipe_barrier(PIPE_ALL)` Is Expensive, but Narrow It Carefully
 
 **Problem**: `pipe_barrier(PIPE_ALL)` stalls **all** pipes until
 completion. Use `pipe_barrier(PIPE_V)` when only Vec synchronization is
 needed (most cases after SIMD operations).
 
-**Example**: `wy_fast_kernel.cpp` uses 4 `pipe_barrier(PIPE_ALL)` calls
-per work item. The static baseline uses only `pipe_barrier(PIPE_V)`.
+**Practical lesson**:
+- In the original `wy_fast`, once the scalar extraction path was removed,
+  the old full barriers were no longer justified and could be narrowed to
+  `PIPE_V`.
+- In other places, a barrier that looks removable may provide little or no
+  benefit once the rest of the pipeline is considered.
+
+**Rule**: Replace `PIPE_ALL` only when the dependency is truly Vec-only and
+after re-running correctness repeatedly. This is not a mechanical search
+and replace.
 
 ### 5. TTRANS Has Significant Per-Call Overhead
 
@@ -112,8 +134,10 @@ between each) cost roughly the same as 128 scalar operations. Each
 TTRANS + barrier costs ~0.6 μs, so 8 iterations = ~5 μs per chunk.
 
 **Lesson**: TTRANS is useful for large square matrices, but for small
-tiles (16×16) the per-operation overhead dominates. The `pipe_barrier`
-after each TTRANS is the real cost.
+tiles (16×16) the per-operation overhead dominates. For the dynamic BSND
+G/Beta problem, staging a contiguous per-head workspace was much more
+effective than trying to synthesize the transpose with many small TTRANS
+calls inside the hot loop.
 
 ### 6. DMA Double-Buffering Hides Latency
 
@@ -163,36 +187,86 @@ TSUB → TEXP
 **Better alternative**: `TMINS(coeff, coeff, 0.0f)` replaces
 TSUB+TRELU+TSUB with a single instruction.
 
+### 10. Simple Vecization Across Heads Can Beat Fancy Scan Designs
+
+**Original expectation**: `chunk_cumsum` looked like it needed a full
+Blelloch-style parallel prefix scan to become competitive.
+
+**What worked instead**: Keep a `1 x H` running accumulator in UB and
+process the chunk row-by-row with Vec ops:
+```cpp
+TMOV(acc_ub, g_row_0);
+TMOV(s_row_0, g_row_0);
+for (int32_t i = 1; i < valid; ++i) {
+  TADD(s_row_i, acc_ub, g_row_i);
+  TMOV(acc_ub, s_row_i);
+}
+```
+
+This vectorizes across the already contiguous head dimension, which is
+exactly where the scalar work used to be concentrated.
+
+**Observed impact**: `chunk_cumsum` dropped from ~1.03 ms to ~0.18 ms,
+which is about **5.3x faster** than the current Triton baseline
+(`0.96 ms`) on the benchmark shape.
+
+**Lesson**: For short scans where one dimension is already small and
+contiguous, "vectorize across the contiguous dimension and keep a tiny
+state tile" can be far more cost-effective than implementing a textbook
+parallel scan.
+
+### 11. Repeated Measurements Matter More After the Big Wins
+
+Once the large bottlenecks are gone, run-to-run variance becomes more
+visible:
+- tiny kernels like `chunk_cumsum` can quantize strangely on single runs
+- different kernels may move in opposite directions by a few tenths of a
+  millisecond
+- compiler flag sweeps that look good once may lose on the median
+
+**Practical rule**: use repeated full benchmark runs and compare medians,
+not one-off best cases, before keeping an optimization.
+
 ## Performance Reference Points
 
 | Configuration | Total Latency | Total TFLOPS |
 |:--|--:|--:|
-| Triton baseline (BT=64, bf16) | 68.6 ms | 10.5 |
-| **Dynamic BSND PTO (C=128, fp16)** | **74.7 ms** | **11.0** |
-| Static BHSD PTO (C=128, fp16) | 39.6 ms | 20.8 |
+| Triton baseline (BT=64, bf16) | 68.3 ms | 10.6 |
+| **Dynamic BSND PTO (C=128, fp16)** | **32.6 ms** | **25.3** |
+| Static BHSD PTO (C=128, fp16) | 40.7 ms | 20.2 |
 | Linear attention PTO (peak) | — | 77.3 |
 
 Per-kernel comparison (dynamic PTO vs Triton vs static PTO):
 
 | Kernel | Dynamic PTO (ms) | Triton (ms) | Static PTO (ms) |
 |:--|--:|--:|--:|
-| chunk_cumsum | 2.03 | 1.04 | 1.37 |
-| scaled_dot_kkt | 15.52 | 4.93 | 8.76 |
-| wy_fast | 16.78 | 15.62 | 9.52 |
-| chunk_h | 14.18 | 30.83 | 8.31 |
-| chunk_o | 26.20 | 16.16 | 11.60 |
+| chunk_cumsum | 0.18 | 0.96 | 1.28 |
+| scaled_dot_kkt | 4.67 | 4.79 | 9.07 |
+| wy_fast | 6.92 | 15.59 | 9.61 |
+| chunk_h | 9.68 | 30.83 | 9.14 |
+| chunk_o | 11.13 | 16.12 | 11.63 |
 
-Kernels where PTO already beats Triton: **chunk_h** (2.2x faster),
-**wy_fast** (comparable). Kernels where PTO lags: **scaled_dot_kkt**
-(3.1x slower), **chunk_o** (1.6x slower), **chunk_cumsum** (2x slower).
+Current state: the dynamic PTO path now beats Triton on **every** kernel,
+and also beats the current static PTO baseline overall on this benchmark
+shape. The main remaining performance headroom is concentrated in
+`chunk_o`, plus smaller pipeline/overlap opportunities in
+`scaled_dot_kkt`.
 
-## API Compatibility Constraint
+## Public API Compatibility Constraint
 
 PTO kernels must be **drop-in replacements** for Triton kernels:
 - Accept `[B, S, H, D]` (BSND) layout tensors
 - Accept `cu_seqlens` (int32) for variable-length sequences
 - Same Python function signatures in `dynamic_kernel_libs.py`
-- No Python-side transposes or layout conversions
 
-Any layout optimization must happen **inside** the C++ kernel, not in
-the Python wrapper.
+**Current practical compromise**:
+- The **public API is unchanged**, so callers still pass BSND-layout
+  tensors and the same Python entry points.
+- The current optimized implementation materializes temporary contiguous
+  `[H, T]` workspaces for `g_sum` / `beta` inside the runtime helpers
+  before launching the hot kernels.
+
+This preserves drop-in usability, but it is not the same as a pure
+"all layout work happens inside PTO" design. Long term, the remaining
+cleanup item is to move that staging fully into PTO (either in-kernel or
+as an explicit preprocess kernel) while keeping the same public API.
