@@ -55,6 +55,7 @@ The environment is assumed capable of compiling and running on NPU; lack of acce
 
 Pick an NPU id with "No running processes", and avoid NPU id with other processes running on, to avoid resource contention. For example, to switch to NPU id 7, set `torch.npu.set_device("npu:7")` at the very beginning of the Python test script.
 
+When all NPUs are free, prefer the later ids such as one of `npu:4` `npu:5` `npu:6` `npu:7`, because they are more likely to be free of resource contention. Avoid heavy use of `npu:0` as many other users will use it by default.
 
 ### Find pto-isa doc, implementation, and unit tests
 
