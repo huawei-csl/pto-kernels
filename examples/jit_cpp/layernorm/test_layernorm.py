@@ -55,4 +55,4 @@ def test_layernorm_matches_reference(
     torch.npu.synchronize()
 
     ref = layernorm_ref(x.cpu(), gamma.cpu(), beta.cpu(), eps=EPS)
-    torch.testing.assert_close(y.cpu(), ref, rtol=1e-2, atol=1e-2)
+    torch.testing.assert_close(y.cpu(), ref, rtol=1e-2, atol=1e-5)
