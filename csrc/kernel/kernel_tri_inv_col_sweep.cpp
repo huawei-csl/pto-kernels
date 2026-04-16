@@ -114,6 +114,7 @@ AICORE void runTTriInv(__gm__ T* vec_in, __gm__ T* vec_out,
       }
 
       TASSIGN(A_k, j * S * sizeof(T));
+      TMULS(diff, A_k, static_cast<T>(1));
       set_flag(PIPE_V, PIPE_S, EVENT_ID1);
 
       pipe_barrier(PIPE_V);
