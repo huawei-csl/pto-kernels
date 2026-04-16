@@ -154,10 +154,10 @@ def benchmark(
                     warmup,
                     repeats,
                     lambda i, x_list=x_list: F.layer_norm(
-                        pool_item(x_list, i).float(),
+                        pool_item(x_list, i),
                         normalized_shape,
-                        gamma.float(),
-                        beta.float(),
+                        gamma,
+                        beta,
                         eps=EPS,
                     ),
                 ),

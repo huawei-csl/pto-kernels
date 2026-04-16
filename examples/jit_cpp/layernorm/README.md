@@ -20,7 +20,7 @@ It uses a two-pass anchored-stats algorithm for numerical stability:
 # Correctness tests
 pytest test_layernorm.py -q --npu npu:0
 
-# Benchmark PTO (fp16) vs F.layer_norm (fp32)
+# Benchmark PTO (fp16) vs F.layer_norm (fp16)
 python bench_layernorm.py --npu npu:0
 
 # Plot results
@@ -61,4 +61,4 @@ The benchmark reports per-shape:
 - runtime in microseconds (median over trials)
 - effective memory bandwidth in GB/s: `2 × rows × hidden × 2 bytes / duration`
   (counts fp16 read of x and fp16 write of y; gamma/beta are per-row amortized)
-- PTO speedup over `F.layer_norm` (fp32 path)
+- PTO speedup over `F.layer_norm` (fp16 path)
