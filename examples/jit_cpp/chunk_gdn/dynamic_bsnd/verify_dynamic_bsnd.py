@@ -6,7 +6,8 @@ Verifies each stage against a PyTorch reference:
   1. chunk_cumsum — chunk-local prefix sum
   2. scaled_dot_kkt — gated KK^T with mask and beta
   3. wy_fast — WY recompute (w, u)
-  4. chunk_h + chunk_o — end-to-end smoke (finite outputs)
+  4. chunk_h — chunkwise state recurrence (states, v_new, final_state)
+  5. chunk_o — output from inter/intra-chunk attention
 """
 from __future__ import annotations
 
@@ -35,6 +36,9 @@ from dynamic_kernel_libs import (
 NPU_DEVICE = os.getenv("GDN_NPU_DEVICE", "npu:0")
 C = 128
 RTOL, ATOL = 2e-2, 2e-2
+# Accumulated fp16 state matrices (chunk_h, chunk_o) compound matmul
+# quantization error across chunks, requiring a wider absolute tolerance.
+RTOL_ACCUM, ATOL_ACCUM = 2e-2, 5e-2
 
 
 # -------- PyTorch references --------
@@ -119,10 +123,10 @@ def ref_recompute_w_u(k, v, beta, A, g_cumsum, chunk_size, cu_seqlens=None):
 
 def ref_chunk_h(k, w, u, g_cumsum, chunk_size, cu_seqlens=None, initial_state=None):
     """
-    Sequential state recurrence reference:
-      S_{i+1} = exp(g_last) * S_i + (k_new)^T @ v_new
-    where k_new = k - w, v_new = v_in (u replaces v), and g_last = exp(g_cumsum[last]).
-    Also outputs per-chunk states and the final_state.
+    Chunkwise state recurrence reference (matches PTO/triton kernel algorithm):
+      h_out[ci] = S  (state BEFORE processing chunk ci)
+      v_new = u - W @ S
+      S_new = exp(g_last) * S + k^T @ (v_new * exp(g_last - g_cumsum))
     """
     B, T, H, D = k.shape
     kf = k.float()
@@ -160,31 +164,33 @@ def ref_chunk_h(k, w, u, g_cumsum, chunk_size, cu_seqlens=None, initial_state=No
                 gc = gf[0, s:e, h]
                 g_last = gc[valid - 1]
 
-                k_scaled = kf[0, s:e, h, :] - wf[0, s:e, h, :]
-                v_chunk = uf[0, s:e, h, :]
+                h_out[ci_base + ci, h] = S.clone()
 
-                kv = k_scaled.T @ v_chunk
-
-                exp_decay = torch.exp(g_last)
-                S = exp_decay * S + kv
-
-                h_out[ci_base + ci, h] = S
+                ws = wf[0, s:e, h, :] @ S
+                v_chunk = uf[0, s:e, h, :] - ws
                 v_new[0, s:e, h, :] = v_chunk
+
+                decay_per_row = torch.exp(g_last - gc).unsqueeze(-1)
+                v_gated = v_chunk * decay_per_row
+                kv = kf[0, s:e, h, :].T @ v_gated
+
+                S = torch.exp(g_last) * S + kv
+
             final_state[si, h] = S
         chunk_idx += num_c
 
     return h_out, v_new, final_state
 
 
-def ref_chunk_o(q, k, v_new, h_states, g_cumsum, chunk_size, scale, cu_seqlens=None):
+def ref_chunk_o(q, k, v_new, h_states, g_cumsum, chunk_size, cu_seqlens=None):
     """
-    Output computation reference:
-      o_inter[t] = q[t] @ h[chunk_of_t]
-      o_intra = causal_attention(q, k, v_new) with exp(g) gating
-      o = o_inter * exp(g_last - g[t]) + o_intra * exp(-g[t])
+    Output computation reference (matches PTO kernel, no scale):
+      o_inter = q @ h_state * exp(g_cumsum[t])
+      o_intra = (q @ k^T * safe_exp(g_row - g_col) * causal_mask) @ v_new
+      o = o_inter + o_intra
     """
     B, T, H, D = q.shape
-    qf = q.float() * scale
+    qf = q.float()
     kf = k.float()
     vf = v_new.float()
     gf = g_cumsum.float()
@@ -215,21 +221,18 @@ def ref_chunk_o(q, k, v_new, h_states, g_cumsum, chunk_size, scale, cu_seqlens=N
 
                 h_state = h_states[ci_offset + ci, h]
                 o_inter = qc @ h_state
+                o_inter = o_inter * torch.exp(gc).unsqueeze(-1)
 
                 qk = qc @ kc.T
                 gc_row = gc.unsqueeze(-1)
                 gc_col = gc.unsqueeze(-2)
                 gating = _safe_exp(gc_row - gc_col)
-                qk_gated = qk * gating
                 bt = valid
                 mask = torch.arange(bt, device=qk.device)[:, None] >= torch.arange(bt, device=qk.device)[None, :]
-                qk_gated = qk_gated * mask.float()
+                qk_gated = qk * gating * mask.float()
                 o_intra = qk_gated @ vc
 
-                g_last = gc[valid - 1]
-                decay = torch.exp(g_last - gc).unsqueeze(-1)
-
-                o_out[0, s:e, h, :] = o_inter * decay + o_intra
+                o_out[0, s:e, h, :] = o_inter + o_intra
 
             ci_offset += num_c
         chunk_idx += num_c
@@ -305,7 +308,8 @@ def main():
     torch.npu.synchronize()
 
     w_ref, u_ref = ref_recompute_w_u(k.cpu(), v.cpu(), beta.cpu(), A_out.cpu(), g_sum.cpu(), C, cu_seqlens.cpu())
-    w_match = torch.allclose(w_out.float().cpu(), w_ref.float(), rtol=RTOL, atol=ATOL)
+    # w = A @ (k*beta*exp(g)): chained fp16 multiplies before matmul need wider atol
+    w_match = torch.allclose(w_out.float().cpu(), w_ref.float(), rtol=RTOL, atol=3e-2)
     u_match = torch.allclose(u_out.float().cpu(), u_ref.float(), rtol=RTOL, atol=ATOL)
     if not w_match:
         diff = (w_out.float().cpu() - w_ref.float()).abs()
@@ -337,11 +341,17 @@ def main():
     h_ref, v_ref, fs_ref = ref_chunk_h(k.cpu(), w_out.cpu(), u_out.cpu(), g_sum.cpu(), C, cu_seqlens.cpu())
     s_reshaped = s_out.float().cpu().view(tc, H, D, D)
     h_ref32 = h_ref.float()
-    h_match = torch.allclose(s_reshaped, h_ref32, rtol=5e-2, atol=5e-2)
+    h_match = torch.allclose(s_reshaped, h_ref32, rtol=RTOL_ACCUM, atol=ATOL_ACCUM)
     if not h_match:
         diff = (s_reshaped - h_ref32).abs()
         print(f"  h states max diff: {diff.max().item():.6f}, mean: {diff.mean().item():.6f}")
-    print(f"  chunk_h states: {'PASS' if h_match else 'FAIL (relaxed tol)'}")
+    print(f"  chunk_h states: {'PASS' if h_match else 'FAIL'}")
+
+    v_match = torch.allclose(v_out.float().cpu(), v_ref.float(), rtol=RTOL, atol=ATOL)
+    if not v_match:
+        diff = (v_out.float().cpu() - v_ref.float()).abs()
+        print(f"  v_new max diff: {diff.max().item():.6f}, mean: {diff.mean().item():.6f}")
+    print(f"  chunk_h v_new: {'PASS' if v_match else 'FAIL'}")
 
     # --- 5. chunk_o ---
     print("[5] Testing chunk_o...")
@@ -355,18 +365,20 @@ def main():
     o_finite = torch.isfinite(o_out).all()
     print(f"  chunk_o output finite: {'PASS' if o_finite else 'FAIL'}")
 
-    scale = D ** -0.5
-    o_ref = ref_chunk_o(q.cpu(), k.cpu(), v_out.cpu(), s_reshaped, g_sum.cpu(), C, scale, cu_seqlens.cpu())
+    o_ref = ref_chunk_o(q.cpu(), k.cpu(), v_out.cpu(), s_reshaped, g_sum.cpu(), C, cu_seqlens.cpu())
     o_cmp = o_out.float().cpu()
     o_ref_f = o_ref.float()
-    o_match = torch.allclose(o_cmp, o_ref_f, rtol=5e-2, atol=5e-2)
+    o_match = torch.allclose(o_cmp, o_ref_f, rtol=RTOL_ACCUM, atol=ATOL_ACCUM)
     if not o_match:
         diff = (o_cmp - o_ref_f).abs()
         print(f"  o max diff: {diff.max().item():.6f}, mean: {diff.mean().item():.6f}")
-    print(f"  chunk_o output: {'PASS' if o_match else 'FAIL (relaxed tol)'}")
+    print(f"  chunk_o output: {'PASS' if o_match else 'FAIL'}")
 
     print()
-    all_pass = match and w_match and u_match and s_finite and v_finite and o_finite
+    all_pass = (match and w_match and u_match
+                and s_finite and v_finite and fs_finite
+                and h_match and v_match
+                and o_finite and o_match)
     print(f"Overall: {'ALL CHECKS PASSED' if all_pass else 'SOME CHECKS FAILED'}")
 
 
