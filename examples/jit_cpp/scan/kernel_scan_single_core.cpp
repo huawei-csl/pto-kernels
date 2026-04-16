@@ -1,7 +1,7 @@
 #include <pto/pto-inst.hpp>
 
 #include "CustomTSync.hpp"
-#include "runtime/rt.h"
+#include "runtime/rt.h" # Required for rtGetC2cCtrlAddr
 
 using namespace pto;
 
