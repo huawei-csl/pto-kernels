@@ -26,14 +26,18 @@ AICORE void cumsum_kernel(
 #if defined(__DAV_C220_VEC__)
   set_mask_norm();
   set_vector_mask(-1, -1);
-
-  if (vid != 0) return;
+  const int64_t subblock_num = static_cast<int64_t>(get_subblockdim());
+  const int64_t num_vec_workers =
+      static_cast<int64_t>(block_num) * subblock_num;
+  const int64_t worker_id =
+      static_cast<int64_t>(cid) * subblock_num + static_cast<int64_t>(vid);
 
   constexpr int32_t HeadTileCols = ((NumHeads + 7) / 8) * 8;
   constexpr int32_t BlockBytes = ChunkSize * HeadTileCols *
                                  static_cast<int32_t>(sizeof(float));
   constexpr int32_t GUbAddr = 0;
   constexpr int32_t SUbAddr = BlockBytes;
+  constexpr int32_t AccUbAddr = SUbAddr + BlockBytes;
 
   chunk_gdn_pto::TileUbDataND<float, ChunkSize, HeadTileCols,
                                ChunkSize, HeadTileCols> g_block_ub;
@@ -41,6 +45,9 @@ AICORE void cumsum_kernel(
   chunk_gdn_pto::TileUbDataND<float, ChunkSize, HeadTileCols,
                                ChunkSize, HeadTileCols> s_block_ub;
   TASSIGN(s_block_ub, SUbAddr);
+  chunk_gdn_pto::TileUbDataND<float, 1, HeadTileCols,
+                               1, HeadTileCols> acc_ub;
+  TASSIGN(acc_ub, AccUbAddr);
 
   int64_t num_seqs = batch_size;
 
@@ -48,8 +55,8 @@ AICORE void cumsum_kernel(
     int64_t chunks_per_seq = (seq_len + ChunkSize - 1) / ChunkSize;
     int64_t total_chunks = num_seqs * chunks_per_seq;
 
-    for (int64_t gi = static_cast<int64_t>(cid); gi < total_chunks;
-         gi += static_cast<int64_t>(block_num)) {
+    for (int64_t gi = worker_id; gi < total_chunks;
+         gi += num_vec_workers) {
       int64_t seq_idx = gi / chunks_per_seq;
       int64_t local_chunk = gi % chunks_per_seq;
       int64_t bos = seq_idx * seq_len;
@@ -66,22 +73,35 @@ AICORE void cumsum_kernel(
       set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
       wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
-      set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-      wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
+      chunk_gdn_pto::TileUbDataND<float, 1, HeadTileCols,
+                                   1, HeadTileCols> g_row_0;
+      TASSIGN(g_row_0, GUbAddr);
+      chunk_gdn_pto::TileUbDataND<float, 1, HeadTileCols,
+                                   1, HeadTileCols> s_row_0;
+      TASSIGN(s_row_0, SUbAddr);
+      TMOV(acc_ub, g_row_0);
+      TMOV(s_row_0, g_row_0);
+      pipe_barrier(PIPE_V);
 
-      for (int32_t h = 0; h < NumHeads; ++h) {
-        float acc = g_block_ub.GetValue(h);
-        s_block_ub.SetValue(h, acc);
-        for (int32_t i = 1; i < valid; ++i) {
-          acc += g_block_ub.GetValue(i * HeadTileCols + h);
-          s_block_ub.SetValue(i * HeadTileCols + h, acc);
-        }
-        for (int32_t i = valid; i < ChunkSize; ++i) {
-          s_block_ub.SetValue(i * HeadTileCols + h, 0.0f);
-        }
+      for (int32_t i = 1; i < valid; ++i) {
+        chunk_gdn_pto::TileUbDataND<float, 1, HeadTileCols,
+                                     1, HeadTileCols> g_row_i;
+        TASSIGN(g_row_i,
+                GUbAddr + i * HeadTileCols *
+                              static_cast<int32_t>(sizeof(float)));
+        chunk_gdn_pto::TileUbDataND<float, 1, HeadTileCols,
+                                     1, HeadTileCols> s_row_i;
+        TASSIGN(s_row_i,
+                SUbAddr + i * HeadTileCols *
+                              static_cast<int32_t>(sizeof(float)));
+        TADD(s_row_i, acc_ub, g_row_i);
+        pipe_barrier(PIPE_V);
+        TMOV(acc_ub, s_row_i);
+        pipe_barrier(PIPE_V);
       }
 
-      pipe_barrier(PIPE_ALL);
+      set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+      wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
 
       chunk_gdn_pto::copy_ub_to_gm<float, float,
           1, 1, 1, ChunkSize, HeadTileCols,
@@ -100,8 +120,7 @@ AICORE void cumsum_kernel(
       int64_t nc = (slen + ChunkSize - 1) / ChunkSize;
 
       for (int64_t c = 0; c < nc; ++c) {
-        if (gi % static_cast<int64_t>(block_num) ==
-            static_cast<int64_t>(cid)) {
+        if (gi % num_vec_workers == worker_id) {
           int64_t chunk_start = bos + c * ChunkSize;
           int64_t remaining = slen - c * ChunkSize;
           int32_t valid = static_cast<int32_t>(
@@ -116,22 +135,35 @@ AICORE void cumsum_kernel(
           set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
           wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
-          set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-          wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
+          chunk_gdn_pto::TileUbDataND<float, 1, HeadTileCols,
+                                       1, HeadTileCols> g_row_0;
+          TASSIGN(g_row_0, GUbAddr);
+          chunk_gdn_pto::TileUbDataND<float, 1, HeadTileCols,
+                                       1, HeadTileCols> s_row_0;
+          TASSIGN(s_row_0, SUbAddr);
+          TMOV(acc_ub, g_row_0);
+          TMOV(s_row_0, g_row_0);
+          pipe_barrier(PIPE_V);
 
-          for (int32_t h = 0; h < NumHeads; ++h) {
-            float acc = g_block_ub.GetValue(h);
-            s_block_ub.SetValue(h, acc);
-            for (int32_t i = 1; i < valid; ++i) {
-              acc += g_block_ub.GetValue(i * HeadTileCols + h);
-              s_block_ub.SetValue(i * HeadTileCols + h, acc);
-            }
-            for (int32_t i = valid; i < ChunkSize; ++i) {
-              s_block_ub.SetValue(i * HeadTileCols + h, 0.0f);
-            }
+          for (int32_t i = 1; i < valid; ++i) {
+            chunk_gdn_pto::TileUbDataND<float, 1, HeadTileCols,
+                                         1, HeadTileCols> g_row_i;
+            TASSIGN(g_row_i,
+                    GUbAddr + i * HeadTileCols *
+                                  static_cast<int32_t>(sizeof(float)));
+            chunk_gdn_pto::TileUbDataND<float, 1, HeadTileCols,
+                                         1, HeadTileCols> s_row_i;
+            TASSIGN(s_row_i,
+                    SUbAddr + i * HeadTileCols *
+                                  static_cast<int32_t>(sizeof(float)));
+            TADD(s_row_i, acc_ub, g_row_i);
+            pipe_barrier(PIPE_V);
+            TMOV(acc_ub, s_row_i);
+            pipe_barrier(PIPE_V);
           }
 
-          pipe_barrier(PIPE_ALL);
+          set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+          wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
 
           chunk_gdn_pto::copy_ub_to_gm<float, float,
               1, 1, 1, ChunkSize, HeadTileCols,

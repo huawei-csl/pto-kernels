@@ -23,7 +23,7 @@ AICORE void wy_fast_kernel(
     __gm__ half *workspace_a1_handle, __gm__ half *workspace_a2_handle,
     __gm__ half *W_handle, __gm__ half *U_handle,
     __gm__ int32_t *cu_seqlens,
-    int64_t batch_size, int64_t seq_len,
+    int64_t batch_size, int64_t seq_len, int64_t total_tokens,
     uint64_t ffts_addr)
 {
   constexpr int32_t HalfChunk = ChunkSize / 2;
@@ -138,16 +138,14 @@ AICORE void wy_fast_kernel(
           remaining < ChunkSize ? remaining : ChunkSize);
       int64_t chunk_token_start = bos + chunk_start;
 
-      // Load beta from BSND [B,S,H]
-      chunk_gdn_pto::TileUbDataND<half, ChunkSize, BetaHeadTileCols,
-                                   ChunkSize, BetaHeadTileCols> beta_block_ub;
-      TASSIGN(beta_block_ub, BetaBlockUbAddr);
+      // Beta is pre-transposed to [H, total_tokens] for contiguous loads.
       chunk_gdn_pto::copy_gm_to_ub<half, half,
-          1, 1, 1, ChunkSize, BetaHeadTileCols,
-          1, 1, 1, NumHeads, 1,
-          ChunkSize, BetaHeadTileCols, pto::PadValue::Zero>(
-          Beta_handle + chunk_token_start * NumHeads,
-          BetaBlockUbAddr, 0, valid_rows, NumHeads);
+          1, 1, 1, 1, ChunkSize,
+          1, 1, 1, 1, 1,
+          1, ChunkSize, pto::PadValue::Zero>(
+          Beta_handle + static_cast<int64_t>(head_idx) * total_tokens +
+              chunk_token_start,
+          BetaHalfUbAddr, 0, 1, valid_rows);
 
       // Load A from BSND [B,S,H,C]
       int64_t a_gm_offset =
@@ -164,19 +162,6 @@ AICORE void wy_fast_kernel(
 
       set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
       wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
-
-      set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-      wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-
-      for (int32_t i = 0; i < valid_rows; ++i) {
-        beta_ub_half.SetValue(i,
-            beta_block_ub.GetValue(i * BetaHeadTileCols + head_idx));
-      }
-      for (int32_t i = valid_rows; i < ChunkSize; ++i) {
-        beta_ub_half.SetValue(i, static_cast<half>(0.0f));
-      }
-
-      pipe_barrier(PIPE_ALL);
 
       TCVT(beta_ub, beta_ub_half, pto::RoundMode::CAST_NONE);
       pipe_barrier(PIPE_V);
@@ -201,32 +186,17 @@ AICORE void wy_fast_kernel(
           A2HalfUbAddr, 0, HalfChunk, ChunkSize);
       chunk_gdn_pto::set_cross_flag<PIPE_MTE3>(2, 2);
 
-      // Load g_sum from BSND [B,S,H]
-      chunk_gdn_pto::TileUbDataND<float, ChunkSize, GHeadTileCols,
-                                   ChunkSize, GHeadTileCols> g_block_ub;
-      TASSIGN(g_block_ub, GBlockUbAddr);
+      // G is pre-transposed to [H, total_tokens] for contiguous loads.
       chunk_gdn_pto::copy_gm_to_ub<float, float,
-          1, 1, 1, ChunkSize, GHeadTileCols,
-          1, 1, 1, NumHeads, 1,
-          ChunkSize, GHeadTileCols, pto::PadValue::Zero>(
-          G_handle + chunk_token_start * NumHeads,
-          GBlockUbAddr, 0, valid_rows, NumHeads);
+          1, 1, 1, 1, ChunkSize,
+          1, 1, 1, 1, 1,
+          1, ChunkSize, pto::PadValue::Zero>(
+          G_handle + static_cast<int64_t>(head_idx) * total_tokens +
+              chunk_token_start,
+          GUbAddr, 0, 1, valid_rows);
 
       set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
       wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
-
-      set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-      wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-
-      for (int32_t i = 0; i < valid_rows; ++i) {
-        g_ub.SetValue(i,
-            g_block_ub.GetValue(i * GHeadTileCols + head_idx));
-      }
-      for (int32_t i = valid_rows; i < ChunkSize; ++i) {
-        g_ub.SetValue(i, 0.0f);
-      }
-
-      pipe_barrier(PIPE_ALL);
 
       TEXP(g_ub, g_ub);
       pipe_barrier(PIPE_V);
@@ -272,16 +242,14 @@ AICORE void wy_fast_kernel(
             int64_t chunk_token_start = bos + chunk_start;
             int32_t head_idx = h;
 
-            chunk_gdn_pto::TileUbDataND<half, ChunkSize, BetaHeadTileCols,
-                                         ChunkSize, BetaHeadTileCols>
-                beta_block_ub;
-            TASSIGN(beta_block_ub, BetaBlockUbAddr);
+            // Beta is pre-transposed to [H, total_tokens] for contiguous loads.
             chunk_gdn_pto::copy_gm_to_ub<half, half,
-                1, 1, 1, ChunkSize, BetaHeadTileCols,
-                1, 1, 1, NumHeads, 1,
-                ChunkSize, BetaHeadTileCols, pto::PadValue::Zero>(
-                Beta_handle + chunk_token_start * NumHeads,
-                BetaBlockUbAddr, 0, valid_rows, NumHeads);
+                1, 1, 1, 1, ChunkSize,
+                1, 1, 1, 1, 1,
+                1, ChunkSize, pto::PadValue::Zero>(
+                Beta_handle + static_cast<int64_t>(head_idx) * total_tokens +
+                    chunk_token_start,
+                BetaHalfUbAddr, 0, 1, valid_rows);
 
             int64_t a_gm_offset =
                 ((chunk_token_start +
@@ -297,20 +265,6 @@ AICORE void wy_fast_kernel(
 
             set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
             wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
-
-            set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-            wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-
-            for (int32_t i = 0; i < valid_rows; ++i) {
-              beta_ub_half.SetValue(i,
-                  beta_block_ub.GetValue(
-                      i * BetaHeadTileCols + head_idx));
-            }
-            for (int32_t i = valid_rows; i < ChunkSize; ++i) {
-              beta_ub_half.SetValue(i, static_cast<half>(0.0f));
-            }
-
-            pipe_barrier(PIPE_ALL);
 
             TCVT(beta_ub, beta_ub_half, pto::RoundMode::CAST_NONE);
             pipe_barrier(PIPE_V);
@@ -335,33 +289,17 @@ AICORE void wy_fast_kernel(
                 A2HalfUbAddr, 0, HalfChunk, ChunkSize);
             chunk_gdn_pto::set_cross_flag<PIPE_MTE3>(2, 2);
 
-            chunk_gdn_pto::TileUbDataND<float, ChunkSize, GHeadTileCols,
-                                         ChunkSize, GHeadTileCols>
-                g_block_ub;
-            TASSIGN(g_block_ub, GBlockUbAddr);
+            // G is pre-transposed to [H, total_tokens] for contiguous loads.
             chunk_gdn_pto::copy_gm_to_ub<float, float,
-                1, 1, 1, ChunkSize, GHeadTileCols,
-                1, 1, 1, NumHeads, 1,
-                ChunkSize, GHeadTileCols, pto::PadValue::Zero>(
-                G_handle + chunk_token_start * NumHeads,
-                GBlockUbAddr, 0, valid_rows, NumHeads);
+                1, 1, 1, 1, ChunkSize,
+                1, 1, 1, 1, 1,
+                1, ChunkSize, pto::PadValue::Zero>(
+                G_handle + static_cast<int64_t>(head_idx) * total_tokens +
+                    chunk_token_start,
+                GUbAddr, 0, 1, valid_rows);
 
             set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
             wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
-
-            set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-            wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-
-            for (int32_t i = 0; i < valid_rows; ++i) {
-              g_ub.SetValue(i,
-                  g_block_ub.GetValue(
-                      i * GHeadTileCols + head_idx));
-            }
-            for (int32_t i = valid_rows; i < ChunkSize; ++i) {
-              g_ub.SetValue(i, 0.0f);
-            }
-
-            pipe_barrier(PIPE_ALL);
 
             TEXP(g_ub, g_ub);
             pipe_barrier(PIPE_V);
@@ -569,7 +507,7 @@ extern "C" __global__ AICORE void launch_wy_fast(
     __gm__ uint8_t *workspace_a1_handle, __gm__ uint8_t *workspace_a2_handle,
     __gm__ uint8_t *W_handle, __gm__ uint8_t *U_handle,
     __gm__ uint8_t *cu_seqlens,
-    int64_t batch_size, int64_t seq_len,
+    int64_t batch_size, int64_t seq_len, int64_t total_tokens,
     uint64_t ffts_addr)
 {
   wy_fast_kernel<GDN_H, GDN_D, GDN_C>(
@@ -583,7 +521,7 @@ extern "C" __global__ AICORE void launch_wy_fast(
       reinterpret_cast<__gm__ half *>(W_handle),
       reinterpret_cast<__gm__ half *>(U_handle),
       reinterpret_cast<__gm__ int32_t *>(cu_seqlens),
-      batch_size, seq_len, ffts_addr);
+      batch_size, seq_len, total_tokens, ffts_addr);
 }
 
 extern "C" void call_kernel(
@@ -592,7 +530,7 @@ extern "C" void call_kernel(
     uint8_t *workspace_a1, uint8_t *workspace_a2,
     uint8_t *w, uint8_t *u,
     uint8_t *cu_seqlens,
-    int64_t batch_size, int64_t seq_len)
+    int64_t batch_size, int64_t seq_len, int64_t total_tokens)
 {
   uint32_t fftsLen{0};
   uint64_t fftsAddr{0};
@@ -602,5 +540,5 @@ extern "C" void call_kernel(
       workspace_a1, workspace_a2,
       w, u,
       cu_seqlens,
-      batch_size, seq_len, fftsAddr);
+      batch_size, seq_len, total_tokens, fftsAddr);
 }

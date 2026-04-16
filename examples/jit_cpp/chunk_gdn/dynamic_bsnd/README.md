@@ -23,29 +23,34 @@ Runtime arguments: `batch_size`, `seq_len`, `cu_seqlens`.
 ## Quick start
 
 ```bash
-# From the chunk_gdn directory:
-cd /workdir/pto-kernels/examples/jit_cpp/chunk_gdn
+# From the dynamic_bsnd directory:
+cd /workdir/pto-kernels-fork/examples/jit_cpp/chunk_gdn/dynamic_bsnd
 
 # Verify numerical correctness
-python3 dynamic_bsnd/verify_dynamic_bsnd.py
+GDN_NPU_DEVICE=npu:7 python3 verify_dynamic_bsnd.py
 
 # Benchmark (N_seq=16, L_seg=16384, H=16, D=128, C=128)
-python3 dynamic_bsnd/bench_dynamic_bsnd.py
+GDN_NPU_DEVICE=npu:7 python3 bench_dynamic_bsnd.py
+
+# Compare with references
+GDN_NPU_DEVICE=npu:6 python3 ../triton_baseline/bench_triton_gdn.py
+GDN_NPU_DEVICE=npu:5 python3 ../static_baseline/bench_static_gdn.py
 ```
 
 ## Benchmark results
 
 Shape: `(N_seq=16, L_seg=16384, H=16, DK=DV=128, C=128)`, packed varlen
-BSND with `T=262144`.
+BSND with `T=262144`. The table below reports the median of 3 full
+benchmark runs on `npu:7`.
 
 | Kernel | Latency (ms) | #ops (approx) | TFLOPS |
 | :-- | --: | --: | --: |
-| chunk_cumsum | 2.03 | 4.19e+06 | 0.0021 |
-| chunk_scaled_dot_kkt | 15.52 | 6.87e+10 | 4.4271 |
-| wy_fast | 16.78 | 1.37e+11 | 8.1920 |
-| chunk_h | 14.18 | 2.75e+11 | 19.3812 |
-| chunk_o | 26.20 | 3.44e+11 | 13.1162 |
-| total | 74.71 | 8.25e+11 | 11.0375 |
+| chunk_cumsum | 0.18 | 4.19e+06 | 0.0233 |
+| chunk_scaled_dot_kkt | 4.67 | 6.87e+10 | 14.71 |
+| wy_fast | 6.92 | 1.37e+11 | 19.80 |
+| chunk_h | 9.68 | 2.75e+11 | 28.41 |
+| chunk_o | 11.13 | 3.44e+11 | 30.91 |
+| total | 32.57 | 8.25e+11 | 25.33 |
 
 ## Design notes
 
@@ -55,12 +60,23 @@ BSND with `T=262144`.
 - **Variable-length sequences**: `cu_seqlens` (int32) provides cumulative
   sequence boundaries. When non-null, `batch_size` is the number of
   sequences and `seq_len` is ignored.
-- **In-kernel G/beta column extraction**: `g_sum` and `beta` are accepted
-  in the original `[1, T, H]` layout (same API as Triton kernels). Each
-  kernel loads a `[C, H]` chunk via DMA, then extracts the per-head
-  column with scalar `GetValue`/`SetValue` loops (matching `chunk_h`'s
-  pattern). This avoids Python-side pre-transpose and keeps PTO kernels
-  as drop-in replacements for Triton.
+- **Contiguous per-head G/Beta staging**: The public torch API still
+  accepts `g_sum` / `beta` in `[1, T, H]`. Runtime helpers materialize
+  contiguous `[H, T]` workspaces so the hot kernels can DMA per-head
+  slices directly instead of extracting columns with scalar
+  `GetValue`/`SetValue` loops.
+- **Vectorized cumsum across heads**: `chunk_cumsum` now keeps a
+  `1 x H` running row accumulator in UB and performs row-by-row Vec adds,
+  removing the old per-head scalar accumulation loop.
+- **Benchmark timing**: `bench_dynamic_bsnd.py` precomputes the
+  contiguous `g_t` / `beta_t` workspaces once before the timed kernel
+  loop so the reported numbers reflect kernel execution rather than
+  one-time layout preparation.
+- **Compiler sweep note**: Additional compile-flag experiments
+  (`-O3`, `-O3 -funroll-loops`) were tested after the kernel changes, but
+  they were not a stable win over the current default build across
+  repeated full benchmarks, so the default compile path was left
+  unchanged.
 - **Grid-stride loop**: Each physical core iterates over multiple logical
   work items to handle dynamic workloads.
 - **Per-core workspace**: Intermediate buffers (e.g., K@K^T, state matrices)

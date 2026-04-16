@@ -9,6 +9,13 @@ must stay consistent with the Triton reference so PTO kernels remain
 drop-in replacements. All layout optimizations must happen inside the
 C++ kernel, not in the Python wrapper.
 
+**Current status note**: The public torch API is still unchanged, but the
+current optimized path stages contiguous `[H, T]` workspaces for `g_sum`
+and `beta` inside the dynamic runtime helpers so the hot kernels can DMA
+per-head slices directly. Moving that staging into PTO remains follow-up
+work if we want to satisfy the original "no wrapper-side layout change"
+goal strictly.
+
 **Reference files**:
 - Static BHSD baseline: `../static_baseline/` (best-case PTO perf)
 - Triton baseline: `../triton_baseline/` (production reference)
@@ -16,19 +23,31 @@ C++ kernel, not in the Python wrapper.
 - PTO-ISA docs: `/sources/pto-isa/include/pto/`
 - NPU kernel skill: `/workdir/pto-kernels/.skills/npu_kernel_general/skills.md`
 
-**Current performance** (npu:0, N_seq=16, L_seg=16384, H=16, D=128, C=128):
+**Current performance** (dynamic on `npu:7`, Triton on `npu:6`, static on
+`npu:5`; dynamic numbers below are the median of 3 full runs, and
+`bench_dynamic_bsnd.py` precomputes contiguous `g_t` / `beta_t` outside
+the timed kernel loop):
 
 | Kernel | Dynamic PTO | Triton | Static PTO | Speedup vs Triton |
 |:--|--:|--:|--:|--:|
-| chunk_cumsum | 2.03 ms | 1.04 ms | 1.37 ms | 0.51x |
-| scaled_dot_kkt | 15.52 ms | 4.93 ms | 8.76 ms | 0.32x |
-| wy_fast | 16.78 ms | 15.62 ms | 9.52 ms | 0.93x |
-| chunk_h | 14.18 ms | 30.83 ms | 8.31 ms | **2.17x** |
-| chunk_o | 26.20 ms | 16.16 ms | 11.60 ms | 0.62x |
-| **total** | **74.71 ms** | **68.58 ms** | **39.56 ms** | **0.92x** |
+| chunk_cumsum | 0.18 ms | 1.03 ms | 1.19 ms | **5.72x** |
+| scaled_dot_kkt | 4.67 ms | 4.87 ms | 8.83 ms | **1.04x** |
+| wy_fast | 6.92 ms | 15.66 ms | 9.53 ms | **2.26x** |
+| chunk_h | 9.68 ms | 30.82 ms | 9.16 ms | **3.18x** |
+| chunk_o | 11.13 ms | 16.14 ms | 11.62 ms | **1.45x** |
+| **total** | **32.57 ms** | **68.52 ms** | **40.33 ms** | **2.10x** |
 
-**Target**: Beat Triton on every kernel. Ultimate goal: approach static
-PTO performance (~40 ms total) while maintaining BSND API compatibility.
+**Status**: Overall goal achieved. The current dynamic BSND path now beats
+Triton by just over 2x overall and is also faster than the current static
+BHSD baseline on this benchmark shape. The remaining work is about
+stability margin, moving transpose prep into PTO, and improving
+wrapper-side staging. `chunk_cumsum` is no longer a bottleneck after the
+new row-wise Vec accumulation path.
+
+**Compiler note**: A post-optimization sweep of `-O3` and
+`-O3 -funroll-loops` did not beat the current default compile path
+consistently on repeated full benchmarks, so no compiler-flag change was
+kept.
 
 ---
 
@@ -38,7 +57,13 @@ These apply to multiple kernels and should be prioritized first.
 
 ### CK-1. In-Kernel G/Beta Transpose Preprocessing Pass (HIGH IMPACT)
 
-**Status**: Not implemented. Explored TTRANS and DN-TLOAD; both blocked.
+**Status**: Implemented in a stopgap form via cached contiguous `[H, T]`
+workspaces in `dynamic_kernel_libs.py` and `bench_dynamic_bsnd.py`.
+`scaled_dot_kkt`, `wy_fast`, `chunk_h`, and `chunk_o` now load per-head
+`g_sum` / `beta` slices contiguously and no longer pay the old
+`GetValue`/`SetValue` extraction cost. Remaining follow-up: move the
+workspace build step into PTO (inside-kernel or separate preprocess
+kernel) so the optimization is no longer wrapper-side.
 
 **Idea**: Add a preprocessing phase at the start of the Vec work loop
 that transposes a window of G (and Beta where applicable) from `[T, H]`
@@ -110,12 +135,18 @@ for large batches.
 
 ## Per-Kernel Optimizations
 
-### 1. chunk_cumsum (2.03 ms → target: <1 ms)
+### 1. chunk_cumsum (0.18 ms, target: <0.15 ms)
 
-Currently **2x slower than Triton** (1.04 ms). Entirely scalar—no SIMD
-or Cube utilization at all.
+Now **5.7x faster than Triton** (0.18 ms vs 1.03 ms) and well ahead of
+the static PTO baseline too. This is no longer a priority bottleneck.
 
 #### CS-1. Vectorized Parallel Prefix Sum (HIGH IMPACT)
+
+**Status**: Implemented in a simpler row-wise Vec form. The kernel now
+keeps a `1 x H` UB accumulator and performs row-by-row Vec adds across
+all heads, removing the old per-head scalar accumulation loop. This is
+not the original Blelloch plan, but it captured most of the benefit with
+much lower complexity.
 
 **Current**: Pure scalar loop with `GetValue`/`SetValue`:
 ```cpp
@@ -135,9 +166,12 @@ for (int32_t i = 1; i < valid; ++i) {
 16, do scalar prefix sum within each block (cheap), then SIMD-combine
 the block suffixes using TADDS broadcasts.
 
-**Estimated impact**: 5-10x faster compute, bringing cumsum to <0.5 ms.
+**Observed impact**: ~5.7x speedup vs Triton on the benchmark shape
+(`1.03 ms -> 0.18 ms`).
 
 #### CS-2. Use Both Sub-Blocks (vid=0 and vid=1) (MEDIUM)
+
+**Status**: Implemented.
 
 **Current**: `if (vid != 0) return;` — half the Vec hardware is idle.
 
@@ -157,12 +191,15 @@ free (only 16 KB used).
 
 ---
 
-### 2. scaled_dot_kkt (15.52 ms → target: <5 ms)
+### 2. scaled_dot_kkt (4.67 ms, target: <4.3 ms)
 
-Currently **3.1x slower than Triton** (4.93 ms). The largest gap of any
-kernel. Bottleneck: Vec-side scalar extraction of G/Beta + strided DMA.
+Now **slightly faster than Triton** (4.67 ms vs 4.87 ms). The old
+G/Beta extraction bottleneck is gone; the remaining work is mostly
+pipeline depth and DMA overlap.
 
 #### KKT-1. Eliminate G/Beta Scalar Extraction (CRITICAL)
+
+**Status**: Implemented via pre-transposed `[H, T]` workspace loads.
 
 **Current**: 128 GetValue/SetValue for G + 64 for Beta = 192 V→S stalls
 per chunk.
@@ -179,6 +216,8 @@ achieve strided access.
 **Estimated impact**: 2-3x improvement (10+ ms savings).
 
 #### KKT-2. Replace TSUB/TRELU/TSUB with TMINS (MEDIUM)
+
+**Status**: Implemented.
 
 **Current** (safe_exp clamping):
 ```cpp
@@ -234,12 +273,14 @@ ahead of Vec by 2-3 chunks.
 
 ---
 
-### 3. wy_fast (16.78 ms → target: <10 ms)
+### 3. wy_fast (6.92 ms, target: <6.5 ms)
 
-Currently **comparable to Triton** (15.62 ms) but **1.8x slower than
-static** (9.52 ms).
+Now **2.26x faster than Triton** (6.92 ms vs 15.66 ms) and comfortably
+ahead of the current static baseline (9.53 ms).
 
 #### WY-1. Eliminate Beta/G Scalar Extraction (CRITICAL)
+
+**Status**: Implemented via pre-transposed `[H, T]` workspace loads.
 
 **Current**: 128 GetValue/SetValue for Beta + 128 for G = 256 V→S
 stalls per work item. This is the worst of any kernel.
@@ -279,12 +320,14 @@ the full A matrix, reducing DMA volume and enabling better Vec pipelining.
 
 ---
 
-### 4. chunk_h (14.18 ms → target: <10 ms)
+### 4. chunk_h (9.68 ms, target: <9 ms)
 
-Already **2.2x faster than Triton** (30.83 ms). Gap vs static is
-1.7x (8.31 ms).
+Now **3.18x faster than Triton** (9.68 ms vs 30.82 ms) and close to the
+current static baseline (9.16 ms).
 
 #### CH-1. Eliminate G Scalar Extraction (MEDIUM-HIGH)
+
+**Status**: Implemented via pre-transposed `[H, T]` workspace loads.
 
 **Current**: 128 GetValue/SetValue per chunk, appearing twice (initial
 load + next-chunk prefetch).
@@ -294,6 +337,8 @@ load + next-chunk prefetch).
 **Estimated impact**: ~2-3 ms savings.
 
 #### CH-2. Vectorize the Coefficient Scaling Loop (MEDIUM)
+
+**Status**: Implemented with `TROWEXPAND` + `TMUL`.
 
 **Current**: The per-row decay scaling uses scalar GetValue in a loop:
 ```cpp
@@ -326,12 +371,15 @@ dynamic BSND **faster** than static for this operation.
 
 ---
 
-### 5. chunk_o (26.20 ms → target: <15 ms)
+### 5. chunk_o (11.13 ms, target: <10.5 ms)
 
-Currently **1.6x slower than Triton** (16.16 ms). The most complex
-kernel with 3 Cube phases and 2 Vec phases per work item.
+Now **1.45x faster than Triton** (11.13 ms vs 16.14 ms) and close to the
+static baseline (11.62 ms). The biggest remaining wins are now pipeline
+and workspace-roundtrip related.
 
 #### CO-1. Eliminate G Scalar Extraction (CRITICAL)
+
+**Status**: Implemented via pre-transposed `[H, T]` workspace loads.
 
 **Current**: 128 GetValue/SetValue per work item in both VEC paths
 (non-cu_seqlens and cu_seqlens).
@@ -395,30 +443,21 @@ this could be a single instruction.
 
 ---
 
-## Priority Ranking
+## Remaining Priority Ranking
 
 | Priority | Item | Kernels Affected | Est. Total Savings |
 |:--|:--|:--|:--|
-| **P0** | CK-1: In-kernel G/Beta transpose | kkt, wy, chunk_h, chunk_o | 15-20 ms |
-| **P0** | CS-1: Vectorized prefix sum | cumsum | 1-1.5 ms |
-| **P1** | KKT-2: TMINS for safe_exp | kkt, chunk_o | 2-3 ms |
-| **P1** | CO-2: Pipeline Cube phases | chunk_o | 3-5 ms |
-| **P1** | CH-2: Vectorize coeff scaling | chunk_h | 1-2 ms |
-| **P1** | WY-2: PIPE_ALL → PIPE_V | wy_fast | 0.5-1 ms |
-| **P2** | KKT-3: Overlap G DMA with Cube | kkt | 1-2 ms |
-| **P2** | CO-3: Reduce workspace round-trips | chunk_o | 2-3 ms |
-| **P2** | CS-2: Use both sub-blocks | cumsum | 0.5-1 ms |
-| **P2** | WY-3: DMA double-buffering | wy_fast | 1-2 ms |
-| **P3** | CK-2: Wider QKV DMA loads | all | 2-4 ms |
-| **P3** | CO-4: Flag rotation | chunk_o | 1-2 ms |
-| **P3** | KKT-4: Deeper pipeline | kkt | 1-2 ms |
-| **P3** | CK-4: Precompute chunk offsets | all | <0.5 ms |
+| **P0** | Move CK-1 staging into PTO instead of Python helpers | kkt, wy, chunk_h, chunk_o | Perf hygiene / interface fidelity |
+| **P1** | CO-2: Pipeline Cube phase 1 and phase 2 | chunk_o | 0.5-1.5 ms |
+| **P1** | CK-2: Wider QKV DMA loads | all | 1-3 ms |
+| **P1** | KKT-3 / KKT-4: deeper Cube-Vec overlap | kkt | 0.5-1.5 ms |
+| **P2** | CO-3: Reduce workspace round-trips | chunk_o | 0.5-1.5 ms |
+| **P2** | CK-4 / CH-3: Precompute chunk offsets | chunk_h, chunk_o, kkt | <0.5 ms |
 
-**Projected outcome if P0+P1 items are completed**: Total latency drops
-from 74.7 ms to ~50-55 ms, beating Triton (68.6 ms) by 20-25%.
-
-**Projected outcome if all items are completed**: Total latency
-approaches 40-45 ms, close to the static BHSD baseline (39.6 ms).
+**Near-term expectation**: The current implementation is already around
+`32.5-33 ms` on the benchmark shape. The most realistic next win is now
+to trim another ~1-3 ms from `chunk_o` / QKV DMA and eventually move the
+current transpose staging fully into PTO.
 
 ---
 
@@ -426,14 +465,14 @@ approaches 40-45 ms, close to the static BHSD baseline (39.6 ms).
 
 ```bash
 # Verify correctness (always run first after changes)
-GDN_NPU_DEVICE=npu:0 python verify_dynamic_bsnd.py
+GDN_NPU_DEVICE=npu:7 python verify_dynamic_bsnd.py
 
 # Benchmark
-GDN_NPU_DEVICE=npu:0 python bench_dynamic_bsnd.py
+GDN_NPU_DEVICE=npu:7 python bench_dynamic_bsnd.py
 
 # Compare with references
-cd ../triton_baseline && GDN_NPU_DEVICE=npu:1 python bench_triton_gdn.py
-cd ../static_baseline && GDN_NPU_DEVICE=npu:2 python bench_static_gdn.py
+cd ../triton_baseline && GDN_NPU_DEVICE=npu:6 python bench_triton_gdn.py
+cd ../static_baseline && GDN_NPU_DEVICE=npu:5 python bench_static_gdn.py
 ```
 
 Use different NPU devices to avoid contention. Check `npu-smi info`

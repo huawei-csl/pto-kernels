@@ -25,7 +25,7 @@ AICORE void chunk_o_kernel(
     __gm__ half *workspace_qk_gated_handle,
     __gm__ half *O_handle,
     __gm__ int32_t *cu_seqlens,
-    int64_t batch_size, int64_t seq_len,
+    int64_t batch_size, int64_t seq_len, int64_t total_tokens,
     uint64_t ffts_addr)
 {
   constexpr int32_t HalfChunk = ChunkSize / 2;
@@ -388,26 +388,14 @@ AICORE void chunk_o_kernel(
       int64_t chunk_token_start = bos + chunk_start;
 
       chunk_gdn_pto::copy_gm_to_ub<float, float,
-          1, 1, 1, ChunkSize, NumHeads,
-          1, 1, 1, NumHeads, 1,
-          ChunkSize, NumHeads, pto::PadValue::Zero>(
-          G_handle + chunk_token_start * NumHeads,
-          GBlockUbAddr, 0, valid_rows, NumHeads);
+          1, 1, 1, 1, ChunkSize,
+          1, 1, 1, 1, 1,
+          1, ChunkSize, pto::PadValue::Zero>(
+          G_handle + static_cast<int64_t>(head_idx) * total_tokens +
+              chunk_token_start,
+          GUbAddr, 0, 1, valid_rows);
       set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
       wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
-      {
-          chunk_gdn_pto::TileUbDataND<float, ChunkSize, NumHeads,
-                                       ChunkSize, NumHeads> g_block;
-          TASSIGN(g_block, GBlockUbAddr);
-          set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-          wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-          for (int32_t gi = 0; gi < ChunkSize; ++gi) {
-              g_ub.SetValue(gi, g_block.GetValue(
-                  gi * NumHeads + head_idx));
-          }
-      }
-      set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-      wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
 
       chunk_gdn_pto::TileUbDataND<float, 1, HalfChunk,
                                    1, HalfChunk> g_ub_temp_0;
@@ -543,26 +531,14 @@ AICORE void chunk_o_kernel(
             int32_t head_idx = h;
 
             chunk_gdn_pto::copy_gm_to_ub<float, float,
-                1, 1, 1, ChunkSize, NumHeads,
-                1, 1, 1, NumHeads, 1,
-                ChunkSize, NumHeads, pto::PadValue::Zero>(
-                G_handle + chunk_token_start * NumHeads,
-                GBlockUbAddr, 0, valid_rows, NumHeads);
+                1, 1, 1, 1, ChunkSize,
+                1, 1, 1, 1, 1,
+                1, ChunkSize, pto::PadValue::Zero>(
+                G_handle + static_cast<int64_t>(head_idx) * total_tokens +
+                    chunk_token_start,
+                GUbAddr, 0, 1, valid_rows);
             set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
             wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
-            {
-                chunk_gdn_pto::TileUbDataND<float, ChunkSize, NumHeads,
-                                             ChunkSize, NumHeads> g_block;
-                TASSIGN(g_block, GBlockUbAddr);
-                set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-                wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-                for (int32_t gi = 0; gi < ChunkSize; ++gi) {
-                    g_ub.SetValue(gi, g_block.GetValue(
-                        gi * NumHeads + head_idx));
-                }
-            }
-            set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-            wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
 
             chunk_gdn_pto::TileUbDataND<float, 1, HalfChunk,
                                          1, HalfChunk> g_ub_temp_v;
@@ -697,7 +673,7 @@ extern "C" __global__ AICORE void launch_chunk_o(
     __gm__ uint8_t *workspace_qk_gated,
     __gm__ uint8_t *O_handle,
     __gm__ uint8_t *cu_seqlens,
-    int64_t batch_size, int64_t seq_len,
+    int64_t batch_size, int64_t seq_len, int64_t total_tokens,
     uint64_t ffts_addr)
 {
   chunk_o_kernel<GDN_H, GDN_D, GDN_C>(
@@ -712,7 +688,7 @@ extern "C" __global__ AICORE void launch_chunk_o(
       reinterpret_cast<__gm__ half *>(workspace_qk_gated),
       reinterpret_cast<__gm__ half *>(O_handle),
       reinterpret_cast<__gm__ int32_t *>(cu_seqlens),
-      batch_size, seq_len, ffts_addr);
+      batch_size, seq_len, total_tokens, ffts_addr);
 }
 
 extern "C" void call_kernel(
@@ -723,7 +699,7 @@ extern "C" void call_kernel(
     uint8_t *workspace_qk_gated,
     uint8_t *o,
     uint8_t *cu_seqlens,
-    int64_t batch_size, int64_t seq_len)
+    int64_t batch_size, int64_t seq_len, int64_t total_tokens)
 {
   uint32_t fftsLen{0};
   uint64_t fftsAddr{0};
@@ -733,5 +709,5 @@ extern "C" void call_kernel(
       workspace_qk, workspace_qs_qkv, workspace_qk_gated,
       o,
       cu_seqlens,
-      batch_size, seq_len, fftsAddr);
+      batch_size, seq_len, total_tokens, fftsAddr);
 }

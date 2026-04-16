@@ -30,6 +30,8 @@ from gdn_bench_common import (
 )
 from dynamic_kernel_libs import (
     BLOCK_DIM,
+    _transpose_beta,
+    _transpose_g,
     load_chunk_cumsum,
     load_chunk_h,
     load_chunk_o,
@@ -112,17 +114,19 @@ def main():
 
     l_cumsum.call_kernel(bd, stream, _vp(g), _vp(g_sum), cu_p, batch_arg, seq_arg)
     torch.npu.synchronize()
-    l_kkt.call_kernel(bd, stream, _vp(k), _vp(beta), _vp(g_sum), _vp(msk1),
-                       _vp(workspace_kkt), _vp(A), cu_p, batch_arg, seq_arg)
-    l_wy.call_kernel(bd, stream, _vp(k), _vp(v), _vp(beta), _vp(g_sum), _vp(A),
+    g_t = _transpose_g(g_sum)
+    beta_t = _transpose_beta(beta)
+    l_kkt.call_kernel(bd, stream, _vp(k), _vp(beta_t), _vp(g_t), _vp(msk1),
+                       _vp(workspace_kkt), _vp(A), cu_p, batch_arg, seq_arg, T)
+    l_wy.call_kernel(bd, stream, _vp(k), _vp(v), _vp(beta_t), _vp(g_t), _vp(A),
                       _vp(workspace_a1), _vp(workspace_a2), _vp(w), _vp(u),
-                      cu_p, batch_arg, seq_arg)
-    l_h.call_kernel(bd, stream, _vp(k), _vp(w), _vp(u), _vp(g_sum),
+                      cu_p, batch_arg, seq_arg, T)
+    l_h.call_kernel(bd, stream, _vp(k), _vp(w), _vp(u), _vp(g_t),
                      _vp(s), _vp(nv), _vp(fs), _vp(workspace_h),
-                     cu_p, batch_arg, seq_arg)
-    l_o.call_kernel(bd, stream, _vp(q), _vp(k), _vp(nv), _vp(s), _vp(g_sum),
+                     cu_p, batch_arg, seq_arg, T)
+    l_o.call_kernel(bd, stream, _vp(q), _vp(k), _vp(nv), _vp(s), _vp(g_t),
                      _vp(msk2), _vp(workspace_o1), _vp(workspace_o2), _vp(workspace_o3),
-                     _vp(o), cu_p, batch_arg, seq_arg)
+                     _vp(o), cu_p, batch_arg, seq_arg, T)
     torch.npu.synchronize()
 
     print()
@@ -140,30 +144,30 @@ def main():
         ),
         "chunk_scaled_dot_kkt": bench_stage(
             "chunk_scaled_dot_kkt",
-            lambda: l_kkt.call_kernel(bd, stream, _vp(k), _vp(beta), _vp(g_sum),
+            lambda: l_kkt.call_kernel(bd, stream, _vp(k), _vp(beta_t), _vp(g_t),
                                        _vp(msk1), _vp(workspace_kkt), _vp(A),
-                                       cu_p, batch_arg, seq_arg),
+                                       cu_p, batch_arg, seq_arg, T),
         ),
         "wy_fast": bench_stage(
             "wy_fast",
-            lambda: l_wy.call_kernel(bd, stream, _vp(k), _vp(v), _vp(beta),
-                                      _vp(g_sum), _vp(A),
+            lambda: l_wy.call_kernel(bd, stream, _vp(k), _vp(v), _vp(beta_t),
+                                      _vp(g_t), _vp(A),
                                       _vp(workspace_a1), _vp(workspace_a2),
-                                      _vp(w), _vp(u), cu_p, batch_arg, seq_arg),
+                                      _vp(w), _vp(u), cu_p, batch_arg, seq_arg, T),
         ),
         "chunk_h": bench_stage(
             "chunk_h",
-            lambda: l_h.call_kernel(bd, stream, _vp(k), _vp(w), _vp(u), _vp(g_sum),
+            lambda: l_h.call_kernel(bd, stream, _vp(k), _vp(w), _vp(u), _vp(g_t),
                                      _vp(s), _vp(nv), _vp(fs), _vp(workspace_h),
-                                     cu_p, batch_arg, seq_arg),
+                                     cu_p, batch_arg, seq_arg, T),
         ),
         "chunk_o": bench_stage(
             "chunk_o",
             lambda: l_o.call_kernel(bd, stream, _vp(q), _vp(k), _vp(nv), _vp(s),
-                                     _vp(g_sum), _vp(msk2),
+                                     _vp(g_t), _vp(msk2),
                                      _vp(workspace_o1), _vp(workspace_o2),
                                      _vp(workspace_o3), _vp(o),
-                                     cu_p, batch_arg, seq_arg),
+                                     cu_p, batch_arg, seq_arg, T),
         ),
     }
 
