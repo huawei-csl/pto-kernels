@@ -140,7 +140,7 @@ def _test_tri_inv_rec_unroll_bsnd(
     assert frob_error <= ftol, f"frob_error: {frob_error}"
 
 
-@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16], ids=str)
 @pytest.mark.parametrize("n", [16, 32, 64, 128])
 @pytest.mark.parametrize("block_dim_x", [1, 2, 3, 4])
 @pytest.mark.parametrize("block_dim_y", [2, 4, 8])
