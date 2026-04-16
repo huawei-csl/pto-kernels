@@ -60,10 +60,14 @@ include_directories(${ASCEND_CANN_PACKAGE_PATH}/include
 
 include(FetchContent)
 
+# certain operations need newer pto-isa header, not CANN 8.5.0 default (pin
+# commit on 2026/03/16
+# https://gitcode.com/cann/pto-isa/commit/313817be696792a4e16a7ea5994ec98e34391613?ref=master)
+# to use default CANN 8.5.0 headers set GIT_TAG "8.5.0"
 FetchContent_Declare(
   libpto_isa_headers
   GIT_REPOSITORY https://gitcode.com/cann/pto-isa.git
-  GIT_TAG 8.5.0)
+  GIT_TAG "313817be696792a4e16a7ea5994ec98e34391613")
 
 FetchContent_Populate(libpto_isa_headers)
 
@@ -92,7 +96,10 @@ set(KERNEL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/csrc/kernel/kernel_simple_matmul.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/csrc/kernel/kernel_batch_matrix_square.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/csrc/kernel/kernel_tri_inv_rec_unroll.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/csrc/kernel/kernel_tri_inv_trick.cpp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/csrc/kernel/kernel_tri_inv_trick.cpp
+#    ${CMAKE_CURRENT_SOURCE_DIR}/csrc/kernel/kernel_csr_gather.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/csrc/kernel/kernel_swiglu.cpp
+)
 
 set(NO_WORKSPACE_KERNEL_LIB
     ${CMAKE_CURRENT_BINARY_DIR}/libno_workspace_kernel.so)

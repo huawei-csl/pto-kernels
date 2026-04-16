@@ -14,11 +14,9 @@ for the full License text.
 
 #include "utils.h"
 
-extern "C" void call_vabs_fp16(uint32_t blockDim, void* stream, void* x,
-                               void* y, uint32_t num_elements);
+extern "C" void vabs_fp16(void* x, void* y, uint32_t num_elements);
 
-extern "C" void call_vabs_fp32(uint32_t blockDim, void* stream, void* x,
-                               void* y, uint32_t num_elements);
+extern "C" void vabs_fp32(void* x, void* y, uint32_t num_elements);
 
 namespace pto_isa_ops {
 /**
@@ -46,12 +44,9 @@ at::Tensor run_abs(const at::Tensor& x) {
 
   auto acl_stream = c10_npu::getCurrentNPUStream().stream(true);
   if (dtype == at::kHalf) {
-    call_vabs_fp16(block_dim, acl_stream, ConvertType(x), ConvertType(z),
-                   total_size);
+    EXEC_KERNEL_CMD(vabs_fp16, block_dim, x, z, total_size);
   } else if (dtype == at::kFloat) {
-    call_vabs_fp32(block_dim, acl_stream, ConvertType(x), ConvertType(z),
-                   total_size);
-
+    EXEC_KERNEL_CMD(vabs_fp32, block_dim, x, z, total_size);
   } else {
     throw std::runtime_error("Unsupported dtype for `pto_abs` kernel");
   }

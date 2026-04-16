@@ -816,12 +816,3 @@ extern "C" __global__ AICORE void tri_inv_rec_unroll_fp16(
     }
   }
 }
-
-extern "C" void call_tri_inv_rec_unroll_fp16(
-    uint32_t block_dim, void* stream, uint8_t* tensor_out, uint8_t* tensor_in,
-    uint8_t* minus_identity_in, uint32_t matrix_size, uint32_t num_matrices,
-    uint32_t num_bsnd_heads, uint8_t* cu_seqlens) {
-  tri_inv_rec_unroll_fp16<<<block_dim, nullptr, stream>>>(
-      tensor_out, tensor_in, minus_identity_in, matrix_size, num_matrices,
-      num_bsnd_heads, cu_seqlens);
-}

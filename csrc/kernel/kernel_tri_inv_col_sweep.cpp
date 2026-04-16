@@ -73,7 +73,6 @@ AICORE void runTTriInv(__gm__ T* vec_in, __gm__ T* vec_out,
   TASSIGN(diff, UB_ZERO_ADDR + matrix_in_size + b_size);
   TileVecData A_k(1, S);
 
-  // synchronization operations between hardware pipelines
   set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID0);
   set_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
 
@@ -93,45 +92,62 @@ AICORE void runTTriInv(__gm__ T* vec_in, __gm__ T* vec_out,
     GlobalData global_out(vec_out);
     TASSIGN(global_in, vec_in + (global_tile_id + tile_id) * tile_len);
     TASSIGN(global_out, vec_out + (global_tile_id + tile_id) * tile_len);
-    // load data from global memory to UB buffer
     TLOAD(matrix_in, global_in);
 
     set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
     wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
-    // For every output column j-th
-    for (int32_t j = 0; j < S; j++) {
-      // Column sweep on each column.
-
-      // `b` vector is  j-th standard vector (e_j).
+    // Find inverse by doing back-sub for each basis vector b_j
+    // Solve A x = e_j for vector x
+    for (int32_t j = S - 1; j >= 0; j--) {
       TEXPANDS(b, static_cast<T>(0));
       set_flag(PIPE_V, PIPE_S, EVENT_ID0);
       wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
       b.SetValue(j, static_cast<T>(1));
 
-      // Solve A x = e_j for vector x
-      // Must be offset by UB address
       TASSIGN(x, out_start_ub_addr + j * S * sizeof(T));
 
-      for (int32_t k = S - 1; k >= 0; k--) {
+      if (j == 0) {
+        x.SetValue(0, static_cast<T>(1));
+        continue;
+      }
+
+      TASSIGN(A_k, j * S * sizeof(T));
+      set_flag(PIPE_V, PIPE_S, EVENT_ID1);
+
+      pipe_barrier(PIPE_V);
+      TSUB(b, b, diff);
+      set_flag(PIPE_V, PIPE_S, EVENT_ID0);
+
+      wait_flag(PIPE_V, PIPE_S, EVENT_ID1);
+      // Scalar core only supports fp32 arithmetic, so use float rather than T
+      float xk = -static_cast<float>(diff.GetValue(j - 1));
+      float xkp1 = 1.0f;
+
+      for (int32_t k = j - 1; k >= 1; --k) {
         TASSIGN(A_k, k * S * sizeof(T));
 
-        set_flag(PIPE_V, PIPE_S, EVENT_ID0);
+        // Keep one x lane buffered so the scalar write from the previous
+        // step overlaps the current vector update.
+        TMULS(diff, A_k, static_cast<T>(xk));
+        set_flag(PIPE_V, PIPE_S, EVENT_ID1);
+
+        x.SetValue(k + 1, static_cast<T>(xkp1));
         wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-        // x[k] = b[k] / A[k, k]
-        const T alpha = b.GetValue(k);
-        x.SetValue(k, alpha);
+        const float bkm1 = static_cast<float>(b.GetValue(k - 1));
+        pipe_barrier(PIPE_V);
+        TSUB(b, b, diff);
+        set_flag(PIPE_V, PIPE_S, EVENT_ID0);
 
-        if (k > 0) {
-          // b[:k] -= A[:k, k] * x[k]
-          TEXPANDS(diff, static_cast<T>(0));
-          TMULS(diff, A_k, alpha);
-          set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-          wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
+        xkp1 = xk;
 
-          TSUB(b, b, diff);
-        }
+        wait_flag(PIPE_V, PIPE_S, EVENT_ID1);
+        xk = bkm1 - static_cast<float>(diff.GetValue(k - 1));
       }
+
+      wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
+      x.SetValue(1, static_cast<T>(xkp1));
+      x.SetValue(0, static_cast<T>(xk));
     }
 
     set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
