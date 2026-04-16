@@ -24,16 +24,19 @@ AICORE void cumsum_kernel(
   set_ffts_base_addr(ffts_addr);
 
 #if defined(__DAV_C220_VEC__)
+  if (vid != 0) return;
+
   set_mask_norm();
   set_vector_mask(-1, -1);
-
-  if (vid != 0) return;
 
   constexpr int32_t HeadTileCols = ((NumHeads + 7) / 8) * 8;
   constexpr int32_t BlockBytes = ChunkSize * HeadTileCols *
                                  static_cast<int32_t>(sizeof(float));
+  constexpr int32_t RowBytes = HeadTileCols *
+                               static_cast<int32_t>(sizeof(float));
   constexpr int32_t GUbAddr = 0;
   constexpr int32_t SUbAddr = BlockBytes;
+  constexpr int32_t AccUbAddr = BlockBytes * 2;
 
   chunk_gdn_pto::TileUbDataND<float, ChunkSize, HeadTileCols,
                                ChunkSize, HeadTileCols> g_block_ub;
@@ -41,6 +44,9 @@ AICORE void cumsum_kernel(
   chunk_gdn_pto::TileUbDataND<float, ChunkSize, HeadTileCols,
                                ChunkSize, HeadTileCols> s_block_ub;
   TASSIGN(s_block_ub, SUbAddr);
+  chunk_gdn_pto::TileUbDataND<float, 1, HeadTileCols,
+                               1, HeadTileCols> acc_ub;
+  TASSIGN(acc_ub, AccUbAddr);
 
   int64_t num_seqs = batch_size;
 
@@ -66,19 +72,40 @@ AICORE void cumsum_kernel(
       set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
       wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
-      set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-      wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
+      chunk_gdn_pto::TileUbDataND<float, 1, HeadTileCols,
+                                   1, HeadTileCols> g_row_0;
+      TASSIGN(g_row_0, GUbAddr);
+      TMOV(acc_ub, g_row_0);
+      pipe_barrier(PIPE_V);
 
-      for (int32_t h = 0; h < NumHeads; ++h) {
-        float acc = g_block_ub.GetValue(h);
-        s_block_ub.SetValue(h, acc);
-        for (int32_t i = 1; i < valid; ++i) {
-          acc += g_block_ub.GetValue(i * HeadTileCols + h);
-          s_block_ub.SetValue(i * HeadTileCols + h, acc);
-        }
-        for (int32_t i = valid; i < ChunkSize; ++i) {
-          s_block_ub.SetValue(i * HeadTileCols + h, 0.0f);
-        }
+      chunk_gdn_pto::TileUbDataND<float, 1, HeadTileCols,
+                                   1, HeadTileCols> s_row_0;
+      TASSIGN(s_row_0, SUbAddr);
+      TMOV(s_row_0, acc_ub);
+      pipe_barrier(PIPE_V);
+
+      for (int32_t i = 1; i < valid; ++i) {
+        chunk_gdn_pto::TileUbDataND<float, 1, HeadTileCols,
+                                     1, HeadTileCols> g_row_i;
+        TASSIGN(g_row_i, GUbAddr + i * RowBytes);
+        TADD(acc_ub, acc_ub, g_row_i);
+        pipe_barrier(PIPE_V);
+
+        chunk_gdn_pto::TileUbDataND<float, 1, HeadTileCols,
+                                     1, HeadTileCols> s_row_i;
+        TASSIGN(s_row_i, SUbAddr + i * RowBytes);
+        TMOV(s_row_i, acc_ub);
+        pipe_barrier(PIPE_V);
+      }
+
+      TEXPANDS(acc_ub, 0.0f);
+      pipe_barrier(PIPE_V);
+      for (int32_t i = valid; i < ChunkSize; ++i) {
+        chunk_gdn_pto::TileUbDataND<float, 1, HeadTileCols,
+                                     1, HeadTileCols> s_row_i;
+        TASSIGN(s_row_i, SUbAddr + i * RowBytes);
+        TMOV(s_row_i, acc_ub);
+        pipe_barrier(PIPE_V);
       }
 
       pipe_barrier(PIPE_ALL);
@@ -116,19 +143,40 @@ AICORE void cumsum_kernel(
           set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
           wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
-          set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-          wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
+          chunk_gdn_pto::TileUbDataND<float, 1, HeadTileCols,
+                                       1, HeadTileCols> g_row_0;
+          TASSIGN(g_row_0, GUbAddr);
+          TMOV(acc_ub, g_row_0);
+          pipe_barrier(PIPE_V);
 
-          for (int32_t h = 0; h < NumHeads; ++h) {
-            float acc = g_block_ub.GetValue(h);
-            s_block_ub.SetValue(h, acc);
-            for (int32_t i = 1; i < valid; ++i) {
-              acc += g_block_ub.GetValue(i * HeadTileCols + h);
-              s_block_ub.SetValue(i * HeadTileCols + h, acc);
-            }
-            for (int32_t i = valid; i < ChunkSize; ++i) {
-              s_block_ub.SetValue(i * HeadTileCols + h, 0.0f);
-            }
+          chunk_gdn_pto::TileUbDataND<float, 1, HeadTileCols,
+                                       1, HeadTileCols> s_row_0;
+          TASSIGN(s_row_0, SUbAddr);
+          TMOV(s_row_0, acc_ub);
+          pipe_barrier(PIPE_V);
+
+          for (int32_t i = 1; i < valid; ++i) {
+            chunk_gdn_pto::TileUbDataND<float, 1, HeadTileCols,
+                                         1, HeadTileCols> g_row_i;
+            TASSIGN(g_row_i, GUbAddr + i * RowBytes);
+            TADD(acc_ub, acc_ub, g_row_i);
+            pipe_barrier(PIPE_V);
+
+            chunk_gdn_pto::TileUbDataND<float, 1, HeadTileCols,
+                                         1, HeadTileCols> s_row_i;
+            TASSIGN(s_row_i, SUbAddr + i * RowBytes);
+            TMOV(s_row_i, acc_ub);
+            pipe_barrier(PIPE_V);
+          }
+
+          TEXPANDS(acc_ub, 0.0f);
+          pipe_barrier(PIPE_V);
+          for (int32_t i = valid; i < ChunkSize; ++i) {
+            chunk_gdn_pto::TileUbDataND<float, 1, HeadTileCols,
+                                         1, HeadTileCols> s_row_i;
+            TASSIGN(s_row_i, SUbAddr + i * RowBytes);
+            TMOV(s_row_i, acc_ub);
+            pipe_barrier(PIPE_V);
           }
 
           pipe_barrier(PIPE_ALL);

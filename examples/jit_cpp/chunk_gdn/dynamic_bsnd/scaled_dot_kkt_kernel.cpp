@@ -22,6 +22,7 @@ AICORE void kkt_kernel(
     __gm__ half *workspace_handle, __gm__ half *A_handle,
     __gm__ int32_t *cu_seqlens,
     int64_t batch_size, int64_t seq_len,
+    int64_t total_tokens,
     uint64_t ffts_addr)
 {
   constexpr int32_t HalfChunk = ChunkSize / 2;
@@ -41,8 +42,6 @@ AICORE void kkt_kernel(
   constexpr int32_t GC2dUbAddr   = 124800;
   constexpr int32_t CoeffUbAddr  = 157568;
   constexpr int32_t AUbHalfAddr  = GR2dUbAddr;
-  constexpr int32_t GBlockUbAddr = AUbAddr;
-  constexpr int32_t BetaBlockUbAddr = CoeffUbAddr;
 
   set_ffts_base_addr(ffts_addr);
   auto cid = get_block_idx();
@@ -185,8 +184,6 @@ AICORE void kkt_kernel(
 
     for (int64_t ci = 0; ci < num_chunks; ++ci) {
       int32_t slot = static_cast<int32_t>(ci & 1);
-      wait_flag_dev(slot);
-      pipe_barrier(PIPE_ALL);
 
       int64_t chunk_start = ci * ChunkSize;
       int64_t remaining = slen - chunk_start;
@@ -201,46 +198,29 @@ AICORE void kkt_kernel(
               : 0;
 
       if (local_valid > 0) {
+        // G is pre-transposed to [H, total_tokens] float — contiguous per head
         chunk_gdn_pto::copy_gm_to_ub<float, float,
-            1, 1, 1, ChunkSize, NumHeads,
-            1, 1, 1, NumHeads, 1,
-            ChunkSize, NumHeads, pto::PadValue::Zero>(
-            G_handle + (bos + chunk_start) * NumHeads,
-            GBlockUbAddr, 0, valid_rows, NumHeads);
+            1, 1, 1, 1, ChunkSize,
+            1, 1, 1, 1, 1,
+            1, ChunkSize, pto::PadValue::Zero>(
+            G_handle + static_cast<int64_t>(head_idx) * total_tokens
+                     + (bos + chunk_start),
+            GUbAddr, 0, 1, valid_rows);
 
+        // Beta is pre-transposed to [H, total_tokens] half — contiguous per head
         chunk_gdn_pto::copy_gm_to_ub<half, half,
-            1, 1, 1, HalfChunk, NumHeads,
-            1, 1, 1, NumHeads, 1,
-            HalfChunk, NumHeads, pto::PadValue::Zero>(
-            Beta_handle + (bos + chunk_start + row_offset) * NumHeads,
-            BetaBlockUbAddr, 0, local_valid, NumHeads);
+            1, 1, 1, 1, HalfChunk,
+            1, 1, 1, 1, 1,
+            1, HalfChunk, pto::PadValue::Zero>(
+            Beta_handle + static_cast<int64_t>(head_idx) * total_tokens
+                        + (bos + chunk_start + row_offset),
+            BetaHalfUbAddr, 0, 1, local_valid);
+      }
 
-        set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
-        wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+      wait_flag_dev(slot);
+      pipe_barrier(PIPE_ALL);
 
-        {
-            chunk_gdn_pto::TileUbDataND<float, ChunkSize, NumHeads,
-                                         ChunkSize, NumHeads> g_block;
-            TASSIGN(g_block, GBlockUbAddr);
-            set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-            wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-            for (int32_t gi = 0; gi < ChunkSize; ++gi) {
-                g_ub.SetValue(gi, g_block.GetValue(
-                    gi * NumHeads + head_idx));
-            }
-        }
-        {
-            chunk_gdn_pto::TileUbDataND<half, HalfChunk, NumHeads,
-                                         HalfChunk, NumHeads> b_block;
-            TASSIGN(b_block, BetaBlockUbAddr);
-            for (int32_t bi = 0; bi < HalfChunk; ++bi) {
-                beta_ub_half.SetValue(bi, b_block.GetValue(
-                    bi * NumHeads + head_idx));
-            }
-        }
-        set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-        wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-
+      if (local_valid > 0) {
         TCVT(beta_ub, beta_ub_half, pto::RoundMode::CAST_NONE);
         chunk_gdn_pto::TileUbDataND<float, 1, HalfChunk, 1, HalfChunk>
             g_ub_temp;
@@ -250,7 +230,6 @@ AICORE void kkt_kernel(
         TMOV(g_v_ub, g_ub_temp);
         pipe_barrier(PIPE_V);
 
-        TEXPANDS(a_ub, 0.0f);
         TLOG(beta_ub, beta_ub);
         pipe_barrier(PIPE_V);
         TADD(g_v_ub, g_v_ub, beta_ub);
@@ -267,11 +246,7 @@ AICORE void kkt_kernel(
         pipe_barrier(PIPE_V);
         TSUB(coeff_ub, g_r_2d_ub, g_c_2d_ub);
         pipe_barrier(PIPE_V);
-        TSUB(coeff_ub, a_ub, coeff_ub);
-        pipe_barrier(PIPE_V);
-        TRELU(coeff_ub, coeff_ub);
-        pipe_barrier(PIPE_V);
-        TSUB(coeff_ub, a_ub, coeff_ub);
+        TMINS(coeff_ub, coeff_ub, 0.0f);
         pipe_barrier(PIPE_V);
         TEXP(coeff_ub, coeff_ub);
 
@@ -324,6 +299,7 @@ extern "C" __global__ AICORE void launch_scaled_dot_kkt(
     __gm__ uint8_t *workspace_handle, __gm__ uint8_t *A_handle,
     __gm__ uint8_t *cu_seqlens,
     int64_t batch_size, int64_t seq_len,
+    int64_t total_tokens,
     uint64_t ffts_addr)
 {
   kkt_kernel<GDN_H, GDN_D, GDN_C>(
@@ -334,7 +310,7 @@ extern "C" __global__ AICORE void launch_scaled_dot_kkt(
       reinterpret_cast<__gm__ half *>(workspace_handle),
       reinterpret_cast<__gm__ half *>(A_handle),
       reinterpret_cast<__gm__ int32_t *>(cu_seqlens),
-      batch_size, seq_len, ffts_addr);
+      batch_size, seq_len, total_tokens, ffts_addr);
 }
 
 extern "C" void call_kernel(
@@ -343,7 +319,8 @@ extern "C" void call_kernel(
     uint8_t *G_handle, uint8_t *Msk_handle,
     uint8_t *workspace_handle, uint8_t *A_handle,
     uint8_t *cu_seqlens,
-    int64_t batch_size, int64_t seq_len)
+    int64_t batch_size, int64_t seq_len,
+    int64_t total_tokens)
 {
   uint32_t fftsLen{0};
   uint64_t fftsAddr{0};
@@ -351,5 +328,5 @@ extern "C" void call_kernel(
   launch_scaled_dot_kkt<<<block_dim, nullptr, stream>>>(
       K_handle, Beta_handle, G_handle, Msk_handle,
       workspace_handle, A_handle, cu_seqlens,
-      batch_size, seq_len, fftsAddr);
+      batch_size, seq_len, total_tokens, fftsAddr);
 }

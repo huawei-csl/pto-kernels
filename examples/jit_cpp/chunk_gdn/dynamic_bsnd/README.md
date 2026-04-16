@@ -38,14 +38,14 @@ python3 dynamic_bsnd/bench_dynamic_bsnd.py
 Shape: `(N_seq=16, L_seg=16384, H=16, DK=DV=128, C=128)`, packed varlen
 BSND with `T=262144`.
 
-| Kernel | Latency (ms) | #ops (approx) | TFLOPS |
-| :-- | --: | --: | --: |
-| chunk_cumsum | 2.03 | 4.19e+06 | 0.0021 |
-| chunk_scaled_dot_kkt | 15.52 | 6.87e+10 | 4.4271 |
-| wy_fast | 16.78 | 1.37e+11 | 8.1920 |
-| chunk_h | 14.18 | 2.75e+11 | 19.3812 |
-| chunk_o | 26.20 | 3.44e+11 | 13.1162 |
-| total | 74.71 | 8.25e+11 | 11.0375 |
+| Kernel | PTO (ms) | Triton (ms) | Speedup | TFLOPS |
+| :-- | --: | --: | --: | --: |
+| chunk_cumsum | 0.37 | 1.00 | 2.7x | 0.012 |
+| chunk_scaled_dot_kkt | 4.69 | 4.81 | 1.03x | 14.6 |
+| wy_fast | 6.85 | 15.57 | 2.27x | 20.1 |
+| chunk_h | 9.57 | 30.82 | 3.22x | 28.7 |
+| chunk_o | 10.73 | 16.13 | 1.50x | 32.0 |
+| **total** | **32.20** | **68.34** | **2.12x** | **25.6** |
 
 ## Design notes
 
@@ -55,12 +55,23 @@ BSND with `T=262144`.
 - **Variable-length sequences**: `cu_seqlens` (int32) provides cumulative
   sequence boundaries. When non-null, `batch_size` is the number of
   sequences and `seq_len` is ignored.
-- **In-kernel G/beta column extraction**: `g_sum` and `beta` are accepted
-  in the original `[1, T, H]` layout (same API as Triton kernels). Each
-  kernel loads a `[C, H]` chunk via DMA, then extracts the per-head
-  column with scalar `GetValue`/`SetValue` loops (matching `chunk_h`'s
-  pattern). This avoids Python-side pre-transpose and keeps PTO kernels
-  as drop-in replacements for Triton.
+- **Drop-in Triton replacement**: The Python wrapper functions (`run_*`)
+  accept the same argument list and memory layouts as Triton kernels.
+  G/beta are accepted as `[1, T, H]` and transposed internally to
+  `[H, T]` for efficient contiguous DMA loads per-head. PTO kernels can
+  be used as drop-in replacements in production inference.
+- **Head-first G/beta layout**: `g_sum` and `beta` are transposed from
+  `[1, T, H]` to `[H, T]` inside the Python `run_*` wrappers, enabling
+  contiguous DMA loads per-head inside the C++ kernels. This eliminates
+  costly scalar `GetValue`/`SetValue` extraction loops.
+- **Vectorized cumsum**: `chunk_cumsum` uses SIMD row-wise TADD/TMOV
+  operations to process all heads simultaneously per row, replacing
+  per-head scalar loops.
+- **Vectorized coefficient scaling**: `chunk_h` uses TROWEXPAND + TMUL
+  to apply per-row decay coefficients to [HalfC, D] tiles, replacing
+  scalar GetValue/TMULS loops.
+- **DMA-Cube overlap**: `scaled_dot_kkt` issues G/beta DMA before
+  waiting for the Cube GEMM, hiding DMA latency behind Cube compute.
 - **Grid-stride loop**: Each physical core iterates over multiple logical
   work items to handle dynamic workloads.
 - **Per-core workspace**: Intermediate buffers (e.g., K@K^T, state matrices)
@@ -70,9 +81,8 @@ BSND with `T=262144`.
   matmul (chunk i+1) with Vec gating (chunk i).
 - **Vectorized gating**: `chunk_o` uses SIMD operations (`TROWEXPAND`,
   `TCOLEXPAND`, `TSUB`, `TMINS`, `TEXP`, `TMUL`) for gating coefficient
-  construction and QS row-scaling, replacing scalar `GetValue`/`SetValue`
-  loops.
-- **safe_exp via clamp**: `scaled_dot_kkt` and `chunk_o` clamp
-  `g_row - g_col` to `min(x, 0)` before `exp()` to prevent IEEE 754
-  `Inf * 0 = NaN`.
+  construction and QS row-scaling.
+- **safe_exp via TMINS**: `scaled_dot_kkt` and `chunk_o` clamp
+  `g_row - g_col` to `min(x, 0)` via `TMINS(coeff, coeff, 0.0f)` before
+  `TEXP` to prevent IEEE 754 `Inf * 0 = NaN`.
 - **solve_tril omitted**: Consistent with the benchmark configuration.
