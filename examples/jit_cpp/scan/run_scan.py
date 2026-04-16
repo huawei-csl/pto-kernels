@@ -10,8 +10,7 @@ def test_scan(tile_size=64, n_tiles=64):
     torch.npu.set_device(device)
 
     # Prepare Inputs
-    # x = torch.rand(size=(total_len,), device="npu", dtype=dtype).contiguous()
-    x = torch.arange(1, total_len + 1, device="npu", dtype=dtype).contiguous()
+    x = torch.rand(size=(total_len,), device="npu", dtype=dtype).contiguous()
     y = torch.zeros_like(x)
 
     # Generate upper triangular matrix of 1s (s x s)
