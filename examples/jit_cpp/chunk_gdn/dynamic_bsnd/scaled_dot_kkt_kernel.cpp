@@ -114,7 +114,7 @@ AICORE void kkt_kernel(
     int64_t num_chunks = (slen + ChunkSize - 1) / ChunkSize;
 
     for (int64_t ci = 0; ci < num_chunks; ++ci) {
-      chunk_gdn_pto::wait_cross_flag(1);
+      wait_flag_dev(1);
       pipe_barrier(PIPE_ALL);
 
       int64_t chunk_start = ci * ChunkSize;
@@ -161,8 +161,8 @@ AICORE void kkt_kernel(
       Msk_handle +
           static_cast<int64_t>(vid) * HalfChunk * ChunkSize,
       MskUbAddr, 0, HalfChunk, ChunkSize);
-  chunk_gdn_pto::set_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
-  chunk_gdn_pto::wait_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
+  set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+  wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
   chunk_gdn_pto::set_cross_flag<PIPE_MTE3>(1, 2);
 
@@ -186,7 +186,7 @@ AICORE void kkt_kernel(
     int64_t num_chunks = (slen + ChunkSize - 1) / ChunkSize;
 
     for (int64_t ci = 0; ci < num_chunks; ++ci) {
-      chunk_gdn_pto::wait_cross_flag(0);
+      wait_flag_dev(0);
       pipe_barrier(PIPE_ALL);
 
       int64_t chunk_start = ci * ChunkSize;
@@ -230,8 +230,8 @@ AICORE void kkt_kernel(
             Beta_handle + beta_gm_offset, BetaBlockUbAddr, 0,
             local_valid, NumHeads);
 
-        chunk_gdn_pto::set_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
-        chunk_gdn_pto::wait_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
+        set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+        wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
         set_flag(PIPE_V, PIPE_S, EVENT_ID0);
         wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
@@ -292,8 +292,8 @@ AICORE void kkt_kernel(
 
         // -- Phase 3: Apply gating to K@K^T from workspace --
 
-        chunk_gdn_pto::set_flag_pipeline<PIPE_V, PIPE_MTE2>(0);
-        chunk_gdn_pto::wait_flag_pipeline<PIPE_V, PIPE_MTE2>(0);
+        set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+        wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
 
         chunk_gdn_pto::copy_gm_to_ub<half, half,
             1, 1, 1, HalfChunk, ChunkSize,
@@ -304,8 +304,8 @@ AICORE void kkt_kernel(
                 static_cast<int64_t>(vid) * HalfChunk * ChunkSize,
             AUbHalfAddr, 0, HalfChunk, ChunkSize);
 
-        chunk_gdn_pto::set_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
-        chunk_gdn_pto::wait_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
+        set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+        wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
         TCVT(a_ub, a_ub_half, pto::RoundMode::CAST_NONE);
         TMUL(a_ub, a_ub, coeff_ub);
@@ -314,8 +314,8 @@ AICORE void kkt_kernel(
 
         // -- Phase 4: Store A to BSND [B,S,H,C] --
 
-        chunk_gdn_pto::set_flag_pipeline<PIPE_V, PIPE_MTE3>(0);
-        chunk_gdn_pto::wait_flag_pipeline<PIPE_V, PIPE_MTE3>(0);
+        set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+        wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
 
         int64_t a_gm_offset =
             ((bos + chunk_start + row_offset) * NumHeads +

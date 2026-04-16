@@ -63,8 +63,8 @@ AICORE void cumsum_kernel(
           1, 1, 1, NumHeads, 1,
           ChunkSize, HeadTileCols, pto::PadValue::Zero>(
           g_ptr + chunk_start * NumHeads, GUbAddr, 0, valid, NumHeads);
-      chunk_gdn_pto::set_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
-      chunk_gdn_pto::wait_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
+      set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+      wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
       set_flag(PIPE_V, PIPE_S, EVENT_ID0);
       wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
@@ -88,8 +88,8 @@ AICORE void cumsum_kernel(
           1, 1, 1, NumHeads, 1,
           ChunkSize, HeadTileCols>(
           g_sum_ptr + chunk_start * NumHeads, SUbAddr, 0, valid, NumHeads);
-      chunk_gdn_pto::set_flag_pipeline<PIPE_MTE3, PIPE_V>(0);
-      chunk_gdn_pto::wait_flag_pipeline<PIPE_MTE3, PIPE_V>(0);
+      set_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
+      wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
     }
   } else {
     int64_t gi = 0;
@@ -113,8 +113,8 @@ AICORE void cumsum_kernel(
               ChunkSize, HeadTileCols, pto::PadValue::Zero>(
               g_ptr + chunk_start * NumHeads,
               GUbAddr, 0, valid, NumHeads);
-          chunk_gdn_pto::set_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
-          chunk_gdn_pto::wait_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
+          set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+          wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
           set_flag(PIPE_V, PIPE_S, EVENT_ID0);
           wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
@@ -139,8 +139,8 @@ AICORE void cumsum_kernel(
               ChunkSize, HeadTileCols>(
               g_sum_ptr + chunk_start * NumHeads,
               SUbAddr, 0, valid, NumHeads);
-          chunk_gdn_pto::set_flag_pipeline<PIPE_MTE3, PIPE_V>(0);
-          chunk_gdn_pto::wait_flag_pipeline<PIPE_MTE3, PIPE_V>(0);
+          set_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
+          wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
         }
         gi++;
       }

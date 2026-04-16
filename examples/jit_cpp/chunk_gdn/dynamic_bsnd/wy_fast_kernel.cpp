@@ -161,8 +161,8 @@ AICORE void wy_fast_kernel(
           A_handle + a_gm_offset,
           A1HalfUbAddr, 0, HalfChunk, ChunkSize);
 
-      chunk_gdn_pto::set_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
-      chunk_gdn_pto::wait_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
+      set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+      wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
       set_flag(PIPE_V, PIPE_S, EVENT_ID0);
       wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
@@ -187,8 +187,8 @@ AICORE void wy_fast_kernel(
       TMUL(a2_ub, a1_ub, beta_2d_ub);
       TCVT(a2_ub_half, a2_ub, pto::RoundMode::CAST_NONE);
 
-      chunk_gdn_pto::set_flag_pipeline<PIPE_V, PIPE_MTE3>(0);
-      chunk_gdn_pto::wait_flag_pipeline<PIPE_V, PIPE_MTE3>(0);
+      set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+      wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
       chunk_gdn_pto::copy_ub_to_gm<half, half,
           1, 1, 1, HalfChunk, ChunkSize,
           1, 1, 1, ChunkSize, 1,
@@ -210,8 +210,8 @@ AICORE void wy_fast_kernel(
           G_handle + chunk_token_start * NumHeads,
           GBlockUbAddr, 0, valid_rows, NumHeads);
 
-      chunk_gdn_pto::set_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
-      chunk_gdn_pto::wait_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
+      set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+      wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
       set_flag(PIPE_V, PIPE_S, EVENT_ID0);
       wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
@@ -236,8 +236,8 @@ AICORE void wy_fast_kernel(
       TMUL(a1_ub, a1_ub, g_2d_ub);
       TCVT(a1_ub_half, a1_ub, pto::RoundMode::CAST_NONE);
 
-      chunk_gdn_pto::set_flag_pipeline<PIPE_V, PIPE_MTE3>(0);
-      chunk_gdn_pto::wait_flag_pipeline<PIPE_V, PIPE_MTE3>(0);
+      set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+      wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
       chunk_gdn_pto::copy_ub_to_gm<half, half,
           1, 1, 1, HalfChunk, ChunkSize,
           1, 1, 1, ChunkSize, 1,
@@ -290,8 +290,8 @@ AICORE void wy_fast_kernel(
                 A_handle + a_gm_offset,
                 A1HalfUbAddr, 0, HalfChunk, ChunkSize);
 
-            chunk_gdn_pto::set_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
-            chunk_gdn_pto::wait_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
+            set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+            wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
             set_flag(PIPE_V, PIPE_S, EVENT_ID0);
             wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
@@ -317,8 +317,8 @@ AICORE void wy_fast_kernel(
             TMUL(a2_ub, a1_ub, beta_2d_ub);
             TCVT(a2_ub_half, a2_ub, pto::RoundMode::CAST_NONE);
 
-            chunk_gdn_pto::set_flag_pipeline<PIPE_V, PIPE_MTE3>(0);
-            chunk_gdn_pto::wait_flag_pipeline<PIPE_V, PIPE_MTE3>(0);
+            set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+            wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             chunk_gdn_pto::copy_ub_to_gm<half, half,
                 1, 1, 1, HalfChunk, ChunkSize,
                 1, 1, 1, ChunkSize, 1,
@@ -340,8 +340,8 @@ AICORE void wy_fast_kernel(
                 G_handle + chunk_token_start * NumHeads,
                 GBlockUbAddr, 0, valid_rows, NumHeads);
 
-            chunk_gdn_pto::set_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
-            chunk_gdn_pto::wait_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
+            set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+            wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
             set_flag(PIPE_V, PIPE_S, EVENT_ID0);
             wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
@@ -367,8 +367,8 @@ AICORE void wy_fast_kernel(
             TMUL(a1_ub, a1_ub, g_2d_ub);
             TCVT(a1_ub_half, a1_ub, pto::RoundMode::CAST_NONE);
 
-            chunk_gdn_pto::set_flag_pipeline<PIPE_V, PIPE_MTE3>(0);
-            chunk_gdn_pto::wait_flag_pipeline<PIPE_V, PIPE_MTE3>(0);
+            set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+            wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             chunk_gdn_pto::copy_ub_to_gm<half, half,
                 1, 1, 1, HalfChunk, ChunkSize,
                 1, 1, 1, ChunkSize, 1,
@@ -420,7 +420,7 @@ AICORE void wy_fast_kernel(
           ChunkSize, HiddenSize>(
           V_handle + kv_offset, 32768, 0, valid_rows, HiddenSize);
 
-      chunk_gdn_pto::wait_cross_flag(2);
+      wait_flag_dev(2);
       chunk_gdn_pto::copy_gm_to_l1<half, half,
           1, 1, 1, ChunkSize, ChunkSize,
           1, 1, 1, ChunkSize, 1,
@@ -440,7 +440,7 @@ AICORE void wy_fast_kernel(
           ChunkSize, HiddenSize>(
           U_handle + kv_offset, 0, 0, valid_rows, HiddenSize);
 
-      chunk_gdn_pto::wait_cross_flag(1);
+      wait_flag_dev(1);
       chunk_gdn_pto::copy_gm_to_l1<half, half,
           1, 1, 1, ChunkSize, ChunkSize,
           1, 1, 1, ChunkSize, 1,
@@ -494,7 +494,7 @@ AICORE void wy_fast_kernel(
                 ChunkSize, HiddenSize>(
                 V_handle + kv_offset, 32768, 0, valid_rows, HiddenSize);
 
-            chunk_gdn_pto::wait_cross_flag(2);
+            wait_flag_dev(2);
             chunk_gdn_pto::copy_gm_to_l1<half, half,
                 1, 1, 1, ChunkSize, ChunkSize,
                 1, 1, 1, ChunkSize, 1,
@@ -514,7 +514,7 @@ AICORE void wy_fast_kernel(
                 ChunkSize, HiddenSize>(
                 U_handle + kv_offset, 0, 0, valid_rows, HiddenSize);
 
-            chunk_gdn_pto::wait_cross_flag(1);
+            wait_flag_dev(1);
             chunk_gdn_pto::copy_gm_to_l1<half, half,
                 1, 1, 1, ChunkSize, ChunkSize,
                 1, 1, 1, ChunkSize, 1,

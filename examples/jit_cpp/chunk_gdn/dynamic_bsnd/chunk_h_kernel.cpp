@@ -134,7 +134,7 @@ AICORE void chunk_h_kernel(
           workspace_handle + ws_base + WS_WS, 0, 0, C, D);
       chunk_gdn_pto::set_cross_flag<PIPE_FIX>(0, 2);
 
-      chunk_gdn_pto::wait_cross_flag(1);
+      wait_flag_dev(1);
 
       chunk_gdn_pto::copy_gm_to_l1<half, half, 1, 1, 1, D, C, 1, 1, 1, C, 1, D, C>(
           workspace_handle + ws_base + WS_K, (DD + C * D) * static_cast<int32_t>(sizeof(half)), 0, D, C);
@@ -150,7 +150,7 @@ AICORE void chunk_h_kernel(
           workspace_handle + ws_base + WS_KV, C * D * static_cast<int32_t>(sizeof(float)), 0, D, D);
       chunk_gdn_pto::set_cross_flag<PIPE_FIX>(2, 2);
 
-      chunk_gdn_pto::wait_cross_flag(3);
+      wait_flag_dev(3);
     }
   }
 #endif
@@ -206,8 +206,8 @@ AICORE void chunk_h_kernel(
           G_handle + g_gm, G_BLOCK_UB, 0, C, H);
     }
 
-    chunk_gdn_pto::set_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
-    chunk_gdn_pto::wait_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
+    set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+    wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
     {
       chunk_gdn_pto::TileUbDataND<float, C, H, C, H> g_block;
@@ -219,8 +219,8 @@ AICORE void chunk_h_kernel(
       }
     }
 
-    chunk_gdn_pto::set_flag_pipeline<PIPE_V, PIPE_S>(0);
-    chunk_gdn_pto::wait_flag_pipeline<PIPE_V, PIPE_S>(0);
+    set_flag(PIPE_V, PIPE_S, EVENT_ID0);
+    wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
 
     for (int32_t ci = 0; ci < static_cast<int32_t>(num_chunks); ++ci) {
       int64_t chunk_start = bos + static_cast<int64_t>(ci) * C;
@@ -250,8 +250,8 @@ AICORE void chunk_h_kernel(
 
       TEXP(g_ub, g_ub);
 
-      chunk_gdn_pto::set_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
-      chunk_gdn_pto::wait_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
+      set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+      wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
       TCVT(u_ub, u_ub_half, pto::RoundMode::CAST_NONE);
 
       for (int32_t i_2 = 0; i_2 < HalfC / 4; ++i_2) {
@@ -281,22 +281,22 @@ AICORE void chunk_h_kernel(
         TMULS(k3, k3, c3);
       }
 
-      chunk_gdn_pto::wait_cross_flag(0);
+      wait_flag_dev(0);
       chunk_gdn_pto::copy_gm_to_ub<half, half, 1, 1, 1, HalfC, D,
           1, 1, 1, D, 1,
           HalfC, D, pto::PadValue::Zero>(
           workspace_handle + ws_base * sizeof(half) + WS_WS * sizeof(half) + vid * HalfC * D * sizeof(half),
           U_UB_HALF, 0, HalfC, D);
 
-      chunk_gdn_pto::set_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
-      chunk_gdn_pto::wait_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
+      set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+      wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
       TCVT(ws_ub, u_ub_half, pto::RoundMode::CAST_NONE);
       TSUB(u_ub, u_ub, ws_ub);
       TCVT(u_ub_half, u_ub, pto::RoundMode::CAST_NONE);
       TCVT(k_ub_half, k_ub, pto::RoundMode::CAST_NONE);
 
-      chunk_gdn_pto::set_flag_pipeline<PIPE_V, PIPE_MTE3>(0);
-      chunk_gdn_pto::wait_flag_pipeline<PIPE_V, PIPE_MTE3>(0);
+      set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+      wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
 
       int64_t v_offset = (chunk_start * H + head) * D + vid * HalfC * BSND_QKV_STRIDE;
       chunk_gdn_pto::copy_ub_to_gm<half, half, 1, 1, 1, HalfC, D,
@@ -312,13 +312,13 @@ AICORE void chunk_h_kernel(
 
       chunk_gdn_pto::set_cross_flag<PIPE_MTE3>(1, 2);
 
-      chunk_gdn_pto::set_flag_pipeline<PIPE_MTE3, PIPE_S>(0);
-      chunk_gdn_pto::wait_flag_pipeline<PIPE_MTE3, PIPE_S>(0);
+      set_flag(PIPE_MTE3, PIPE_S, EVENT_ID0);
+      wait_flag(PIPE_MTE3, PIPE_S, EVENT_ID0);
       float exp_g_last = g_ub.GetValue(static_cast<int32_t>(valid) - 1);
       TMULS(s_ub, s_ub, exp_g_last);
 
-      chunk_gdn_pto::set_flag_pipeline<PIPE_V, PIPE_MTE2>(0);
-      chunk_gdn_pto::wait_flag_pipeline<PIPE_V, PIPE_MTE2>(0);
+      set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+      wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
       if (ci + 1 < static_cast<int32_t>(num_chunks)) {
         int64_t next_start = bos + static_cast<int64_t>(ci + 1) * C;
         int64_t next_valid = slen - static_cast<int64_t>(ci + 1) * C;
@@ -337,23 +337,23 @@ AICORE void chunk_h_kernel(
             G_handle + ng_gm, G_BLOCK_UB, 0, static_cast<int32_t>(next_valid), H);
       }
 
-      chunk_gdn_pto::wait_cross_flag(2);
+      wait_flag_dev(2);
       chunk_gdn_pto::copy_gm_to_ub<half, half, 1, 1, 1, HalfC, D,
           1, 1, 1, D, 1,
           HalfC, D, pto::PadValue::Zero>(
           workspace_handle + ws_base * sizeof(half) + WS_KV * sizeof(half) + vid * HalfC * D * sizeof(half),
           S_UB_HALF, 0, HalfC, D);
 
-      chunk_gdn_pto::set_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
-      chunk_gdn_pto::wait_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
+      set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+      wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
       TCVT(kv_ub, s_ub_half, pto::RoundMode::CAST_NONE);
       pipe_barrier(PIPE_ALL);
       TADD(s_ub, s_ub, kv_ub);
       TCVT(s_ub_half, s_ub, pto::RoundMode::CAST_NONE);
 
       if (ci + 1 < static_cast<int32_t>(num_chunks)) {
-        chunk_gdn_pto::set_flag_pipeline<PIPE_V, PIPE_MTE3>(0);
-        chunk_gdn_pto::wait_flag_pipeline<PIPE_V, PIPE_MTE3>(0);
+        set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+        wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
         chunk_gdn_pto::copy_ub_to_gm<half, half, 1, 1, 1, HalfC, D,
             1, 1, 1, D, 1,
             HalfC, D>(
@@ -370,8 +370,8 @@ AICORE void chunk_h_kernel(
       chunk_gdn_pto::set_cross_flag<PIPE_MTE3>(3, 2);
 
       if (ci + 1 < static_cast<int32_t>(num_chunks)) {
-        chunk_gdn_pto::set_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
-        chunk_gdn_pto::wait_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
+        set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+        wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
         {
           chunk_gdn_pto::TileUbDataND<float, C, H, C, H> g_block;
           TASSIGN(g_block, G_BLOCK_UB);
@@ -384,8 +384,8 @@ AICORE void chunk_h_kernel(
       }
     }
 
-    chunk_gdn_pto::set_flag_pipeline<PIPE_V, PIPE_MTE3>(0);
-    chunk_gdn_pto::wait_flag_pipeline<PIPE_V, PIPE_MTE3>(0);
+    set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+    wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
     int64_t fs_offset = (seq_idx * H + head) * DD;
     chunk_gdn_pto::copy_ub_to_gm<half, half, 1, 1, 1, HalfC, D,
         1, 1, 1, D, 1,

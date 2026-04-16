@@ -207,7 +207,7 @@ AICORE void chunk_o_kernel(
       chunk_gdn_pto::set_cross_flag<PIPE_FIX>(0, 2);
 
       // Wait for vec to finish gating QK
-      chunk_gdn_pto::wait_cross_flag(1);
+      wait_flag_dev(1);
 
       // Step 3: gated_QK @ V -> workspace_qkv
       chunk_gdn_pto::copy_gm_to_l1<half, half,
@@ -317,7 +317,7 @@ AICORE void chunk_o_kernel(
 
             chunk_gdn_pto::set_cross_flag<PIPE_FIX>(0, 2);
 
-            chunk_gdn_pto::wait_cross_flag(1);
+            wait_flag_dev(1);
 
             chunk_gdn_pto::copy_gm_to_l1<half, half,
                 1, 1, 1, ChunkSize, ChunkSize,
@@ -398,8 +398,8 @@ AICORE void chunk_o_kernel(
               static_cast<int64_t>(vid) * HalfChunk * ChunkSize,
           MskUbAddr, 0, HalfChunk, ChunkSize);
 
-      chunk_gdn_pto::set_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
-      chunk_gdn_pto::wait_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
+      set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+      wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
       set_flag(PIPE_V, PIPE_S, EVENT_ID0);
       wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
@@ -487,7 +487,7 @@ AICORE void chunk_o_kernel(
       TEXP(g_v_ub, g_v_ub);
 
       // Wait for cube to finish QK and QS
-      chunk_gdn_pto::wait_cross_flag(0);
+      wait_flag_dev(0);
 
       // Load QK from workspace
       chunk_gdn_pto::copy_gm_to_ub<half, half,
@@ -499,12 +499,12 @@ AICORE void chunk_o_kernel(
               static_cast<int64_t>(vid) * HalfChunk * ChunkSize,
           QKHalfUbAddr, 0, HalfChunk, ChunkSize);
 
-      chunk_gdn_pto::set_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
-      chunk_gdn_pto::wait_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
+      set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+      wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
       TCVT(qk_ub, qk_ub_half, pto::RoundMode::CAST_NONE);
 
-      chunk_gdn_pto::set_flag_pipeline<PIPE_V, PIPE_MTE2>(0);
-      chunk_gdn_pto::wait_flag_pipeline<PIPE_V, PIPE_MTE2>(0);
+      set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+      wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
 
       // Load QS from workspace
       chunk_gdn_pto::copy_gm_to_ub<half, half,
@@ -522,8 +522,8 @@ AICORE void chunk_o_kernel(
       TCVT(qk_ub_half, qk_ub, pto::RoundMode::CAST_NONE);
 
       // Store gated QK to workspace for cube
-      chunk_gdn_pto::set_flag_pipeline<PIPE_V, PIPE_MTE3>(0);
-      chunk_gdn_pto::wait_flag_pipeline<PIPE_V, PIPE_MTE3>(0);
+      set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+      wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
       chunk_gdn_pto::copy_ub_to_gm<half, half,
           1, 1, 1, HalfChunk, ChunkSize,
           1, 1, 1, ChunkSize, 1,
@@ -535,8 +535,8 @@ AICORE void chunk_o_kernel(
       chunk_gdn_pto::set_cross_flag<PIPE_MTE3>(1, 2);
 
       // Convert QS to float
-      chunk_gdn_pto::set_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
-      chunk_gdn_pto::wait_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
+      set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+      wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
       TCVT(qs_ub, qs_ub_half, pto::RoundMode::CAST_NONE);
 
       // Apply exp(g) row-wise scaling to QS
@@ -611,7 +611,7 @@ AICORE void chunk_o_kernel(
       }
 
       // Wait for cube to finish QKV
-      chunk_gdn_pto::wait_cross_flag(2);
+      wait_flag_dev(2);
 
       // Load QKV from workspace
       chunk_gdn_pto::copy_gm_to_ub<half, half,
@@ -623,8 +623,8 @@ AICORE void chunk_o_kernel(
               static_cast<int64_t>(vid) * HalfChunk * HiddenSize,
           OHalfUbAddr, 0, HalfChunk, HiddenSize);
 
-      chunk_gdn_pto::set_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
-      chunk_gdn_pto::wait_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
+      set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+      wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
       // O = QS_gated + QKV
       TCVT(o_ub, o_ub_half, pto::RoundMode::CAST_NONE);
@@ -632,8 +632,8 @@ AICORE void chunk_o_kernel(
       TCVT(o_ub_half, o_ub, pto::RoundMode::CAST_NONE);
 
       // Store O to BSND
-      chunk_gdn_pto::set_flag_pipeline<PIPE_V, PIPE_MTE3>(0);
-      chunk_gdn_pto::wait_flag_pipeline<PIPE_V, PIPE_MTE3>(0);
+      set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+      wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
 
       int64_t o_offset =
           (chunk_token_start * NumHeads + head_idx) *
@@ -686,8 +686,8 @@ AICORE void chunk_o_kernel(
                     static_cast<int64_t>(vid) * HalfChunk * ChunkSize,
                 MskUbAddr, 0, HalfChunk, ChunkSize);
 
-            chunk_gdn_pto::set_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
-            chunk_gdn_pto::wait_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
+            set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+            wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
             set_flag(PIPE_V, PIPE_S, EVENT_ID0);
             wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
@@ -774,7 +774,7 @@ AICORE void chunk_o_kernel(
             TEXP(coeff_ub, coeff_ub);
             TEXP(g_v_ub, g_v_ub);
 
-            chunk_gdn_pto::wait_cross_flag(0);
+            wait_flag_dev(0);
 
             chunk_gdn_pto::copy_gm_to_ub<half, half,
                 1, 1, 1, HalfChunk, ChunkSize,
@@ -785,12 +785,12 @@ AICORE void chunk_o_kernel(
                     static_cast<int64_t>(vid) * HalfChunk * ChunkSize,
                 QKHalfUbAddr, 0, HalfChunk, ChunkSize);
 
-            chunk_gdn_pto::set_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
-            chunk_gdn_pto::wait_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
+            set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+            wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
             TCVT(qk_ub, qk_ub_half, pto::RoundMode::CAST_NONE);
 
-            chunk_gdn_pto::set_flag_pipeline<PIPE_V, PIPE_MTE2>(0);
-            chunk_gdn_pto::wait_flag_pipeline<PIPE_V, PIPE_MTE2>(0);
+            set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+            wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
 
             chunk_gdn_pto::copy_gm_to_ub<half, half,
                 1, 1, 1, HalfChunk, HiddenSize,
@@ -805,8 +805,8 @@ AICORE void chunk_o_kernel(
             TMUL(qk_ub, qk_ub, msk_ub);
             TCVT(qk_ub_half, qk_ub, pto::RoundMode::CAST_NONE);
 
-            chunk_gdn_pto::set_flag_pipeline<PIPE_V, PIPE_MTE3>(0);
-            chunk_gdn_pto::wait_flag_pipeline<PIPE_V, PIPE_MTE3>(0);
+            set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+            wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             chunk_gdn_pto::copy_ub_to_gm<half, half,
                 1, 1, 1, HalfChunk, ChunkSize,
                 1, 1, 1, ChunkSize, 1,
@@ -817,8 +817,8 @@ AICORE void chunk_o_kernel(
                 QKHalfUbAddr, 0, HalfChunk, ChunkSize);
             chunk_gdn_pto::set_cross_flag<PIPE_MTE3>(1, 2);
 
-            chunk_gdn_pto::set_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
-            chunk_gdn_pto::wait_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
+            set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+            wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
             TCVT(qs_ub, qs_ub_half, pto::RoundMode::CAST_NONE);
 
             for (int32_t i = 0; i < HalfChunk / 4; ++i) {
@@ -891,7 +891,7 @@ AICORE void chunk_o_kernel(
               TMULS(qsd3, qsr3, gv3);
             }
 
-            chunk_gdn_pto::wait_cross_flag(2);
+            wait_flag_dev(2);
 
             chunk_gdn_pto::copy_gm_to_ub<half, half,
                 1, 1, 1, HalfChunk, HiddenSize,
@@ -902,15 +902,15 @@ AICORE void chunk_o_kernel(
                     static_cast<int64_t>(vid) * HalfChunk * HiddenSize,
                 OHalfUbAddr, 0, HalfChunk, HiddenSize);
 
-            chunk_gdn_pto::set_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
-            chunk_gdn_pto::wait_flag_pipeline<PIPE_MTE2, PIPE_V>(0);
+            set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+            wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
             TCVT(o_ub, o_ub_half, pto::RoundMode::CAST_NONE);
             TADD(o_ub, qs_ub, o_ub);
             TCVT(o_ub_half, o_ub, pto::RoundMode::CAST_NONE);
 
-            chunk_gdn_pto::set_flag_pipeline<PIPE_V, PIPE_MTE3>(0);
-            chunk_gdn_pto::wait_flag_pipeline<PIPE_V, PIPE_MTE3>(0);
+            set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+            wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
 
             int64_t o_offset =
                 (chunk_token_start * NumHeads + head_idx) *
