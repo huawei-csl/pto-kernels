@@ -335,6 +335,5 @@ jobs.
 | wy_fast | `wy_fast_kernel.cpp` | `dynamic_kernel_libs.py` → `run_wy_fast` |
 | chunk_h | `chunk_h_kernel.cpp` | `dynamic_kernel_libs.py` → `run_chunk_h` |
 | chunk_o | `chunk_o_kernel.cpp` | `dynamic_kernel_libs.py` → `run_chunk_o` |
-| Common utilities | `include/common.h` | `pto_dynamic_common.py` |
 | Benchmark | — | `bench_dynamic_bsnd.py` |
 | Verification | — | `verify_dynamic_bsnd.py` |
