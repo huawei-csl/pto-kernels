@@ -137,7 +137,7 @@ Those are due the asynchronous nature of the execution units in hardware.
 
 Good practices:
 - Always run the same verification scripts 3~5 times, not just one time.
-- Be prepared that a test script might hang -- time-out until waiting for 20~30 seconds, to avoid the agent session being stucked forever.
+- Be prepared that a test script might hang -- time-out until waiting for 60~90 seconds, to avoid the agent session being stucked forever.
 
 
 ### Performance optimization practices
