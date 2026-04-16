@@ -1,4 +1,4 @@
-#include "common.h"
+#include <pto/pto-inst.hpp>
 #include "acl/acl.h"
 #include <runtime/rt_ffts.h>
 using namespace pto;

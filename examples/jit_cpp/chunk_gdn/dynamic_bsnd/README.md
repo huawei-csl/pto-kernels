@@ -69,11 +69,11 @@ benchmark runs on `npu:7`.
   `1 x H` running row accumulator in UB and performs row-by-row Vec adds,
   removing the old per-head scalar accumulation loop.
 - **Direct PTO source style**: The kernel sources now spell out
-  `pto::GlobalTensor`, dynamic-valid `pto::Tile` objects, and explicit
-  `TLOAD` / `TSTORE` / `TFILLPAD` blocks in place. `include/common.h`
-  is intentionally reduced to shared tile aliases plus the blocked GEMM
-  helper, so beginners can map the math comments in each kernel directly
-  to PTO primitives.
+  `pto::GlobalTensor`, `pto::Tile`, dynamic-valid tiles, and explicit
+  `TLOAD` / `TSTORE` / `TFILLPAD` blocks in place. The old shared
+  `include/common.h` wrapper layer has been removed, so the math comments
+  in each kernel map directly to PTO primitives or to the tiny local
+  K-sliced GEMM helper that stays beside its call sites.
 - **Benchmark timing**: `bench_dynamic_bsnd.py` precomputes the
   contiguous `g_t` / `beta_t` workspaces once before the timed kernel
   loop so the reported numbers reflect kernel execution rather than
