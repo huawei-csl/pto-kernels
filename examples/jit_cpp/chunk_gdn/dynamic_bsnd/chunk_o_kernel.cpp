@@ -126,10 +126,15 @@ AICORE void chunk_o_kernel(
   if (cu_seqlens == nullptr) {
     int64_t chunks_per_seq = (seq_len + ChunkSize - 1) / ChunkSize;
     int64_t global_chunk_base = 0;
+    bool first_cube_iter = true;
 
     for (int64_t work_idx = static_cast<int64_t>(cid);
          work_idx < total_work;
          work_idx += static_cast<int64_t>(block_num)) {
+      if (!first_cube_iter) wait_flag_dev(3);
+      set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+      wait_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+
       int32_t head_idx = static_cast<int32_t>(work_idx % NumHeads);
       int64_t chunk_head_idx = work_idx / NumHeads;
       int64_t seq_idx = chunk_head_idx / chunks_per_seq;
@@ -209,6 +214,10 @@ AICORE void chunk_o_kernel(
       // Wait for vec to finish gating QK
       wait_flag_dev(1);
 
+      // L0C hazard: ensure copy_l0c_to_gm from L0C[0..] done before writing
+      set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+      wait_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+
       // Step 3: gated_QK @ V -> workspace_qkv
       chunk_gdn_pto::copy_gm_to_l1<half, half,
           1, 1, 1, ChunkSize, ChunkSize,
@@ -238,10 +247,12 @@ AICORE void chunk_o_kernel(
           0, 0, ChunkSize, HiddenSize);
 
       chunk_gdn_pto::set_cross_flag<PIPE_FIX>(2, 2);
+      first_cube_iter = false;
     }
   } else {
     int64_t gi = 0;
     int64_t chunk_global_idx = 0;
+    bool first_cube_iter_v = true;
     for (int64_t si = 0; si < num_seqs; ++si) {
       int64_t bos = static_cast<int64_t>(cu_seqlens[si]);
       int64_t eos = static_cast<int64_t>(cu_seqlens[si + 1]);
@@ -252,6 +263,10 @@ AICORE void chunk_o_kernel(
         for (int32_t h = 0; h < NumHeads; ++h) {
           if (gi % static_cast<int64_t>(block_num) ==
               static_cast<int64_t>(cid)) {
+            if (!first_cube_iter_v) wait_flag_dev(3);
+            set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+            wait_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+
             int64_t chunk_start = ci * ChunkSize;
             int64_t remaining = slen - chunk_start;
             int32_t valid_rows = static_cast<int32_t>(
@@ -319,6 +334,9 @@ AICORE void chunk_o_kernel(
 
             wait_flag_dev(1);
 
+            set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+            wait_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+
             chunk_gdn_pto::copy_gm_to_l1<half, half,
                 1, 1, 1, ChunkSize, ChunkSize,
                 1, 1, 1, ChunkSize, 1,
@@ -346,6 +364,7 @@ AICORE void chunk_o_kernel(
                 0, 0, ChunkSize, HiddenSize);
 
             chunk_gdn_pto::set_cross_flag<PIPE_FIX>(2, 2);
+            first_cube_iter_v = false;
           }
           gi++;
         }
@@ -646,6 +665,8 @@ AICORE void chunk_o_kernel(
           HalfChunk, HiddenSize>(
           O_handle + o_offset,
           OHalfUbAddr, 0, HalfChunk, HiddenSize);
+
+      chunk_gdn_pto::set_cross_flag<PIPE_MTE3>(3, 2);
     }
   } else {
     int64_t gi = 0;
@@ -924,6 +945,8 @@ AICORE void chunk_o_kernel(
                 HalfChunk, HiddenSize>(
                 O_handle + o_offset,
                 OHalfUbAddr, 0, HalfChunk, HiddenSize);
+
+            chunk_gdn_pto::set_cross_flag<PIPE_MTE3>(3, 2);
           }
           gi++;
         }
