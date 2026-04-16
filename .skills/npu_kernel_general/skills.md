@@ -131,7 +131,7 @@ For complex "mix" kernels that use both Cube cores and Vector cores, one cube co
 Data movement instructions (e.g. `TLOAD`/`TSTORE`/`TMOV`) and compute instructions (e.g. `TADD`, `TMATMUL`) are asynchronous. To avoid data hazards during software pipelining, need `SetFlag` & `WaitFlag` instructions in between. Check existing kernel samples under `examples/jit_cpp` or `csrc/kernel` of this repo for typical synchronization patterns.
 
 Insufficient synchronization can lead to **indeterministic bugs** that are hard to locate. Typical error patterns:
-- Same kernel sometimes deadlocks, sometimes runs through
+- Same kernel sometimes deadlocks or crashes, sometimes runs through
 - Same kernel sometimes passes numerical check, sometimes not.
 Those are due the asynchronous nature of the execution units in hardware.
 
