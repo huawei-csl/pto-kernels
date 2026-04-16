@@ -93,25 +93,32 @@ with unrolling.
 The compiler treats it as metadata assignment, not an instruction. This
 enables creating tile views at arbitrary row offsets within larger tiles.
 
-### 3. pipe_barrier(PIPE_ALL) Required Before Output DMA
+### 3. Proper Vec→MTE3 Synchronization Before Output DMA
 
 **Problem**: After Vec writes to UB via `TMOV`/`TADD`, issuing
 `copy_ub_to_gm` (MTE3) to read from the same UB requires that Vec
 writes are committed and visible to MTE3.
 
 **Incorrect approach**: `pipe_barrier(PIPE_V)` only synchronizes the
-Vec pipe. MTE3 may not see the Vec-written data.
+Vec pipe internally. It does **not** establish a happens-before
+relationship with MTE3.
 
-**Correct approach**: `pipe_barrier(PIPE_ALL)` ensures all pipes
-(including Vec writes to UB) are visible to subsequent MTE3 reads.
+**Correct approaches** (from lightweight to heavy):
+1. `set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0)` +
+   `wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0)` — places a flag on the
+   Vec pipe that fires after all pending Vec ops complete; MTE3 waits
+   for this flag before starting the DMA. This is the standard pattern
+   used throughout the codebase.
+2. `pipe_barrier(PIPE_ALL)` — waits for all pipes. Works but
+   unnecessarily stalls MTE2 and other pipes.
 
-**Impact**: Without this, cumsum produced completely wrong results
-(max abs diff = 125). With `pipe_barrier(PIPE_ALL)` before
-`copy_ub_to_gm`, all checks pass.
+**Impact**: Without proper Vec→MTE3 sync, cumsum produced completely
+wrong results (max abs diff = 125). Adding the correct sync fixed it.
 
-**Rule**: Always use `pipe_barrier(PIPE_ALL)` before `copy_ub_to_gm`
-when the UB data was written by Vec operations. Use `pipe_barrier(PIPE_V)`
-only between consecutive Vec operations.
+**Rule**: Before `copy_ub_to_gm` that reads Vec-written UB data, use
+`set_flag(PIPE_V, PIPE_MTE3)` / `wait_flag(PIPE_V, PIPE_MTE3)`.
+Reserve `pipe_barrier(PIPE_ALL)` for cases that genuinely need
+all-pipe synchronization (e.g., before cross-core flag signals).
 
 ### 4. DMA-Cube Overlap Hides Load Latency
 

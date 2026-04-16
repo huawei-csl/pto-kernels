@@ -108,7 +108,8 @@ AICORE void cumsum_kernel(
         pipe_barrier(PIPE_V);
       }
 
-      pipe_barrier(PIPE_ALL);
+      set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+      wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
 
       chunk_gdn_pto::copy_ub_to_gm<float, float,
           1, 1, 1, ChunkSize, HeadTileCols,
@@ -179,7 +180,8 @@ AICORE void cumsum_kernel(
             pipe_barrier(PIPE_V);
           }
 
-          pipe_barrier(PIPE_ALL);
+          set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+          wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
 
           chunk_gdn_pto::copy_ub_to_gm<float, float,
               1, 1, 1, ChunkSize, HeadTileCols,
