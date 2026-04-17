@@ -58,25 +58,20 @@ at::Tensor run_tri_inv_ns(const at::Tensor& M, uint32_t num_iters = 0,
 
   const uint32_t num_matrices = static_cast<uint32_t>(M.numel()) / (n * n);
 
-  const auto opts_in = at::TensorOptions().dtype(dtype).device(device);
-
   if (num_iters == 0) {
     num_iters = static_cast<uint32_t>(std::ceil(2.0f * std::log2(n)));
     num_iters = std::max<uint32_t>(num_iters, 8);
   }
 
-  const at::Tensor I_eye = at::eye(n, opts_in);
-  const at::Tensor I_scaled =
-      (I_eye / scale_value).to(dtype).contiguous();  // per matrix
+  const at::Tensor I_neg = -at::eye(n, M.options());
+  const at::Tensor I_scaled = I_neg / (-scale_value);
 
-  const at::Tensor I_neg = -I_eye.contiguous();
-
-  const at::Tensor M_inv_raw =
+  const at::Tensor M_inv =
       at::zeros_like(M, at::TensorOptions().dtype(dtype_out).device(device));
 
-  EXEC_KERNEL_CMD(tri_inv_ns_fp16, num_matrices, M_inv_raw, M, I_neg, I_scaled,
-                  n, num_iters);
+  EXEC_KERNEL_CMD(tri_inv_ns_fp16, num_matrices, M_inv, M, I_neg, I_scaled, n,
+                  num_iters);
 
-  return M_inv_raw;
+  return M_inv;
 }
 }  // namespace pto_isa_ops
