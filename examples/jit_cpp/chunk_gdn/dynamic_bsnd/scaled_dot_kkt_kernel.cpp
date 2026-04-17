@@ -74,6 +74,16 @@ using DynVecTile =
 template <typename T, int32_t Rows, int32_t Cols>
 using DynAccTile = pto::TileAcc<T, Rows, Cols, pto::DYNAMIC, pto::DYNAMIC>;
 
+// PTO cheat sheet for the bigger matrix kernels:
+//   - `GlobalTensor<T>` is a GM view, similar to a tensor plus explicit strides.
+//   - `Tile<..., Mat, ...>` lives in L1 and feeds Cube matmul instructions.
+//   - `Tile<..., Vec, ...>` lives in UB and feeds vector instructions.
+//   - `TileAcc<T, ...>` is the Cube accumulator tile written by `TMATMUL`.
+//   - `TLOAD` / `TSTORE` move data between GM and on-chip memory.
+//   - `TEXTRACT` slices an L1 matrix tile into an L0 tile for Cube.
+//   - `TRESHAPE` changes metadata/layout view without changing the bytes.
+//   - `TROWEXPAND` / `TCOLEXPAND` act like broadcast/repeat along one axis.
+
 template <typename T1, typename T2, uint32_t M, uint32_t N, uint32_t K,
           uint32_t validM = M, uint32_t validN = N, uint32_t validK = K,
           uint32_t KTail, bool TransposeA = false, bool TransposeB = false>
@@ -88,6 +98,14 @@ AICORE PTO_INLINE void gemm_v0(
   //   C = A @ B  (or accumulate into C)
   // The Cube core only sees one K-slice at a time, so PTO explicitly extracts
   // L0 tiles from L1 and accumulates the partial products.
+  //
+  // PyTorch mental model:
+  //   C = 0
+  //   for k0 in range(0, K, KL0Size):
+  //       C += A[:, k0:k1] @ B[k0:k1, :]
+  //
+  // PTO version of the same loop:
+  //   L1 tile -> `TEXTRACT` -> L0A/L0B -> `TMATMUL` / `TMATMUL_ACC`
   constexpr uint32_t KL0Size = 128;
   const uint32_t k_l0_split = (K + KL0Size - 1) / KL0Size;
 
@@ -199,6 +217,23 @@ AICORE void kkt_kernel(
   // 2. Vec applies the dynamic gate and causal mask:
   //      A[i, j] = A_raw[i, j] * mask[i, j]
   //                * exp(min(g_i + log(beta_i) - g_j, 0)).
+  //
+  // Shapes for one (sequence, head, chunk):
+  //   K_chunk    : [valid, D]
+  //   g_chunk    : [valid]
+  //   beta_chunk : [valid]
+  //   A_chunk    : [valid, valid]
+  //
+  // PyTorch / NumPy sketch:
+  //   A_raw = K_chunk @ K_chunk.T
+  //   row_term = g_chunk[:, None] + log(beta_chunk)[:, None]
+  //   col_term = g_chunk[None, :]
+  //   gate = exp(min(row_term - col_term, 0))
+  //   A = tril(A_raw * gate, diagonal=-1)
+  //
+  // PTO schedule:
+  //   Cube: GM -> L1 -> L0 -> matmul -> workspace
+  //   Vec : workspace -> UB -> apply gate/mask -> final GM tensor
   constexpr int32_t HalfChunk = ChunkSize / 2;
   constexpr int32_t ChunkSquare = ChunkSize * ChunkSize;
   constexpr uint32_t KTail =
@@ -321,6 +356,8 @@ AICORE void kkt_kernel(
             a_shape, a_stride);
         DynAccTile<float, ChunkSize, ChunkSize> a_store(ChunkSize, ChunkSize);
         TASSIGN(a_store, 0);
+        // Save A_raw into a per-core ping-pong workspace slot.
+        // Later the Vec phase reads the same slot and applies the nonlinear gate.
         TSTORE(workspace_global, a_store);
       }
 
@@ -428,6 +465,10 @@ AICORE void kkt_kernel(
         TMOV(g_v_ub, g_ub_temp);
         pipe_barrier(PIPE_V);
 
+        // Torch-like:
+        //   beta_ub = beta[row_slice].float()
+        //   g_v_ub  = g[row_slice]
+        //   g_v_ub += log(beta_ub)
         TLOG(beta_ub, beta_ub);
         pipe_barrier(PIPE_V);
         TADD(g_v_ub, g_v_ub, beta_ub);
@@ -473,6 +514,10 @@ AICORE void kkt_kernel(
         wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
         // Apply the gate exp(g_i + log(beta_j) - g_j) and causal mask to A.
+        // Torch-like:
+        //   a_rows = a_raw_rows.float()
+        //   a_rows *= coeff_ub
+        //   a_rows *= msk_ub
         TCVT(a_ub, a_ub_half, pto::RoundMode::CAST_NONE);
         TMUL(a_ub, a_ub, coeff_ub);
         TMUL(a_ub, a_ub, msk_ub);

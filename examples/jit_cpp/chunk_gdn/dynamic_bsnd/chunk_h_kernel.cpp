@@ -70,6 +70,15 @@ using TileUbDataDN = pto::Tile<pto::TileType::Vec, T, Rows, Cols,
                                pto::BLayout::ColMajor, RowValid, ColValid,
                                pto::SLayout::NoneBox, 512, PadVal>;
 
+// PTO cheat sheet for the recurrent kernel:
+//   - `GlobalTensor<T>` is a GM tensor view with explicit runtime shape/stride.
+//   - `Tile<..., Mat, ...>` lives in L1 and feeds Cube matmul instructions.
+//   - `Tile<..., Vec, ...>` lives in UB for elementwise vector work.
+//   - `TileAcc<T, ...>` is a Cube accumulator tile.
+//   - `TLOAD` / `TSTORE` are DMA copies between GM and on-chip memory.
+//   - `TROWEXPAND` broadcasts a column vector across the feature dimension.
+//   - `TFILLPAD(_INPLACE)` zero-pads tail rows so full-tile code can still run.
+
 template <typename T1, typename T2, uint32_t M, uint32_t N, uint32_t K,
           uint32_t validM = M, uint32_t validN = N, uint32_t validK = K,
           uint32_t K_tail = K, bool transpose_A = false,
@@ -85,6 +94,11 @@ gemm_v0(std::conditional_t<transpose_A, TileMatL1<T1, K, M, validK, validM>,
   //   C = A @ B
   // PTO exposes the L1/L0 staging explicitly, so this stays as a tiny file-
   // local helper instead of a shared wrapper.
+  //
+  // PyTorch mental model:
+  //   C = 0
+  //   for k0 in range(0, K, kL0Size):
+  //       C += A[:, k0:k1] @ B[k0:k1, :]
   constexpr uint32_t kL0Size = 128;
   const uint32_t kL0split = (K + kL0Size - 1) / kL0Size;
 
@@ -197,6 +211,22 @@ AICORE void chunk_h_kernel(
   //   v_i_new   = U_i - ws_i
   //   k_i_tilde = exp(g_last - g_i) * K_i
   //   S_{i+1}   = exp(g_last) * S_i + k_i_tilde^T @ v_i_new.
+  //
+  // Shapes for one (sequence, head, chunk):
+  //   W_i, U_i, K_i, V_i_new : [valid, D]
+  //   S_i, S_{i+1}           : [D, D]
+  //
+  // PyTorch / NumPy sketch:
+  //   ws = W_i @ S_i
+  //   v_new = U_i - ws
+  //   decay = exp(g_last - g_i)[:, None]
+  //   k_tilde = decay * K_i
+  //   kv = k_tilde.T @ v_new
+  //   S = exp(g_last) * S + kv
+  //
+  // PTO split:
+  //   Cube forms the two matmuls (`W_i @ S_i` and `K_i^T @ V_i_new`).
+  //   Vec does the elementwise gating/decay and carries the running state.
   auto cid = get_block_idx();
   auto block_num = get_block_num();
   set_ffts_base_addr(ffts_addr);
@@ -298,6 +328,11 @@ AICORE void chunk_h_kernel(
     }
     int64_t num_chunks = (slen + C - 1) / C;
     int64_t ws_base = static_cast<int64_t>(cid) * WS_PER_CORE;
+    // One per-core scratch region stores:
+    //   WS_WS : ws = W_i @ S_i
+    //   WS_K  : k_tilde
+    //   WS_S  : running state S_i
+    //   WS_KV : k_tilde^T @ v_i_new
 
     for (int32_t ci = 0; ci < num_chunks; ++ci) {
       wait_flag_dev(3);
@@ -313,6 +348,7 @@ AICORE void chunk_h_kernel(
                                   s_stride);
         DynMatL1<half, D, D> s_l1_load(D, D);
         TASSIGN(s_l1_load, 0);
+        // Load the previous recurrent state S_i from per-core workspace.
         TLOAD(s_l1_load, s_global);
       }
 
@@ -342,6 +378,7 @@ AICORE void chunk_h_kernel(
                                    ws_shape, ws_stride);
         DynAccTile<float, C, D> ws_store(C, D);
         TASSIGN(ws_store, 0);
+        // Save ws_i so the Vec phase can do `v_new = U_i - ws_i`.
         TSTORE(ws_global, ws_store);
       }
       ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (0 << 8));
@@ -385,6 +422,7 @@ AICORE void chunk_h_kernel(
                                    kv_shape, kv_stride);
         DynAccTile<float, D, D> kv_store(D, D);
         TASSIGN(kv_store, C * D * static_cast<int32_t>(sizeof(float)));
+        // Save kv = k_tilde^T @ v_i_new so Vec can finish the state update.
         TSTORE(kv_global, kv_store);
       }
       ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (2 << 8));
@@ -496,6 +534,8 @@ AICORE void chunk_h_kernel(
           static_cast<int32_t>(valid - static_cast<int64_t>(vid) * HalfC);
       if (valid_rows < 0) valid_rows = 0;
       if (valid_rows > HalfC) valid_rows = HalfC;
+      // Each Vec subblock owns one contiguous HalfC-row stripe of the chunk.
+      // For short tail chunks, `valid_rows` may be smaller or even zero.
 
       int64_t u_offset = (chunk_start * H + head) * D + vid * HalfC * BSND_QKV_STRIDE;
       if (valid_rows > 0) {
@@ -523,6 +563,8 @@ AICORE void chunk_h_kernel(
       wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
       float g_last = g_ub.GetValue(static_cast<int32_t>(valid) - 1);
       // Rebase the chunk gate around g_last so the intra-chunk decay stays numerically local.
+      // Torch-like:
+      //   coeff = exp(g_last - g_rows_owned_by_this_subblock)
       TADDS(coeff_ub, g_v_ub, -g_last);
       pipe_barrier(PIPE_V);
       TSUB(coeff_ub, zero_ub, coeff_ub);
@@ -539,8 +581,11 @@ AICORE void chunk_h_kernel(
       TASSIGN(coeff_col_ub, COEFF_UB);
       TileUbDataND<float, HalfC, D, HalfC, D> coeff_2d_ub;
       TASSIGN(coeff_2d_ub, WS_UB);
+      // Broadcast one decay scalar per token row across the D feature columns:
+      //   coeff_2d[row, :] = coeff[row]
       TROWEXPAND(coeff_2d_ub, coeff_col_ub);
       pipe_barrier(PIPE_V);
+      // `k_ub` now holds k_tilde = exp(g_last - g_i) * K_i.
       TMUL(k_ub, k_ub, coeff_2d_ub);
       pipe_barrier(PIPE_V);
 
@@ -560,6 +605,8 @@ AICORE void chunk_h_kernel(
       wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
       TCVT(ws_ub, u_ub_half, pto::RoundMode::CAST_NONE);
       // v_i_new = U_i - W_i @ S_i.
+      // In PyTorch notation:
+      //   u_ub = u_ub - ws_ub
       TSUB(u_ub, u_ub, ws_ub);
       TCVT(u_ub_half, u_ub, pto::RoundMode::CAST_NONE);
       TCVT(k_ub_half, k_ub, pto::RoundMode::CAST_NONE);
@@ -658,6 +705,8 @@ AICORE void chunk_h_kernel(
       TCVT(kv_ub, s_ub_half, pto::RoundMode::CAST_NONE);
       pipe_barrier(PIPE_ALL);
       // Finish S_{i+1} = exp(g_last) * S_i + k_i_tilde^T @ v_i_new.
+      // Torch-like:
+      //   s_ub = s_ub + kv_ub
       TADD(s_ub, s_ub, kv_ub);
       TCVT(s_ub_half, s_ub, pto::RoundMode::CAST_NONE);
 
@@ -676,7 +725,8 @@ AICORE void chunk_h_kernel(
         }
 
         // Expose the post-chunk state so the next chunk (and debug/verification
-        // outputs) can see S_{i+1}.
+        // outputs) can see S_{i+1}. Conceptually:
+        //   S_handle[chunk_idx + 1, head] = S_{i+1}
         int64_t s_out_offset = ((chunk_offset + ci + 1) * H + head) * DD;
         {
           GmShape2D s_out_shape(HalfC, D);

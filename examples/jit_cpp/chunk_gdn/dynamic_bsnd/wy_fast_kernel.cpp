@@ -80,6 +80,15 @@ using DynVecTile = pto::Tile<pto::TileType::Vec, T, Rows, Cols,
 template <typename T, int32_t Rows, int32_t Cols>
 using DynAccTile = pto::TileAcc<T, Rows, Cols, pto::DYNAMIC, pto::DYNAMIC>;
 
+// PTO cheat sheet for readers coming from PyTorch / NumPy:
+//   - `GlobalTensor<T>` is a GM tensor view with explicit shape/stride metadata.
+//   - `Tile<..., Mat, ...>` is an on-chip matrix tile used by Cube kernels.
+//   - `Tile<..., Vec, ...>` is an on-chip UB tile used by SIMD vector kernels.
+//   - `TileAcc<T, ...>` is the matmul accumulator tile.
+//   - `TLOAD` / `TSTORE` are DMA copies between GM and local memory.
+//   - `TCOLEXPAND` is broadcast like `x[None, :].expand(rows, -1)`.
+//   - `TMUL`, `TEXP`, `TCVT` are vector ops on UB tiles.
+
 template <typename T1, typename T2, uint32_t M, uint32_t N, uint32_t K,
           uint32_t validM = M, uint32_t validN = N, uint32_t validK = K,
           uint32_t K_tail, bool transpose_A = false, bool transpose_B = false>
@@ -95,6 +104,11 @@ gemm_v0(std::conditional_t<transpose_A, TileMatL1<T1, K, M, validK, validM>,
   // PTO exposes the L1 -> L0 -> Cube movement explicitly, so keeping this tiny
   // helper local lets readers see the schedule without hiding it in a repo-wide
   // wrapper layer.
+  //
+  // PyTorch mental model:
+  //   C = 0
+  //   for k0 in range(0, K, kL0Size):
+  //       C += A[:, k0:k1] @ B[k0:k1, :]
   constexpr uint32_t kL0Size = 128;
   const uint32_t kL0split = (K + kL0Size - 1) / kL0Size;
 
@@ -208,6 +222,22 @@ AICORE void wy_fast_kernel(
   //   A1[:, j] = A[:, j] * exp(g_j) * beta_j
   // and then forms the two branch outputs
   //   U = A2 @ V,   W = A1 @ K.
+  //
+  // Shapes for one (sequence, head, chunk):
+  //   A_chunk : [valid, valid]
+  //   beta    : [valid]
+  //   g       : [valid]
+  //   K, V    : [valid, D]
+  //
+  // PyTorch / NumPy sketch:
+  //   A2 = A_chunk * beta[None, :]
+  //   A1 = A_chunk * (exp(g) * beta)[None, :]
+  //   U  = A2 @ V_chunk
+  //   W  = A1 @ K_chunk
+  //
+  // PTO split:
+  //   Vec builds the two reweighted A tiles in workspace.
+  //   Cube later consumes those workspaces in two GEMMs.
   constexpr int32_t HalfChunk = ChunkSize / 2;
   constexpr uint32_t KTail =
       (HiddenSize % 128 == 0) ? 128 : (HiddenSize % 128);
@@ -362,10 +392,13 @@ AICORE void wy_fast_kernel(
       TMOV(beta_r_ub, beta_ub);
       pipe_barrier(PIPE_V);
       // Replicate beta_j across rows so every column j of A gets the same beta.
+      // PyTorch-like:
+      //   beta_2d = beta[None, :].expand(HalfChunk, ChunkSize)
       TCOLEXPAND(beta_2d_ub, beta_r_ub);
 
       TCVT(a1_ub, a1_ub_half, pto::RoundMode::CAST_NONE);
       // Form the beta-scaled tile that the later U = A2 * V matmul consumes.
+      //   a2_ub = a1_ub * beta_2d_ub
       TMUL(a2_ub, a1_ub, beta_2d_ub);
       TCVT(a2_ub_half, a2_ub, pto::RoundMode::CAST_NONE);
 
@@ -405,6 +438,8 @@ AICORE void wy_fast_kernel(
       wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
       // Build the g-based column weights before forming the W = A1 * K branch.
+      // Torch-like:
+      //   g_weight = exp(g) * beta
       TEXP(g_ub, g_ub);
       pipe_barrier(PIPE_V);
       TMUL(g_ub, g_ub, beta_ub);
@@ -413,6 +448,7 @@ AICORE void wy_fast_kernel(
       pipe_barrier(PIPE_V);
       TCOLEXPAND(g_2d_ub, g_r_ub);
       // A1 keeps the same A columns but multiplies each one by exp(g_j) * beta_j.
+      //   a1_ub = a1_ub * g_weight[None, :]
       TMUL(a1_ub, a1_ub, g_2d_ub);
       TCVT(a1_ub_half, a1_ub, pto::RoundMode::CAST_NONE);
 
@@ -621,6 +657,8 @@ AICORE void wy_fast_kernel(
         GmTensor2D<half> workspace_a2_global(
             workspace_a2_handle + static_cast<int64_t>(cid) * WsA2Size,
             a2_shape, a2_stride);
+        // Load the Vec-prepared A2 tile:
+        //   A2 = A * beta[None, :]
         TLOAD(a2_l1, workspace_a2_global);
       }
 
@@ -639,6 +677,8 @@ AICORE void wy_fast_kernel(
         DynAccTile<float, ChunkSize, HiddenSize> u_store(valid_rows,
                                                          HiddenSize);
         TASSIGN(u_store, 0);
+        // Store only the valid token rows even though the accumulator tile is
+        // physically ChunkSize x HiddenSize.
         TSTORE(u_global, u_store);
       }
       ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (3 << 8));
@@ -650,6 +690,8 @@ AICORE void wy_fast_kernel(
         GmTensor2D<half> workspace_a1_global(
             workspace_a1_handle + static_cast<int64_t>(cid) * WsA1Size,
             a1_shape, a1_stride);
+        // Load the Vec-prepared A1 tile:
+        //   A1 = A * (exp(g) * beta)[None, :]
         TLOAD(a1_l1, workspace_a1_global);
       }
 

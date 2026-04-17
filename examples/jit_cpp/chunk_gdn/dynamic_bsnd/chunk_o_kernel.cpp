@@ -80,6 +80,15 @@ using TileUbDataDN =
     pto::Tile<pto::TileType::Vec, T, Rows, Cols, pto::BLayout::ColMajor,
               RowValid, ColValid, pto::SLayout::NoneBox, 512, PadVal>;
 
+// PTO cheat sheet for the final output kernel:
+//   - `GlobalTensor<T>` is a GM tensor view with shape/stride metadata.
+//   - `Tile<..., Mat, ...>` is an on-chip matrix tile for Cube matmul.
+//   - `Tile<..., Vec, ...>` is a UB tile for vector elementwise work.
+//   - `TileAcc<T, ...>` is the Cube accumulator tile.
+//   - `TROWEXPAND` / `TCOLEXPAND` implement broadcast like PyTorch expand.
+//   - `TLOAD` / `TSTORE` are DMA copies between GM and local SRAM.
+//   - `TFILLPAD(_INPLACE)` zero-fills tail rows so full-tile code still works.
+
 template <typename T1, typename T2, uint32_t M, uint32_t N, uint32_t K,
           uint32_t validM = M, uint32_t validN = N, uint32_t validK = K,
           uint32_t K_tail, bool transpose_A = false,
@@ -95,6 +104,11 @@ gemm_v0(std::conditional_t<transpose_A, TileMatL1<T1, K, M, validK, validM>,
   //   C = A @ B
   // Keeping it in this file makes the Cube schedule visible without relying on
   // a shared wrapper layer.
+  //
+  // PyTorch mental model:
+  //   C = 0
+  //   for k0 in range(0, K, kL0Size):
+  //       C += A[:, k0:k1] @ B[k0:k1, :]
   constexpr uint32_t kL0Size = 128;
   const uint32_t kL0split = (K + kL0Size - 1) / kL0Size;
 
@@ -210,6 +224,23 @@ AICORE void chunk_o_kernel(
   //   QS          = Q @ S_prev
   //   QK_gated    = QK_raw * mask * exp(min(g_i - g_j, 0))
   //   O           = exp(g_i) * QS + QK_gated @ V.
+  //
+  // Shapes for one (sequence, head, chunk):
+  //   Q, K, V      : [valid, D]
+  //   S_prev       : [D, D]
+  //   QK_raw/gated : [valid, valid]
+  //   QS, QKV, O   : [valid, D]
+  //
+  // PyTorch / NumPy sketch:
+  //   qk_raw = Q @ K.T
+  //   qs = Q @ S_prev
+  //   gate = exp(min(g[:, None] - g[None, :], 0)) * causal_mask
+  //   qkv = (qk_raw * gate) @ V
+  //   o = exp(g)[:, None] * qs + qkv
+  //
+  // PTO split:
+  //   Cube builds qk_raw, qs, and later qkv.
+  //   Vec applies the gate, rescales qs, and sums the two output branches.
   constexpr int32_t HalfChunk = ChunkSize / 2;
   constexpr uint32_t KTail =
       (HiddenSize % 128 == 0) ? 128 : (HiddenSize % 128);
@@ -387,6 +418,7 @@ AICORE void chunk_o_kernel(
         DynAccTile<float, ChunkSize, ChunkSize> qk_store(ChunkSize,
                                                          ChunkSize);
         TASSIGN(qk_store, 0);
+        // Save qk_raw so Vec can later apply exp(min(g_i - g_j, 0)) * mask.
         TSTORE(qk_workspace, qk_store);
       }
 
@@ -399,6 +431,7 @@ AICORE void chunk_o_kernel(
         DynAccTile<float, ChunkSize, HiddenSize> qs_store(ChunkSize,
                                                           HiddenSize);
         TASSIGN(qs_store, 65536);
+        // Save qs = Q @ S_prev. Vec will later multiply each row by exp(g_i).
         TSTORE(qs_workspace, qs_store);
       }
 
@@ -449,6 +482,8 @@ AICORE void chunk_o_kernel(
         DynAccTile<float, ChunkSize, HiddenSize> qkv_store(ChunkSize,
                                                            HiddenSize);
         TASSIGN(qkv_store, 0);
+        // Reuse the QS/QKV workspace buffer: once QS has been consumed by Vec,
+        // Cube overwrites it with qkv = qk_gated @ V.
         TSTORE(qkv_workspace, qkv_store);
       }
 
@@ -676,6 +711,7 @@ AICORE void chunk_o_kernel(
       TASSIGN(g_ub_temp_0,
               GUbAddr + static_cast<int32_t>(vid) * HalfChunk *
                             static_cast<int32_t>(sizeof(float)));
+      // `g_v_ub` is this subblock's own row slice g_i.
       TMOV(g_v_ub, g_ub_temp_0);
 
       TileUbDataND<float, HalfChunk, ChunkSize,
@@ -686,6 +722,8 @@ AICORE void chunk_o_kernel(
       TASSIGN(g_v_col, GvUbAddr);
       // Broadcast row term g_i and column term g_j to build
       // exp(min(g_i - g_j, 0)) over the whole HalfChunk x ChunkSize tile.
+      // PyTorch-like:
+      //   coeff = exp(min(g_rows[:, None] - g_all[None, :], 0))
       TROWEXPAND(g_r_2d, g_v_col);
       TCOLEXPAND(coeff_ub, g_ub);
       TSUB(coeff_ub, g_r_2d, coeff_ub);
@@ -730,6 +768,8 @@ AICORE void chunk_o_kernel(
       }
 
       // Gate QK by exp(min(g_j - g_i, 0)) and the causal mask.
+      // PyTorch-like:
+      //   qk_ub *= coeff_ub
       TMUL(qk_ub, qk_ub, coeff_ub);
       TCVT(qk_ub_half, qk_ub, pto::RoundMode::CAST_NONE);
 
@@ -743,6 +783,8 @@ AICORE void chunk_o_kernel(
                 static_cast<int64_t>(cid) * WsGatedSize +
                 static_cast<int64_t>(vid) * HalfChunk * ChunkSize,
             qk_gated_shape, qk_gated_stride);
+        // Save qk_gated so the Cube phase can do:
+        //   qkv = qk_gated @ V
         TSTORE(qk_gated_global, qk_ub_half);
       }
       ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (1 << 8));
@@ -759,6 +801,7 @@ AICORE void chunk_o_kernel(
       TROWEXPAND(g_exp_2d, g_v_col2);
       pipe_barrier(PIPE_V);
       // Reweight the recurrent QS path before it joins the QKV term.
+      //   qs_ub = exp(g_rows)[:, None] * qs_ub
       TMUL(qs_ub, qs_ub, g_exp_2d);
 
       wait_flag_dev(2);
@@ -781,6 +824,7 @@ AICORE void chunk_o_kernel(
 
       TCVT(o_ub, o_ub_half, pto::RoundMode::CAST_NONE);
       // Final O rows add the recurrent QS term onto the gated QKV output.
+      //   o_ub = qs_ub + o_ub
       TADD(o_ub, qs_ub, o_ub);
       TCVT(o_ub_half, o_ub, pto::RoundMode::CAST_NONE);
 
@@ -796,6 +840,7 @@ AICORE void chunk_o_kernel(
         GmShape2D o_shape(HalfChunk, HiddenSize);
         GmStride2D o_stride(NumHeads * HiddenSize);
         GmTensor2D<half> o_global(O_handle + o_offset, o_shape, o_stride);
+        // Store this subblock's output stripe back to BSND layout.
         TSTORE(o_global, o_ub_half);
       }
 

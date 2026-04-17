@@ -33,6 +33,16 @@ using DynVecTile = pto::Tile<pto::TileType::Vec, T, Rows, Cols,
 template <typename T>
 using GmTensor2D = pto::GlobalTensor<T, GmShape2D, GmStride2D>;
 
+// PTO cheat sheet for this file:
+//   - `GlobalTensor<T>` is a GM tensor view: think "pointer + shape + stride".
+//   - `Tile<..., Vec, ...>` is a UB tile: think "small on-chip tensor buffer".
+//   - `TASSIGN(tile, addr)` binds a tile object to a concrete UB address.
+//   - `TLOAD` / `TSTORE` are DMA copies between GM and UB.
+//   - `TMOV` is a local on-chip copy, similar to `dst.copy_(src)`.
+//   - `TADD(dst, a, b)` is SIMD elementwise `dst = a + b`.
+//   - `TFILLPAD_INPLACE` zero-fills padded rows/columns so one full-tile kernel
+//     can still handle short tail chunks.
+
 } // namespace
 
 #endif
@@ -44,6 +54,15 @@ AICORE void cumsum_kernel(
   // For every chunk, compute the chunk-local prefix sum
   //   g_sum[t, h] = sum_{u <= t within this chunk} g[u, h].
   // PTO view: rows are tokens inside the chunk and columns are attention heads.
+  //
+  // PyTorch / NumPy sketch for one chunk:
+  //   g_chunk = g[chunk_start : chunk_start + valid, :]   # [valid, H]
+  //   g_sum_chunk = g_chunk.cumsum(dim=0)
+  //
+  // PTO schedule in this kernel:
+  //   1. TLOAD  GM -> UB for one [valid, H] block.
+  //   2. Do the prefix sum row by row inside UB.
+  //   3. TSTORE UB -> GM for the finished block.
   auto cid = get_block_idx();
   auto block_num = get_block_num();
   auto vid = get_subblockid();
@@ -71,6 +90,10 @@ AICORE void cumsum_kernel(
       DynVecTile<float, ChunkSize, HeadTileCols, pto::PadValue::Zero>;
   using RowTile = VecTile<float, 1, HeadTileCols, pto::PadValue::Zero>;
 
+  // Three UB regions:
+  //   g_block_ub : input chunk
+  //   s_block_ub : output prefix sums
+  //   acc_ub     : running "previous row sum"
   BlockTile g_block_ub;
   TASSIGN(g_block_ub, GUbAddr);
   BlockTile s_block_ub;
@@ -84,6 +107,7 @@ AICORE void cumsum_kernel(
     int64_t chunks_per_seq = (seq_len + ChunkSize - 1) / ChunkSize;
     int64_t total_chunks = num_seqs * chunks_per_seq;
 
+    // Fixed-length enumeration: logical chunk id -> (sequence, local chunk).
     for (int64_t gi = worker_id; gi < total_chunks; gi += num_vec_workers) {
       int64_t seq_idx = gi / chunks_per_seq;
       int64_t local_chunk = gi % chunks_per_seq;
@@ -115,6 +139,7 @@ AICORE void cumsum_kernel(
       TASSIGN(g_row_0, GUbAddr);
       RowTile s_row_0;
       TASSIGN(s_row_0, SUbAddr);
+      // Row 0 is unchanged: prefix_sum[0] = input[0].
       TMOV(acc_ub, g_row_0);
       TMOV(s_row_0, g_row_0);
       pipe_barrier(PIPE_V);
@@ -128,6 +153,9 @@ AICORE void cumsum_kernel(
         TASSIGN(
             s_row_i,
             SUbAddr + i * HeadTileCols * static_cast<int32_t>(sizeof(float)));
+        // Torch-like row update:
+        //   s_row_i = acc_ub + g_row_i
+        //   acc_ub  = s_row_i
         TADD(s_row_i, acc_ub, g_row_i);
         pipe_barrier(PIPE_V);
         TMOV(acc_ub, s_row_i);
@@ -149,7 +177,10 @@ AICORE void cumsum_kernel(
     }
   } else {
     // Same prefix-sum math as the fixed-length path above; only the chunk
-    // enumeration changes to follow `cu_seqlens`.
+    // enumeration changes to follow `cu_seqlens`, i.e.
+    //   for seq in packed_sequences:
+    //       for chunk in seq:
+    //           run the same UB cumsum kernel body
     int64_t gi = 0;
     for (int64_t si = 0; si < num_seqs; ++si) {
       int64_t bos = static_cast<int64_t>(cu_seqlens[si]);
