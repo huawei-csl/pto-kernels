@@ -17,6 +17,11 @@ extern "C" __global__ AICORE void simple_matmul_fp16(__gm__ void* a,
                                                      __gm__ void* c,
                                                      uint32_t matrix_size) {}
 
+extern "C" __global__ AICORE void simple_matmul_bf16(__gm__ void* a,
+                                                     __gm__ void* b,
+                                                     __gm__ void* c,
+                                                     uint32_t matrix_size) {}
+
 extern "C" __global__ AICORE void simple_matmul_fp32(__gm__ void* a,
                                                      __gm__ void* b,
                                                      __gm__ void* c,
@@ -121,8 +126,9 @@ AICORE void runKernelSimpleMatMul(__gm__ InputT* a, __gm__ InputT* b,
 template <typename T>
 AICORE void run_simple_matmul(__gm__ T* a, __gm__ T* b, __gm__ float* c,
                               uint32_t matrix_size) {
-  static_assert(std::is_same_v<T, half> or std::is_same_v<T, float>,
-                "simple_matmul supports only fp16/fp32.");
+  static_assert(std::is_same_v<T, half> or std::is_same_v<T, bfloat16_t> or
+                    std::is_same_v<T, float>,
+                "simple_matmul supports only fp16/bf16/fp32.");
 
   switch (matrix_size) {
     case 16:
@@ -152,6 +158,14 @@ extern "C" __global__ AICORE void simple_matmul_fp16(__gm__ void* a,
                                                      uint32_t matrix_size) {
   run_simple_matmul<half>((__gm__ half*)a, (__gm__ half*)b, (__gm__ float*)c,
                           matrix_size);
+}
+
+extern "C" __global__ AICORE void simple_matmul_bf16(__gm__ void* a,
+                                                     __gm__ void* b,
+                                                     __gm__ void* c,
+                                                     uint32_t matrix_size) {
+  run_simple_matmul<bfloat16_t>((__gm__ bfloat16_t*)a, (__gm__ bfloat16_t*)b,
+                                (__gm__ float*)c, matrix_size);
 }
 
 extern "C" __global__ AICORE void simple_matmul_fp32(__gm__ void* a,

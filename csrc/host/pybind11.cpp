@@ -11,8 +11,11 @@ for the full License text.
 
 #include "torch_abs.h"
 #include "torch_batch_matrix_square.h"
+#include "torch_csr_gather.h"
 #include "torch_simple_matmul.h"
+#include "torch_swiglu.h"
 #include "torch_tri_inv.h"
+#include "torch_tri_inv_ns.h"
 #include "torch_tri_inv_rec_unroll.h"
 #include "torch_tri_inv_trick.h"
 
@@ -35,9 +38,15 @@ PYBIND11_MODULE(pto_kernels_ops, m) {
       pybind11::arg("device_id") = 0);
   m.def("pto_abs", &pto_isa_ops::run_abs);
   m.def("pto_batch_matrix_square", &pto_isa_ops::run_batch_matrix_square);
+  m.def("pto_csr_gather", &pto_isa_ops::run_csr_gather);
   m.def("pto_simple_matmul", &pto_isa_ops::run_simple_matmul);
+  m.def("pto_swiglu", &pto_isa_ops::run_swiglu, py::arg("x"),
+        py::arg("dim") = -1);
   m.def("pto_tri_inv_trick", &pto_isa_ops::run_tri_inv_trick);
   m.def("pto_tri_inv_rec_unroll", &pto_isa_ops::run_tri_inv_rec_unroll,
-        py::arg("M"), py::arg("is_bsnd_format") = false);
+        py::arg("M"), py::arg("is_bsnd_format") = false,
+        py::arg("cu_seqlens") = at::zeros({1}));
+  m.def("pto_tri_inv_ns", &pto_isa_ops::run_tri_inv_ns, py::arg("M"),
+        py::arg("num_iters") = 0, py::arg("scale_value") = 0.0f);
   m.def("pto_tri_inv", &pto_isa_ops::run_tri_inv);
 }

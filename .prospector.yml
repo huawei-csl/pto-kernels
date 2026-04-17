@@ -27,10 +27,11 @@ pep8:
 pylint:
   run: true
   options:
-    max-args: 8
-    max-positional-arguments: 8
+    max-args: 10
+    max-positional-arguments: 10
   disable:
     - import-error
+    - import-outside-toplevel
     - too-many-locals
     - arguments-differ
     - no-else-return

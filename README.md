@@ -22,7 +22,7 @@ make setup_once
 The repository is "pip installable", i.e.,
 
 ```bash
-export CMAKE_GENERATOR="Unix Makefiles" && pip install -v git+https://github.com/huawei-csl/pto-dsl.git
+export CMAKE_GENERATOR="Unix Makefiles" && pip install -v git+https://github.com/huawei-csl/pto-kernels.git
 ```
 ---
 
@@ -37,7 +37,7 @@ make build_wheel
 This produces an installable Python wheel:
 
 ```
-pto_kernels-0.1.0-*.whl
+pto_kernels-X.Y.Z-*.whl
 ```
 
 ---

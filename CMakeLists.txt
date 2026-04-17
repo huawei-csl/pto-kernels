@@ -78,10 +78,14 @@ include(${ASCENDC_CMAKE_DIR}/ascendc.cmake)
 
 include(FetchContent)
 
+# certain operations need newer pto-isa header, not CANN 8.5.0 default (pin
+# commit on 2026/03/16
+# https://gitcode.com/cann/pto-isa/commit/313817be696792a4e16a7ea5994ec98e34391613?ref=master)
+# to use default CANN 8.5.0 headers set GIT_TAG "8.5.0"
 FetchContent_Declare(
   libpto_isa_headers
   GIT_REPOSITORY https://gitcode.com/cann/pto-isa.git
-  GIT_TAG v9.0.0-beta.1)
+  GIT_TAG v9.0.0-beta.2)
 
 FetchContent_Populate(libpto_isa_headers)
 
@@ -109,10 +113,13 @@ ascendc_library(
   SHARED
   csrc/kernel/kernel_tri_inv_col_sweep.cpp
   csrc/kernel/kernel_abs.cpp
+  csrc/kernel/kernel_csr_gather.cpp
   csrc/kernel/kernel_simple_matmul.cpp
   csrc/kernel/kernel_batch_matrix_square.cpp
+  csrc/kernel/kernel_tri_inv_ns.cpp
   csrc/kernel/kernel_tri_inv_rec_unroll.cpp
-  csrc/kernel/kernel_tri_inv_trick.cpp)
+  csrc/kernel/kernel_tri_inv_trick.cpp
+  csrc/kernel/kernel_swiglu.cpp)
 
 ascendc_include_directories(
   no_workspace_kernel PRIVATE ${libpto_isa_headers_SOURCE_DIR}/include
