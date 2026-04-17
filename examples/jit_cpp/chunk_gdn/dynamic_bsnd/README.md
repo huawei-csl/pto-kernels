@@ -28,8 +28,9 @@ cd /workdir/pto-kernels-fork/examples/jit_cpp/chunk_gdn/dynamic_bsnd
 
 # Verify numerical correctness
 GDN_NPU_DEVICE=npu:7 python3 verify_dynamic_bsnd.py
-# Sweeps 6 varlen cases by default: single-sequence exact/tail chunks,
-# mixed short/tail sequences, and randomized cu_seqlens stress cases.
+# Sweeps 7 varlen cases by default: single-sequence exact/tail chunks,
+# mixed short/tail sequences, and randomized cu_seqlens stress cases
+# up to a 17-sequence / 2048-token pack.
 
 # Benchmark (N_seq=16, L_seg=16384, H=16, D=128, C=128)
 GDN_NPU_DEVICE=npu:7 python3 bench_dynamic_bsnd.py

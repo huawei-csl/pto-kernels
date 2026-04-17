@@ -434,11 +434,11 @@ AICORE void chunk_h_kernel(
     set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
     wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
     {
+      // `workspace_handle` is a `half*`, so all offsets here are in half elements.
       GmShape2D s_shape(HalfC, D);
       GmStride2D s_stride(D);
       GmTensor2D<half> s_global(
-          workspace_handle + ws_base * sizeof(half) + WS_S * sizeof(half) +
-              vid * HalfC * D * sizeof(half),
+          workspace_handle + ws_base + WS_S + vid * HalfC * D,
           s_shape, s_stride);
       DynVecTile<half, HalfC, D> s_store(HalfC, D);
       TASSIGN(s_store, S_UB_HALF);
@@ -549,8 +549,7 @@ AICORE void chunk_h_kernel(
         GmShape2D ws_shape(HalfC, D);
         GmStride2D ws_stride(D);
         GmTensor2D<half> ws_global(
-            workspace_handle + ws_base * sizeof(half) +
-                WS_WS * sizeof(half) + vid * HalfC * D * sizeof(half),
+            workspace_handle + ws_base + WS_WS + vid * HalfC * D,
             ws_shape, ws_stride);
         DynVecTile<half, HalfC, D, pto::PadValue::Zero> ws_load(HalfC, D);
         TASSIGN(ws_load, U_UB_HALF);
@@ -584,8 +583,7 @@ AICORE void chunk_h_kernel(
         GmShape2D k_shape(HalfC, D);
         GmStride2D k_stride(D);
         GmTensor2D<half> k_global(
-            workspace_handle + ws_base * sizeof(half) +
-                WS_K * sizeof(half) + vid * HalfC * D * sizeof(half),
+            workspace_handle + ws_base + WS_K + vid * HalfC * D,
             k_shape, k_stride);
         DynVecTile<half, HalfC, D> k_store(HalfC, D);
         TASSIGN(k_store, K_UB_HALF);
@@ -648,8 +646,7 @@ AICORE void chunk_h_kernel(
         GmShape2D kv_shape(HalfC, D);
         GmStride2D kv_stride(D);
         GmTensor2D<half> kv_global(
-            workspace_handle + ws_base * sizeof(half) +
-                WS_KV * sizeof(half) + vid * HalfC * D * sizeof(half),
+            workspace_handle + ws_base + WS_KV + vid * HalfC * D,
             kv_shape, kv_stride);
         DynVecTile<half, HalfC, D, pto::PadValue::Zero> kv_load(HalfC, D);
         TASSIGN(kv_load, S_UB_HALF);
@@ -671,8 +668,7 @@ AICORE void chunk_h_kernel(
           GmShape2D s_shape(HalfC, D);
           GmStride2D s_stride(D);
           GmTensor2D<half> s_global(
-              workspace_handle + ws_base * sizeof(half) +
-                  WS_S * sizeof(half) + vid * HalfC * D * sizeof(half),
+              workspace_handle + ws_base + WS_S + vid * HalfC * D,
               s_shape, s_stride);
           DynVecTile<half, HalfC, D> s_store(HalfC, D);
           TASSIGN(s_store, S_UB_HALF);

@@ -128,8 +128,14 @@ def build_cases() -> list[VerifyCase]:
             seed=105,
         ),
         VerifyCase(
-            name="varlen_random_9seq_1536tok",
-            seq_lens=tuple(generate_random_sequence_lengths(9, 1536, seed=106)),
+            name="varlen_random_13seq_1536tok",
+            seq_lens=tuple(generate_random_sequence_lengths(13, 1536, seed=202)),
+            use_cu_seqlens=True,
+            seed=202,
+        ),
+        VerifyCase(
+            name="varlen_random_17seq_2048tok",
+            seq_lens=tuple(generate_random_sequence_lengths(17, 2048, seed=106)),
             use_cu_seqlens=True,
             seed=106,
         ),
