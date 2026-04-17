@@ -18,57 +18,6 @@ for the full License text.
 using namespace pto;
 using namespace kernel_utils;
 
-#define BSND_OFFSET(tile_id, N, S, D) \
-  (((tile_id) / (N)) * (S) * (N) * (D) + ((tile_id) % (N)) * (D))
-
-/*
- * For aligned BSND, tile_id enumerates chunk-major then head-major and maps to
- * a fixed-stride address inside the dense BSND tensor.
- */
-AICORE inline uint32_t GetBSNDFixedTileOffset(uint32_t tile_id,
-                                              uint32_t num_bsnd_heads,
-                                              uint32_t matrix_size) {
-  return BSND_OFFSET(tile_id, num_bsnd_heads, matrix_size, matrix_size);
-}
-
-/**
- * @brief Struct containing starting address and size of a single tile
- */
-struct BSNDVarlenTileInfo {
-  uint32_t bsnd_offset; /**< Contains the starting index in the global tensor */
-  uint32_t valid_size;  /**< This is the size (num_rows/cols) of the tile */
-};
-
-/*
- * For cu_seqlens-based varlen BSND, tile_id still enumerates chunk-major then
- * head-major. We recover the owning sequence by scanning cu_seqlens and
- * counting chunks per sequence.
- */
-AICORE inline BSNDVarlenTileInfo GetBSNDVarlenTileInfoFromCuSeqlens(
-    uint32_t tile_id, uint32_t num_bsnd_heads, uint32_t matrix_size,
-    __gm__ int32_t* cu_seqlens) {
-  const uint32_t head_idx = tile_id % num_bsnd_heads;
-  const uint32_t chunk_idx = tile_id / num_bsnd_heads;
-
-  uint32_t seq_start = static_cast<uint32_t>(cu_seqlens[0]);
-  uint32_t accumulated_chunks = 0;
-  for (uint32_t seq_idx = 0;; ++seq_idx) {
-    const uint32_t seq_end = static_cast<uint32_t>(cu_seqlens[seq_idx + 1]);
-    const uint32_t seq_len = seq_end - seq_start;
-    const uint32_t seq_num_chunks = CeilDiv(seq_len, matrix_size);
-    if (chunk_idx < accumulated_chunks + seq_num_chunks) {
-      const uint32_t local_chunk_idx = chunk_idx - accumulated_chunks;
-      const uint32_t row_start = seq_start + local_chunk_idx * matrix_size;
-      const uint32_t valid_size =
-          min(static_cast<uint32_t>(seq_end - row_start), matrix_size);
-      return {row_start * num_bsnd_heads * matrix_size + head_idx * matrix_size,
-              valid_size};
-    }
-    accumulated_chunks += seq_num_chunks;
-    seq_start = seq_end;
-  }
-}
-
 /*
  * @brief: Takes as input two matrices of size MatrixSize * MatrixSize each.
  * The src matrix lies in L1, while the dst matrix lies either in L0A or L0B.
@@ -607,12 +556,12 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
         const uint32_t global_tile_id = global_index + tile_id;
         if (cu_seqlens != nullptr) {
           const BSNDVarlenTileInfo tile_info =
-              GetBSNDVarlenTileInfoFromCuSeqlens(global_tile_id, num_bsnd_heads,
-                                                 MatrixSize, cu_seqlens);
+              kernel_utils::GetBSNDVarlenTileInfoFromCuSeqlens(
+                  global_tile_id, num_bsnd_heads, MatrixSize, cu_seqlens);
           bsnd_tile_offsets[tile_id] = tile_info.bsnd_offset;
           bsnd_tile_valid_sizes[tile_id] = tile_info.valid_size;
         } else {
-          bsnd_tile_offsets[tile_id] = GetBSNDFixedTileOffset(
+          bsnd_tile_offsets[tile_id] = kernel_utils::GetBSNDFixedTileOffset(
               global_tile_id, num_bsnd_heads, MatrixSize);
           bsnd_tile_valid_sizes[tile_id] = MatrixSize;
         }
