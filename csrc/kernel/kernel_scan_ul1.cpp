@@ -87,7 +87,6 @@ AICORE void runKernelScanUl1(__gm__ InputT* x, __gm__ InputT* o,
 
   TMOV(xL0, xL1);
   TMOV(oL0, oL1);
-  TMOV(uL0, uL1);
 
   // Cube unit waits for MTE1
   set_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
@@ -102,7 +101,7 @@ AICORE void runKernelScanUl1(__gm__ InputT* x, __gm__ InputT* o,
   wait_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
 
   // Move C1 from L0C to L1
-  TMOV(cL1, sL0);
+  TMOV(c1L1, sL0);
 
   // Wait for FP
   set_flag(PIPE_FIX, PIPE_MTE1, EVENT_ID0);
@@ -110,7 +109,7 @@ AICORE void runKernelScanUl1(__gm__ InputT* x, __gm__ InputT* o,
 
   // Load Us from L1 to L0
   TileL0B uL0;
-  TASSIGN(uL0, 0x0)
+  TASSIGN(uL0, 0x0);
   TMOV(uL0, uL1);
 
   // Int the paper notation C2 = A @ U
@@ -136,7 +135,7 @@ AICORE void runKernelScanUl1(__gm__ InputT* x, __gm__ InputT* o,
   wait_flag(PIPE_MTE1, PIPE_M, EVENT_ID1);
 
   // In the paper notation C2 += Ls @ C1
-  TMATMUL_ACC(sL0, lL0, c1L0);
+  TMATMUL_ACC(sL0, sL0, lL0, c1L0);
 
   // Wait for matmul to complete before storing result back to GM
   set_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
