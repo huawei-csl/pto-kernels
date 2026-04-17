@@ -32,8 +32,10 @@ namespace Stats {
 constexpr unsigned X_HALF_BASE = UB_BASE;
 constexpr unsigned X_HALF_STRIDE = STATS_DB_CHUNK_HIDDEN * sizeof(half);
 constexpr unsigned X_FLOAT_BASE = X_HALF_BASE + 2 * X_HALF_STRIDE;
-constexpr unsigned REDUCE_TMP_BASE = X_FLOAT_BASE + STATS_DB_CHUNK_HIDDEN * sizeof(float);
-constexpr unsigned PHASE_END = REDUCE_TMP_BASE + STATS_DB_CHUNK_HIDDEN * sizeof(float);
+constexpr unsigned REDUCE_TMP_BASE =
+    X_FLOAT_BASE + STATS_DB_CHUNK_HIDDEN * sizeof(float);
+constexpr unsigned PHASE_END =
+    REDUCE_TMP_BASE + STATS_DB_CHUNK_HIDDEN * sizeof(float);
 }  // namespace Stats
 
 namespace Chunk {
@@ -48,20 +50,27 @@ constexpr unsigned X_FLOAT_STRIDE = OUTPUT_DB_CHUNK_HIDDEN * sizeof(float);
 constexpr unsigned Y_HALF_BASE = X_HALF_BASE + 2 * X_HALF_STRIDE;
 constexpr unsigned Y_HALF_STRIDE = OUTPUT_DB_CHUNK_HIDDEN * sizeof(half);
 constexpr unsigned GAMMA_HALF_BASE = Y_HALF_BASE + 2 * Y_HALF_STRIDE;
-constexpr unsigned BETA_HALF_BASE = GAMMA_HALF_BASE + OUTPUT_DB_CHUNK_HIDDEN * sizeof(half);
-constexpr unsigned X_FLOAT_BASE = BETA_HALF_BASE + OUTPUT_DB_CHUNK_HIDDEN * sizeof(half);
+constexpr unsigned BETA_HALF_BASE =
+    GAMMA_HALF_BASE + OUTPUT_DB_CHUNK_HIDDEN * sizeof(half);
+constexpr unsigned X_FLOAT_BASE =
+    BETA_HALF_BASE + OUTPUT_DB_CHUNK_HIDDEN * sizeof(half);
 constexpr unsigned GAMMA_FLOAT_BASE = X_FLOAT_BASE + 2 * X_FLOAT_STRIDE;
-constexpr unsigned BETA_FLOAT_BASE = GAMMA_FLOAT_BASE + OUTPUT_DB_CHUNK_HIDDEN * sizeof(float);
-constexpr unsigned PHASE_END = BETA_FLOAT_BASE + OUTPUT_DB_CHUNK_HIDDEN * sizeof(float);
+constexpr unsigned BETA_FLOAT_BASE =
+    GAMMA_FLOAT_BASE + OUTPUT_DB_CHUNK_HIDDEN * sizeof(float);
+constexpr unsigned PHASE_END =
+    BETA_FLOAT_BASE + OUTPUT_DB_CHUNK_HIDDEN * sizeof(float);
 }  // namespace OutputDb
 
 namespace MediumHidden {
 constexpr unsigned X_HALF_BASE = UB_BASE;
 constexpr unsigned X_HALF_STRIDE = CHUNK_HIDDEN * sizeof(half);
 constexpr unsigned X_FLOAT_BASE = X_HALF_BASE + 2 * X_HALF_STRIDE;
-constexpr unsigned GAMMA_FLOAT_BASE = X_FLOAT_BASE + CHUNK_HIDDEN * sizeof(float);
-constexpr unsigned BETA_FLOAT_BASE = GAMMA_FLOAT_BASE + CHUNK_HIDDEN * sizeof(float);
-constexpr unsigned REDUCE_TMP_BASE = BETA_FLOAT_BASE + CHUNK_HIDDEN * sizeof(float);
+constexpr unsigned GAMMA_FLOAT_BASE =
+    X_FLOAT_BASE + CHUNK_HIDDEN * sizeof(float);
+constexpr unsigned BETA_FLOAT_BASE =
+    GAMMA_FLOAT_BASE + CHUNK_HIDDEN * sizeof(float);
+constexpr unsigned REDUCE_TMP_BASE =
+    BETA_FLOAT_BASE + CHUNK_HIDDEN * sizeof(float);
 constexpr unsigned Y_HALF_BASE = REDUCE_TMP_BASE + CHUNK_HIDDEN * sizeof(float);
 constexpr unsigned SUM_BASE = Y_HALF_BASE + CHUNK_HIDDEN * sizeof(half);
 constexpr unsigned MEAN_BASE = SUM_BASE + STAT_TILE_BYTES;
@@ -73,8 +82,8 @@ constexpr unsigned PHASE_END = CHUNK_STAT_BASE + STAT_TILE_BYTES;
 
 namespace RowStats {
 constexpr unsigned SUM_BASE = Stats::PHASE_END > OutputDb::PHASE_END
-          ? Stats::PHASE_END
-          : OutputDb::PHASE_END;
+                                  ? Stats::PHASE_END
+                                  : OutputDb::PHASE_END;
 constexpr unsigned STRIDE = ROW_TILE * STAT_TILE_BYTES;
 constexpr unsigned MEAN_BASE = SUM_BASE + STRIDE;
 constexpr unsigned VAR_BASE = MEAN_BASE + STRIDE;
@@ -277,12 +286,14 @@ AICORE void accumulateCenteredChunkMoments(__gm__ T *x, uint32_t row_offset,
   using ChunkHalfTile = VecRowTile<T, ChunkHidden>;
   using ChunkFloatTile = VecRowTile<float, ChunkHidden>;
   constexpr bool kUseStatsDbLayout = ChunkHidden == STATS_DB_CHUNK_HIDDEN;
-  constexpr unsigned kXHalfBase =
-      kUseStatsDbLayout ? UbLayout::Stats::X_HALF_BASE : UbLayout::Chunk::X_HALF_BASE;
+  constexpr unsigned kXHalfBase = kUseStatsDbLayout
+                                      ? UbLayout::Stats::X_HALF_BASE
+                                      : UbLayout::Chunk::X_HALF_BASE;
   constexpr unsigned kXHalfStride =
       kUseStatsDbLayout ? UbLayout::Stats::X_HALF_STRIDE : 0;
-  constexpr unsigned kXFloatBase =
-      kUseStatsDbLayout ? UbLayout::Stats::X_FLOAT_BASE : UbLayout::Chunk::X_FLOAT_BASE;
+  constexpr unsigned kXFloatBase = kUseStatsDbLayout
+                                       ? UbLayout::Stats::X_FLOAT_BASE
+                                       : UbLayout::Chunk::X_FLOAT_BASE;
 
   if constexpr (kUseStatsDbLayout) {
     const uint32_t first_hidden = hidden < ChunkHidden ? hidden : ChunkHidden;
@@ -426,8 +437,8 @@ AICORE void computeLayerNormRowStats(__gm__ T *x, uint32_t row_offset,
         chunkStatRow);
   }
 
-  finalizeLayerNormStats<true>(meanRow, sumRow, varRow, invStdRow,
-                               inv_hidden, eps);
+  finalizeLayerNormStats<true>(meanRow, sumRow, varRow, invStdRow, inv_hidden,
+                               eps);
 #endif
 }
 
@@ -501,8 +512,8 @@ AICORE void runLayerNormMediumHidden(__gm__ T *x, __gm__ T *gamma,
     const int8_t buf = ping ? 0 : 1;
     const event_t current_ev = ping ? (event_t)EVENT_ID0 : (event_t)EVENT_ID1;
     const event_t next_ev = ping ? (event_t)EVENT_ID1 : (event_t)EVENT_ID0;
-    const unsigned x_half_base =
-        UbLayout::MediumHidden::X_HALF_BASE + buf * UbLayout::MediumHidden::X_HALF_STRIDE;
+    const unsigned x_half_base = UbLayout::MediumHidden::X_HALF_BASE +
+                                 buf * UbLayout::MediumHidden::X_HALF_STRIDE;
 
     FullGlobal yGlobal(y + row_offset);
     TASSIGN(yGlobal, (y + row_offset));
@@ -513,9 +524,10 @@ AICORE void runLayerNormMediumHidden(__gm__ T *x, __gm__ T *gamma,
 
     const uint32_t next_row = row + 1;
     if (next_row < row_end) {
-      const unsigned next_x_half_base = ping
-          ? (UbLayout::MediumHidden::X_HALF_BASE + UbLayout::MediumHidden::X_HALF_STRIDE)
-          : UbLayout::MediumHidden::X_HALF_BASE;
+      const unsigned next_x_half_base =
+          ping ? (UbLayout::MediumHidden::X_HALF_BASE +
+                  UbLayout::MediumHidden::X_HALF_STRIDE)
+               : UbLayout::MediumHidden::X_HALF_BASE;
       issueStatsXLoad<T, CHUNK_HIDDEN>(x, next_row * hidden, hidden,
                                        next_x_half_base, next_ev);
     }
@@ -535,7 +547,7 @@ AICORE void runLayerNormMediumHidden(__gm__ T *x, __gm__ T *gamma,
     pipe_barrier(PIPE_V);
 
     finalizeLayerNormStats<false>(meanRow, sumRow, varRow, invStdRow,
-                    inv_hidden, eps);
+                                  inv_hidden, eps);
 
     TCVT(xFloat, xHalf, RoundMode::CAST_NONE);
     pipe_barrier(PIPE_V);
@@ -610,12 +622,12 @@ AICORE void runLayerNormOutputRowsDb(__gm__ T *x, __gm__ T *gamma,
       const int8_t buf = ping ? 0 : 1;
       const event_t current_ev = ping ? (event_t)EVENT_ID0 : (event_t)EVENT_ID1;
       const event_t next_ev = ping ? (event_t)EVENT_ID1 : (event_t)EVENT_ID0;
-      const unsigned x_half_base =
-          UbLayout::OutputDb::X_HALF_BASE + buf * UbLayout::OutputDb::X_HALF_STRIDE;
-      const unsigned y_half_base =
-          UbLayout::OutputDb::Y_HALF_BASE + buf * UbLayout::OutputDb::Y_HALF_STRIDE;
-      const unsigned x_float_base =
-          UbLayout::OutputDb::X_FLOAT_BASE + buf * UbLayout::OutputDb::X_FLOAT_STRIDE;
+      const unsigned x_half_base = UbLayout::OutputDb::X_HALF_BASE +
+                                   buf * UbLayout::OutputDb::X_HALF_STRIDE;
+      const unsigned y_half_base = UbLayout::OutputDb::Y_HALF_BASE +
+                                   buf * UbLayout::OutputDb::Y_HALF_STRIDE;
+      const unsigned x_float_base = UbLayout::OutputDb::X_FLOAT_BASE +
+                                    buf * UbLayout::OutputDb::X_FLOAT_STRIDE;
 
       StatTileColMajor meanCol(1, 1);
       StatTileColMajor invStdCol(1, 1);
@@ -639,8 +651,9 @@ AICORE void runLayerNormOutputRowsDb(__gm__ T *x, __gm__ T *gamma,
         const uint32_t next_row = row_tile_begin + next_row_slot;
         const uint32_t next_row_offset = next_row * hidden;
         const unsigned next_x_half_base =
-            ping ? (UbLayout::OutputDb::X_HALF_BASE + UbLayout::OutputDb::X_HALF_STRIDE)
-              : UbLayout::OutputDb::X_HALF_BASE;
+            ping ? (UbLayout::OutputDb::X_HALF_BASE +
+                    UbLayout::OutputDb::X_HALF_STRIDE)
+                 : UbLayout::OutputDb::X_HALF_BASE;
         issueLayerNormOutputXLoad<T>(x, next_row_offset + col, cur_hidden,
                                      next_x_half_base, next_ev);
       }
@@ -669,7 +682,6 @@ AICORE void runLayerNormOutputRowsDb(__gm__ T *x, __gm__ T *gamma,
 #endif
 }
 
-
 template <typename T>
 AICORE void runTLayerNorm(__gm__ T *x, __gm__ T *gamma, __gm__ T *beta,
                           __gm__ T *y, uint32_t rows, uint32_t hidden,
@@ -695,7 +707,8 @@ AICORE void runTLayerNorm(__gm__ T *x, __gm__ T *gamma, __gm__ T *beta,
   const uint32_t row_begin = worker_id * base_rows_per_worker +
                              (worker_id < extra_rows ? worker_id : extra_rows);
   const uint32_t row_end = row_begin + worker_rows;
-  const bool use_medium_hidden_fast_path = useMediumHiddenFastPath(rows, hidden);
+  const bool use_medium_hidden_fast_path =
+      useMediumHiddenFastPath(rows, hidden);
 
   initDbPipeFlags();
 

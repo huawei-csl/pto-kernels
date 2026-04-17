@@ -21,16 +21,16 @@ from jit_util_common import (  # noqa: E402
 )
 
 LAYERNORM_ARGTYPES = [
-    ctypes.c_uint32,   # blockDim
-    ctypes.c_void_p,   # stream
-    ctypes.c_void_p,   # x
-    ctypes.c_void_p,   # gamma
-    ctypes.c_void_p,   # beta
-    ctypes.c_void_p,   # y
-    ctypes.c_uint32,   # rows
-    ctypes.c_uint32,   # hidden
-    ctypes.c_float,    # eps
-    ctypes.c_float,    # inv_hidden
+    ctypes.c_uint32,  # blockDim
+    ctypes.c_void_p,  # stream
+    ctypes.c_void_p,  # x
+    ctypes.c_void_p,  # gamma
+    ctypes.c_void_p,  # beta
+    ctypes.c_void_p,  # y
+    ctypes.c_uint32,  # rows
+    ctypes.c_uint32,  # hidden
+    ctypes.c_float,  # eps
+    ctypes.c_float,  # inv_hidden
 ]
 
 
@@ -44,8 +44,12 @@ def _validate_layernorm_io(x, gamma, beta, y):
     for name, t in [("x", x), ("gamma", gamma), ("beta", beta), ("y", y)]:
         if t.dtype != torch.float16:
             raise TypeError(f"{name} must use torch.float16.")
-    if not (x.is_contiguous() and gamma.is_contiguous()
-            and beta.is_contiguous() and y.is_contiguous()):
+    if not (
+        x.is_contiguous()
+        and gamma.is_contiguous()
+        and beta.is_contiguous()
+        and y.is_contiguous()
+    ):
         raise ValueError("All tensors must be contiguous.")
     rows, hidden = x.shape
     if gamma.shape[0] != hidden or beta.shape[0] != hidden:
@@ -64,8 +68,9 @@ def load_lib(lib_path, block_dim=BLOCK_DIM):
         LAYERNORM_ARGTYPES,
     )
 
-    def layernorm_func(x, gamma, beta, y, *, eps=1e-5,
-                       block_dim=resolved_block_dim, stream_ptr=None):
+    def layernorm_func(
+        x, gamma, beta, y, *, eps=1e-5, block_dim=resolved_block_dim, stream_ptr=None
+    ):
         _validate_layernorm_io(x, gamma, beta, y)
         rows, hidden = x.shape
         kernel(
