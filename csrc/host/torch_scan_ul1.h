@@ -34,22 +34,31 @@ at::Tensor run_scan_ul1(const at::Tensor& x) {
   }
 
   const uint32_t scan_size = static_cast<uint32_t>(x.size(-1));
-  if ( x.dim() != 1) {
+  if (x.dim() != 1) {
     throw std::runtime_error("Only 1D scan is supported.\n");
   }
 
   constexpr uint32_t block_dim = 1;
 
-  const at::Tensor scan =
-      at::zeros({scan_size},
-               at::TensorOptions().dtype(dtype_out).device(device));
+  const at::Tensor scan = at::zeros(
+      {scan_size}, at::TensorOptions().dtype(dtype_out).device(device));
 
   const uint32_t matrix_size = ceil(sqrt(scan_size));
 
+  // FIXME: use vector or scalar cores to generate U and L on device
+  // Upper triangular matrix
+  const at::Tensor u = torch::triu(
+      torch::ones({matrix_size, matrix_size},
+                  at::TensorOptions().dtype(dtype_out).device(device)));
+  // Lower triangular matrix
+  const at::Tensor l = torch::tril(
+      torch::ones({matrix_size, matrix_size},
+                  at::TensorOptions().dtype(dtype_out).device(device)));
+
   if (dtype == at::kHalf) {
-    EXEC_KERNEL_CMD(scan_ul1_fp16, block_dim, x, scan, matrix_size);
+    EXEC_KERNEL_CMD(scan_ul1_fp16, block_dim, x, u, l, scan, matrix_size);
   } else if (dtype == at::kFloat) {
-    EXEC_KERNEL_CMD(scan_ul1_fp32, block_dim, x, scan, matrix_size);
+    EXEC_KERNEL_CMD(scan_ul1_fp32, block_dim, x, u, l, scan, matrix_size);
   }
 
   return scan;
