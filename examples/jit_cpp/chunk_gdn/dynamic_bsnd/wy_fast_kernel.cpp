@@ -336,137 +336,140 @@ AICORE void wy_fast_kernel(
   // Vec prepares the two reweighted A workspaces (`A2` and `A1`) that the
   // Cube phase consumes later.
   if (cu_seqlens == nullptr) {
-    int64_t chunks_per_seq = (seq_len + ChunkSize - 1) / ChunkSize;
     bool first_iter = true;
-    for (int64_t work_idx = static_cast<int64_t>(cid);
-         work_idx < total_work;
-         work_idx += static_cast<int64_t>(block_num)) {
-      int32_t head_idx = static_cast<int32_t>(work_idx % NumHeads);
-      int64_t chunk_head_idx = work_idx / NumHeads;
-      int64_t seq_idx = chunk_head_idx / chunks_per_seq;
-      int64_t ci = chunk_head_idx % chunks_per_seq;
-
+    int64_t gi = 0;
+    for (int64_t seq_idx = 0; seq_idx < num_seqs; ++seq_idx) {
       int64_t bos = seq_idx * seq_len;
       int64_t slen = seq_len;
-      int64_t chunk_start = ci * ChunkSize;
-      int64_t remaining = slen - chunk_start;
-      int32_t valid_rows = static_cast<int32_t>(
-          remaining < ChunkSize ? remaining : ChunkSize);
-      int64_t chunk_token_start = bos + chunk_start;
+      int64_t nc = (slen + ChunkSize - 1) / ChunkSize;
 
-      // Beta is pre-transposed to [H, total_tokens] for contiguous loads.
-      {
-        GmShape2D beta_shape(1, valid_rows);
-        GmStride2D beta_stride(1);
-        GmTensor2D<half> beta_global(
-            Beta_handle + static_cast<int64_t>(head_idx) * total_tokens +
-                chunk_token_start,
-            beta_shape, beta_stride);
-        DynVecTile<half, 1, ChunkSize, pto::PadValue::Zero> beta_load(
-            1, valid_rows);
-        TASSIGN(beta_load, BetaHalfUbAddr);
-        TLOAD(beta_load, beta_global);
-        if (valid_rows != ChunkSize) {
-          TFILLPAD_INPLACE(beta_ub_half, beta_load);
+      for (int64_t ci = 0; ci < nc; ++ci) {
+        for (int32_t head_idx = 0; head_idx < NumHeads; ++head_idx) {
+          if (gi % static_cast<int64_t>(block_num) ==
+              static_cast<int64_t>(cid)) {
+            int64_t chunk_start = ci * ChunkSize;
+            int64_t remaining = slen - chunk_start;
+            int32_t valid_rows = static_cast<int32_t>(
+                remaining < ChunkSize ? remaining : ChunkSize);
+            int64_t chunk_token_start = bos + chunk_start;
+
+            // Beta is pre-transposed to [H, total_tokens] for contiguous loads.
+            {
+              GmShape2D beta_shape(1, valid_rows);
+              GmStride2D beta_stride(1);
+              GmTensor2D<half> beta_global(
+                  Beta_handle + static_cast<int64_t>(head_idx) * total_tokens +
+                      chunk_token_start,
+                  beta_shape, beta_stride);
+              DynVecTile<half, 1, ChunkSize, pto::PadValue::Zero> beta_load(
+                  1, valid_rows);
+              TASSIGN(beta_load, BetaHalfUbAddr);
+              TLOAD(beta_load, beta_global);
+              if (valid_rows != ChunkSize) {
+                TFILLPAD_INPLACE(beta_ub_half, beta_load);
+              }
+            }
+
+            int64_t a_gm_offset =
+                ((chunk_token_start +
+                  static_cast<int64_t>(vid) * HalfChunk) *
+                 NumHeads + head_idx) *
+                static_cast<int64_t>(ChunkSize);
+            {
+              GmShape2D a_shape(HalfChunk, ChunkSize);
+              GmStride2D a_stride(NumHeads * ChunkSize);
+              GmTensor2D<half> a_global(A_handle + a_gm_offset, a_shape,
+                                        a_stride);
+              TLOAD(a1_ub_half, a_global);
+            }
+
+            set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+            wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+
+            TCVT(beta_ub, beta_ub_half, pto::RoundMode::CAST_NONE);
+            pipe_barrier(PIPE_V);
+            TMOV(beta_r_ub, beta_ub);
+            pipe_barrier(PIPE_V);
+            // Replicate beta_j across rows so every column j of A gets the same beta.
+            // PyTorch-like:
+            //   beta_2d = beta[None, :].expand(HalfChunk, ChunkSize)
+            TCOLEXPAND(beta_2d_ub, beta_r_ub);
+
+            TCVT(a1_ub, a1_ub_half, pto::RoundMode::CAST_NONE);
+            // Form the beta-scaled tile that the later U = A2 * V matmul consumes.
+            //   a2_ub = a1_ub * beta_2d_ub
+            TMUL(a2_ub, a1_ub, beta_2d_ub);
+            TCVT(a2_ub_half, a2_ub, pto::RoundMode::CAST_NONE);
+
+            if (!first_iter) wait_flag_dev(3);
+            set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+            wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+            {
+              GmShape2D a2_shape(HalfChunk, ChunkSize);
+              GmStride2D a2_stride(ChunkSize);
+              GmTensor2D<half> workspace_a2_global(
+                  workspace_a2_handle +
+                      static_cast<int64_t>(cid) * WsA2Size +
+                      static_cast<int64_t>(vid) * HalfChunk * ChunkSize,
+                  a2_shape, a2_stride);
+              TSTORE(workspace_a2_global, a2_ub_half);
+            }
+            ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (2 << 8));
+
+            // G is pre-transposed to [H, total_tokens] for contiguous loads.
+            {
+              GmShape2D g_shape(1, valid_rows);
+              GmStride2D g_stride(1);
+              GmTensor2D<float> g_global(
+                  G_handle + static_cast<int64_t>(head_idx) * total_tokens +
+                      chunk_token_start,
+                  g_shape, g_stride);
+              DynVecTile<float, 1, ChunkSize, pto::PadValue::Zero> g_load(
+                  1, valid_rows);
+              TASSIGN(g_load, GUbAddr);
+              TLOAD(g_load, g_global);
+              if (valid_rows != ChunkSize) {
+                TFILLPAD_INPLACE(g_ub, g_load);
+              }
+            }
+
+            set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+            wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+
+            // Build the g-based column weights before forming the W = A1 * K branch.
+            // Torch-like:
+            //   g_weight = exp(g) * beta
+            TEXP(g_ub, g_ub);
+            pipe_barrier(PIPE_V);
+            TMUL(g_ub, g_ub, beta_ub);
+            pipe_barrier(PIPE_V);
+            TMOV(g_r_ub, g_ub);
+            pipe_barrier(PIPE_V);
+            TCOLEXPAND(g_2d_ub, g_r_ub);
+            // A1 keeps the same A columns but multiplies each one by exp(g_j) * beta_j.
+            //   a1_ub = a1_ub * g_weight[None, :]
+            TMUL(a1_ub, a1_ub, g_2d_ub);
+            TCVT(a1_ub_half, a1_ub, pto::RoundMode::CAST_NONE);
+
+            if (!first_iter) wait_flag_dev(4);
+            set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+            wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+            {
+              GmShape2D a1_shape(HalfChunk, ChunkSize);
+              GmStride2D a1_stride(ChunkSize);
+              GmTensor2D<half> workspace_a1_global(
+                  workspace_a1_handle +
+                      static_cast<int64_t>(cid) * WsA1Size +
+                      static_cast<int64_t>(vid) * HalfChunk * ChunkSize,
+                  a1_shape, a1_stride);
+              TSTORE(workspace_a1_global, a1_ub_half);
+            }
+            ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (1 << 8));
+            first_iter = false;
+          }
+          gi++;
         }
       }
-
-      // Load A from BSND [B,S,H,C]
-      int64_t a_gm_offset =
-          ((chunk_token_start +
-            static_cast<int64_t>(vid) * HalfChunk) *
-           NumHeads + head_idx) *
-          static_cast<int64_t>(ChunkSize);
-      {
-        GmShape2D a_shape(HalfChunk, ChunkSize);
-        GmStride2D a_stride(NumHeads * ChunkSize);
-        GmTensor2D<half> a_global(A_handle + a_gm_offset, a_shape, a_stride);
-        TLOAD(a1_ub_half, a_global);
-      }
-
-      set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
-      wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
-
-      TCVT(beta_ub, beta_ub_half, pto::RoundMode::CAST_NONE);
-      pipe_barrier(PIPE_V);
-      TMOV(beta_r_ub, beta_ub);
-      pipe_barrier(PIPE_V);
-      // Replicate beta_j across rows so every column j of A gets the same beta.
-      // PyTorch-like:
-      //   beta_2d = beta[None, :].expand(HalfChunk, ChunkSize)
-      TCOLEXPAND(beta_2d_ub, beta_r_ub);
-
-      TCVT(a1_ub, a1_ub_half, pto::RoundMode::CAST_NONE);
-      // Form the beta-scaled tile that the later U = A2 * V matmul consumes.
-      //   a2_ub = a1_ub * beta_2d_ub
-      TMUL(a2_ub, a1_ub, beta_2d_ub);
-      TCVT(a2_ub_half, a2_ub, pto::RoundMode::CAST_NONE);
-
-      if (!first_iter) wait_flag_dev(3);
-      set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
-      wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
-      {
-        GmShape2D a2_shape(HalfChunk, ChunkSize);
-        GmStride2D a2_stride(ChunkSize);
-        GmTensor2D<half> workspace_a2_global(
-            workspace_a2_handle +
-                static_cast<int64_t>(cid) * WsA2Size +
-                static_cast<int64_t>(vid) * HalfChunk * ChunkSize,
-            a2_shape, a2_stride);
-        TSTORE(workspace_a2_global, a2_ub_half);
-      }
-      ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (2 << 8));
-
-      // G is pre-transposed to [H, total_tokens] for contiguous loads.
-      {
-        GmShape2D g_shape(1, valid_rows);
-        GmStride2D g_stride(1);
-        GmTensor2D<float> g_global(
-            G_handle + static_cast<int64_t>(head_idx) * total_tokens +
-                chunk_token_start,
-            g_shape, g_stride);
-        DynVecTile<float, 1, ChunkSize, pto::PadValue::Zero> g_load(
-            1, valid_rows);
-        TASSIGN(g_load, GUbAddr);
-        TLOAD(g_load, g_global);
-        if (valid_rows != ChunkSize) {
-          TFILLPAD_INPLACE(g_ub, g_load);
-        }
-      }
-
-      set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
-      wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
-
-      // Build the g-based column weights before forming the W = A1 * K branch.
-      // Torch-like:
-      //   g_weight = exp(g) * beta
-      TEXP(g_ub, g_ub);
-      pipe_barrier(PIPE_V);
-      TMUL(g_ub, g_ub, beta_ub);
-      pipe_barrier(PIPE_V);
-      TMOV(g_r_ub, g_ub);
-      pipe_barrier(PIPE_V);
-      TCOLEXPAND(g_2d_ub, g_r_ub);
-      // A1 keeps the same A columns but multiplies each one by exp(g_j) * beta_j.
-      //   a1_ub = a1_ub * g_weight[None, :]
-      TMUL(a1_ub, a1_ub, g_2d_ub);
-      TCVT(a1_ub_half, a1_ub, pto::RoundMode::CAST_NONE);
-
-      if (!first_iter) wait_flag_dev(4);
-      set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
-      wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
-      {
-        GmShape2D a1_shape(HalfChunk, ChunkSize);
-        GmStride2D a1_stride(ChunkSize);
-        GmTensor2D<half> workspace_a1_global(
-            workspace_a1_handle +
-                static_cast<int64_t>(cid) * WsA1Size +
-                static_cast<int64_t>(vid) * HalfChunk * ChunkSize,
-            a1_shape, a1_stride);
-        TSTORE(workspace_a1_global, a1_ub_half);
-      }
-      ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (1 << 8));
-      first_iter = false;
     }
   } else {
     // Same WY math as above; only the work enumeration changes for varlen input.
@@ -606,113 +609,118 @@ AICORE void wy_fast_kernel(
   // Cube consumes the two Vec-generated workspaces and turns them into the
   // branch outputs U and W.
   if (cu_seqlens == nullptr) {
-    int64_t chunks_per_seq = (seq_len + ChunkSize - 1) / ChunkSize;
-    for (int64_t work_idx = static_cast<int64_t>(cid);
-         work_idx < total_work;
-         work_idx += static_cast<int64_t>(block_num)) {
-      int32_t head_idx = static_cast<int32_t>(work_idx % NumHeads);
-      int64_t chunk_head_idx = work_idx / NumHeads;
-      int64_t seq_idx = chunk_head_idx / chunks_per_seq;
-      int64_t ci = chunk_head_idx % chunks_per_seq;
-
+    int64_t gi = 0;
+    for (int64_t seq_idx = 0; seq_idx < num_seqs; ++seq_idx) {
       int64_t bos = seq_idx * seq_len;
       int64_t slen = seq_len;
-      int64_t chunk_start = ci * ChunkSize;
-      int64_t remaining = slen - chunk_start;
-      int32_t valid_rows = static_cast<int32_t>(
-          remaining < ChunkSize ? remaining : ChunkSize);
-      int64_t chunk_token_start = bos + chunk_start;
+      int64_t nc = (slen + ChunkSize - 1) / ChunkSize;
 
-      int64_t kv_offset =
-          (chunk_token_start * NumHeads + head_idx) *
-          static_cast<int64_t>(HiddenSize);
+      for (int64_t ci = 0; ci < nc; ++ci) {
+        for (int32_t head_idx = 0; head_idx < NumHeads; ++head_idx) {
+          if (gi % static_cast<int64_t>(block_num) ==
+              static_cast<int64_t>(cid)) {
+            int64_t chunk_start = ci * ChunkSize;
+            int64_t remaining = slen - chunk_start;
+            int32_t valid_rows = static_cast<int32_t>(
+                remaining < ChunkSize ? remaining : ChunkSize);
+            int64_t chunk_token_start = bos + chunk_start;
 
-      {
-        GmShape2D k_shape(valid_rows, HiddenSize);
-        GmStride2D k_stride(NumHeads * HiddenSize);
-        GmTensor2D<half> k_global(K_handle + kv_offset, k_shape, k_stride);
-        DynMatL1<half, ChunkSize, HiddenSize> k_l1_load(valid_rows, HiddenSize);
-        TASSIGN(k_l1_load, 0);
-        TLOAD(k_l1_load, k_global);
-        if (valid_rows != ChunkSize) {
-          TFILLPAD(k_l1_load, k_l1_load);
+            int64_t kv_offset =
+                (chunk_token_start * NumHeads + head_idx) *
+                static_cast<int64_t>(HiddenSize);
+
+            {
+              GmShape2D k_shape(valid_rows, HiddenSize);
+              GmStride2D k_stride(NumHeads * HiddenSize);
+              GmTensor2D<half> k_global(K_handle + kv_offset, k_shape, k_stride);
+              DynMatL1<half, ChunkSize, HiddenSize> k_l1_load(valid_rows,
+                                                              HiddenSize);
+              TASSIGN(k_l1_load, 0);
+              TLOAD(k_l1_load, k_global);
+              if (valid_rows != ChunkSize) {
+                TFILLPAD(k_l1_load, k_l1_load);
+              }
+            }
+            {
+              GmShape2D v_shape(valid_rows, HiddenSize);
+              GmStride2D v_stride(NumHeads * HiddenSize);
+              GmTensor2D<half> v_global(V_handle + kv_offset, v_shape, v_stride);
+              DynMatL1<half, ChunkSize, HiddenSize> v_l1_load(valid_rows,
+                                                              HiddenSize);
+              TASSIGN(v_l1_load, 32768);
+              TLOAD(v_l1_load, v_global);
+              if (valid_rows != ChunkSize) {
+                TFILLPAD(v_l1_load, v_l1_load);
+              }
+            }
+
+            wait_flag_dev(2);
+            {
+              GmShape2D a2_shape(ChunkSize, ChunkSize);
+              GmStride2D a2_stride(ChunkSize);
+              GmTensor2D<half> workspace_a2_global(
+                  workspace_a2_handle + static_cast<int64_t>(cid) * WsA2Size,
+                  a2_shape, a2_stride);
+              // Load the Vec-prepared A2 tile:
+              //   A2 = A * beta[None, :]
+              TLOAD(a2_l1, workspace_a2_global);
+            }
+
+            set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+            wait_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+            // U = A2 * V keeps the beta-scaled path separate from the K-side update.
+            gemm_v0<half, float,
+                ChunkSize, HiddenSize, ChunkSize,
+                ChunkSize, HiddenSize, ChunkSize,
+                KTail, false, false>(a2_l1, v_l1, u_l0, true);
+
+            {
+              GmShape2D u_shape(valid_rows, HiddenSize);
+              GmStride2D u_stride(NumHeads * HiddenSize);
+              GmTensor2D<half> u_global(U_handle + kv_offset, u_shape, u_stride);
+              DynAccTile<float, ChunkSize, HiddenSize> u_store(valid_rows,
+                                                               HiddenSize);
+              TASSIGN(u_store, 0);
+              // Store only the valid token rows even though the accumulator tile is
+              // physically ChunkSize x HiddenSize.
+              TSTORE(u_global, u_store);
+            }
+            ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (3 << 8));
+
+            wait_flag_dev(1);
+            {
+              GmShape2D a1_shape(ChunkSize, ChunkSize);
+              GmStride2D a1_stride(ChunkSize);
+              GmTensor2D<half> workspace_a1_global(
+                  workspace_a1_handle + static_cast<int64_t>(cid) * WsA1Size,
+                  a1_shape, a1_stride);
+              // Load the Vec-prepared A1 tile:
+              //   A1 = A * (exp(g) * beta)[None, :]
+              TLOAD(a1_l1, workspace_a1_global);
+            }
+
+            set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+            wait_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+            // W = A1 * K uses the g-reweighted path for the complementary WY factor.
+            gemm_v0<half, float,
+                ChunkSize, HiddenSize, ChunkSize,
+                ChunkSize, HiddenSize, ChunkSize,
+                KTail, false, false>(a1_l1, k_l1, w_l0, true);
+
+            {
+              GmShape2D w_shape(valid_rows, HiddenSize);
+              GmStride2D w_stride(NumHeads * HiddenSize);
+              GmTensor2D<half> w_global(W_handle + kv_offset, w_shape, w_stride);
+              DynAccTile<float, ChunkSize, HiddenSize> w_store(valid_rows,
+                                                               HiddenSize);
+              TASSIGN(w_store, 65536);
+              TSTORE(w_global, w_store);
+            }
+            ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (4 << 8));
+          }
+          gi++;
         }
       }
-      {
-        GmShape2D v_shape(valid_rows, HiddenSize);
-        GmStride2D v_stride(NumHeads * HiddenSize);
-        GmTensor2D<half> v_global(V_handle + kv_offset, v_shape, v_stride);
-        DynMatL1<half, ChunkSize, HiddenSize> v_l1_load(valid_rows, HiddenSize);
-        TASSIGN(v_l1_load, 32768);
-        TLOAD(v_l1_load, v_global);
-        if (valid_rows != ChunkSize) {
-          TFILLPAD(v_l1_load, v_l1_load);
-        }
-      }
-
-      wait_flag_dev(2);
-      {
-        GmShape2D a2_shape(ChunkSize, ChunkSize);
-        GmStride2D a2_stride(ChunkSize);
-        GmTensor2D<half> workspace_a2_global(
-            workspace_a2_handle + static_cast<int64_t>(cid) * WsA2Size,
-            a2_shape, a2_stride);
-        // Load the Vec-prepared A2 tile:
-        //   A2 = A * beta[None, :]
-        TLOAD(a2_l1, workspace_a2_global);
-      }
-
-      set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
-      wait_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
-      // U = A2 * V keeps the beta-scaled path separate from the K-side update.
-      gemm_v0<half, float,
-          ChunkSize, HiddenSize, ChunkSize,
-          ChunkSize, HiddenSize, ChunkSize,
-          KTail, false, false>(a2_l1, v_l1, u_l0, true);
-
-      {
-        GmShape2D u_shape(valid_rows, HiddenSize);
-        GmStride2D u_stride(NumHeads * HiddenSize);
-        GmTensor2D<half> u_global(U_handle + kv_offset, u_shape, u_stride);
-        DynAccTile<float, ChunkSize, HiddenSize> u_store(valid_rows,
-                                                         HiddenSize);
-        TASSIGN(u_store, 0);
-        // Store only the valid token rows even though the accumulator tile is
-        // physically ChunkSize x HiddenSize.
-        TSTORE(u_global, u_store);
-      }
-      ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (3 << 8));
-
-      wait_flag_dev(1);
-      {
-        GmShape2D a1_shape(ChunkSize, ChunkSize);
-        GmStride2D a1_stride(ChunkSize);
-        GmTensor2D<half> workspace_a1_global(
-            workspace_a1_handle + static_cast<int64_t>(cid) * WsA1Size,
-            a1_shape, a1_stride);
-        // Load the Vec-prepared A1 tile:
-        //   A1 = A * (exp(g) * beta)[None, :]
-        TLOAD(a1_l1, workspace_a1_global);
-      }
-
-      set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
-      wait_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
-      // W = A1 * K uses the g-reweighted path for the complementary WY factor.
-      gemm_v0<half, float,
-          ChunkSize, HiddenSize, ChunkSize,
-          ChunkSize, HiddenSize, ChunkSize,
-          KTail, false, false>(a1_l1, k_l1, w_l0, true);
-
-      {
-        GmShape2D w_shape(valid_rows, HiddenSize);
-        GmStride2D w_stride(NumHeads * HiddenSize);
-        GmTensor2D<half> w_global(W_handle + kv_offset, w_shape, w_stride);
-        DynAccTile<float, ChunkSize, HiddenSize> w_store(valid_rows,
-                                                         HiddenSize);
-        TASSIGN(w_store, 65536);
-        TSTORE(w_global, w_store);
-      }
-      ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (4 << 8));
     }
   } else {
     int64_t gi = 0;

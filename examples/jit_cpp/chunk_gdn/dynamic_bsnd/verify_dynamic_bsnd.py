@@ -82,6 +82,24 @@ def format_seq_lens(seq_lens: tuple[int, ...], *, max_items: int = 8) -> str:
 def build_cases() -> list[VerifyCase]:
     return [
         VerifyCase(
+            name="fixed_single_seq_exact_one_chunk",
+            seq_lens=(128,),
+            use_cu_seqlens=False,
+            seed=91,
+        ),
+        VerifyCase(
+            name="fixed_single_seq_exact_two_chunks",
+            seq_lens=(256,),
+            use_cu_seqlens=False,
+            seed=92,
+        ),
+        VerifyCase(
+            name="fixed_single_seq_tail_four_chunks",
+            seq_lens=(385,),
+            use_cu_seqlens=False,
+            seed=93,
+        ),
+        VerifyCase(
             name="varlen_single_seq_exact_one_chunk",
             seq_lens=(128,),
             use_cu_seqlens=True,
