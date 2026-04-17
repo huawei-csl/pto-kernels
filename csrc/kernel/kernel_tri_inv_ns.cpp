@@ -104,37 +104,39 @@ AICORE inline void InvertSingleTile(
   // b_l0[1] will store X (where initially X0 = I / (2 * n))
 
   TMOV(a_l0_tile[0], I_neg_l1_tile);
+  TMOV(b_l0_tile[1], I_l1_tile);
   TMOV(b_l0_tile[0], A_neg_l1_tile);
   set_flag(PIPE_MTE1, PIPE_M, event_0);
 
-  TMOV(b_l0_tile[1], I_l1_tile);
-  set_flag(PIPE_MTE1, PIPE_M, event_1);
-
+  TMOV(a_l0_tile[1], two_I_l1_tile);  // a_l0[1] <- 2 * I (will stay constant)
   wait_flag(PIPE_MTE1, PIPE_M, event_0);
-  TMATMUL(c_l0_tile[0], a_l0_tile[0], b_l0_tile[0]);  // c_l0[0] <- -M
+  TMATMUL(c_l0_tile[0], a_l0_tile[0],
+          b_l0_tile[1]);  // c_l0[0] <- -I
+  set_flag(PIPE_M, PIPE_S, event_0);
+  wait_flag(PIPE_M, PIPE_S, event_0);
+  set_flag(PIPE_S, PIPE_M, event_0);
+  wait_flag(PIPE_S, PIPE_M, event_0);
 
-  wait_flag(PIPE_MTE1, PIPE_M, event_1);
   TMATMUL_ACC(c_l0_tile[0], c_l0_tile[0], a_l0_tile[0],
-              b_l0_tile[1]);  // c_l0[0] <- -I-M = -A
+              b_l0_tile[0]);  // c_l0[0] <- -I-M = -A
+
   set_flag(PIPE_M, PIPE_FIX, event_0);
   set_flag(PIPE_M, PIPE_MTE1, event_0);
 
   wait_flag(PIPE_M, PIPE_MTE1, event_0);
-  TMOV(a_l0_tile[1], two_I_l1_tile);  // a_l0[1] <- 2 * I (will stay constant)
   TMOV(b_l0_tile[1], I_scaled_l1_tile);  // b_l0[1] <- X0 = I / (2 * n)
   TMOV(a_l0_tile[0], I_scaled_l1_tile);  // a_l0[0] <- X0 = I / (2 * n)
-  set_flag(PIPE_MTE1, PIPE_M, event_0);
-  wait_flag(PIPE_MTE1, PIPE_M, event_0);
 
   wait_flag(PIPE_M, PIPE_FIX, event_0);
   TMOV(A_neg_l1_tile, c_l0_tile[0]);
   set_flag(PIPE_FIX, PIPE_MTE1, event_0);
   wait_flag(PIPE_FIX, PIPE_MTE1, event_0);
-  TMOV(b_l0_tile[0], A_neg_l1_tile);  // b_l0[0] <- -A (will stay constant)
-  set_flag(PIPE_MTE1, PIPE_M, event_1);
-  wait_flag(PIPE_MTE1, PIPE_M, event_1);
 
-  set_flag(PIPE_FIX, PIPE_M, event_1);
+  TMOV(b_l0_tile[0], A_neg_l1_tile);  // b_l0[0] <- -A (will stay constant)
+  set_flag(PIPE_MTE1, PIPE_M, event_0);
+  wait_flag(PIPE_MTE1, PIPE_M, event_0);
+
+  set_flag(PIPE_FIX, PIPE_M, event_0);
   for (uint32_t i = 0; i < num_iters; ++i) {
     TMATMUL(c_l0_tile[0], a_l0_tile[0], b_l0_tile[0]);  // c_l0[0] <- X @ (-A)
     set_flag(PIPE_M, PIPE_FIX, event_0);
@@ -144,14 +146,21 @@ AICORE inline void InvertSingleTile(
     TMOV(Y_l1_tile, c_l0_tile[0]);
     set_flag(PIPE_FIX, PIPE_MTE1, event_0);
 
-    wait_flag(PIPE_FIX, PIPE_M, event_1);
-    TMATMUL(c_l0_tile[1], a_l0_tile[1], b_l0_tile[1]);  // c_l0[1] <- 2 * X
-
     wait_flag(PIPE_M, PIPE_MTE1, event_0);
     wait_flag(PIPE_FIX, PIPE_MTE1, event_0);
     TMOV(a_l0_tile[0], Y_l1_tile);
     set_flag(PIPE_MTE1, PIPE_M, event_0);
 
+    set_flag(PIPE_M, PIPE_S, event_0);
+    wait_flag(PIPE_M, PIPE_S, event_0);
+    set_flag(PIPE_S, PIPE_M, event_0);
+    wait_flag(PIPE_S, PIPE_M, event_0);
+    wait_flag(PIPE_FIX, PIPE_M, event_0);               // from previous iter
+    TMATMUL(c_l0_tile[1], a_l0_tile[1], b_l0_tile[1]);  // c_l0[1] <- 2 * X
+    set_flag(PIPE_M, PIPE_S, event_0);
+    wait_flag(PIPE_M, PIPE_S, event_0);
+    set_flag(PIPE_S, PIPE_M, event_0);
+    wait_flag(PIPE_S, PIPE_M, event_0);
     wait_flag(PIPE_MTE1, PIPE_M, event_0);
     TMATMUL_ACC(c_l0_tile[1], c_l0_tile[1], a_l0_tile[0],
                 b_l0_tile[1]);  // c_l0[1] <- Y @ X + 2 * X
@@ -159,13 +168,13 @@ AICORE inline void InvertSingleTile(
     wait_flag(PIPE_M, PIPE_FIX, event_0);
 
     if (i < num_iters - 1) {
-      set_flag(PIPE_M, PIPE_MTE1, event_1);
+      set_flag(PIPE_M, PIPE_MTE1, event_0);
       TMOV(X_l1_tile, c_l0_tile[1]);        // X_l1 now contains X_new
-      set_flag(PIPE_FIX, PIPE_M, event_1);  // for next iter
+      set_flag(PIPE_FIX, PIPE_M, event_0);  // for next iter
       set_flag(PIPE_FIX, PIPE_MTE1, event_0);
 
       wait_flag(PIPE_FIX, PIPE_MTE1, event_0);
-      wait_flag(PIPE_M, PIPE_MTE1, event_1);
+      wait_flag(PIPE_M, PIPE_MTE1, event_0);
       TMOV(b_l0_tile[1], X_l1_tile);
       TMOV(a_l0_tile[0], X_l1_tile);
       set_flag(PIPE_MTE1, PIPE_M, event_0);
@@ -234,10 +243,8 @@ AICORE void runKernelTriInvNS(__gm__ OutputT* M_inv, __gm__ InputT* M,
   using TileL0B = TileRight<InputT, MatrixSize, MatrixSize>;
   using TileL0C = TileAcc<OutputT, MatrixSize, MatrixSize>;
 
-  GlobalTensorIn M_global_in(M + global_index);
   GlobalTensorIn I_neg_global_in(I_neg);
   GlobalTensorIn I_scaled_global_in(I_scaled);
-  GlobalTensorOut M_inv_global_out(M_inv + global_index);
 
   TileL1AB A_neg_l1_tile[NumTilesPerCubeIter];
   TileL1AB X_l1_tile;
