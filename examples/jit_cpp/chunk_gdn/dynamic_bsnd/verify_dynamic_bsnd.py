@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-Numerical verification for dynamic BSND PTO kernels (chunk_size=128).
+Numerical verification for dynamic BSND PTO kernels.
 
-Verifies each stage against a PyTorch reference:
+The script sweeps several fixed-length and variable-length shape combinations
+and verifies every PTO stage against a PyTorch reference:
   1. chunk_cumsum — chunk-local prefix sum
   2. scaled_dot_kkt — gated KK^T with mask and beta
   3. wy_fast — WY recompute (w, u)
@@ -11,6 +12,7 @@ Verifies each stage against a PyTorch reference:
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 import os, sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -43,6 +45,97 @@ RTOL, ATOL = 2e-2, 2e-2
 RTOL_ACCUM, ATOL_ACCUM = 2e-2, 8e-2
 
 
+@dataclass(frozen=True)
+class VerifyCase:
+    name: str
+    seq_lens: tuple[int, ...]
+    use_cu_seqlens: bool
+    num_heads: int = 16
+    hidden_size: int = 128
+    seed: int = 42
+
+    @property
+    def total_tokens(self) -> int:
+        return sum(self.seq_lens)
+
+    @property
+    def num_sequences(self) -> int:
+        return len(self.seq_lens)
+
+
+def generate_random_sequence_lengths(
+    num_sequences: int, total_tokens: int, *, seed: int
+) -> list[int]:
+    """Split `total_tokens` into `num_sequences` positive lengths deterministically."""
+    if total_tokens < num_sequences:
+        raise ValueError("total_tokens must be >= num_sequences")
+    if num_sequences == 1:
+        return [total_tokens]
+
+    gen = torch.Generator(device="cpu")
+    gen.manual_seed(seed)
+    split_points = torch.randperm(total_tokens - 1, generator=gen)[: num_sequences - 1] + 1
+    split_points = torch.sort(split_points).values.tolist()
+    boundaries = [0, *split_points, total_tokens]
+    return [boundaries[i + 1] - boundaries[i] for i in range(num_sequences)]
+
+
+def make_cu_seqlens(seq_lens: tuple[int, ...], device: torch.device) -> torch.Tensor:
+    cu = [0]
+    for length in seq_lens:
+        cu.append(cu[-1] + int(length))
+    return torch.tensor(cu, dtype=torch.int32, device=device)
+
+
+def format_seq_lens(seq_lens: tuple[int, ...], *, max_items: int = 8) -> str:
+    if len(seq_lens) <= max_items:
+        return str(list(seq_lens))
+    prefix = ", ".join(str(x) for x in seq_lens[: max_items // 2])
+    suffix = ", ".join(str(x) for x in seq_lens[-(max_items // 2) :])
+    return f"[{prefix}, ..., {suffix}]"
+
+
+def build_cases() -> list[VerifyCase]:
+    return [
+        VerifyCase(
+            name="varlen_single_seq_exact_two_chunks",
+            seq_lens=(256,),
+            use_cu_seqlens=True,
+            seed=101,
+        ),
+        VerifyCase(
+            name="varlen_single_seq_tail_four_chunks",
+            seq_lens=(385,),
+            use_cu_seqlens=True,
+            seed=102,
+        ),
+        VerifyCase(
+            name="varlen_exact_two_chunks_per_seq",
+            seq_lens=(256, 256),
+            use_cu_seqlens=True,
+            seed=103,
+        ),
+        VerifyCase(
+            name="varlen_short_and_tail_mix",
+            seq_lens=(1, 17, 128, 129, 255),
+            use_cu_seqlens=True,
+            seed=104,
+        ),
+        VerifyCase(
+            name="varlen_random_7seq_1024tok",
+            seq_lens=tuple(generate_random_sequence_lengths(7, 1024, seed=105)),
+            use_cu_seqlens=True,
+            seed=105,
+        ),
+        VerifyCase(
+            name="varlen_random_9seq_1536tok",
+            seq_lens=tuple(generate_random_sequence_lengths(9, 1536, seed=106)),
+            use_cu_seqlens=True,
+            seed=106,
+        ),
+    ]
+
+
 # -------- PyTorch references --------
 
 def ref_chunk_local_cumsum(g, chunk_size, cu_seqlens=None):
@@ -68,7 +161,7 @@ def _safe_exp(x):
 
 
 def ref_scaled_dot_kkt(k, beta, g_cumsum, chunk_size, cu_seqlens=None):
-    """Reference KKT: [B,T,H,C] layout with strict lower triangle, gating, beta."""
+    """Reference KKT with strict lower triangle, gating, beta, and tail chunks."""
     B, T, H, D = k.shape
     out = torch.zeros(B, T, H, chunk_size, device=k.device, dtype=torch.float32)
     kf, bf, gf = k.float(), beta.float(), g_cumsum.float()
@@ -79,9 +172,10 @@ def ref_scaled_dot_kkt(k, beta, g_cumsum, chunk_size, cu_seqlens=None):
         ranges = [(cu[i], cu[i + 1]) for i in range(len(cu) - 1)]
     for bos, eos in ranges:
         L = eos - bos
-        for ci in range(L // chunk_size):
-            s = bos + ci * chunk_size
-            e = s + chunk_size
+        for chunk_start in range(0, L, chunk_size):
+            s = bos + chunk_start
+            e = min(s + chunk_size, eos)
+            valid = e - s
             for h in range(H):
                 kc = kf[0, s:e, h, :]
                 kk = kc @ kc.T
@@ -89,10 +183,9 @@ def ref_scaled_dot_kkt(k, beta, g_cumsum, chunk_size, cu_seqlens=None):
                 gam = gc.unsqueeze(-1) - gc.unsqueeze(-2)
                 blk = kk * _safe_exp(gam)
                 blk = blk * bf[0, s:e, h].unsqueeze(-1)
-                bt = blk.shape[0]
-                mask = torch.arange(bt, device=blk.device)[:, None] > torch.arange(bt, device=blk.device)[None, :]
+                mask = torch.arange(valid, device=blk.device)[:, None] > torch.arange(valid, device=blk.device)[None, :]
                 blk = blk * mask.float()
-                out[0, s:e, h, :chunk_size] = blk
+                out[0, s:e, h, :valid] = blk
     return out
 
 
@@ -109,11 +202,12 @@ def ref_recompute_w_u(k, v, beta, A, g_cumsum, chunk_size, cu_seqlens=None):
         ranges = [(cu[i], cu[i + 1]) for i in range(len(cu) - 1)]
     for bos, eos in ranges:
         L = eos - bos
-        for ci in range(L // chunk_size):
-            s = bos + ci * chunk_size
-            e = s + chunk_size
+        for chunk_start in range(0, L, chunk_size):
+            s = bos + chunk_start
+            e = min(s + chunk_size, eos)
+            valid = e - s
             for h in range(H):
-                Ablk = Af[0, s:e, h, :]
+                Ablk = Af[0, s:e, h, :valid]
                 gc = gf[0, s:e, h]
                 b_g = torch.exp(gc)
                 vb = vf[0, s:e, h, :] * bf[0, s:e, h, None]
@@ -241,21 +335,26 @@ def ref_chunk_o(q, k, v_new, h_states, g_cumsum, chunk_size, cu_seqlens=None):
     return o_out
 
 
-def main():
-    torch.manual_seed(42)
-    torch.npu.set_device(NPU_DEVICE)
-    dev = torch.device(NPU_DEVICE)
+def run_case(case: VerifyCase, dev: torch.device) -> bool:
+    torch.manual_seed(case.seed)
 
-    N_seq = 2
-    L_seg = 256
-    H, D = 16, 128
-    T = N_seq * L_seg
+    H = case.num_heads
+    D = case.hidden_size
+    T = case.total_tokens
+    seq_lens = case.seq_lens
+    cu_seqlens = make_cu_seqlens(seq_lens, dev) if case.use_cu_seqlens else None
+    batch_override = case.num_sequences if case.use_cu_seqlens else None
+    cu_cpu = cu_seqlens.cpu() if cu_seqlens is not None else None
 
-    cu_seqlens = torch.arange(0, T + 1, L_seg, dtype=torch.int32, device=dev)
-    print(f"Shape: B=1, T={T}, H={H}, D={D}, C={C}, N_seq={N_seq}, L_seg={L_seg}")
-    print(f"cu_seqlens={cu_seqlens.cpu().tolist()}")
-    print(f"BLOCK_DIM={BLOCK_DIM}")
-    print()
+    print(f"== Case: {case.name} ==")
+    print(
+        f"  B=1, T={T}, H={H}, D={D}, C={C}, "
+        f"N_seq={case.num_sequences}, use_cu_seqlens={case.use_cu_seqlens}"
+    )
+    print(f"  seq_lens={format_seq_lens(seq_lens)}")
+    if cu_cpu is not None:
+        print(f"  cu_seqlens={cu_cpu.tolist()}")
+    print(f"  BLOCK_DIM={BLOCK_DIM}")
 
     q = torch.randn(1, T, H, D, device=dev, dtype=torch.float16)
     k = torch.randn(1, T, H, D, device=dev, dtype=torch.float16)
@@ -264,125 +363,211 @@ def main():
     g_in = F.logsigmoid(torch.randn(1, T, H, device=dev, dtype=torch.float32))
     beta = torch.rand(1, T, H, device=dev, dtype=torch.float16)
 
+    q_cpu = q.cpu()
+    k_cpu = k.cpu()
+    v_cpu = v.cpu()
+    g_in_cpu = g_in.cpu()
+    beta_cpu = beta.cpu()
+
     # --- 1. chunk_cumsum ---
     print("[1] Testing chunk_cumsum...")
     g_sum = torch.empty(1, T, H, device=dev, dtype=torch.float32)
-    run_chunk_cumsum(g_in, g_sum, chunk_size=C,
-                     cu_seqlens=cu_seqlens, batch_size_override=N_seq)
+    run_chunk_cumsum(
+        g_in,
+        g_sum,
+        chunk_size=C,
+        cu_seqlens=cu_seqlens,
+        batch_size_override=batch_override,
+    )
     torch.npu.synchronize()
 
-    g_ref = ref_chunk_local_cumsum(g_in.cpu(), C, cu_seqlens.cpu())
+    g_ref = ref_chunk_local_cumsum(g_in_cpu, C, cu_cpu)
     g_sum_cpu = g_sum.float().cpu()
-    match = torch.allclose(g_sum_cpu, g_ref, rtol=RTOL, atol=ATOL)
-    if not match:
+    cumsum_match = torch.allclose(g_sum_cpu, g_ref, rtol=RTOL, atol=ATOL)
+    if not cumsum_match:
         diff = (g_sum_cpu - g_ref).abs()
         print(f"  max abs diff: {diff.max().item():.6f}, mean: {diff.mean().item():.6f}")
-    print(f"  chunk_cumsum: {'PASS' if match else 'FAIL'}")
+    print(f"  chunk_cumsum: {'PASS' if cumsum_match else 'FAIL'}")
 
     # --- 2. scaled_dot_kkt ---
     print("[2] Testing scaled_dot_kkt...")
     msk = torch.tril(torch.ones(C, C, device=dev), diagonal=-1).to(torch.float32)
     workspace_kkt = torch.zeros(BLOCK_DIM, C, C, device=dev, dtype=torch.float16)
     A_out = torch.zeros(1, T, H, C, device=dev, dtype=torch.float16)
-    run_scaled_dot_kkt(k, beta, g_sum, msk, workspace_kkt, A_out,
-                       chunk_size=C, cu_seqlens=cu_seqlens,
-                       batch_size_override=N_seq)
+    run_scaled_dot_kkt(
+        k,
+        beta,
+        g_sum,
+        msk,
+        workspace_kkt,
+        A_out,
+        chunk_size=C,
+        cu_seqlens=cu_seqlens,
+        batch_size_override=batch_override,
+    )
     torch.npu.synchronize()
 
-    A_ref = ref_scaled_dot_kkt(k.cpu(), beta.cpu(), g_sum.cpu(), C, cu_seqlens.cpu())
-    A_cmp = A_out.float().cpu()
-    match = torch.allclose(A_cmp, A_ref, rtol=RTOL, atol=ATOL)
-    if not match:
-        diff = (A_cmp - A_ref).abs()
+    A_ref = ref_scaled_dot_kkt(k_cpu, beta_cpu, g_sum_cpu, C, cu_cpu)
+    A_cpu = A_out.float().cpu()
+    kkt_match = torch.allclose(A_cpu, A_ref, rtol=RTOL, atol=ATOL)
+    if not kkt_match:
+        diff = (A_cpu - A_ref).abs()
         print(f"  max abs diff: {diff.max().item():.6f}, mean: {diff.mean().item():.6f}")
-        nonzero_diff = diff[A_ref.abs() > 1e-6]
+        ref_nonzero = A_ref.abs() > 1e-6
+        nonzero_diff = diff[ref_nonzero]
         if nonzero_diff.numel() > 0:
-            print(f"  max rel diff (nonzero): {(nonzero_diff / A_ref[A_ref.abs() > 1e-6].abs()).max().item():.4f}")
-    print(f"  scaled_dot_kkt: {'PASS' if match else 'FAIL'}")
+            rel = nonzero_diff / A_ref[ref_nonzero].abs()
+            print(f"  max rel diff (nonzero): {rel.max().item():.4f}")
+    print(f"  scaled_dot_kkt: {'PASS' if kkt_match else 'FAIL'}")
 
     # --- 3. wy_fast ---
     print("[3] Testing wy_fast...")
     w_out = torch.empty(1, T, H, D, device=dev, dtype=torch.float16)
     u_out = torch.empty(1, T, H, D, device=dev, dtype=torch.float16)
-    run_wy_fast(k, v, beta, g_sum, A_out, w_out, u_out,
-                chunk_size=C, cu_seqlens=cu_seqlens,
-                batch_size_override=N_seq)
+    run_wy_fast(
+        k,
+        v,
+        beta,
+        g_sum,
+        A_out,
+        w_out,
+        u_out,
+        chunk_size=C,
+        cu_seqlens=cu_seqlens,
+        batch_size_override=batch_override,
+    )
     torch.npu.synchronize()
 
-    w_ref, u_ref = ref_recompute_w_u(k.cpu(), v.cpu(), beta.cpu(), A_out.cpu(), g_sum.cpu(), C, cu_seqlens.cpu())
+    w_ref, u_ref = ref_recompute_w_u(k_cpu, v_cpu, beta_cpu, A_cpu, g_sum_cpu, C, cu_cpu)
+    w_cpu = w_out.float().cpu()
+    u_cpu = u_out.float().cpu()
     # w = A @ (k*beta*exp(g)): chained fp16 multiplies before matmul need wider atol
-    w_match = torch.allclose(w_out.float().cpu(), w_ref.float(), rtol=RTOL, atol=5e-2)
-    u_match = torch.allclose(u_out.float().cpu(), u_ref.float(), rtol=RTOL, atol=ATOL)
+    w_match = torch.allclose(w_cpu, w_ref.float(), rtol=RTOL, atol=5e-2)
+    u_match = torch.allclose(u_cpu, u_ref.float(), rtol=RTOL, atol=ATOL)
     if not w_match:
-        diff = (w_out.float().cpu() - w_ref.float()).abs()
-        print(f"  w max diff: {diff.max().item():.6f}")
+        diff = (w_cpu - w_ref.float()).abs()
+        print(f"  w max diff: {diff.max().item():.6f}, mean: {diff.mean().item():.6f}")
     if not u_match:
-        diff = (u_out.float().cpu() - u_ref.float()).abs()
-        print(f"  u max diff: {diff.max().item():.6f}")
+        diff = (u_cpu - u_ref.float()).abs()
+        print(f"  u max diff: {diff.max().item():.6f}, mean: {diff.mean().item():.6f}")
     print(f"  wy_fast w: {'PASS' if w_match else 'FAIL'}")
     print(f"  wy_fast u: {'PASS' if u_match else 'FAIL'}")
 
     # --- 4. chunk_h ---
     print("[4] Testing chunk_h...")
-    tc = total_chunks(N_seq, T, C, cu_seqlens)
-    s_out = torch.zeros(tc * H, D, D, device=dev, dtype=torch.float16)
+    total_case_chunks = total_chunks(case.num_sequences, T, C, cu_seqlens)
+    s_out = torch.zeros(total_case_chunks * H, D, D, device=dev, dtype=torch.float16)
     v_out = torch.empty(1, T, H, D, device=dev, dtype=torch.float16)
-    fs_out = torch.zeros(N_seq * H, D, D, device=dev, dtype=torch.float16)
-    run_chunk_h(k, w_out, u_out, g_sum, s_out, v_out, fs_out,
-                chunk_size=C, cu_seqlens=cu_seqlens,
-                batch_size_override=N_seq)
+    fs_out = torch.zeros(case.num_sequences * H, D, D, device=dev, dtype=torch.float16)
+    run_chunk_h(
+        k,
+        w_out,
+        u_out,
+        g_sum,
+        s_out,
+        v_out,
+        fs_out,
+        chunk_size=C,
+        cu_seqlens=cu_seqlens,
+        batch_size_override=batch_override,
+    )
     torch.npu.synchronize()
 
-    s_finite = torch.isfinite(s_out).all()
-    v_finite = torch.isfinite(v_out).all()
-    fs_finite = torch.isfinite(fs_out).all()
+    s_finite = bool(torch.isfinite(s_out).all().item())
+    v_finite = bool(torch.isfinite(v_out).all().item())
+    fs_finite = bool(torch.isfinite(fs_out).all().item())
     print(f"  chunk_h states finite: {'PASS' if s_finite else 'FAIL'}")
     print(f"  chunk_h v_new finite: {'PASS' if v_finite else 'FAIL'}")
     print(f"  chunk_h final_state finite: {'PASS' if fs_finite else 'FAIL'}")
 
-    h_ref, v_ref, fs_ref = ref_chunk_h(k.cpu(), w_out.cpu(), u_out.cpu(), g_sum.cpu(), C, cu_seqlens.cpu())
-    s_reshaped = s_out.float().cpu().view(tc, H, D, D)
-    h_ref32 = h_ref.float()
-    h_match = torch.allclose(s_reshaped, h_ref32, rtol=RTOL_ACCUM, atol=ATOL_ACCUM)
+    h_ref, v_ref, fs_ref = ref_chunk_h(k_cpu, w_cpu, u_cpu, g_sum_cpu, C, cu_cpu)
+    s_reshaped = s_out.float().cpu().view(total_case_chunks, H, D, D)
+    h_match = torch.allclose(s_reshaped, h_ref.float(), rtol=RTOL_ACCUM, atol=ATOL_ACCUM)
     if not h_match:
-        diff = (s_reshaped - h_ref32).abs()
+        diff = (s_reshaped - h_ref.float()).abs()
         print(f"  h states max diff: {diff.max().item():.6f}, mean: {diff.mean().item():.6f}")
     print(f"  chunk_h states: {'PASS' if h_match else 'FAIL'}")
 
-    v_match = torch.allclose(v_out.float().cpu(), v_ref.float(), rtol=RTOL, atol=ATOL)
+    v_cpu = v_out.float().cpu()
+    v_match = torch.allclose(v_cpu, v_ref.float(), rtol=RTOL, atol=ATOL)
     if not v_match:
-        diff = (v_out.float().cpu() - v_ref.float()).abs()
+        diff = (v_cpu - v_ref.float()).abs()
         print(f"  v_new max diff: {diff.max().item():.6f}, mean: {diff.mean().item():.6f}")
     print(f"  chunk_h v_new: {'PASS' if v_match else 'FAIL'}")
+
+    fs_cpu = fs_out.float().cpu().view(case.num_sequences, H, D, D)
+    fs_match = torch.allclose(fs_cpu, fs_ref.float(), rtol=RTOL_ACCUM, atol=ATOL_ACCUM)
+    if not fs_match:
+        diff = (fs_cpu - fs_ref.float()).abs()
+        print(f"  final_state max diff: {diff.max().item():.6f}, mean: {diff.mean().item():.6f}")
+    print(f"  chunk_h final_state: {'PASS' if fs_match else 'FAIL'}")
 
     # --- 5. chunk_o ---
     print("[5] Testing chunk_o...")
     msk2 = torch.tril(torch.ones(C, C, device=dev), diagonal=0).to(torch.float32)
     o_out = torch.empty(1, T, H, D, device=dev, dtype=torch.float16)
-    run_chunk_o(q, k, v_out, s_out, g_sum, msk2, o_out,
-                chunk_size=C, cu_seqlens=cu_seqlens,
-                batch_size_override=N_seq)
+    run_chunk_o(
+        q,
+        k,
+        v_out,
+        s_out,
+        g_sum,
+        msk2,
+        o_out,
+        chunk_size=C,
+        cu_seqlens=cu_seqlens,
+        batch_size_override=batch_override,
+    )
     torch.npu.synchronize()
 
-    o_finite = torch.isfinite(o_out).all()
+    o_finite = bool(torch.isfinite(o_out).all().item())
     print(f"  chunk_o output finite: {'PASS' if o_finite else 'FAIL'}")
 
-    o_ref = ref_chunk_o(q.cpu(), k.cpu(), v_out.cpu(), s_reshaped, g_sum.cpu(), C, cu_seqlens.cpu())
-    o_cmp = o_out.float().cpu()
-    o_ref_f = o_ref.float()
-    o_match = torch.allclose(o_cmp, o_ref_f, rtol=RTOL_ACCUM, atol=ATOL_ACCUM)
+    o_ref = ref_chunk_o(q_cpu, k_cpu, v_cpu, s_reshaped, g_sum_cpu, C, cu_cpu)
+    o_cpu = o_out.float().cpu()
+    o_match = torch.allclose(o_cpu, o_ref.float(), rtol=RTOL_ACCUM, atol=ATOL_ACCUM)
     if not o_match:
-        diff = (o_cmp - o_ref_f).abs()
+        diff = (o_cpu - o_ref.float()).abs()
         print(f"  o max diff: {diff.max().item():.6f}, mean: {diff.mean().item():.6f}")
     print(f"  chunk_o output: {'PASS' if o_match else 'FAIL'}")
 
+    case_pass = (
+        cumsum_match
+        and kkt_match
+        and w_match
+        and u_match
+        and s_finite
+        and v_finite
+        and fs_finite
+        and h_match
+        and v_match
+        and fs_match
+        and o_finite
+        and o_match
+    )
+    print(f"Case result: {'PASS' if case_pass else 'FAIL'}")
     print()
-    all_pass = (match and w_match and u_match
-                and s_finite and v_finite and fs_finite
-                and h_match and v_match
-                and o_finite and o_match)
+    return case_pass
+
+
+def main():
+    torch.npu.set_device(NPU_DEVICE)
+    dev = torch.device(NPU_DEVICE)
+
+    cases = build_cases()
+    passed = 0
+
+    print(f"Running {len(cases)} verification cases on {NPU_DEVICE}")
+    print()
+    for case in cases:
+        if run_case(case, dev):
+            passed += 1
+
+    all_pass = passed == len(cases)
+    print(f"Summary: {passed}/{len(cases)} cases passed.")
     print(f"Overall: {'ALL CHECKS PASSED' if all_pass else 'SOME CHECKS FAILED'}")
+    return 0 if all_pass else 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

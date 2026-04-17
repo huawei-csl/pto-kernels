@@ -246,13 +246,13 @@ AICORE void chunk_h_kernel(
   TASSIGN(zero_ub, ZERO_UB);
   TileUbDataND<float, HalfC, D, HalfC, D> s_ub;
   TASSIGN(s_ub, S_UB);
-  TileUbDataND<half, HalfC, D, HalfC, D> k_ub_half;
+  TileUbDataND<half, HalfC, D, HalfC, D, pto::PadValue::Zero> k_ub_half;
   TASSIGN(k_ub_half, K_UB_HALF);
   TileUbDataND<float, 1, C, 1, C, pto::PadValue::Zero> g_ub;
   TASSIGN(g_ub, G_UB);
   TileUbDataND<half, HalfC, D, HalfC, D> s_ub_half;
   TASSIGN(s_ub_half, S_UB_HALF);
-  TileUbDataND<half, HalfC, D, HalfC, D> u_ub_half;
+  TileUbDataND<half, HalfC, D, HalfC, D, pto::PadValue::Zero> u_ub_half;
   TASSIGN(u_ub_half, U_UB_HALF);
   TileUbDataND<float, HalfC, D, HalfC, D> k_ub;
   TASSIGN(k_ub, K_UB);
@@ -447,24 +447,42 @@ AICORE void chunk_h_kernel(
     ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (3 << 8));
 
     int64_t chunk_start_0 = bos;
-    int64_t k_offset_0 = (chunk_start_0 * H + head) * D + vid * HalfC * BSND_QKV_STRIDE;
-    {
-      GmShape2D k_shape(HalfC, D);
+    int64_t valid0 = slen;
+    if (valid0 > C) valid0 = C;
+    int32_t valid_rows_0 =
+        static_cast<int32_t>(valid0 - static_cast<int64_t>(vid) * HalfC);
+    if (valid_rows_0 < 0) valid_rows_0 = 0;
+    if (valid_rows_0 > HalfC) valid_rows_0 = HalfC;
+
+    int64_t k_offset_0 =
+        (chunk_start_0 * H + head) * D + vid * HalfC * BSND_QKV_STRIDE;
+    if (valid_rows_0 > 0) {
+      GmShape2D k_shape(valid_rows_0, D);
       GmStride2D k_stride(BSND_QKV_STRIDE);
       GmTensor2D<half> k_global(K_handle + k_offset_0, k_shape, k_stride);
-      DynVecTile<half, HalfC, D, pto::PadValue::Zero> k_load(HalfC, D);
+      DynVecTile<half, HalfC, D, pto::PadValue::Zero> k_load(valid_rows_0, D);
       TASSIGN(k_load, K_UB_HALF);
       TLOAD(k_load, k_global);
+      if (valid_rows_0 != HalfC) {
+        TFILLPAD_INPLACE(k_ub_half, k_load);
+      }
+    } else {
+      TEXPANDS(k_ub, 0.0f);
+      TCVT(k_ub_half, k_ub, pto::RoundMode::CAST_NONE);
     }
 
     {
-      GmShape2D g_shape(1, C);
+      GmShape2D g_shape(1, static_cast<int32_t>(valid0));
       GmStride2D g_stride(1);
       GmTensor2D<float> g_global(G_handle + head * total_tokens + chunk_start_0,
                                  g_shape, g_stride);
-      DynVecTile<float, 1, C, pto::PadValue::Zero> g_load(1, C);
+      DynVecTile<float, 1, C, pto::PadValue::Zero> g_load(
+          1, static_cast<int32_t>(valid0));
       TASSIGN(g_load, G_UB);
       TLOAD(g_load, g_global);
+      if (valid0 != C) {
+        TFILLPAD_INPLACE(g_ub, g_load);
+      }
     }
 
     set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
@@ -474,15 +492,25 @@ AICORE void chunk_h_kernel(
       int64_t chunk_start = bos + static_cast<int64_t>(ci) * C;
       int64_t valid = slen - static_cast<int64_t>(ci) * C;
       if (valid > C) valid = C;
+      int32_t valid_rows =
+          static_cast<int32_t>(valid - static_cast<int64_t>(vid) * HalfC);
+      if (valid_rows < 0) valid_rows = 0;
+      if (valid_rows > HalfC) valid_rows = HalfC;
 
       int64_t u_offset = (chunk_start * H + head) * D + vid * HalfC * BSND_QKV_STRIDE;
-      {
-        GmShape2D u_shape(HalfC, D);
+      if (valid_rows > 0) {
+        GmShape2D u_shape(valid_rows, D);
         GmStride2D u_stride(BSND_QKV_STRIDE);
         GmTensor2D<half> u_global(U_handle + u_offset, u_shape, u_stride);
-        DynVecTile<half, HalfC, D, pto::PadValue::Zero> u_load(HalfC, D);
+        DynVecTile<half, HalfC, D, pto::PadValue::Zero> u_load(valid_rows, D);
         TASSIGN(u_load, U_UB_HALF);
         TLOAD(u_load, u_global);
+        if (valid_rows != HalfC) {
+          TFILLPAD_INPLACE(u_ub_half, u_load);
+        }
+      } else {
+        TEXPANDS(u_ub, 0.0f);
+        TCVT(u_ub_half, u_ub, pto::RoundMode::CAST_NONE);
       }
 
       TCVT(k_ub, k_ub_half, pto::RoundMode::CAST_NONE);
@@ -541,11 +569,11 @@ AICORE void chunk_h_kernel(
       wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
 
       int64_t v_offset = (chunk_start * H + head) * D + vid * HalfC * BSND_QKV_STRIDE;
-      {
-        GmShape2D v_shape(HalfC, D);
+      if (valid_rows > 0) {
+        GmShape2D v_shape(valid_rows, D);
         GmStride2D v_stride(BSND_QKV_STRIDE);
         GmTensor2D<half> v_global(V_handle + v_offset, v_shape, v_stride);
-        DynVecTile<half, HalfC, D> v_store(HalfC, D);
+        DynVecTile<half, HalfC, D> v_store(valid_rows, D);
         TASSIGN(v_store, U_UB_HALF);
         TSTORE(v_global, v_store);
       }
@@ -578,15 +606,26 @@ AICORE void chunk_h_kernel(
         int64_t next_start = bos + static_cast<int64_t>(ci + 1) * C;
         int64_t next_valid = slen - static_cast<int64_t>(ci + 1) * C;
         if (next_valid > C) next_valid = C;
+        int32_t next_valid_rows = static_cast<int32_t>(
+            next_valid - static_cast<int64_t>(vid) * HalfC);
+        if (next_valid_rows < 0) next_valid_rows = 0;
+        if (next_valid_rows > HalfC) next_valid_rows = HalfC;
 
         int64_t nk_off = (next_start * H + head) * D + vid * HalfC * BSND_QKV_STRIDE;
-        {
-          GmShape2D k_shape(HalfC, D);
+        if (next_valid_rows > 0) {
+          GmShape2D k_shape(next_valid_rows, D);
           GmStride2D k_stride(BSND_QKV_STRIDE);
           GmTensor2D<half> k_global(K_handle + nk_off, k_shape, k_stride);
-          DynVecTile<half, HalfC, D, pto::PadValue::Zero> k_load(HalfC, D);
+          DynVecTile<half, HalfC, D, pto::PadValue::Zero> k_load(
+              next_valid_rows, D);
           TASSIGN(k_load, K_UB_HALF);
           TLOAD(k_load, k_global);
+          if (next_valid_rows != HalfC) {
+            TFILLPAD_INPLACE(k_ub_half, k_load);
+          }
+        } else {
+          TEXPANDS(k_ub, 0.0f);
+          TCVT(k_ub_half, k_ub, pto::RoundMode::CAST_NONE);
         }
 
         {

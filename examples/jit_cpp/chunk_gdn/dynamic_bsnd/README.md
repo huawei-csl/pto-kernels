@@ -28,6 +28,8 @@ cd /workdir/pto-kernels-fork/examples/jit_cpp/chunk_gdn/dynamic_bsnd
 
 # Verify numerical correctness
 GDN_NPU_DEVICE=npu:7 python3 verify_dynamic_bsnd.py
+# Sweeps 6 varlen cases by default: single-sequence exact/tail chunks,
+# mixed short/tail sequences, and randomized cu_seqlens stress cases.
 
 # Benchmark (N_seq=16, L_seg=16384, H=16, D=128, C=128)
 GDN_NPU_DEVICE=npu:7 python3 bench_dynamic_bsnd.py
@@ -60,6 +62,10 @@ benchmark runs on `npu:7`.
 - **Variable-length sequences**: `cu_seqlens` (int32) provides cumulative
   sequence boundaries. When non-null, `batch_size` is the number of
   sequences and `seq_len` is ignored.
+- **Verifier sweep**: `verify_dynamic_bsnd.py` now checks multiple
+  variable-length layouts, including short sequences (`len < C`), tail
+  chunks, randomized `cu_seqlens`, and a numeric `final_state` comparison
+  for `chunk_h`.
 - **Contiguous per-head G/Beta staging**: The public torch API still
   accepts `g_sum` / `beta` in `[1, T, H]`. Runtime helpers materialize
   contiguous `[H, T]` workspaces so the hot kernels can DMA per-head
