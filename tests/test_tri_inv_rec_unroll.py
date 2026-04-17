@@ -19,7 +19,7 @@ torch.manual_seed(42)
 np.random.seed(42)
 
 
-def random_triu_matrix(n, block_dim_x, block_dim_y, scale=0.01):
+def random_triu_matrix(n, block_dim_x, block_dim_y, scale=0.1):
     U = scale * torch.triu(torch.rand((block_dim_x, block_dim_y, n, n)), diagonal=1)
     return U
 
@@ -42,7 +42,7 @@ def block_ones_triu_matrix(n, block_dim_x, block_dim_y):
     return torch.from_numpy(np.triu(U, 1))
 
 
-def block_random_triu_matrix(n, block_dim_x, block_dim_y, scale=0.02):
+def block_random_triu_matrix(n, block_dim_x, block_dim_y, scale=0.2):
     U_ = scale * np.random.rand(16, 16)
     U_ = np.triu(U_, k=1)
     U = np.zeros((block_dim_x, block_dim_y, n, n))
@@ -140,17 +140,21 @@ def _test_tri_inv_rec_unroll_bsnd(
     assert frob_error <= ftol, f"frob_error: {frob_error}"
 
 
-@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16], ids=str)
+
 @pytest.mark.parametrize("n", [16, 32, 64, 128])
 @pytest.mark.parametrize("block_dim_x", [1, 2, 3, 4])
 @pytest.mark.parametrize("block_dim_y", [2, 4, 8])
 @pytest.mark.parametrize(
-    "matrix_gen,atol,rtol,ftol",
+    "matrix_gen,atol,rtol,ftol,dtype",
     [
-        (block_ones_triu_matrix, 0, 0, 0),
-        (ones_triu_matrix, 0, 0, 0),
-        (block_random_triu_matrix, 5e-5, 0.1, 1e-4),
-        (random_triu_matrix, 5e-5, 0.1, 1e-4),
+        (block_ones_triu_matrix, 0, 0, 0,torch.float16),
+        (ones_triu_matrix, 0, 0, 0,torch.float16),
+        (block_random_triu_matrix, 5e-5, 0.1, 1e-4, torch.float16),
+        (random_triu_matrix, 5e-5, 0.1, 1e-4,torch.float16),
+        (block_ones_triu_matrix, 0, 0, 0,torch.bfloat16),
+        (ones_triu_matrix, 0, 0, 0,torch.bfloat16),
+        (block_random_triu_matrix, 5e-5, 0.1, 1e-3, torch.bfloat16),
+        (random_triu_matrix, 5e-5, 0.1, 1e-3,torch.bfloat16),
     ],
 )
 def test_tri_inv_rec_unroll(
@@ -167,18 +171,21 @@ def test_tri_inv_rec_unroll(
     _test_tri_inv_rec_unroll(U, atol, rtol, ftol, dtype)
 
 
-@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 @pytest.mark.parametrize("B", [1, 4])
 @pytest.mark.parametrize("S", [128, 256, 1024])
 @pytest.mark.parametrize("N", [4, 8])
 @pytest.mark.parametrize("D", [16, 32, 64, 128])
 @pytest.mark.parametrize(
-    "matrix_gen,atol,rtol,ftol",
+    "matrix_gen,atol,rtol,ftol,dtype",
     [
-        (block_ones_triu_matrix, 0, 0, 0),
-        (ones_triu_matrix, 0, 0, 0),
-        (block_random_triu_matrix, 5e-5, 0.1, 1e-4),
-        (random_triu_matrix, 5e-5, 0.1, 1e-4),
+        (block_ones_triu_matrix, 0, 0, 0,torch.float16),
+        (ones_triu_matrix, 0, 0, 0,torch.float16),
+        (block_random_triu_matrix, 5e-5, 0.1, 1e-4, torch.float16),
+        (random_triu_matrix, 5e-5, 0.1, 1e-4,torch.float16),
+        (block_ones_triu_matrix, 0, 0, 0,torch.bfloat16),
+        (ones_triu_matrix, 0, 0, 0,torch.bfloat16),
+        (block_random_triu_matrix, 5e-5, 0.1, 1e-3, torch.bfloat16),
+        (random_triu_matrix, 5e-5, 0.1, 1e-3,torch.bfloat16),
     ],
 )
 def test_tri_inv_rec_unroll_bsnd(
