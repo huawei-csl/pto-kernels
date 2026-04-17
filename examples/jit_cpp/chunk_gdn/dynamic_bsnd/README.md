@@ -29,6 +29,12 @@ cd /workdir/pto-kernels/examples/jit_cpp/chunk_gdn
 # Verify numerical correctness
 python3 dynamic_bsnd/verify_dynamic_bsnd.py
 
+# Reproduce the full NPU verification sweep used during development
+python3 dynamic_bsnd/verify_dynamic_bsnd.py --device npu:7
+
+# Re-run the previously failing ragged-tail regression directly
+python3 dynamic_bsnd/verify_dynamic_bsnd.py --device npu:7 --case 21 -v
+
 # Benchmark (N_seq=16, L_seg=16384, H=16, D=128, C=128)
 python3 dynamic_bsnd/bench_dynamic_bsnd.py
 ```
