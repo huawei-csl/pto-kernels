@@ -2,8 +2,9 @@
 """
 Numerical verification for dynamic BSND PTO kernels.
 
-The script sweeps several fixed-length and variable-length shape combinations
-and verifies every PTO stage against a PyTorch reference:
+The script sweeps a deterministic list of fixed-length and variable-length
+shape combinations chosen to cover chunk-boundary corner cases, and verifies
+every PTO stage against a PyTorch reference:
   1. chunk_cumsum — chunk-local prefix sum
   2. scaled_dot_kkt — gated KK^T with mask and beta
   3. wy_fast — WY recompute (w, u)
@@ -63,23 +64,6 @@ class VerifyCase:
         return len(self.seq_lens)
 
 
-def generate_random_sequence_lengths(
-    num_sequences: int, total_tokens: int, *, seed: int
-) -> list[int]:
-    """Split `total_tokens` into `num_sequences` positive lengths deterministically."""
-    if total_tokens < num_sequences:
-        raise ValueError("total_tokens must be >= num_sequences")
-    if num_sequences == 1:
-        return [total_tokens]
-
-    gen = torch.Generator(device="cpu")
-    gen.manual_seed(seed)
-    split_points = torch.randperm(total_tokens - 1, generator=gen)[: num_sequences - 1] + 1
-    split_points = torch.sort(split_points).values.tolist()
-    boundaries = [0, *split_points, total_tokens]
-    return [boundaries[i + 1] - boundaries[i] for i in range(num_sequences)]
-
-
 def make_cu_seqlens(seq_lens: tuple[int, ...], device: torch.device) -> torch.Tensor:
     cu = [0]
     for length in seq_lens:
@@ -98,46 +82,52 @@ def format_seq_lens(seq_lens: tuple[int, ...], *, max_items: int = 8) -> str:
 def build_cases() -> list[VerifyCase]:
     return [
         VerifyCase(
+            name="varlen_single_seq_exact_one_chunk",
+            seq_lens=(128,),
+            use_cu_seqlens=True,
+            seed=101,
+        ),
+        VerifyCase(
             name="varlen_single_seq_exact_two_chunks",
             seq_lens=(256,),
             use_cu_seqlens=True,
-            seed=101,
+            seed=102,
         ),
         VerifyCase(
             name="varlen_single_seq_tail_four_chunks",
             seq_lens=(385,),
             use_cu_seqlens=True,
-            seed=102,
+            seed=103,
         ),
         VerifyCase(
-            name="varlen_exact_two_chunks_per_seq",
-            seq_lens=(256, 256),
+            name="varlen_all_chunk_aligned_multi_seq",
+            seq_lens=(128, 256, 384),
             use_cu_seqlens=True,
-            seed=103,
+            seed=104,
         ),
         VerifyCase(
             name="varlen_short_and_tail_mix",
             seq_lens=(1, 17, 128, 129, 255),
             use_cu_seqlens=True,
-            seed=104,
-        ),
-        VerifyCase(
-            name="varlen_random_7seq_1024tok",
-            seq_lens=tuple(generate_random_sequence_lengths(7, 1024, seed=105)),
-            use_cu_seqlens=True,
             seed=105,
         ),
         VerifyCase(
-            name="varlen_random_13seq_1536tok",
-            seq_lens=tuple(generate_random_sequence_lengths(13, 1536, seed=202)),
-            use_cu_seqlens=True,
-            seed=202,
-        ),
-        VerifyCase(
-            name="varlen_random_17seq_2048tok",
-            seq_lens=tuple(generate_random_sequence_lengths(17, 2048, seed=106)),
+            name="varlen_boundary_ladder_8seq_1024tok",
+            seq_lens=(1, 63, 64, 65, 127, 128, 129, 447),
             use_cu_seqlens=True,
             seed=106,
+        ),
+        VerifyCase(
+            name="varlen_boundary_ladder_13seq_1536tok",
+            seq_lens=(1, 17, 31, 32, 33, 95, 127, 128, 129, 191, 192, 193, 367),
+            use_cu_seqlens=True,
+            seed=107,
+        ),
+        VerifyCase(
+            name="varlen_boundary_ladder_17seq_2048tok",
+            seq_lens=(1, 2, 31, 32, 33, 63, 64, 65, 95, 127, 128, 129, 191, 319, 255, 256, 257),
+            use_cu_seqlens=True,
+            seed=108,
         ),
     ]
 
