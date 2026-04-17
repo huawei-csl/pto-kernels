@@ -116,6 +116,7 @@ ascendc_library(
   csrc/kernel/kernel_csr_gather.cpp
   csrc/kernel/kernel_simple_matmul.cpp
   csrc/kernel/kernel_batch_matrix_square.cpp
+  csrc/kernel/kernel_tri_inv_ns.cpp
   csrc/kernel/kernel_tri_inv_rec_unroll.cpp
   csrc/kernel/kernel_tri_inv_trick.cpp
   csrc/kernel/kernel_swiglu.cpp)
