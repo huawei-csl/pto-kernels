@@ -20,4 +20,6 @@ def test_pto_scan_ul1(scan_size: int, dtype: torch.dtype):
     scan_npu = pto_scan_ul1(a_npu)
 
     ref = torch.cumsum(a, dim=0)
+
+    breakpoint()
     assert torch.allclose(scan_npu.cpu(), ref)
