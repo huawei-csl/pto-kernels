@@ -26,6 +26,29 @@
 //
 // NPU memory hierarchy used:
 //   GM -> UB (Vec), GM -> L1 -> L0A/L0B -> L0C -> GM (Cube)
+//
+// ── PTO / NPU Primer ──────────────────────────────────────────────────
+// This kernel uses BOTH the Cube engine (matrix multiply) and Vec engine
+// (SIMD element-wise ops), running on SEPARATE physical cores that
+// communicate via Global Memory (GM) + cross-core flags (FFTS).
+//
+// Execution flow:
+//   Vec core:  load A,beta,G → compute A2,A1 → store to GM workspace
+//   Cube core: wait for workspace → load A2/A1 + K/V → GEMM → store U,W
+//
+// Key PTO APIs (with numpy/torch equivalents):
+//   TLOAD(ub_tile, gm)      — ub_tile = gm[...]          (DMA: GM→UB, async MTE2)
+//   TSTORE(gm, ub_tile)     — gm[...] = ub_tile          (DMA: UB→GM, async MTE3)
+//   TCVT(dst, src, mode)    — dst = src.float() or .half() (type conversion)
+//   TMOV(dst, src)          — dst = src.clone()
+//   TMUL(d, a, b)           — d = a * b                   (element-wise)
+//   TEXP(d, s)              — d = torch.exp(s)
+//   TCOLEXPAND(2d, row)     — 2d[i,j] = row[j]  (broadcast row across all rows)
+//   TEXTRACT(l0, l1, r, c)  — L1 sub-block → L0A/L0B     (MTE1 for Cube GEMM)
+//   TMATMUL(C, A, B)        — C = A @ B in Cube engine    (fp16→fp32 accumulate)
+//   set_flag / wait_flag    — sync between pipes on SAME core
+//   ffts_cross_core_sync    — signal ACROSS Cube↔Vec cores
+//   wait_flag_dev(flag)     — wait for cross-core signal
 // ============================================================================
 
 #include <pto/pto-inst.hpp>
@@ -33,6 +56,8 @@
 #include <runtime/rt_ffts.h>
 using namespace pto;
 
+// Compile-time constants for head count, hidden size, and chunk size.
+// These are set via -D flags at JIT compilation time to specialize the kernel.
 #ifndef GDN_H
 #define GDN_H 16
 #endif
@@ -46,21 +71,39 @@ using namespace pto;
 #endif
 
 // ── PTO type aliases (device-only, guarded by __CCE_AICORE__) ───────────────
-// UB tile in row-major (ND) layout, used by Vec engine.
-// T=dtype, R×C=static shape, RV×CV=valid region, P=pad value for TLOAD.
+// UbND<T, R, C, RV, CV, P>: A tile in UB (on-chip SRAM) with row-major layout.
+//   Like torch.empty((R, C), dtype=T) in fast on-chip memory.
+//   T=dtype, R×C=static shape, RV×CV=valid sub-region (handles partial/tail chunks).
+//   P = pad value for TLOAD (PadValue::Zero fills outside valid region with 0).
+//   Used by Vec engine for element-wise computation.
 #ifdef __CCE_AICORE__
 template <typename T, int R, int C, int RV = R, int CV = C,
           pto::PadValue P = pto::PadValue::Null>
 using UbND = pto::Tile<pto::TileType::Vec, T, R, C, pto::BLayout::RowMajor,
                        RV, CV, pto::SLayout::NoneBox, 512, P>;
 
-// L1 tile in column-major (NZ) layout, used as input to Cube engine.
-// T=dtype, R×C=static shape, RV×CV=valid region. Zero-padded on TLOAD.
+// L1Mat<T, R, C>: A tile in L1 cache, NZ (column-major) fractal format,
+//   for Cube GEMM input.
+//   Think of it as a matrix staged in L1 cache, ready for matrix multiplication.
+//   TLOAD(l1_tile, gm_tensor) loads data from GM → L1.
+//   TEXTRACT(l0_tile, l1_tile, row, col) copies from L1 → L0A or L0B
+//   (the Cube engine's register files).
+//   T=dtype, R×C=static shape, RV×CV=valid region. Zero-padded on TLOAD.
 template <typename T, int R, int C, int RV = R, int CV = C>
 using L1Mat = pto::Tile<pto::TileType::Mat, T, R, C, pto::BLayout::ColMajor,
                         RV, CV, pto::SLayout::RowMajor, 512, pto::PadValue::Zero>;
 #endif
 
+// ── Kernel function (runs on each AI core) ────────────────────────────
+// Template params: NumHeads (H), HiddenSize (D), ChunkSize (C).
+// __gm__ pointers: Global Memory addresses passed from the host.
+//   K, V:         key/value tensors [B, S, N, D] (BSND layout)
+//   Beta, G:      decay/gate vectors [H, total_tokens] (pre-transposed)
+//   A:            triangular attention matrix [B, S, H, C] (from kkt kernel)
+//   workspace_a1/a2: GM scratch space for Vec→Cube data transfer
+//   W, U:         output matrices [B, S, N, D] (BSND layout)
+//   cu_seqlens:   cumulative seq lengths (nullptr for fixed-length batches)
+//   ffts_addr:    cross-core synchronization control address
 template <int32_t NumHeads, int32_t HiddenSize, int32_t ChunkSize>
 AICORE void wy_fast_kernel(
     __gm__ half *K_handle, __gm__ half *V_handle,
@@ -73,11 +116,29 @@ AICORE void wy_fast_kernel(
     int64_t total_tokens,
     uint64_t ffts_addr)
 {
+  // Each Vec sub-block processes half the chunk rows (C/2).
   constexpr int32_t HalfChunk = ChunkSize / 2;
+  // KTail handles the last partial 128-element block of HiddenSize (for alignment).
   constexpr uint32_t KTail =
       (HiddenSize % 128 == 0) ? 128 : (HiddenSize % 128);
 
-  // ── UB memory layout (byte addresses, Vec engine) ─────────────────────
+  // ── UB Memory Layout (manual memory management) ─────────────────────
+  // On NPU, there is NO dynamic memory allocator for on-chip buffers.
+  // We manually assign each tile a fixed byte address in UB, like a C union.
+  // The compiler verifies these don't overlap (or we manage it ourselves).
+  // Think of it as: ub = bytearray(256*1024)  # 256KB UB
+  //   beta_ub_half = ub[0:256]       # half[1, C]
+  //   a1_ub_half   = ub[256:16640]   # half[C/2, C]
+  //   beta_ub      = ub[16640:17152] # float[1, C]
+  //   beta_r_ub    = ub[17152:17664] # float[1, C]  (copy for TCOLEXPAND)
+  //   beta_2d_ub   = ub[17664:50432] # float[C/2, C] (broadcast result)
+  //   tmp_ub       = ub[50432:75008] # scratch space
+  //   a1_ub        = ub[75008:107776]  # float[C/2, C]
+  //   a2_ub        = ub[107776:140544] # float[C/2, C]
+  //   a2_ub_half   = ub[140544:156928] # half[C/2, C]
+  //   g_ub         = ub[156928:157440] # float[1, C]
+  //   g_r_ub       = ub[157440:157952] # float[1, C]  (copy for TCOLEXPAND)
+  //   g_2d_ub      = ub[157952:...]    # float[C/2, C] (broadcast result)
   constexpr int32_t BetaHalfUbAddr = 0;
   constexpr int32_t A1HalfUbAddr   = 256;
   constexpr int32_t BetaUbAddr     = 16640;
@@ -91,17 +152,26 @@ AICORE void wy_fast_kernel(
   constexpr int32_t GRUbAddr       = 157440;
   constexpr int32_t G2dUbAddr      = 157952;
 
+  // Workspace sizes (in elements) for A1 and A2 in Global Memory.
+  // Each core gets its own workspace slice so cores don't collide.
   constexpr int32_t WsA1Size = ChunkSize * ChunkSize;
   constexpr int32_t WsA2Size = ChunkSize * ChunkSize;
 
+  // Initialize cross-core synchronization base address for this kernel launch.
   set_ffts_base_addr(ffts_addr);
+  // cid = this AI core's index (like CUDA blockIdx.x)
   auto cid = get_block_idx();
+  // block_num = total number of AI cores running this kernel (like CUDA gridDim.x)
   auto block_num = get_block_num();
+  // vid = Vec sub-block ID (0 or 1). Each Vec core has 2 sub-blocks that
+  // process the upper (vid=0) and lower (vid=1) C/2 rows of A in parallel.
   auto vid = get_subblockid();
 
   int64_t num_seqs = batch_size;
 
   // ── UB tile declarations (Vec sub-blocks) ─────────────────────────────
+  // Each UbND tile is "assigned" a fixed byte address in UB via TASSIGN.
+  // This is how we map logical tile names to physical on-chip memory regions.
   UbND<half, 1, ChunkSize> beta_ub_half;
   TASSIGN(beta_ub_half, BetaHalfUbAddr);
   UbND<half, HalfChunk, ChunkSize> a1_ub_half;
@@ -128,12 +198,18 @@ AICORE void wy_fast_kernel(
   TASSIGN(g_2d_ub, G2dUbAddr);
 
   // ── L1 / L0C tile declarations (Cube engine) ─────────────────────────
+  // L1 holds data loaded from GM, waiting to be fed into the Cube.
+  // L0A / L0B are the Cube engine's input register files (left/right operands).
+  // L0C (TileAcc) is the Cube accumulator — always float32 for precision.
   L1Mat<half, ChunkSize, HiddenSize> k_l1;
   TASSIGN(k_l1, 0);
   L1Mat<half, ChunkSize, HiddenSize> v_l1;
   TASSIGN(v_l1, 32768);
   L1Mat<half, ChunkSize, ChunkSize> a2_l1;
   TASSIGN(a2_l1, 65536);
+  // TileAcc<float, C, D>: Cube accumulator in L0C (float32).
+  // GEMM always accumulates in fp32 for numerical precision.
+  // When TSTORE writes TileAcc to a half GlobalTensor, automatic fp32→fp16 cast.
   TileAcc<float, ChunkSize, HiddenSize,
           ChunkSize, HiddenSize> u_l0;
   TASSIGN(u_l0, 0);
@@ -143,6 +219,11 @@ AICORE void wy_fast_kernel(
           ChunkSize, HiddenSize> w_l0;
   TASSIGN(w_l0, 65536);
 
+  // ── Work distribution ─────────────────────────────────────────────────
+  // total_work = num_seqs × chunks_per_seq × NumHeads
+  // Each AI core processes work items in a grid-stride loop:
+  //   for (work_idx = cid; work_idx < total_work; work_idx += block_num)
+  // This is the NPU equivalent of CUDA's grid-stride loop pattern.
   int64_t total_work = 0;
   if (cu_seqlens == nullptr) {
     int64_t chunks_per_seq = (seq_len + ChunkSize - 1) / ChunkSize;
@@ -154,12 +235,17 @@ AICORE void wy_fast_kernel(
   // Two Vec sub-blocks (vid=0,1) handle upper/lower C/2 rows in parallel.
   // ════════════════════════════════════════════════════════════════════════
 #if defined(__DAV_C220_VEC__)
+  // set_mask_norm / set_vector_mask: configure the Vec engine's SIMD lanes.
+  // -1, -1 means "enable all 128 lanes" — full-width SIMD operation.
   set_mask_norm();
   set_vector_mask(-1, -1);
 
   // ── Fixed-length sequence path ────────────────────────────────────────
   if (cu_seqlens == nullptr) {
     int64_t chunks_per_seq = (seq_len + ChunkSize - 1) / ChunkSize;
+    // first_iter: On the very first iteration, there's no previous cross-core
+    // signal to wait for (the "done" flag from Cube hasn't been set yet).
+    // So we skip wait_flag_dev() on the first iteration only.
     bool first_iter = true;
     for (int64_t work_idx = static_cast<int64_t>(cid);
          work_idx < total_work;
@@ -210,8 +296,19 @@ AICORE void wy_fast_kernel(
         TLOAD(_ld, _gm);
       }
 
+      // Sync: wait for TLOAD (MTE2 pipe) to finish before Vec engine reads data.
+      // set_flag(PIPE_MTE2, PIPE_V) signals that DMA loads are complete;
+      // wait_flag(PIPE_MTE2, PIPE_V) blocks the Vec pipe until that signal.
       set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
       wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+
+      // ── A2 = A * beta_2d (numpy pseudocode) ──────────────────────────────
+      // # beta is [1, C] — one scalar per token in this chunk
+      // beta_f32 = beta.float()                              # TCVT half→float
+      // beta_2d = np.tile(beta_f32, (C/2, 1))                # TCOLEXPAND
+      // A_f32 = A[my_rows].float()                           # TCVT half→float
+      // A2 = A_f32 * beta_2d                                 # TMUL element-wise
+      // A2_f16 = A2.half()                                   # TCVT float→half
 
       // A2 = A * beta_2d: column-broadcast beta then elementwise multiply
       TCVT(beta_ub, beta_ub_half, pto::RoundMode::CAST_NONE);
@@ -223,6 +320,15 @@ AICORE void wy_fast_kernel(
       TCVT(a1_ub, a1_ub_half, pto::RoundMode::CAST_NONE);
       TMUL(a2_ub, a1_ub, beta_2d_ub);
       TCVT(a2_ub_half, a2_ub, pto::RoundMode::CAST_NONE);
+
+      // ── Store A2 to GM workspace for Cube ─────────────────────────────────
+      // After Vec computes A2, it must be accessible by the Cube core.
+      // Since Cube and Vec are on DIFFERENT physical cores, they share data
+      // through Global Memory (GM). The workflow is:
+      //   1. Vec: TSTORE(workspace, A2)  — write to GM (MTE3 pipe)
+      //   2. Vec: ffts_cross_core_sync(flag 2)  — signal Cube "A2 is ready"
+      //   3. Cube: wait_flag_dev(2)  — wait for Vec's signal
+      //   4. Cube: TLOAD(l1, workspace)  — read A2 from GM into L1
 
       // Store A2 -> workspace GM, signal Cube (cross-core flag 2)
       if (!first_iter) wait_flag_dev(3);
@@ -239,6 +345,9 @@ AICORE void wy_fast_kernel(
         TASSIGN(_st, A2HalfUbAddr);
         TSTORE(_gm, _st);
       }
+      // ffts_cross_core_sync encodes: pipe | (dest_core_type << 4) | (flag_id << 8)
+      //   1 = current pipe done, 2<<4 = target is Cube core, 2<<8 = flag ID 2
+      //   Cube will call wait_flag_dev(2) to receive this signal.
       ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (2 << 8));
 
       // Load G (pre-transposed [H, total_tokens]) -> UB, zero-pad tail
@@ -260,6 +369,14 @@ AICORE void wy_fast_kernel(
 
       set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
       wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+
+      // ── A1 = A * (exp(g) * beta)_2d (numpy pseudocode) ──────────────────
+      // # g is [1, C] float — cumulative gate values for this chunk
+      // g_exp = np.exp(g)                                    # TEXP
+      // g_exp_beta = g_exp * beta_f32                        # TMUL
+      // g_exp_beta_2d = np.tile(g_exp_beta, (C/2, 1))        # TCOLEXPAND
+      // A1 = A_f32 * g_exp_beta_2d                           # TMUL
+      // A1_f16 = A1.half()                                   # TCVT float→half
 
       // A1 = A * (exp(g) * beta)_2d: gate modulation before column-broadcast
       TEXP(g_ub, g_ub);
@@ -287,11 +404,16 @@ AICORE void wy_fast_kernel(
         TASSIGN(_st, A1HalfUbAddr);
         TSTORE(_gm, _st);
       }
+      // Signal Cube: flag ID 1 means "A1 is ready in workspace GM"
       ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (1 << 8));
       first_iter = false;
     }
   }
   // ── Variable-length sequence path (Vec) ───────────────────────────────
+  // When cu_seqlens is provided, sequences have different lengths.
+  // cu_seqlens = [0, len0, len0+len1, ...] — cumulative sequence boundaries.
+  // We iterate over (sequence, chunk, head) and use round-robin assignment
+  // to distribute work across AI cores.
   else {
     int64_t gi = 0;
     bool first_iter_v = true;
@@ -497,6 +619,19 @@ AICORE void wy_fast_kernel(
         TLOAD(_l1, _gm);
       }
 
+      // ── Cube GEMM: U = A2 @ V ────────────────────────────────────────────
+      // numpy equivalent: U = A2.half() @ V.half()  # result accumulated in float32
+      //
+      // NPU Cube pipeline:
+      //   1. A2 is already in L1 (a2_l1). V is in L1 (v_l1).
+      //   2. TEXTRACT copies them to L0A and L0B (the Cube's register files).
+      //   3. TMATMUL computes C×D = (C×C) @ (C×D), accumulating in float32 L0C.
+      //   4. TSTORE writes L0C → GM (with implicit float32→float16 conversion).
+      //
+      // WAR (Write-After-Read) sync before TEXTRACT:
+      //   MTE2→MTE1: ensure L1 data from TLOAD is ready before TEXTRACT reads it
+      //   M→MTE1: ensure previous TMATMUL has read L0A/L0B before overwriting
+
       // GEMM: U = A2 @ V  (L1 -> L0A/L0B -> L0C)
       set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
       wait_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
@@ -531,6 +666,8 @@ AICORE void wy_fast_kernel(
             U_handle + kv_offset, _gs);
         TSTORE(_gm, _l0);
       }
+      // Signal Vec: flag ID 3 tells Vec "Cube is done reading A2 workspace,
+      // safe to overwrite it next iteration". Vec waits on this via wait_flag_dev(3).
       ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (3 << 8));
 
       // Wait for Vec's A1 workspace (cross-core flag 1) -> load A1 -> L1
@@ -545,6 +682,10 @@ AICORE void wy_fast_kernel(
                 static_cast<int64_t>(cid) * WsA1Size, _gs);
         TLOAD(_l1, _gm);
       }
+
+      // ── Cube GEMM: W = A1 @ K ────────────────────────────────────────────
+      // Same pipeline as U = A2 @ V above, but with A1 as left operand
+      // and K as right operand. Result W is also accumulated in fp32 L0C.
 
       // GEMM: W = A1 @ K  (L1 -> L0A/L0B -> L0C)
       set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
@@ -580,10 +721,14 @@ AICORE void wy_fast_kernel(
             W_handle + kv_offset, _gs);
         TSTORE(_gm, _l0);
       }
+      // Signal Vec: flag ID 4 tells Vec "Cube is done reading A1 workspace,
+      // safe to overwrite it next iteration". Vec waits on this via wait_flag_dev(4).
       ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (4 << 8));
     }
   }
   // ── Variable-length sequence path (Cube) ──────────────────────────────
+  // Same logic as fixed-length but iterates over cu_seqlens boundaries.
+  // Round-robin work assignment: gi % block_num == cid.
   else {
     int64_t gi = 0;
     for (int64_t si = 0; si < num_seqs; ++si) {
@@ -736,6 +881,11 @@ AICORE void wy_fast_kernel(
 #endif
 }
 
+// ── Device kernel entry point ─────────────────────────────────────────
+// extern "C" __global__ AICORE: NPU kernel function, callable from the host.
+// All pointer args are uint8_t* (type-erased) and reinterpret_cast'd to their
+// actual types inside. This is the standard pattern for NPU kernel launch
+// interfaces — similar to how CUDA kernels receive void* from the launcher.
 extern "C" __global__ AICORE void launch_wy_fast(
     __gm__ uint8_t *K_handle, __gm__ uint8_t *V_handle,
     __gm__ uint8_t *Beta_handle, __gm__ uint8_t *G_handle,
@@ -761,6 +911,12 @@ extern "C" __global__ AICORE void launch_wy_fast(
       batch_size, seq_len, total_tokens, ffts_addr);
 }
 
+// ── Host launcher (called from Python ctypes) ─────────────────────────
+// call_kernel: launches the NPU kernel on `block_dim` AI cores.
+// rtGetC2cCtrlAddr: retrieves the FFTS cross-core control address that
+//   enables Cube↔Vec synchronization at runtime.
+// <<<block_dim, nullptr, stream>>>: NPU kernel launch syntax, analogous
+//   to CUDA's <<<grid, block, stream>>> but for AI cores.
 extern "C" void call_kernel(
     uint32_t block_dim, void *stream,
     uint8_t *k, uint8_t *v, uint8_t *beta, uint8_t *g_sum, uint8_t *A,

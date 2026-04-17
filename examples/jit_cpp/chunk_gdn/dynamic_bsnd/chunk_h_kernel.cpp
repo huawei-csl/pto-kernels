@@ -42,6 +42,49 @@
 //   GM → L1 (Cube-accessible) → L0A/L0B/L0C (Cube GEMM registers)
 //   GM → UB (Vec-accessible, on-chip SRAM)
 //   Cross-core sync via FFTS (Fast Fine-grained Task Synchronization)
+//
+// ── PTO / NPU Primer ──────────────────────────────────────────────────
+// This is the most complex kernel in the GDN suite. It implements the
+// recurrent state update, requiring sequential chunk processing (chunks
+// within a sequence CANNOT be parallelized — each depends on the previous).
+//
+// Key PTO APIs (numpy/torch equivalents):
+//   TLOAD(dst, gm)          — dst = gm_data        (DMA: GM→L1 or GM→UB)
+//   TSTORE(gm, src)         — gm_data = src        (DMA: UB/L0C→GM)
+//   TASSIGN(tile, addr)     — tile = memory[addr]   (bind tile to buffer address)
+//   TCVT(dst, src, mode)    — dst = src.float()/.half()
+//   TMOV(dst, src)          — dst = src.clone()
+//   TADD(d, a, b)           — d = a + b
+//   TSUB(d, a, b)           — d = a - b
+//   TMUL(d, a, b)           — d = a * b
+//   TMULS(d, s, scalar)     — d = s * scalar       (scalar multiply)
+//   TADDS(d, s, scalar)     — d = s + scalar       (scalar add)
+//   TEXP(d, s)              — d = torch.exp(s)
+//   TEXPANDS(tile, scalar)  — tile[:] = scalar     (fill with constant)
+//   TROWEXPAND(2d, col)     — 2d[i,j] = col[i]    (broadcast col across row dim)
+//   TFILLPAD(dst, src)      — zero-fill L1 tile padding (for tail chunks)
+//   TEXTRACT(l0, l1, r, c)  — L1 sub-tile → L0A/L0B
+//   TRESHAPE(zn, nz)        — reinterpret layout NZ↔ZN (logical transpose, free)
+//   TMATMUL(C, A, B)        — C = A @ B (Cube GEMM, fp16 inputs → fp32 accum)
+//   set_flag/wait_flag      — pipe sync within same core
+//   ffts_cross_core_sync    — cross-core signal Cube↔Vec
+//   wait_flag_dev(flag)     — wait for cross-core signal
+//   GetValue(idx)           — read a single scalar from a UB tile (slow, use sparingly)
+//
+// ── Workspace memory layout (shared between Cube and Vec via GM) ──────
+// Each AI core has its own workspace region to avoid contention:
+//   WS_WS [C×D]:  Cube writes WS = W @ S here → Vec reads it
+//   WS_K  [D×C]:  Vec writes K_scaled here → Cube reads it for KV = K^T @ V
+//   WS_S  [D×D]:  Vec writes current state S here → Cube reads it for GEMM 1
+//   WS_KV [D×D]:  Cube writes KV = K^T @ V here → Vec reads it to update S
+//
+// Data flow per chunk (think of it as a ping-pong between Cube and Vec):
+//   Vec: write S₀ to WS_S → signal Cube (flag 3)
+//   Cube: read S from WS_S, load W → compute WS = W@S → write WS_WS → signal Vec (flag 0)
+//   Vec: read WS, compute V_new = U - WS, compute K_scaled → write WS_K → signal Cube (flag 1)
+//   Cube: read K from WS_K, load V → compute KV = K^T@V → write WS_KV → signal Vec (flag 2)
+//   Vec: read KV, update S = exp(g_last)*S + KV → write S to WS_S → signal Cube (flag 3)
+//   ... repeat for next chunk ...
 // ============================================================================
 
 #include <pto/pto-inst.hpp>
@@ -65,6 +108,19 @@ using namespace pto;
 // The bisheng compiler makes 3 passes: Vec core, Cube core (both define
 // __CCE_AICORE__), and Host (does NOT define it).  All PTO tile types
 // must be hidden from the host pass.
+//
+// Quick tile taxonomy for beginners:
+//   UbND  — Vec engine tile, row-major (ND). For element-wise math in UB SRAM.
+//   UbDN  — Vec engine tile, col-major (DN). Needed for TROWEXPAND broadcasts.
+//   L1Mat — Cube engine tile in L1 cache, NZ fractal format (standard input layout).
+//   L1MatZN — Cube engine tile, ZN fractal format (used when you need transpose_A).
+//   TileAcc — Cube accumulator in L0C (fp32). TMATMUL writes results here.
+//   TileLeft/TileRight — GEMM operands in L0A/L0B respectively.
+//
+// The template parameters are:
+//   <Dtype, StaticRows, StaticCols, DynValidRows, DynValidCols, PadValue>
+//   Static shape = tile allocation size. Dynamic valid = how much data is real.
+//   Padding fills unused slots with zeros (important for tail chunks < C tokens).
 #ifdef __CCE_AICORE__
 
 // UB tile, row-major (ND) layout — used by Vec engine for element-wise ops.
@@ -94,6 +150,10 @@ using L1MatZN = pto::Tile<pto::TileType::Mat, T, R, C, pto::BLayout::RowMajor,
 
 #endif  // __CCE_AICORE__
 
+// ── Kernel function signature ────────────────────────────────────────────
+// Template params: NumHeads (H), HiddenSize (D), ChunkSize (C) are compile-time.
+// __gm__ pointers point to Global Memory (device DRAM). Each AI core gets
+// a unique cid (core ID) and picks its share of work from the total_work pool.
 template <int32_t NumHeads, int32_t HiddenSize, int32_t ChunkSize>
 AICORE void chunk_h_kernel(
     __gm__ half *K_handle, __gm__ half *W_handle, __gm__ half *U_handle,
@@ -105,26 +165,45 @@ AICORE void chunk_h_kernel(
     int64_t total_tokens,
     uint64_t ffts_addr)
 {
+  // cid = which AI core am I? block_num = total AI cores launched.
+  // Each core processes a subset of (sequence, head) pairs.
   auto cid = get_block_idx();
   auto block_num = get_block_num();
+  // FFTS base address enables cross-core synchronization (Cube↔Vec signaling).
   set_ffts_base_addr(ffts_addr);
 
   constexpr int32_t D = HiddenSize;
   constexpr int32_t C = ChunkSize;
   constexpr int32_t H = NumHeads;
-  constexpr int32_t HalfC = C / 2;
-  constexpr int32_t BSND_QKV_STRIDE = H * D;
-  constexpr int32_t DD = D * D;
+  constexpr int32_t HalfC = C / 2;       // Each Vec sub-block handles C/2 rows
+  constexpr int32_t BSND_QKV_STRIDE = H * D;  // Stride between consecutive tokens in BSND layout
+  constexpr int32_t DD = D * D;           // Size of the D×D state matrix
 
   // ── Workspace layout (per AI-core, in half-element units) ─────────────
   // Cube and Vec share workspace via GM for cross-core data exchange.
-  constexpr int32_t WS_WS = 0;         // WS = W @ S result (C×D)
-  constexpr int32_t WS_K  = DD;        // scaled keys from Vec (D×C)
-  constexpr int32_t WS_S  = DD * 2;    // current state S (D×D)
-  constexpr int32_t WS_KV = DD * 3;    // KV = K^T @ V result (D×D)
-  constexpr int32_t WS_PER_CORE = DD * 4;
+  // Think of this as a shared mailbox: one engine writes, signals, and the
+  // other reads. Each AI core gets its own region (ws_base offset) so cores
+  // don't step on each other.
+  constexpr int32_t WS_WS = 0;         // WS = W @ S result (C×D) — Cube writes, Vec reads
+  constexpr int32_t WS_K  = DD;        // scaled keys from Vec (D×C) — Vec writes, Cube reads
+  constexpr int32_t WS_S  = DD * 2;    // current state S (D×D) — Vec writes, Cube reads
+  constexpr int32_t WS_KV = DD * 3;    // KV = K^T @ V result (D×D) — Cube writes, Vec reads
+  constexpr int32_t WS_PER_CORE = DD * 4;  // Total workspace per core = 4 × D² half elements
 
   // ── L1 tile assignments (Cube GEMM operands) ─────────────────────────
+  // L1 cache is the Cube engine's working memory. We manually partition it
+  // into tiles at specific byte offsets using TASSIGN (like malloc, but static).
+  //
+  // L1 cache layout (Cube engine's working memory):
+  //   Address 0:                s_l1 [D×D]  — current state S
+  //   Address D*D*2:            w_l1 [C×D]  — W matrix (or K_scaled later)
+  //   Address (DD+C*D)*2:       k_l1 [D×C]  — K_scaled (from Vec workspace)
+  //   Address (DD+C*D+D*C)*2:   v_l1 [C×D]  — V (value vectors from GM)
+  // Cube reads S and W for GEMM 1 (WS = W@S), then K and V for GEMM 2 (KV = K^T@V)
+  //
+  // Accumulators live in L0C (on-chip registers, fp32):
+  //   ws_l0 [C×D]  — result of GEMM 1 (W@S)
+  //   kv_l0 [D×D]  — result of GEMM 2 (K^T@V)
   L1Mat<half, D, D, D, D> s_l1;
   TASSIGN(s_l1, 0);
   L1Mat<half, C, D, C, D> w_l1;
@@ -139,6 +218,24 @@ AICORE void chunk_h_kernel(
   TASSIGN(kv_l0, C * D * sizeof(float));
 
   // ── UB memory layout (Vec sub-block local SRAM) ──────────────────────
+  // UB (Unified Buffer) is the Vec engine's on-chip SRAM (~256 KB).
+  // We manually partition it into tiles at specific byte offsets.
+  // Think of it as: UB[offset .. offset+size] = one named tensor.
+  //
+  // Layout map (offsets in bytes):
+  //   G_BLOCK_UB:  g_sum values for all heads (pre-fetched for block of chunks)
+  //   ZERO_UB:     a tile filled with 0.0 (used for negation via TSUB(0, x))
+  //   S_UB:        current state [C/2, D] float (Vec's copy of state)
+  //   K_UB_HALF:   keys in half precision [C/2, D]
+  //   G_UB:        gate values for current chunk [1, C] float
+  //   U_UB_HALF:   wy_fast output in half [C/2, D]
+  //   K_UB:        keys in float [C/2, D] (after TCVT from half)
+  //   G_V_UB:      gate values for this sub-block [1, 64] float
+  //   COEFF_UB:    exp(g - g_last) coefficients [1, 64] float
+  //   U_UB:        wy_fast output in float [C/2, D]
+  //   WS_UB:       W@S result loaded from workspace [C/2, D] float
+  //   KV_UB:       aliases U_UB_HALF (reuses memory — KV is loaded after U is consumed)
+  //   S_UB_HALF:   state in half precision (for DMA store to workspace)
   constexpr int32_t G_BLOCK_UB = 0;
   constexpr int32_t G_BLOCK_SIZE = C * H * sizeof(float);
   constexpr int32_t EXPAND_UB = 0;
@@ -157,6 +254,9 @@ AICORE void chunk_h_kernel(
   constexpr int32_t S_UB_HALF = WS_UB + HalfC * D * sizeof(float);
 
   // ── UB tile declarations ─────────────────────────────────────────────
+  // Each tile is a "view" into UB memory at a fixed offset. TASSIGN binds
+  // the tile variable to its memory address — no data is moved, it's like
+  // creating a numpy view: zero_ub = ub_memory[ZERO_UB:ZERO_UB+size]
   UbND<float, 1, 64, 1, 64> zero_ub;
   TASSIGN(zero_ub, ZERO_UB);
   UbND<float, HalfC, D, HalfC, D> s_ub;
@@ -182,46 +282,78 @@ AICORE void chunk_h_kernel(
   UbND<float, HalfC, D, HalfC, D> kv_ub;
   TASSIGN(kv_ub, KV_UB);
 
+  // vid = Vec sub-block ID (0 or 1). The Vec engine has 2 sub-blocks that
+  // run in parallel. vid=0 handles rows [0..C/2), vid=1 handles [C/2..C).
+  // This doubles Vec throughput by splitting row-wise work.
   auto vid = get_subblockid();
 
+  // Total work items = num_sequences × num_heads. Each AI core picks every
+  // block_num-th item (strided distribution across cores).
   int64_t num_seqs = batch_size;
   int64_t total_work = num_seqs * H;
 
   // ========================================================================
   // CUBE PHASE — two GEMMs per chunk: WS = W @ S, then KV = K^T @ V
+  //
+  // The Cube engine is the NPU's matrix-multiply unit (like a GPU's tensor
+  // cores). It can only do GEMM — no element-wise ops. All element-wise
+  // math happens on the Vec engine. Cube and Vec run on SEPARATE hardware
+  // cores and communicate through GM workspace + FFTS signals.
+  //
+  // For each chunk, Cube performs two matrix multiplications:
+  //   GEMM 1: WS = W @ S   → projects state through W matrix
+  //   GEMM 2: KV = K^T @ V → computes key-value outer product
+  // Between GEMMs, it waits for Vec to prepare K_scaled.
   // ========================================================================
 #if defined(__DAV_C220_CUBE__)
+  // Outer work loop: each iteration processes one (sequence, head) pair.
+  // Cores stripe through work items: core 0 gets items 0, N, 2N, ...
   for (int64_t wi = 0; wi < (total_work + block_num - 1) / block_num; ++wi) {
-    int64_t pid = wi * block_num + cid;
+    int64_t pid = wi * block_num + cid;  // This core's work item index
     if (pid >= total_work) break;
 
+    // Decode which head and sequence this work item corresponds to.
     int64_t head = pid % H;
     int64_t seq_idx = pid / H;
 
+    // ── Compute sequence boundaries (variable-length support) ──────────
+    // cu_seqlens (cumulative sequence lengths) enables packed/ragged batches:
+    //   bos = beginning-of-sequence token index in the packed tensor
+    //   slen = this sequence's actual length
+    //   chunk_offset = how many chunks precede this sequence in S_handle
     int64_t bos, slen;
     int64_t chunk_offset = 0;
     if (cu_seqlens != nullptr) {
+      // Variable-length mode: sequences are packed end-to-end
       bos = static_cast<int64_t>(cu_seqlens[seq_idx]);
       int64_t eos = static_cast<int64_t>(cu_seqlens[seq_idx + 1]);
       slen = eos - bos;
+      // Count total chunks from all preceding sequences
       for (int64_t si = 0; si < seq_idx; ++si) {
         int64_t sb = static_cast<int64_t>(cu_seqlens[si]);
         int64_t se = static_cast<int64_t>(cu_seqlens[si + 1]);
         chunk_offset += (se - sb + C - 1) / C;
       }
     } else {
+      // Fixed-length mode: all sequences have the same length
       bos = seq_idx * seq_len;
       slen = seq_len;
       chunk_offset = seq_idx * ((seq_len + C - 1) / C);
     }
+    // ceil(slen / C) = number of chunks in this sequence
     int64_t num_chunks = (slen + C - 1) / C;
+    // Each core's workspace starts at a different GM offset
     int64_t ws_base = static_cast<int64_t>(cid) * WS_PER_CORE;
 
+    // ── Sequential chunk loop (CANNOT be parallelized — recurrence!) ───
     for (int32_t ci = 0; ci < num_chunks; ++ci) {
       // Wait for Vec to finish writing S to workspace (flag 3)
+      // This is the Cube's "start of chunk" sync point — it cannot proceed
+      // until Vec has provided the current state S.
       wait_flag_dev(3);
 
       int64_t chunk_start = bos + static_cast<int64_t>(ci) * C;
+      // valid = min(C, remaining tokens). The last chunk may be shorter.
       int64_t valid = slen - static_cast<int64_t>(ci) * C;
       if (valid > C) valid = C;
 
@@ -237,6 +369,10 @@ AICORE void chunk_h_kernel(
       }
 
       // ── Load W (C×D) from GM → L1, BSND stride ─────────────────────
+      // W_handle points to the wy_fast output in BSND layout. The stride
+      // between consecutive tokens is H*D (skipping over all heads).
+      // If this is a tail chunk (valid < C), we TFILLPAD to zero-fill the
+      // padding rows so the GEMM doesn't produce garbage in unused rows.
       {
         int64_t w_offset = ((chunk_start) * H + head) * D;
         L1Mat<half, C, D, DYNAMIC, DYNAMIC> _l1(static_cast<int32_t>(valid), D);
@@ -252,6 +388,15 @@ AICORE void chunk_h_kernel(
 
       // ── GEMM 1: WS = W @ S  (no transpose) ─────────────────────────
       // W ∈ L1 (C×D), S ∈ L1 (D×D) → WS ∈ L0C (C×D float accumulator)
+      // numpy equivalent: WS = W @ S  →  [C×D] @ [D×D] = [C×D]
+      //
+      // Pipeline sync dance explained:
+      //   set_flag(A, B, id) = "pipe A signals pipe B on event id"
+      //   wait_flag(A, B, id) = "pipe B waits for pipe A's signal on event id"
+      //   TEXTRACT loads tiles from L1 → L0A/L0B (MTE1 pipe)
+      //   TMATMUL runs on the M pipe (matrix multiply hardware)
+      //   The flags ensure data is in L0 before GEMM starts, and GEMM is
+      //   done before we try to store the result.
       set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
       wait_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
       {
@@ -270,6 +415,9 @@ AICORE void chunk_h_kernel(
       }
 
       // ── Store WS (C×D) from L0C → workspace GM (with half conversion) ─
+      // The accumulator is fp32, but workspace stores fp16 (half). TSTORE
+      // automatically converts fp32 L0C → fp16 GM (hardware-accelerated).
+      // After storing, we signal Vec that WS is ready to read.
       {
         TileAcc<float, C, D, DYNAMIC, DYNAMIC> _l0(C, D);
         TASSIGN(_l0, 0);
@@ -280,6 +428,8 @@ AICORE void chunk_h_kernel(
         TSTORE(_gm, _l0);
       }
       // Signal Vec: WS is ready (Cube→Vec flag 0)
+      // ffts_cross_core_sync encodes: direction | (core_mask << 4) | (flag_id << 8)
+      //   1 = signal (not wait), 2 = target core mask, 0 = flag ID
       ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (0 << 8));
 
       // Wait for Vec to finish writing K_scaled to workspace (flag 1)
@@ -313,6 +463,15 @@ AICORE void chunk_h_kernel(
       // ── GEMM 2: KV = K^T @ V  (transpose_A) ───────────────────────
       // K ∈ L1 (D×C NZ) → reshape to ZN for transpose, V ∈ L1 (C×D)
       // Result: KV ∈ L0C (D×D float accumulator)
+      //
+      // numpy: KV = K_scaled.T @ V  →  [D×C] @ [C×D] = [D×D]
+      // To transpose K_scaled for the Cube, we TRESHAPE the L1 tile from
+      // NZ→ZN format. TRESHAPE is a zero-cost operation — it just
+      // reinterprets the fractal memory layout, effectively transposing
+      // the matrix without moving any data. This is possible because the
+      // NZ fractal format stores data in 16×16 sub-blocks, and swapping
+      // the interpretation of "row-major sub / col-major base" to
+      // "col-major sub / row-major base" is equivalent to transposing.
       set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
       wait_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
       {
@@ -350,8 +509,27 @@ AICORE void chunk_h_kernel(
   // ========================================================================
   // VEC PHASE — gate scaling, state update, cross-core data exchange
   // Two Vec sub-blocks (vid=0,1) each handle C/2 rows independently.
+  //
+  // The Vec engine handles all element-wise operations: exp, add, sub, mul,
+  // type conversion, etc. It cannot do matrix multiply (that's Cube's job).
+  // The two sub-blocks (vid=0 and vid=1) split the C rows in half so they
+  // can process in parallel, doubling throughput.
+  //
+  // The Vec phase orchestrates the entire chunk pipeline:
+  //   1. Initialize state S = 0
+  //   2. For each chunk:
+  //      a. Load K, G, U from GM
+  //      b. Compute decay coefficients and scale K
+  //      c. Wait for Cube's WS, compute V_new = U - WS
+  //      d. Send K_scaled + V_new to Cube for GEMM 2
+  //      e. Wait for Cube's KV, update S = exp(g_last)*S + KV
+  //      f. Send updated S back to Cube for next iteration
+  //   3. Store final state FS
   // ========================================================================
 #if defined(__DAV_C220_VEC__)
+  // set_mask_norm + set_vector_mask(-1,-1): enable all Vec lanes (no masking).
+  // The Vec engine processes 256 bits per cycle; masking selects which lanes
+  // are active. -1 = all bits set = all lanes active.
   set_mask_norm();
   set_vector_mask(-1, -1);
 
@@ -359,9 +537,12 @@ AICORE void chunk_h_kernel(
     int64_t pid = wi * block_num + cid;
     if (pid >= total_work) break;
 
+    // Same (head, sequence) decoding as Cube phase — both engines must
+    // process the same work item so their workspace reads/writes match.
     int64_t head = pid % H;
     int64_t seq_idx = pid / H;
 
+    // Compute sequence boundaries (same logic as Cube — see comments above)
     int64_t bos, slen;
     int64_t chunk_offset = 0;
     if (cu_seqlens != nullptr) {
@@ -381,7 +562,16 @@ AICORE void chunk_h_kernel(
     int64_t num_chunks = (slen + C - 1) / C;
     int64_t ws_base = static_cast<int64_t>(cid) * WS_PER_CORE;
 
-    // ── Initialize S = 0 for the first chunk ────────────────────────────
+    // ── Initialize state S = 0 for the first chunk ────────────────────────
+    // For the first chunk of each sequence, S starts at zero.
+    // TEXPANDS(s_ub, 0.0f) fills the state tile with zeros:
+    //   numpy equivalent: S = np.zeros((D, D), dtype=np.float32)
+    //
+    // We also fill zero_ub with 0.0 — this constant tile is used later to
+    // negate values via TSUB(zero, x) = -x (since there's no TNEG instruction).
+    //
+    // The set_flag/wait_flag pairs around TEXPANDS synchronize the Vec pipe (V)
+    // with the scalar pipe (S) — TEXPANDS uses the scalar unit to broadcast.
     set_flag(PIPE_V, PIPE_S, EVENT_ID0);
     wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
     TEXPANDS(zero_ub, 0.0f);
@@ -389,7 +579,10 @@ AICORE void chunk_h_kernel(
     wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
     TEXPANDS(s_ub, 0.0f);
 
-    // Convert zero state to half and store to workspace for Cube
+    // Convert zero state to half and store to workspace for Cube.
+    // numpy equivalent: workspace['S'] = S.astype(np.float16)
+    // The Cube can only read fp16 from workspace (it feeds into GEMM which
+    // requires fp16 inputs), so we must convert before storing.
     TCVT(s_ub_half, s_ub, pto::RoundMode::CAST_NONE);
     set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
     wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
@@ -404,10 +597,16 @@ AICORE void chunk_h_kernel(
       TSTORE(_gm, _st);
     }
     // Signal Cube: initial S is ready (Vec→Cube flag 3)
+    // This kicks off the first iteration — Cube is waiting on flag 3 to read S.
     ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (3 << 8));
 
     // ── Prefetch K and G for the first chunk ────────────────────────────
+    // We start loading K and G from GM → UB BEFORE entering the chunk loop.
+    // This "primes the pump" so data is ready when the loop body needs it.
+    // Subsequent prefetches happen inside the loop (overlapped with Cube work).
     int64_t chunk_start_0 = bos;
+    // vid * HalfC * BSND_QKV_STRIDE: skip to this sub-block's rows.
+    // vid=0 reads rows [0..C/2), vid=1 reads rows [C/2..C).
     int64_t k_offset_0 = (chunk_start_0 * H + head) * D + vid * HalfC * BSND_QKV_STRIDE;
     {
       Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
@@ -419,7 +618,9 @@ AICORE void chunk_h_kernel(
       TLOAD(_ld, _gm);
     }
 
-    // G is pre-transposed to [H, total_tokens] float — contiguous per head
+    // G is pre-transposed to [H, total_tokens] float — contiguous per head.
+    // This layout means all gate values for one head are adjacent in memory,
+    // enabling efficient DMA. The transpose was done on the host/prior kernel.
     {
       Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
       _gs.shape[3] = 1; _gs.shape[4] = C;
@@ -430,16 +631,21 @@ AICORE void chunk_h_kernel(
       TLOAD(_ld, _gm);
     }
 
+    // Wait for the prefetch DMA to finish before Vec starts using the data.
     set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
     wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
     // ── Main chunk loop ─────────────────────────────────────────────────
+    // Each iteration processes one chunk of C tokens. Chunks MUST be
+    // processed sequentially because S_{c+1} depends on S_c.
     for (int32_t ci = 0; ci < static_cast<int32_t>(num_chunks); ++ci) {
       int64_t chunk_start = bos + static_cast<int64_t>(ci) * C;
+      // valid = actual number of tokens in this chunk (last chunk may be < C)
       int64_t valid = slen - static_cast<int64_t>(ci) * C;
       if (valid > C) valid = C;
 
-      // Load U (wy_fast output) for this chunk
+      // Load U (wy_fast output) for this chunk — this is the "uncorrected"
+      // value that will become V_new = U - W@S after the residual subtraction.
       {
         int64_t u_offset = (chunk_start * H + head) * D + vid * HalfC * BSND_QKV_STRIDE;
         Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
@@ -451,18 +657,36 @@ AICORE void chunk_h_kernel(
         TLOAD(_ld, _gm);
       }
 
-      // K half→float for scaling
+      // K half→float for scaling (Vec math operates on fp32 for precision)
       TCVT(k_ub, k_ub_half, pto::RoundMode::CAST_NONE);
 
-      // Extract this sub-block's gate slice (vid selects upper/lower half)
+      // Extract this sub-block's gate slice (vid selects upper/lower half).
+      // g_ub holds all C gate values; vid=0 reads g[0..63], vid=1 reads g[64..127].
       UbND<float, 1, 64, 1, 64> g_ub_temp;
       TASSIGN(g_ub_temp, G_UB + vid * 64 * sizeof(float));
       TMOV(g_v_ub, g_ub_temp);
 
-      // ── Compute coeff[i] = exp(g[i] - g[valid-1]) ──────────────────
-      // This gives the time-decay factor relative to the chunk's last token.
+      // ── Time-decay coefficient: coeff[i] = exp(g_last - g[i]) ────────
+      // This scales each token's key by how "old" it is relative to the
+      // chunk end. Tokens near the end get coeff ≈ 1 (recent), tokens at
+      // the start get coeff > 1 (but after K scaling and the state update
+      // recurrence, the net effect is proper exponential gating).
+      //
+      // numpy equivalent:
+      //   g_last = g[valid - 1]                    # last gate value in chunk
+      //   coeff = np.exp(g_last - g[my_rows])      # decay from token to end
+      //
+      // Step by step:
+      //   1. TADDS(coeff, g_v, -g_last)  → coeff = g[i] - g_last  (≤ 0, since g is cumsum)
+      //   2. TSUB(coeff, zero, coeff)    → coeff = -(g[i] - g_last) = g_last - g[i]  (≥ 0)
+      //   3. TEXP(coeff, coeff)          → coeff = exp(g_last - g[i])
+      //
+      // Result: K_scaled[i] = K[i] * exp(g_last - g[i])
+      // This ensures recent tokens (near chunk end) have larger keys.
       set_flag(PIPE_V, PIPE_S, EVENT_ID0);
       wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
+      // GetValue reads a scalar from a UB tile — slow (stalls pipeline),
+      // but we only need one value per chunk so it's acceptable.
       float g_last = g_ub.GetValue(static_cast<int32_t>(valid) - 1);
       TADDS(coeff_ub, g_v_ub, -g_last);
       pipe_barrier(PIPE_V);
@@ -470,16 +694,28 @@ AICORE void chunk_h_kernel(
       pipe_barrier(PIPE_V);
       TEXP(coeff_ub, coeff_ub);
 
-      // exp(g) for the full chunk (used later for state decay)
+      // exp(g) for the full chunk — we need g_ub = exp(cumulative_gate) later
+      // for the state decay: S *= exp(g_last). The TEXP here converts all C
+      // gate values in-place, so g_ub[valid-1] will be exp(g_last) afterwards.
       TEXP(g_ub, g_ub);
 
+      // Wait for the U load DMA to finish, then convert U from half to float.
       set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
       wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
       TCVT(u_ub, u_ub_half, pto::RoundMode::CAST_NONE);
 
-      // ── Scale K rows by coeff via TROWEXPAND ────────────────────────
-      // K_scaled[i,:] = K[i,:] * exp(g[i] - g_last)
-      // Process in blocks of EXPAND_ROWS for TROWEXPAND tile size.
+      // ── Scale K rows by decay coefficients ────────────────────────────
+      // We need: K_scaled[i, d] = K[i, d] * coeff[i] for all d.
+      // This is a "row broadcast multiply" — each row of K gets multiplied
+      // by a scalar from coeff.
+      //
+      // TROWEXPAND(expanded, coeff_col): broadcasts coeff_col into a 2D tile:
+      //   expanded[i, j] = coeff_col[i] for all j
+      //   (Like numpy: np.tile(coeff[:, None], (1, D)))
+      // Then TMUL(k_blk, k_blk, expanded) = element-wise multiply.
+      //
+      // We process in blocks of EXPAND_ROWS=16 because TROWEXPAND has a max
+      // tile size it can handle efficiently on the Vec hardware.
       for (int32_t blk = 0; blk < HalfC / EXPAND_ROWS; ++blk) {
         UbDN<float, EXPAND_ROWS, 1,
              EXPAND_ROWS, 1> coeff_blk;
@@ -500,7 +736,13 @@ AICORE void chunk_h_kernel(
       }
 
       // ── Wait for Cube's WS result, compute V_new = U - WS ──────────
-      // flag 0: Cube signals WS is ready in workspace
+      // flag 0: Cube signals WS is ready in workspace.
+      // V_new = U - WS (residual correction):
+      //   numpy: V_new = U - (W @ S)
+      //   U comes from wy_fast kernel, WS = W @ S comes from Cube via workspace.
+      //   The subtraction "corrects" U by removing the state-projected component.
+      //   This is the "delta" in GatedDeltaNet — we update S with only the
+      //   residual information not already captured by the current state.
       wait_flag_dev(0);
       {
         Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
@@ -515,9 +757,11 @@ AICORE void chunk_h_kernel(
 
       set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
       wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+      // WS was loaded as half → convert to float for subtraction
       TCVT(ws_ub, u_ub_half, pto::RoundMode::CAST_NONE);
-      // V_new = U - WS (residual correction)
+      // V_new = U - WS (the core "delta rule" residual correction)
       TSUB(u_ub, u_ub, ws_ub);
+      // Convert results back to half for DMA store to GM
       TCVT(u_ub_half, u_ub, pto::RoundMode::CAST_NONE);
       TCVT(k_ub_half, k_ub, pto::RoundMode::CAST_NONE);
 
@@ -525,6 +769,8 @@ AICORE void chunk_h_kernel(
       wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
 
       // ── Store V_new to output V (BSND layout) ──────────────────────
+      // This is a final output — V_new goes to the V output tensor in GM,
+      // which downstream kernels will read.
       {
         int64_t v_offset = (chunk_start * H + head) * D + vid * HalfC * BSND_QKV_STRIDE;
         Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
@@ -536,7 +782,10 @@ AICORE void chunk_h_kernel(
         TSTORE(_gm, _st);
       }
 
-      // ── Store K_scaled to workspace for Cube's next GEMM 2 ─────────
+      // ── Store K_scaled to workspace for Cube's GEMM 2 ─────────────
+      // Cube will read K_scaled from WS_K to compute KV = K_scaled^T @ V_new.
+      // Note: K_scaled is stored as [HalfC, D] per sub-block; the two sub-blocks
+      // write to different halves of the D×C workspace region.
       {
         Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
         _gs.shape[3] = HalfC; _gs.shape[4] = D;
@@ -552,12 +801,23 @@ AICORE void chunk_h_kernel(
       ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (1 << 8));
 
       // ── State decay: S = exp(g_last) * S ────────────────────────────
+      // This is the first half of the state update recurrence:
+      //   S_{c+1} = exp(g_last) * S_c + KV
+      // We compute exp(g_last)*S now, and add KV after Cube finishes GEMM 2.
+      //
+      // exp_g_last = exp(g[valid-1]) was pre-computed by TEXP(g_ub, g_ub) above.
+      // TMULS multiplies every element of s_ub by this scalar.
+      // numpy: S = exp(g[valid-1]) * S
       set_flag(PIPE_MTE3, PIPE_S, EVENT_ID0);
       wait_flag(PIPE_MTE3, PIPE_S, EVENT_ID0);
       float exp_g_last = g_ub.GetValue(static_cast<int32_t>(valid) - 1);
       TMULS(s_ub, s_ub, exp_g_last);
 
-      // ── Prefetch next chunk's K and G while waiting for KV ──────────
+      // ── Prefetch next chunk's K and G while waiting for Cube's KV ────
+      // While waiting for Cube to finish GEMM 2 (KV = K^T @ V), we use MTE2
+      // (the DMA-in pipe) to start loading the NEXT chunk's K and G from GM → UB.
+      // This hides DMA latency behind Cube computation time — a key optimization
+      // that keeps the Vec engine busy instead of idling.
       set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
       wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
       if (ci + 1 < static_cast<int32_t>(num_chunks)) {
@@ -576,7 +836,10 @@ AICORE void chunk_h_kernel(
           TLOAD(_ld, _gm);
         }
 
-        // G is pre-transposed to [H, total_tokens] float
+        // G is pre-transposed to [H, total_tokens] float.
+        // If this is the last chunk and it's shorter than C, we load only
+        // next_valid elements and zero-pad the rest with TFILLPAD_INPLACE
+        // so the unused gate values don't corrupt the computation.
         {
           Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
           _gs.shape[3] = 1; _gs.shape[4] = static_cast<int32_t>(next_valid);
@@ -595,7 +858,9 @@ AICORE void chunk_h_kernel(
       }
 
       // ── Wait for Cube's KV result, accumulate into S ────────────────
-      // flag 2: Cube signals KV is ready in workspace
+      // flag 2: Cube signals KV is ready in workspace.
+      // This completes the state update: S_{c+1} = exp(g_last)*S_c + KV
+      // We already computed exp(g_last)*S above; now we add KV.
       wait_flag_dev(2);
       {
         Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
@@ -608,15 +873,29 @@ AICORE void chunk_h_kernel(
         TLOAD(_ld, _gm);
       }
 
-      // S_{c+1} = exp(g_last) * S_c + KV
+      // ── State update: S_{c+1} = exp(g_last) * S_c + KV ──────────────
+      // numpy: S = exp(g[valid-1]) * S + K_scaled.T @ V_new
+      // exp(g_last) decays the old state, then we add the new key-value outer
+      // product. This is the core recurrence of GatedDeltaNet's linear attention.
+      //
+      // s_ub already holds exp(g_last)*S from the decay step above.
+      // kv_ub holds the KV result from Cube (loaded from workspace, converted to float).
+      // TADD performs the final accumulation.
       set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
       wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+      // Convert KV from half (workspace format) to float (computation format)
       TCVT(kv_ub, s_ub_half, pto::RoundMode::CAST_NONE);
       pipe_barrier(PIPE_ALL);
+      // S = exp(g_last)*S + KV  (the GatedDeltaNet recurrence!)
       TADD(s_ub, s_ub, kv_ub);
+      // Convert updated state back to half for storage
       TCVT(s_ub_half, s_ub, pto::RoundMode::CAST_NONE);
 
       // ── Store updated S to workspace and snapshot output ────────────
+      // Two stores happen here:
+      //   1. S → workspace WS_S: so Cube can read it for the NEXT chunk's GEMM 1
+      //   2. S → S_handle output: a snapshot of S after each chunk (for backward pass)
+      // We only do this if there's a next chunk; the final state goes to FS.
       if (ci + 1 < static_cast<int32_t>(num_chunks)) {
         set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
         wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
@@ -642,6 +921,7 @@ AICORE void chunk_h_kernel(
           TSTORE(_gm, _st);
         }
         // Signal Cube: updated S is ready (Vec→Cube flag 3)
+        // This unblocks Cube's wait_flag_dev(3) at the top of the next chunk iteration.
         ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (3 << 8));
       }
 
@@ -652,6 +932,9 @@ AICORE void chunk_h_kernel(
     }
 
     // ── Store final state FS for this sequence ──────────────────────────
+    // After all chunks are processed, the final state S is the "memory" that
+    // carries over to the next forward pass (or is used by the backward pass).
+    // FS[seq_idx, head, :, :] = S_final  (shape [batch, H, D, D] in half)
     set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
     wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
     {
@@ -668,6 +951,11 @@ AICORE void chunk_h_kernel(
 #endif
 }
 
+// ── Device entry point ────────────────────────────────────────────────
+// extern "C" __global__ AICORE: this is the NPU kernel entry point.
+// Each AI core runs one instance of this function in parallel.
+// Pointers are uint8_t* (type-erased) — standard NPU calling convention.
+// The actual types are reinterpret_cast'd inside to half*/float*/int32_t*.
 extern "C" __global__ AICORE void launch_chunk_h(
     __gm__ uint8_t *K, __gm__ uint8_t *W, __gm__ uint8_t *U,
     __gm__ uint8_t *G,
@@ -691,6 +979,11 @@ extern "C" __global__ AICORE void launch_chunk_h(
       batch_size, seq_len, total_tokens, ffts_addr);
 }
 
+// ── Host launcher (called from Python via ctypes) ─────────────────────
+// block_dim = number of AI cores to launch.
+// rtGetC2cCtrlAddr obtains the FFTS (cross-core sync) hardware address.
+// <<<block_dim, nullptr, stream>>> is the NPU kernel launch syntax
+// (analogous to CUDA's <<<grid, block, stream>>>).
 extern "C" void call_kernel(
     uint32_t block_dim, void *stream,
     uint8_t *K, uint8_t *W, uint8_t *U, uint8_t *G,
