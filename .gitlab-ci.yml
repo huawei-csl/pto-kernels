@@ -88,7 +88,6 @@ test_examples_on_x86_910B4:
   image: quay.io/ascend/cann:8.5.1-910b-ubuntu22.04-py3.11
   tags:
     - docker_npu # Build and test on-device NPU (x86-64 / 910B4)
-  <<: *build_config
   parallel:
     matrix:
       - EXAMPLE: ["scan", "silu_dynamic"]
