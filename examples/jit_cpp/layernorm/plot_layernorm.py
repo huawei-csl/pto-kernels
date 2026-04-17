@@ -31,27 +31,27 @@ DURATION_LINE_PLOT = {
     "filename": "layernorm_duration_bd{block_dim}.png",
     "series": (
         ("pto_duration_us", "PTO LayerNorm", "#dc2626", "s--"),
-        ("torch_duration_us", "F.layer_norm (fp32)", "#2563eb", "o-"),
+        ("torch_duration_us", "F.layer_norm (fp16)", "#2563eb", "o-"),
     ),
     "y_label": "Duration (us)",
-    "title": "LayerNorm Duration: PTO (fp16) vs F.layer_norm (fp32)",
+    "title": "LayerNorm Duration: PTO (fp16) vs F.layer_norm (fp16)",
 }
 
 BANDWIDTH_LINE_PLOT = {
     "filename": "layernorm_bandwidth_bd{block_dim}.png",
     "series": (
         ("pto_bandwidth_gbs", "PTO LayerNorm", "#dc2626", "s--"),
-        ("torch_bandwidth_gbs", "F.layer_norm (fp32)", "#2563eb", "o-"),
+        ("torch_bandwidth_gbs", "F.layer_norm (fp16)", "#2563eb", "o-"),
     ),
     "y_label": "Effective Bandwidth (GB/s)",
-    "title": "LayerNorm Effective Bandwidth: PTO (fp16) vs F.layer_norm (fp32)",
+    "title": "LayerNorm Effective Bandwidth: PTO (fp16) vs F.layer_norm (fp16)",
 }
 
 HEATMAPS = (
     {
         "filename": "layernorm_speedup_heatmap_bd{block_dim}.png",
         "key": "pto_speedup_vs_torch",
-        "title": "LayerNorm PTO Speedup over F.layer_norm (fp32)",
+        "title": "LayerNorm PTO Speedup over F.layer_norm (fp16)",
         "colorbar_label": "log2(PTO speedup)",
     },
 )

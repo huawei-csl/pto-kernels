@@ -1,7 +1,16 @@
+/**
+Copyright (c) 2026 Huawei Technologies Co., Ltd.
+All rights reserved.
+
+See LICENSE in the root of the software repository:
+https://github.com/huawei-csl/pto-kernels/
+for the full License text.
+*/
+
 #include <pto/pto-inst.hpp>
 
 // clang-format off: so it does not get wrongfully flagged by linter
-#define GM_ADDR __gm__ uint8_t*
+#define GM_ADDR __gm__ uint8_t*  // To avoid #include "kernel_operator.h"
 // clang-format on
 
 using namespace pto;
@@ -9,8 +18,8 @@ using namespace pto;
 constexpr uint32_t MAX_HIDDEN = 262144;
 constexpr uint32_t CHUNK_HIDDEN = 8192;
 constexpr uint32_t OUTPUT_DB_CHUNK_HIDDEN = 4096;
-constexpr uint32_t STATS_CHUNK_HIDDEN = 16384;
-constexpr uint32_t ANCHORED_STATS_MIN_HIDDEN = STATS_CHUNK_HIDDEN;
+constexpr uint32_t STATS_DB_CHUNK_HIDDEN = 12288;
+constexpr uint32_t ANCHORED_STATS_MIN_HIDDEN = STATS_DB_CHUNK_HIDDEN;
 constexpr uint32_t ROW_TILE = 24;
 constexpr uint32_t UB_USABLE_BYTES = 192 * 1024;
 constexpr uint32_t STAT_TILE_BYTES = 256;
@@ -21,9 +30,10 @@ namespace UbLayout {
 // Only one phase is live at a time, so each phase starts from UB_BASE.
 namespace Stats {
 constexpr unsigned X_HALF_BASE = UB_BASE;
-constexpr unsigned X_FLOAT_BASE = X_HALF_BASE + STATS_CHUNK_HIDDEN * sizeof(half);
-constexpr unsigned REDUCE_TMP_BASE = X_FLOAT_BASE + STATS_CHUNK_HIDDEN * sizeof(float);
-constexpr unsigned PHASE_END = REDUCE_TMP_BASE + STATS_CHUNK_HIDDEN * sizeof(float);
+constexpr unsigned X_HALF_STRIDE = STATS_DB_CHUNK_HIDDEN * sizeof(half);
+constexpr unsigned X_FLOAT_BASE = X_HALF_BASE + 2 * X_HALF_STRIDE;
+constexpr unsigned REDUCE_TMP_BASE = X_FLOAT_BASE + STATS_DB_CHUNK_HIDDEN * sizeof(float);
+constexpr unsigned PHASE_END = REDUCE_TMP_BASE + STATS_DB_CHUNK_HIDDEN * sizeof(float);
 }  // namespace Stats
 
 namespace Chunk {
@@ -45,10 +55,26 @@ constexpr unsigned BETA_FLOAT_BASE = GAMMA_FLOAT_BASE + OUTPUT_DB_CHUNK_HIDDEN *
 constexpr unsigned PHASE_END = BETA_FLOAT_BASE + OUTPUT_DB_CHUNK_HIDDEN * sizeof(float);
 }  // namespace OutputDb
 
+namespace MediumHidden {
+constexpr unsigned X_HALF_BASE = UB_BASE;
+constexpr unsigned X_HALF_STRIDE = CHUNK_HIDDEN * sizeof(half);
+constexpr unsigned X_FLOAT_BASE = X_HALF_BASE + 2 * X_HALF_STRIDE;
+constexpr unsigned GAMMA_FLOAT_BASE = X_FLOAT_BASE + CHUNK_HIDDEN * sizeof(float);
+constexpr unsigned BETA_FLOAT_BASE = GAMMA_FLOAT_BASE + CHUNK_HIDDEN * sizeof(float);
+constexpr unsigned REDUCE_TMP_BASE = BETA_FLOAT_BASE + CHUNK_HIDDEN * sizeof(float);
+constexpr unsigned Y_HALF_BASE = REDUCE_TMP_BASE + CHUNK_HIDDEN * sizeof(float);
+constexpr unsigned SUM_BASE = Y_HALF_BASE + CHUNK_HIDDEN * sizeof(half);
+constexpr unsigned MEAN_BASE = SUM_BASE + STAT_TILE_BYTES;
+constexpr unsigned VAR_BASE = MEAN_BASE + STAT_TILE_BYTES;
+constexpr unsigned INV_STD_BASE = VAR_BASE + STAT_TILE_BYTES;
+constexpr unsigned CHUNK_STAT_BASE = INV_STD_BASE + STAT_TILE_BYTES;
+constexpr unsigned PHASE_END = CHUNK_STAT_BASE + STAT_TILE_BYTES;
+}  // namespace MediumHidden
+
 namespace RowStats {
 constexpr unsigned SUM_BASE = Stats::PHASE_END > OutputDb::PHASE_END
-                  ? Stats::PHASE_END
-                  : OutputDb::PHASE_END;
+          ? Stats::PHASE_END
+          : OutputDb::PHASE_END;
 constexpr unsigned STRIDE = ROW_TILE * STAT_TILE_BYTES;
 constexpr unsigned MEAN_BASE = SUM_BASE + STRIDE;
 constexpr unsigned VAR_BASE = MEAN_BASE + STRIDE;
@@ -60,6 +86,10 @@ constexpr unsigned LAYOUT_END = CHUNK_STAT_BASE + STAT_TILE_BYTES;
 
 static_assert(UbLayout::RowStats::LAYOUT_END <= UB_USABLE_BYTES,
               "LayerNorm chunk UB layout exceeds usable UB.");
+static_assert(UbLayout::MediumHidden::PHASE_END <= UB_USABLE_BYTES,
+              "LayerNorm medium-hidden UB layout exceeds usable UB.");
+
+#if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
 
 using StrideDim5 = pto::Stride<1, 1, 1, 1, 1>;
 template <uint32_t Columns>
@@ -74,6 +104,22 @@ using ScalarTile = VecRowTile<T, 16>;
 using StatTileColMajor =
     Tile<TileType::Vec, float, 8, 1, BLayout::ColMajor, -1, -1>;
 using StatTileRowMajor = VecRowTile<float, 8>;
+
+template <typename T, uint32_t ChunkHidden>
+AICORE void issueStatsXLoad(__gm__ T *x, uint32_t gm_offset,
+                            uint32_t cur_hidden, unsigned x_half_base,
+                            event_t ev) {
+#if defined(__DAV_VEC__)
+  VecRowTile<T, ChunkHidden> xChunkHalf(1, cur_hidden);
+  Global1D<T, ChunkHidden> xChunkGlobal(x + gm_offset);
+  TASSIGN(xChunkHalf, x_half_base);
+  TASSIGN(xChunkGlobal, (x + gm_offset));
+
+  wait_flag(PIPE_V, PIPE_MTE2, ev);
+  TLOAD(xChunkHalf, xChunkGlobal);
+  set_flag(PIPE_MTE2, PIPE_V, ev);
+#endif
+}
 
 template <typename T>
 AICORE void issueLayerNormOutputXLoad(__gm__ T *x, uint32_t gm_offset,
@@ -195,6 +241,30 @@ AICORE void computeInvStd(StatTile &invStdRow, StatTile &varRow,
 #endif
 }
 
+template <bool AddToMean, typename StatTile>
+AICORE void finalizeLayerNormStats(StatTile &meanRow, StatTile &sumRow,
+                                   StatTile &varRow, StatTile &invStdRow,
+                                   float inv_hidden, float eps) {
+#if defined(__DAV_VEC__)
+  TMULS(sumRow, sumRow, inv_hidden);
+  pipe_barrier(PIPE_V);
+  TMULS(varRow, varRow, inv_hidden);
+  pipe_barrier(PIPE_V);
+  TMUL(invStdRow, sumRow, sumRow);
+  pipe_barrier(PIPE_V);
+  TSUB(varRow, varRow, invStdRow);
+  pipe_barrier(PIPE_V);
+  if constexpr (AddToMean) {
+    TADD(meanRow, meanRow, sumRow);
+  } else {
+    TMULS(meanRow, sumRow, 1.0f);
+  }
+  pipe_barrier(PIPE_V);
+
+  computeInvStd(invStdRow, varRow, sumRow, eps);
+#endif
+}
+
 template <typename T, uint32_t ChunkHidden>
 AICORE void accumulateCenteredChunkMoments(__gm__ T *x, uint32_t row_offset,
                                            uint32_t hidden,
@@ -204,50 +274,109 @@ AICORE void accumulateCenteredChunkMoments(__gm__ T *x, uint32_t row_offset,
                                            StatTileRowMajor &varRow,
                                            StatTileRowMajor &chunkStatRow) {
 #if defined(__DAV_VEC__)
-  using ChunkGlobal = Global1D<T, ChunkHidden>;
   using ChunkHalfTile = VecRowTile<T, ChunkHidden>;
   using ChunkFloatTile = VecRowTile<float, ChunkHidden>;
+  constexpr bool kUseStatsDbLayout = ChunkHidden == STATS_DB_CHUNK_HIDDEN;
   constexpr unsigned kXHalfBase =
-      ChunkHidden == STATS_CHUNK_HIDDEN ? UbLayout::Stats::X_HALF_BASE
-                                        : UbLayout::Chunk::X_HALF_BASE;
+      kUseStatsDbLayout ? UbLayout::Stats::X_HALF_BASE : UbLayout::Chunk::X_HALF_BASE;
+  constexpr unsigned kXHalfStride =
+      kUseStatsDbLayout ? UbLayout::Stats::X_HALF_STRIDE : 0;
   constexpr unsigned kXFloatBase =
-      ChunkHidden == STATS_CHUNK_HIDDEN ? UbLayout::Stats::X_FLOAT_BASE
-                                        : UbLayout::Chunk::X_FLOAT_BASE;
+      kUseStatsDbLayout ? UbLayout::Stats::X_FLOAT_BASE : UbLayout::Chunk::X_FLOAT_BASE;
 
-  bool first_chunk = true;
-  for (uint32_t col = 0; col < hidden; col += ChunkHidden) {
-    const uint32_t remain = hidden - col;
-    const uint32_t cur_hidden = remain < ChunkHidden ? remain : ChunkHidden;
+  if constexpr (kUseStatsDbLayout) {
+    const uint32_t first_hidden = hidden < ChunkHidden ? hidden : ChunkHidden;
+    issueStatsXLoad<T, ChunkHidden>(x, row_offset, first_hidden, kXHalfBase,
+                                    EVENT_ID0);
 
-    ChunkHalfTile xChunkHalf(1, cur_hidden);
-    ChunkFloatTile xChunkFloat(1, cur_hidden);
-    ChunkFloatTile reduceTmp(1, cur_hidden);
-    TASSIGN(xChunkHalf, kXHalfBase);
-    TASSIGN(xChunkFloat, kXFloatBase);
-    TASSIGN(reduceTmp, UbLayout::Stats::REDUCE_TMP_BASE);
+    bool first_chunk = true;
+    bool ping = true;
+    for (uint32_t col = 0; col < hidden; col += ChunkHidden) {
+      const uint32_t remain = hidden - col;
+      const uint32_t cur_hidden = remain < ChunkHidden ? remain : ChunkHidden;
 
-    ChunkGlobal xChunkGlobal(x + row_offset + col);
-    TASSIGN(xChunkGlobal, (x + row_offset + col));
+      const int8_t buf = ping ? 0 : 1;
+      const event_t current_ev = ping ? (event_t)EVENT_ID0 : (event_t)EVENT_ID1;
+      const event_t next_ev = ping ? (event_t)EVENT_ID1 : (event_t)EVENT_ID0;
+      const unsigned x_half_base = kXHalfBase + buf * kXHalfStride;
 
-    loadTilesSync(xChunkHalf, xChunkGlobal);
+      ChunkHalfTile xChunkHalf(1, cur_hidden);
+      ChunkFloatTile xChunkFloat(1, cur_hidden);
+      ChunkFloatTile reduceTmp(1, cur_hidden);
+      TASSIGN(xChunkHalf, x_half_base);
+      TASSIGN(xChunkFloat, kXFloatBase);
+      TASSIGN(reduceTmp, UbLayout::Stats::REDUCE_TMP_BASE);
 
-    TCVT(xChunkFloat, xChunkHalf, RoundMode::CAST_NONE);
-    pipe_barrier(PIPE_V);
-    TROWEXPANDSUB(xChunkFloat, xChunkFloat, meanCol);
-    pipe_barrier(PIPE_V);
+      wait_flag(PIPE_MTE2, PIPE_V, current_ev);
 
-    TROWSUM(chunkStatCol, xChunkFloat, reduceTmp);
-    pipe_barrier(PIPE_V);
-    addOrCopyFirst(sumRow, chunkStatRow, first_chunk);
+      const uint32_t next_col = col + ChunkHidden;
+      if (next_col < hidden) {
+        const uint32_t next_remain = hidden - next_col;
+        const uint32_t next_hidden =
+            next_remain < ChunkHidden ? next_remain : ChunkHidden;
+        const unsigned next_x_half_base =
+            ping ? (kXHalfBase + kXHalfStride) : kXHalfBase;
+        issueStatsXLoad<T, ChunkHidden>(x, row_offset + next_col, next_hidden,
+                                        next_x_half_base, next_ev);
+      }
 
-    TMUL(xChunkFloat, xChunkFloat, xChunkFloat);
-    pipe_barrier(PIPE_V);
-    TROWSUM(chunkStatCol, xChunkFloat, reduceTmp);
-    pipe_barrier(PIPE_V);
-    addOrCopyFirst(varRow, chunkStatRow, first_chunk);
+      TCVT(xChunkFloat, xChunkHalf, RoundMode::CAST_NONE);
+      pipe_barrier(PIPE_V);
+      TROWEXPANDSUB(xChunkFloat, xChunkFloat, meanCol);
+      pipe_barrier(PIPE_V);
 
-    first_chunk = false;
-    set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+      TROWSUM(chunkStatCol, xChunkFloat, reduceTmp);
+      pipe_barrier(PIPE_V);
+      addOrCopyFirst(sumRow, chunkStatRow, first_chunk);
+
+      TMUL(xChunkFloat, xChunkFloat, xChunkFloat);
+      pipe_barrier(PIPE_V);
+      TROWSUM(chunkStatCol, xChunkFloat, reduceTmp);
+      pipe_barrier(PIPE_V);
+      addOrCopyFirst(varRow, chunkStatRow, first_chunk);
+
+      first_chunk = false;
+      set_flag(PIPE_V, PIPE_MTE2, current_ev);
+      ping = !ping;
+    }
+  } else {
+    using ChunkGlobal = Global1D<T, ChunkHidden>;
+
+    bool first_chunk = true;
+    for (uint32_t col = 0; col < hidden; col += ChunkHidden) {
+      const uint32_t remain = hidden - col;
+      const uint32_t cur_hidden = remain < ChunkHidden ? remain : ChunkHidden;
+
+      ChunkHalfTile xChunkHalf(1, cur_hidden);
+      ChunkFloatTile xChunkFloat(1, cur_hidden);
+      ChunkFloatTile reduceTmp(1, cur_hidden);
+      TASSIGN(xChunkHalf, kXHalfBase);
+      TASSIGN(xChunkFloat, kXFloatBase);
+      TASSIGN(reduceTmp, UbLayout::Stats::REDUCE_TMP_BASE);
+
+      ChunkGlobal xChunkGlobal(x + row_offset + col);
+      TASSIGN(xChunkGlobal, (x + row_offset + col));
+
+      loadTilesSync(xChunkHalf, xChunkGlobal);
+
+      TCVT(xChunkFloat, xChunkHalf, RoundMode::CAST_NONE);
+      pipe_barrier(PIPE_V);
+      TROWEXPANDSUB(xChunkFloat, xChunkFloat, meanCol);
+      pipe_barrier(PIPE_V);
+
+      TROWSUM(chunkStatCol, xChunkFloat, reduceTmp);
+      pipe_barrier(PIPE_V);
+      addOrCopyFirst(sumRow, chunkStatRow, first_chunk);
+
+      TMUL(xChunkFloat, xChunkFloat, xChunkFloat);
+      pipe_barrier(PIPE_V);
+      TROWSUM(chunkStatCol, xChunkFloat, reduceTmp);
+      pipe_barrier(PIPE_V);
+      addOrCopyFirst(varRow, chunkStatRow, first_chunk);
+
+      first_chunk = false;
+      set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+    }
   }
 #endif
 }
@@ -288,7 +417,7 @@ AICORE void computeLayerNormRowStats(__gm__ T *x, uint32_t row_offset,
   set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
 
   if (hidden >= ANCHORED_STATS_MIN_HIDDEN) {
-    accumulateCenteredChunkMoments<T, STATS_CHUNK_HIDDEN>(
+    accumulateCenteredChunkMoments<T, STATS_DB_CHUNK_HIDDEN>(
         x, row_offset, hidden, meanCol, chunkStatCol, sumRow, varRow,
         chunkStatRow);
   } else {
@@ -297,18 +426,137 @@ AICORE void computeLayerNormRowStats(__gm__ T *x, uint32_t row_offset,
         chunkStatRow);
   }
 
-  TMULS(sumRow, sumRow, inv_hidden);
-  pipe_barrier(PIPE_V);
-  TMULS(varRow, varRow, inv_hidden);
-  pipe_barrier(PIPE_V);
-  TMUL(invStdRow, sumRow, sumRow);
-  pipe_barrier(PIPE_V);
-  TSUB(varRow, varRow, invStdRow);
-  pipe_barrier(PIPE_V);
-  TADD(meanRow, meanRow, sumRow);
-  pipe_barrier(PIPE_V);
+  finalizeLayerNormStats<true>(meanRow, sumRow, varRow, invStdRow,
+                               inv_hidden, eps);
+#endif
+}
 
-  computeInvStd(invStdRow, varRow, sumRow, eps);
+AICORE inline bool useMediumHiddenFastPath(uint32_t rows, uint32_t hidden) {
+  return rows >= 2048 && hidden <= CHUNK_HIDDEN;
+}
+
+template <typename T>
+AICORE void runLayerNormMediumHidden(__gm__ T *x, __gm__ T *gamma,
+                                     __gm__ T *beta, __gm__ T *y,
+                                     uint32_t row_begin, uint32_t row_end,
+                                     uint32_t hidden, float eps,
+                                     float inv_hidden) {
+#if defined(__DAV_VEC__)
+  using FullGlobal = Global1D<T, CHUNK_HIDDEN>;
+  using FullHalfTile = VecRowTile<T, CHUNK_HIDDEN>;
+  using FullFloatTile = VecRowTile<float, CHUNK_HIDDEN>;
+
+  FullHalfTile xHalf(1, hidden);
+  FullHalfTile ioHalf(1, hidden);
+  FullFloatTile xFloat(1, hidden);
+  FullFloatTile gammaFloat(1, hidden);
+  FullFloatTile betaFloat(1, hidden);
+  FullFloatTile reduceTmp(1, hidden);
+  StatTileColMajor meanCol(1, 1);
+  StatTileColMajor invStdCol(1, 1);
+  StatTileColMajor chunkStatCol(1, 1);
+  StatTileRowMajor chunkStatRow(1, 1);
+  StatTileRowMajor sumRow(1, 1);
+  StatTileRowMajor meanRow(1, 1);
+  StatTileRowMajor varRow(1, 1);
+  StatTileRowMajor invStdRow(1, 1);
+
+  TASSIGN(ioHalf, UbLayout::MediumHidden::Y_HALF_BASE);
+  TASSIGN(xFloat, UbLayout::MediumHidden::X_FLOAT_BASE);
+  TASSIGN(gammaFloat, UbLayout::MediumHidden::GAMMA_FLOAT_BASE);
+  TASSIGN(betaFloat, UbLayout::MediumHidden::BETA_FLOAT_BASE);
+  TASSIGN(reduceTmp, UbLayout::MediumHidden::REDUCE_TMP_BASE);
+  TASSIGN(meanCol, UbLayout::MediumHidden::MEAN_BASE);
+  TASSIGN(invStdCol, UbLayout::MediumHidden::INV_STD_BASE);
+  TASSIGN(chunkStatCol, UbLayout::MediumHidden::CHUNK_STAT_BASE);
+  TASSIGN(chunkStatRow, UbLayout::MediumHidden::CHUNK_STAT_BASE);
+  TASSIGN(sumRow, UbLayout::MediumHidden::SUM_BASE);
+  TASSIGN(meanRow, UbLayout::MediumHidden::MEAN_BASE);
+  TASSIGN(varRow, UbLayout::MediumHidden::VAR_BASE);
+  TASSIGN(invStdRow, UbLayout::MediumHidden::INV_STD_BASE);
+
+  FullGlobal gammaGlobal(gamma);
+  FullGlobal betaGlobal(beta);
+  TASSIGN(gammaGlobal, (gamma));
+  TASSIGN(betaGlobal, (beta));
+
+  loadTilesSync(ioHalf, gammaGlobal);
+  TCVT(gammaFloat, ioHalf, RoundMode::CAST_NONE);
+  pipe_barrier(PIPE_V);
+  set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+
+  loadTilesSync(ioHalf, betaGlobal);
+  TCVT(betaFloat, ioHalf, RoundMode::CAST_NONE);
+  pipe_barrier(PIPE_V);
+  set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+
+  issueStatsXLoad<T, CHUNK_HIDDEN>(x, row_begin * hidden, hidden,
+                                   UbLayout::MediumHidden::X_HALF_BASE,
+                                   EVENT_ID0);
+
+  bool ping = true;
+
+  for (uint32_t row = row_begin; row < row_end; ++row) {
+    const uint32_t row_offset = row * hidden;
+    const int8_t buf = ping ? 0 : 1;
+    const event_t current_ev = ping ? (event_t)EVENT_ID0 : (event_t)EVENT_ID1;
+    const event_t next_ev = ping ? (event_t)EVENT_ID1 : (event_t)EVENT_ID0;
+    const unsigned x_half_base =
+        UbLayout::MediumHidden::X_HALF_BASE + buf * UbLayout::MediumHidden::X_HALF_STRIDE;
+
+    FullGlobal yGlobal(y + row_offset);
+    TASSIGN(yGlobal, (y + row_offset));
+
+    TASSIGN(xHalf, x_half_base);
+
+    wait_flag(PIPE_MTE2, PIPE_V, current_ev);
+
+    const uint32_t next_row = row + 1;
+    if (next_row < row_end) {
+      const unsigned next_x_half_base = ping
+          ? (UbLayout::MediumHidden::X_HALF_BASE + UbLayout::MediumHidden::X_HALF_STRIDE)
+          : UbLayout::MediumHidden::X_HALF_BASE;
+      issueStatsXLoad<T, CHUNK_HIDDEN>(x, next_row * hidden, hidden,
+                                       next_x_half_base, next_ev);
+    }
+
+    TCVT(xFloat, xHalf, RoundMode::CAST_NONE);
+    pipe_barrier(PIPE_V);
+    TROWSUM(chunkStatCol, xFloat, reduceTmp);
+    pipe_barrier(PIPE_V);
+    TMULS(sumRow, chunkStatRow, 1.0f);
+    pipe_barrier(PIPE_V);
+
+    TMUL(xFloat, xFloat, xFloat);
+    pipe_barrier(PIPE_V);
+    TROWSUM(chunkStatCol, xFloat, reduceTmp);
+    pipe_barrier(PIPE_V);
+    TMULS(varRow, chunkStatRow, 1.0f);
+    pipe_barrier(PIPE_V);
+
+    finalizeLayerNormStats<false>(meanRow, sumRow, varRow, invStdRow,
+                    inv_hidden, eps);
+
+    TCVT(xFloat, xHalf, RoundMode::CAST_NONE);
+    pipe_barrier(PIPE_V);
+    TROWEXPANDSUB(xFloat, xFloat, meanCol);
+    pipe_barrier(PIPE_V);
+    TROWEXPANDMUL(xFloat, xFloat, invStdCol);
+    pipe_barrier(PIPE_V);
+    TMUL(xFloat, xFloat, gammaFloat);
+    pipe_barrier(PIPE_V);
+    TADD(xFloat, xFloat, betaFloat);
+    pipe_barrier(PIPE_V);
+
+    wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
+    TCVT(ioHalf, xFloat, RoundMode::CAST_RINT);
+    pipe_barrier(PIPE_V);
+
+    set_flag(PIPE_V, PIPE_MTE2, current_ev);
+    storeTileAfterWait(yGlobal, ioHalf, EVENT_ID0);
+
+    ping = !ping;
+  }
 #endif
 }
 
@@ -447,8 +695,16 @@ AICORE void runTLayerNorm(__gm__ T *x, __gm__ T *gamma, __gm__ T *beta,
   const uint32_t row_begin = worker_id * base_rows_per_worker +
                              (worker_id < extra_rows ? worker_id : extra_rows);
   const uint32_t row_end = row_begin + worker_rows;
+  const bool use_medium_hidden_fast_path = useMediumHiddenFastPath(rows, hidden);
 
   initDbPipeFlags();
+
+  if (use_medium_hidden_fast_path) {
+    runLayerNormMediumHidden<T>(x, gamma, beta, y, row_begin, row_end, hidden,
+                                eps, inv_hidden);
+    drainDbPipeFlags();
+    return;
+  }
 
   for (uint32_t row_tile_begin = row_begin; row_tile_begin < row_end;
        row_tile_begin += ROW_TILE) {
@@ -470,13 +726,26 @@ AICORE void runTLayerNorm(__gm__ T *x, __gm__ T *gamma, __gm__ T *beta,
 #endif
 }
 
+#endif
+
 extern "C" __global__ AICORE void layernorm_fp16(GM_ADDR x, GM_ADDR gamma,
                                                  GM_ADDR beta, GM_ADDR y,
                                                  uint32_t rows, uint32_t hidden,
                                                  float eps, float inv_hidden) {
+#if defined(__DAV_VEC__)
   runTLayerNorm<half>((__gm__ half *)x, (__gm__ half *)gamma,
                       (__gm__ half *)beta, (__gm__ half *)y, rows, hidden, eps,
                       inv_hidden);
+#else
+  (void)x;
+  (void)gamma;
+  (void)beta;
+  (void)y;
+  (void)rows;
+  (void)hidden;
+  (void)eps;
+  (void)inv_hidden;
+#endif
 }
 
 extern "C" void call_layernorm_kernel(uint32_t blockDim, void *stream,
