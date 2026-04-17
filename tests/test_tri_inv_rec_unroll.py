@@ -140,21 +140,20 @@ def _test_tri_inv_rec_unroll_bsnd(
     assert frob_error <= ftol, f"frob_error: {frob_error}"
 
 
-
 @pytest.mark.parametrize("n", [16, 32, 64, 128])
 @pytest.mark.parametrize("block_dim_x", [1, 2, 3, 4])
 @pytest.mark.parametrize("block_dim_y", [2, 4, 8])
 @pytest.mark.parametrize(
     "matrix_gen,atol,rtol,ftol,dtype",
     [
-        (block_ones_triu_matrix, 0, 0, 0,torch.float16),
-        (ones_triu_matrix, 0, 0, 0,torch.float16),
+        (block_ones_triu_matrix, 0, 0, 0, torch.float16),
+        (ones_triu_matrix, 0, 0, 0, torch.float16),
         (block_random_triu_matrix, 5e-5, 0.1, 1e-4, torch.float16),
-        (random_triu_matrix, 5e-5, 0.1, 1e-4,torch.float16),
-        (block_ones_triu_matrix, 0, 0, 0,torch.bfloat16),
-        (ones_triu_matrix, 0, 0, 0,torch.bfloat16),
+        (random_triu_matrix, 5e-5, 0.1, 1e-4, torch.float16),
+        (block_ones_triu_matrix, 0, 0, 0, torch.bfloat16),
+        (ones_triu_matrix, 0, 0, 0, torch.bfloat16),
         (block_random_triu_matrix, 5e-5, 0.1, 1e-3, torch.bfloat16),
-        (random_triu_matrix, 5e-5, 0.1, 1e-3,torch.bfloat16),
+        (random_triu_matrix, 5e-5, 0.1, 1e-3, torch.bfloat16),
     ],
 )
 def test_tri_inv_rec_unroll(
@@ -178,14 +177,14 @@ def test_tri_inv_rec_unroll(
 @pytest.mark.parametrize(
     "matrix_gen,atol,rtol,ftol,dtype",
     [
-        (block_ones_triu_matrix, 0, 0, 0,torch.float16),
-        (ones_triu_matrix, 0, 0, 0,torch.float16),
+        (block_ones_triu_matrix, 0, 0, 0, torch.float16),
+        (ones_triu_matrix, 0, 0, 0, torch.float16),
         (block_random_triu_matrix, 5e-5, 0.1, 1e-4, torch.float16),
-        (random_triu_matrix, 5e-5, 0.1, 1e-4,torch.float16),
-        (block_ones_triu_matrix, 0, 0, 0,torch.bfloat16),
-        (ones_triu_matrix, 0, 0, 0,torch.bfloat16),
+        (random_triu_matrix, 5e-5, 0.1, 1e-4, torch.float16),
+        (block_ones_triu_matrix, 0, 0, 0, torch.bfloat16),
+        (ones_triu_matrix, 0, 0, 0, torch.bfloat16),
         (block_random_triu_matrix, 5e-5, 0.1, 1e-3, torch.bfloat16),
-        (random_triu_matrix, 5e-5, 0.1, 1e-3,torch.bfloat16),
+        (random_triu_matrix, 5e-5, 0.1, 1e-3, torch.bfloat16),
     ],
 )
 def test_tri_inv_rec_unroll_bsnd(
