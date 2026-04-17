@@ -80,3 +80,19 @@ build_and_test_aarch64_910B2_py3.12:
     - make build_wheel
     - pip install pto_kernels*.whl
     - python3 -m pytest -v tests/
+
+######################################
+# On-device test of examples/jit_cpp #
+######################################
+test_examples_on_x86_910B4:
+  tags:
+    - docker_npu # Build and test on-device NPU (x86-64 / 910B4)
+  <<: *build_config
+  parallel:
+    matrix:
+      - EXAMPLE: ["scan", "silu_dynamic"]
+  script:
+    - echo "Testing example ${EXAMPLE}"
+    - make setup_once
+    - cd examples/jit_cpp/${EXAMPLE}
+    - python3 run_${EXAMPLE}.py
