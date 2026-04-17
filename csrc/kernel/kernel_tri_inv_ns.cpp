@@ -21,15 +21,25 @@ using namespace pto;
  *
  * Implements the following algorithm:
  * A = I + M
- * X = I * scale
+ * X = I / (2 * MatrixSize)
  * for _ in range(num_iters):
  *     Y = X @ (-A)
  *     X = Y @ X + 2 * X
  * return X
+ * @tparam InputT The type of the input elements.
+ * @tparam OutputT The type of the output elements.
+ * @tparam MatrixSize Size of the entire input/output matrices.
+ *
+ * @param M_inv pointer to the global memory to store the final inverse.
+ * @param M Pointer to the global tensor matrix in global memory.
+ * @param I_neg Pointer to global memory that contains the negative identity.
+ * @param I_scaled Pointer to global memory containing the identity scaled by:
+ * 1 / (2 * MatrixSize).
+ * @param num_iters Number of Newton-Schulz iterations.
  */
 template <typename InputT, typename OutputT, uint32_t MatrixSize>
 AICORE void runKernelTriInvNS(__gm__ OutputT* M_inv, __gm__ InputT* M,
-                              __gm__ InputT* I_neg, __gm__ InputT* I_over_n,
+                              __gm__ InputT* I_neg, __gm__ InputT* I_scaled,
                               uint32_t num_iters) {
 #if (__CHECK_FEATURE_AT_PRECOMPILE) || \
     (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))  // Cube compilation
@@ -65,7 +75,7 @@ AICORE void runKernelTriInvNS(__gm__ OutputT* M_inv, __gm__ InputT* M,
 
   GlobalTensorIn M_global_in(M + global_index);
   GlobalTensorIn I_neg_global_in(I_neg);
-  GlobalTensorIn I_over_n_global_in(I_over_n);
+  GlobalTensorIn I_scaled_global_in(I_scaled);
   GlobalTensorOut M_inv_global_out(M_inv + global_index);
 
   TileL1AB A_neg_l1_tile;
@@ -98,7 +108,7 @@ AICORE void runKernelTriInvNS(__gm__ OutputT* M_inv, __gm__ InputT* M,
   set_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID0);
 
   TLOAD(A_neg_l1_tile, M_global_in);
-  TLOAD(X_l1_tile, I_over_n_global_in);
+  TLOAD(X_l1_tile, I_scaled_global_in);
   set_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID1);
 
   // Precompute I and store to L1
