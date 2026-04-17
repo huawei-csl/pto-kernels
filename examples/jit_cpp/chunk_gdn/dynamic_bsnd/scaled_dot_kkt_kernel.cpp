@@ -84,6 +84,10 @@ AICORE PTO_INLINE void gemm_v0(
                        TileMatL1<T1, K, N, validK, validN>> &b,
     pto::TileAcc<T2, M, N, validM, validN> &c, bool clear)
 {
+  // Local K-sliced matmul helper:
+  //   C = A @ B  (or accumulate into C)
+  // The Cube core only sees one K-slice at a time, so PTO explicitly extracts
+  // L0 tiles from L1 and accumulates the partial products.
   constexpr uint32_t KL0Size = 128;
   const uint32_t k_l0_split = (K + KL0Size - 1) / KL0Size;
 
@@ -190,6 +194,11 @@ AICORE void kkt_kernel(
     int64_t batch_size, int64_t seq_len, int64_t total_tokens,
     uint64_t ffts_addr)
 {
+  // This kernel has two phases:
+  // 1. Cube builds the raw local score matrix A_raw = K @ K^T for each chunk.
+  // 2. Vec applies the dynamic gate and causal mask:
+  //      A[i, j] = A_raw[i, j] * mask[i, j]
+  //                * exp(min(g_i + log(beta_i) - g_j, 0)).
   constexpr int32_t HalfChunk = ChunkSize / 2;
   constexpr int32_t ChunkSquare = ChunkSize * ChunkSize;
   constexpr uint32_t KTail =
@@ -270,6 +279,8 @@ AICORE void kkt_kernel(
     int64_t num_chunks = (slen + ChunkSize - 1) / ChunkSize;
 
     for (int64_t ci = 0; ci < num_chunks; ++ci) {
+      // Ping-pong two per-core workspace slots so Cube can produce chunk i+1
+      // while Vec is still consuming chunk i.
       int32_t slot = static_cast<int32_t>(ci & 1);
       wait_flag_dev(2 + slot);
       pipe_barrier(PIPE_ALL);
@@ -322,6 +333,8 @@ AICORE void kkt_kernel(
   set_mask_norm();
   set_vector_mask(-1, -1);
 
+  // Vec owns the lower-triangular mask and converts the raw Cube scores into
+  // gated attention coefficients one HalfChunk-row stripe at a time.
   {
     GmShape2D msk_shape(HalfChunk, ChunkSize);
     GmStride2D msk_stride(ChunkSize);
@@ -370,6 +383,8 @@ AICORE void kkt_kernel(
               : 0;
 
       if (local_valid > 0) {
+        // Each Vec sub-block owns HalfChunk consecutive output rows i. It loads
+        // the row term g_i + log(beta_i) plus the full column term g_j.
         {
           GmShape2D g_shape(1, valid_rows);
           GmStride2D g_stride(1);
@@ -421,6 +436,8 @@ AICORE void kkt_kernel(
         TMOV(g_c_ub, g_ub);
         pipe_barrier(PIPE_V);
 
+        // Broadcast the row and column terms to a 2-D coefficient tile so PTO
+        // matches the scalar formula exp(min(g_i + log(beta_i) - g_j, 0)).
         TileUbDataDN<float, HalfChunk, 1, HalfChunk, 1> g_r_ub_temp;
         TASSIGN(g_r_ub_temp, GRUbAddr);
         TROWEXPAND(g_r_2d_ub, g_r_ub_temp);
@@ -440,6 +457,7 @@ AICORE void kkt_kernel(
         set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
         wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
 
+        // Consume the raw A_raw rows produced earlier by the Cube stage.
         {
           GmShape2D a_shape(HalfChunk, ChunkSize);
           GmStride2D a_stride(ChunkSize);
@@ -468,6 +486,7 @@ AICORE void kkt_kernel(
              head_idx) *
             static_cast<int64_t>(ChunkSize);
 
+        // Write this worker's final gated A rows back to the public BSND tensor.
         {
           GmShape2D a_out_shape(local_valid, ChunkSize);
           GmStride2D a_out_stride(NumHeads * ChunkSize);

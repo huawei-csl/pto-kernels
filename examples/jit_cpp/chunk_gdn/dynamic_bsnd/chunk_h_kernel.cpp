@@ -81,6 +81,10 @@ gemm_v0(std::conditional_t<transpose_A, TileMatL1<T1, K, M, validK, validM>,
                            TileMatL1<T1, K, N, validK, validN>> &B,
         pto::TileAcc<T2, M, N, validM, validN> &C, bool clear)
 {
+  // Local K-sliced matmul helper:
+  //   C = A @ B
+  // PTO exposes the L1/L0 staging explicitly, so this stays as a tiny file-
+  // local helper instead of a shared wrapper.
   constexpr uint32_t kL0Size = 128;
   const uint32_t kL0split = (K + kL0Size - 1) / kL0Size;
 
@@ -188,6 +192,11 @@ AICORE void chunk_h_kernel(
     int64_t batch_size, int64_t seq_len, int64_t total_tokens,
     uint64_t ffts_addr)
 {
+  // chunk_h advances the recurrent hidden state chunk by chunk:
+  //   ws_i      = W_i @ S_i
+  //   v_i_new   = U_i - ws_i
+  //   k_i_tilde = exp(g_last - g_i) * K_i
+  //   S_{i+1}   = exp(g_last) * S_i + k_i_tilde^T @ v_i_new.
   auto cid = get_block_idx();
   auto block_num = get_block_num();
   set_ffts_base_addr(ffts_addr);
@@ -386,6 +395,7 @@ AICORE void chunk_h_kernel(
   set_mask_norm();
   set_vector_mask(-1, -1);
 
+  // Vec owns the running recurrent state S_i and updates it after every chunk.
   for (int64_t wi = 0; wi < (total_work + block_num - 1) / block_num; ++wi) {
     int64_t pid = wi * block_num + cid;
     if (pid >= total_work) break;
@@ -417,6 +427,7 @@ AICORE void chunk_h_kernel(
     TEXPANDS(zero_ub, 0.0f);
     set_flag(PIPE_V, PIPE_S, EVENT_ID0);
     wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
+    // Start each sequence/head recurrence from S_0 = 0.
     TEXPANDS(s_ub, 0.0f);
 
     TCVT(s_ub_half, s_ub, pto::RoundMode::CAST_NONE);
@@ -521,6 +532,7 @@ AICORE void chunk_h_kernel(
       set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
       wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
       TCVT(ws_ub, u_ub_half, pto::RoundMode::CAST_NONE);
+      // v_i_new = U_i - W_i @ S_i.
       TSUB(u_ub, u_ub, ws_ub);
       TCVT(u_ub_half, u_ub, pto::RoundMode::CAST_NONE);
       TCVT(k_ub_half, k_ub, pto::RoundMode::CAST_NONE);
@@ -538,6 +550,8 @@ AICORE void chunk_h_kernel(
         TSTORE(v_global, v_store);
       }
 
+      // Spill both V_i_new and k_i_tilde so the Cube stage can form
+      // k_i_tilde^T @ V_i_new for this chunk.
       {
         GmShape2D k_shape(HalfC, D);
         GmStride2D k_stride(D);
@@ -607,6 +621,7 @@ AICORE void chunk_h_kernel(
       wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
       TCVT(kv_ub, s_ub_half, pto::RoundMode::CAST_NONE);
       pipe_barrier(PIPE_ALL);
+      // Finish S_{i+1} = exp(g_last) * S_i + k_i_tilde^T @ v_i_new.
       TADD(s_ub, s_ub, kv_ub);
       TCVT(s_ub_half, s_ub, pto::RoundMode::CAST_NONE);
 
@@ -625,6 +640,8 @@ AICORE void chunk_h_kernel(
           TSTORE(s_global, s_store);
         }
 
+        // Expose the post-chunk state so the next chunk (and debug/verification
+        // outputs) can see S_{i+1}.
         int64_t s_out_offset = ((chunk_offset + ci + 1) * H + head) * DD;
         {
           GmShape2D s_out_shape(HalfC, D);

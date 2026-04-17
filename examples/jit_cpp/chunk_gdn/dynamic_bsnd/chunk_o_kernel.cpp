@@ -91,6 +91,10 @@ gemm_v0(std::conditional_t<transpose_A, TileMatL1<T1, K, M, validK, validM>,
                            TileMatL1<T1, K, N, validK, validN>> &B,
         pto::TileAcc<T2, M, N, validM, validN> &C, bool clear)
 {
+  // Local K-sliced matmul helper:
+  //   C = A @ B
+  // Keeping it in this file makes the Cube schedule visible without relying on
+  // a shared wrapper layer.
   constexpr uint32_t kL0Size = 128;
   const uint32_t kL0split = (K + kL0Size - 1) / kL0Size;
 
@@ -201,6 +205,11 @@ AICORE void chunk_o_kernel(
     int64_t batch_size, int64_t seq_len, int64_t total_tokens,
     uint64_t ffts_addr)
 {
+  // chunk_o combines the two attention paths that feed the final output:
+  //   QK_raw      = Q @ K^T
+  //   QS          = Q @ S_prev
+  //   QK_gated    = QK_raw * mask * exp(min(g_i - g_j, 0))
+  //   O           = exp(g_i) * QS + QK_gated @ V.
   constexpr int32_t HalfChunk = ChunkSize / 2;
   constexpr uint32_t KTail =
       (HiddenSize % 128 == 0) ? 128 : (HiddenSize % 128);
@@ -293,6 +302,8 @@ AICORE void chunk_o_kernel(
   }
 
 #if defined(__DAV_C220_CUBE__)
+  // Cube builds the raw QK and QS products first, then later turns the gated
+  // QK path into the QKV contribution.
   if (cu_seqlens == nullptr) {
     int64_t chunks_per_seq = (seq_len + ChunkSize - 1) / ChunkSize;
     int64_t global_chunk_base = 0;
@@ -610,6 +621,8 @@ AICORE void chunk_o_kernel(
   set_mask_norm();
   set_vector_mask(-1, -1);
 
+  // Vec turns the raw QK tile into gated coefficients, rescales the QS branch
+  // by exp(g_i), and finally adds the two paths into O.
   {
     GmShape2D msk_shape(HalfChunk, ChunkSize);
     GmStride2D msk_stride(ChunkSize);
@@ -671,6 +684,8 @@ AICORE void chunk_o_kernel(
       TileUbDataDN<float, HalfChunk, 1,
                    HalfChunk, 1> g_v_col;
       TASSIGN(g_v_col, GvUbAddr);
+      // Broadcast row term g_i and column term g_j to build
+      // exp(min(g_i - g_j, 0)) over the whole HalfChunk x ChunkSize tile.
       TROWEXPAND(g_r_2d, g_v_col);
       TCOLEXPAND(coeff_ub, g_ub);
       TSUB(coeff_ub, g_r_2d, coeff_ub);
@@ -684,6 +699,7 @@ AICORE void chunk_o_kernel(
 
       wait_flag_dev(0);
 
+      // Consume the raw QK rows that the Cube stage produced earlier.
       {
         GmShape2D qk_shape(HalfChunk, ChunkSize);
         GmStride2D qk_stride(ChunkSize);
@@ -747,6 +763,8 @@ AICORE void chunk_o_kernel(
 
       wait_flag_dev(2);
 
+      // Consume the gated QK @ V contribution before adding the reweighted QS
+      // branch on top.
       {
         GmShape2D qkv_shape(HalfChunk, HiddenSize);
         GmStride2D qkv_stride(HiddenSize);

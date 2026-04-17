@@ -41,6 +41,9 @@ template <int32_t NumHeads, int32_t ChunkSize>
 AICORE void cumsum_kernel(
     __gm__ float *g_ptr, __gm__ float *g_sum_ptr, __gm__ int32_t *cu_seqlens,
     int64_t batch_size, int64_t seq_len, uint64_t ffts_addr) {
+  // For every chunk, compute the chunk-local prefix sum
+  //   g_sum[t, h] = sum_{u <= t within this chunk} g[u, h].
+  // PTO view: rows are tokens inside the chunk and columns are attention heads.
   auto cid = get_block_idx();
   auto block_num = get_block_num();
   auto vid = get_subblockid();
@@ -90,6 +93,9 @@ AICORE void cumsum_kernel(
       int32_t valid =
           static_cast<int32_t>(remaining < ChunkSize ? remaining : ChunkSize);
 
+      // Pull one logical [valid_tokens, num_heads] block into UB. Tail rows and
+      // padded head columns are zero-filled so the same vector code works for
+      // short final chunks too.
       GmShape2D shape(valid, NumHeads);
       GmStride2D stride(NumHeads);
       GmTensor2D<float> g_global(g_ptr + chunk_start * NumHeads, shape, stride);
@@ -131,6 +137,8 @@ AICORE void cumsum_kernel(
       set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
       wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
 
+      // Store the finished chunk-local prefix sums back in the original [T, H]
+      // layout.
       GmTensor2D<float> g_sum_global(g_sum_ptr + chunk_start * NumHeads, shape,
                                      stride);
       BlockLoadTile s_block_store(valid, NumHeads);
@@ -140,6 +148,8 @@ AICORE void cumsum_kernel(
       wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
     }
   } else {
+    // Same prefix-sum math as the fixed-length path above; only the chunk
+    // enumeration changes to follow `cu_seqlens`.
     int64_t gi = 0;
     for (int64_t si = 0; si < num_seqs; ++si) {
       int64_t bos = static_cast<int64_t>(cu_seqlens[si]);

@@ -90,6 +90,11 @@ gemm_v0(std::conditional_t<transpose_A, TileMatL1<T1, K, M, validK, validM>,
                            TileMatL1<T1, K, N, validK, validN>> &B,
         pto::TileAcc<T2, M, N, validM, validN> &C, bool clear)
 {
+  // Local K-sliced matmul helper:
+  //   C = A @ B
+  // PTO exposes the L1 -> L0 -> Cube movement explicitly, so keeping this tiny
+  // helper local lets readers see the schedule without hiding it in a repo-wide
+  // wrapper layer.
   constexpr uint32_t kL0Size = 128;
   const uint32_t kL0split = (K + kL0Size - 1) / kL0Size;
 
@@ -198,6 +203,11 @@ AICORE void wy_fast_kernel(
     int64_t batch_size, int64_t seq_len, int64_t total_tokens,
     uint64_t ffts_addr)
 {
+  // WY recompute materializes two diagonal reweightings of the same A tile:
+  //   A2[:, j] = A[:, j] * beta_j
+  //   A1[:, j] = A[:, j] * exp(g_j) * beta_j
+  // and then forms the two branch outputs
+  //   U = A2 @ V,   W = A1 @ K.
   constexpr int32_t HalfChunk = ChunkSize / 2;
   constexpr uint32_t KTail =
       (HiddenSize % 128 == 0) ? 128 : (HiddenSize % 128);
@@ -293,6 +303,8 @@ AICORE void wy_fast_kernel(
   set_mask_norm();
   set_vector_mask(-1, -1);
 
+  // Vec prepares the two reweighted A workspaces (`A2` and `A1`) that the
+  // Cube phase consumes later.
   if (cu_seqlens == nullptr) {
     int64_t chunks_per_seq = (seq_len + ChunkSize - 1) / ChunkSize;
     bool first_iter = true;
@@ -349,6 +361,7 @@ AICORE void wy_fast_kernel(
       pipe_barrier(PIPE_V);
       TMOV(beta_r_ub, beta_ub);
       pipe_barrier(PIPE_V);
+      // Replicate beta_j across rows so every column j of A gets the same beta.
       TCOLEXPAND(beta_2d_ub, beta_r_ub);
 
       TCVT(a1_ub, a1_ub_half, pto::RoundMode::CAST_NONE);
@@ -399,6 +412,7 @@ AICORE void wy_fast_kernel(
       TMOV(g_r_ub, g_ub);
       pipe_barrier(PIPE_V);
       TCOLEXPAND(g_2d_ub, g_r_ub);
+      // A1 keeps the same A columns but multiplies each one by exp(g_j) * beta_j.
       TMUL(a1_ub, a1_ub, g_2d_ub);
       TCVT(a1_ub_half, a1_ub, pto::RoundMode::CAST_NONE);
 
@@ -419,6 +433,7 @@ AICORE void wy_fast_kernel(
       first_iter = false;
     }
   } else {
+    // Same WY math as above; only the work enumeration changes for varlen input.
     int64_t gi = 0;
     bool first_iter_v = true;
     for (int64_t si = 0; si < num_seqs; ++si) {
@@ -552,6 +567,8 @@ AICORE void wy_fast_kernel(
 #endif
 
 #if defined(__DAV_C220_CUBE__)
+  // Cube consumes the two Vec-generated workspaces and turns them into the
+  // branch outputs U and W.
   if (cu_seqlens == nullptr) {
     int64_t chunks_per_seq = (seq_len + ChunkSize - 1) / ChunkSize;
     for (int64_t work_idx = static_cast<int64_t>(cid);
