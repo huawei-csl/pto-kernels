@@ -80,3 +80,9 @@ build_and_test_aarch64_910B2_py3.12:
     - make build_wheel
     - pip install pto_kernels*.whl
     - python3 -m pytest -v tests/
+
+######################################
+# On-device test of examples/jit_cpp #
+######################################
+include:
+  - '.gitlab-ci.examples.yml'
