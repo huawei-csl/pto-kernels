@@ -11,46 +11,47 @@ for the full License text.
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
-#include "aclrtlaunch_simple_matmul_fp16.h"
-#include "aclrtlaunch_simple_matmul_fp32.h"
+#include "aclrtlaunch_scan_ul1_fp16.h"
+#include "aclrtlaunch_scan_ul1_fp32.h"
 #include "utils.h"
 
 namespace pto_isa_ops {
 
 /**
- * @brief Simple matrix multiplication A @ B.
+ * @brief Single Cube scan
  *
- * @param [in] a Input left martrix
- * @param [in] b Input right matrix
- * @return at::Tensor Matrix multiplication result of a @ b.
+ * @param [in] x Input vector
+ * @return at::Tensor vector result of the scan operation.
  */
-at::Tensor run_simple_matmul(const at::Tensor& a, const at::Tensor& b) {
-  const at::Device device = a.options().device();
-  const auto dtype = a.options().dtype();
+at::Tensor run_scan_ul1(const at::Tensor& x) {
+  const at::Device device = x.options().device();
+  const auto dtype = x.options().dtype();
   const auto dtype_out = at::kFloat;
 
   if (!(dtype == at::kHalf or dtype == at::kFloat)) {
     throw std::runtime_error(
-        "Unsupported dtype for simple_matmul kernel. Supports only fp16/fp32");
+        "Unsupported dtype for scan_ul1 kernel. Supports only fp16/fp32");
   }
 
-  const uint32_t matrix_size = static_cast<uint32_t>(a.size(-1));
-  if (matrix_size != a.size(-2)) {
-    throw std::runtime_error("Only square matrices are supported.\n");
+  const uint32_t scan_size = static_cast<uint32_t>(x.size(-1));
+  if ( x.dim() != 1) {
+    throw std::runtime_error("Only 1D scan is supported.\n");
   }
 
   constexpr uint32_t block_dim = 1;
 
-  const at::Tensor c =
-      at::ones({matrix_size, matrix_size},
+  const at::Tensor scan =
+      at::zeros({scan_size},
                at::TensorOptions().dtype(dtype_out).device(device));
 
+  const uint32_t matrix_size = ceil(sqrt(scan_size));
+
   if (dtype == at::kHalf) {
-    EXEC_KERNEL_CMD(simple_matmul_fp16, block_dim, a, b, c, matrix_size);
+    EXEC_KERNEL_CMD(scan_ul1_fp16, block_dim, x, scan, matrix_size);
   } else if (dtype == at::kFloat) {
-    EXEC_KERNEL_CMD(simple_matmul_fp32, block_dim, a, b, c, matrix_size);
+    EXEC_KERNEL_CMD(scan_ul1_fp32, block_dim, x, scan, matrix_size);
   }
 
-  return c;
+  return scan;
 }
 }  // namespace pto_isa_ops

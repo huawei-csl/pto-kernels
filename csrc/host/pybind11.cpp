@@ -12,6 +12,7 @@ for the full License text.
 #include "torch_abs.h"
 #include "torch_batch_matrix_square.h"
 #include "torch_csr_gather.h"
+#include "torch_scan_ul1.h"
 #include "torch_simple_matmul.h"
 #include "torch_swiglu.h"
 #include "torch_tri_inv.h"
