@@ -1,3 +1,4 @@
+# pylint: disable=wrong-import-position
 import ctypes
 import sys
 from pathlib import Path
@@ -51,7 +52,7 @@ def _validate_layernorm_io(x, gamma, beta, y):
         and y.is_contiguous()
     ):
         raise ValueError("All tensors must be contiguous.")
-    rows, hidden = x.shape
+    hidden = x.shape[1]
     if gamma.shape[0] != hidden or beta.shape[0] != hidden:
         raise ValueError("gamma and beta must have shape [hidden].")
     if y.shape != x.shape:

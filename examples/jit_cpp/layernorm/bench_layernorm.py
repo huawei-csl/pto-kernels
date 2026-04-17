@@ -134,10 +134,10 @@ def benchmark(
 
             pto_stats = benchmark_trials_us(
                 trials,
-                lambda x_list=x_list, y_list=y_list: benchmark_npu_us(
+                lambda x_list=x_list, y_list=y_list, gamma=gamma, beta=beta: benchmark_npu_us(
                     warmup,
                     repeats,
-                    lambda i, x_list=x_list, y_list=y_list: layernorm_func(
+                    lambda i, x_list=x_list, y_list=y_list, gamma=gamma, beta=beta: layernorm_func(
                         pool_item(x_list, i),
                         gamma,
                         beta,
@@ -150,10 +150,10 @@ def benchmark(
             )
             torch_stats = benchmark_trials_us(
                 trials,
-                lambda x_list=x_list: benchmark_npu_us(
+                lambda x_list=x_list, normalized_shape=normalized_shape, gamma=gamma, beta=beta: benchmark_npu_us(
                     warmup,
                     repeats,
-                    lambda i, x_list=x_list: F.layer_norm(
+                    lambda i, x_list=x_list, normalized_shape=normalized_shape, gamma=gamma, beta=beta: F.layer_norm(
                         pool_item(x_list, i),
                         normalized_shape,
                         gamma,
