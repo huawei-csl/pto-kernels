@@ -92,7 +92,7 @@ test_examples_on_x86_910B4:
   parallel:
     matrix:
       - EXAMPLE: ["scan", "silu_dynamic"]
- before_script:
+  before_script:
     - source /usr/local/Ascend/ascend-toolkit/set_env.sh
     - pip3 install pyyaml setuptools pytest packaging
     - pip3 install -r requirements.txt
