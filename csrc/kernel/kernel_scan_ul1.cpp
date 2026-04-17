@@ -38,7 +38,9 @@ AICORE void runKernelScanUl1(__gm__ InputT* x, __gm__ InputT* o,
 
   // L0
   using TileL0A = TileLeft<InputT, matrix_size, matrix_size>;
+  using TileL0AOut = TileLeft<OutputT, matrix_size, matrix_size>;
   using TileL0B = TileRight<InputT, matrix_size, matrix_size>;
+  using TileL0BOut = TileRight<OutputT, matrix_size, matrix_size>;
   using TileL0C = TileAcc<OutputT, matrix_size, matrix_size>;
 
   // GM Data
@@ -52,16 +54,22 @@ AICORE void runKernelScanUl1(__gm__ InputT* x, __gm__ InputT* o,
   TileL1In xL1;
   TileL1In oL1;
   TileL1In uL1;
-  TileL1Out sL1;
+  TileL1Out c1L1;
+  TileL1Out lL1;
   TASSIGN(xL1, 0x0);
-  const uint32_t tile_l1_in_byte_size = matrix_size * matrix_size * sizeof(InputT);
-  const uint32_t tile_l1_out_byte_size = matrix_size * matrix_size * sizeof(OutputT);
+  const uint32_t tile_l1_in_byte_size =
+      matrix_size * matrix_size * sizeof(InputT);
+  const uint32_t tile_l1_out_byte_size =
+      matrix_size * matrix_size * sizeof(OutputT);
   TASSIGN(oL1, 0x0 + tile_l1_in_byte_size);
   TASSIGN(uL1, 0x0 + 2 * tile_l1_in_byte_size);
-  TASSIGN(sL1, 0x0 + 3 *tile_l1_in_byte_size);
+  TASSIGN(c1L1, 0x0 + 3 * tile_l1_in_byte_size);
+  TASSIGN(lL1, 0x0 + 3 * tile_l1_in_byte_size + tile_l1_out_byte_size);
+
   TLOAD(xL1, xGlobal);
   TLOAD(oL1, oGlobal);
   TLOAD(uL1, uGlobal);
+  TLOAD(lL1, lGlobal);
 
   // Wait for load to complete before moving data to L0
   set_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID0);
@@ -69,23 +77,66 @@ AICORE void runKernelScanUl1(__gm__ InputT* x, __gm__ InputT* o,
 
   // Load data from L1 to L0
   TileL0A xL0;
-  TileL0B uL0;
+  TileL0B oL0;
   TileL0C sL0;
-  
+
   // L0A/L0B/L0C are distinct scratchpads
   TASSIGN(xL0, 0x0);
-  TASSIGN(uL0, 0x0);
+  TASSIGN(oL0, 0x0);
   TASSIGN(sL0, 0x0);
 
   TMOV(xL0, xL1);
+  TMOV(oL0, oL1);
   TMOV(uL0, uL1);
+
   // Cube unit waits for MTE1
   set_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
   wait_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
 
   // In the paper notation C1 = As @ 1s
+  // row-wise reduction for the A tile
+  TMATMUL(sL0, xL0, oL0);
+
+  // Wait for matmul to complete before storing result back to GM
+  set_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
+  wait_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
+
+  // Move C1 from L0C to L1
+  TMOV(cL1, sL0);
+
+  // Wait for FP
+  set_flag(PIPE_FIX, PIPE_MTE1, EVENT_ID0);
+  wait_flag(PIPE_FIX, PIPE_MTE1, EVENT_ID0);
+
+  // Load Us from L1 to L0
+  TileL0B uL0;
+  TASSIGN(uL0, 0x0)
+  TMOV(uL0, uL1);
+
+  // Int the paper notation C2 = A @ U
   // row-wise inclusive scan for the A tile
   TMATMUL(sL0, xL0, uL0);
+
+  // Wait for matmul to complet before loading Ls and C1
+  set_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);
+  wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);
+
+  // Load Ls from L1 to L0
+  TileL0AOut lL0;
+  TASSIGN(lL0, 0x0);
+  TMOV(lL0, lL1);
+
+  // Load C1 from L1 to L0
+  TileL0BOut c1L0;
+  TASSIGN(c1L0, 0x0);
+  TMOV(c1L0, c1L1);
+
+  // Wait for load to be complete
+  set_flag(PIPE_MTE1, PIPE_M, EVENT_ID1);
+  wait_flag(PIPE_MTE1, PIPE_M, EVENT_ID1);
+
+  // In the paper notation C2 += Ls @ C1
+  TMATMUL_ACC(sL0, lL0, c1L0);
 
   // Wait for matmul to complete before storing result back to GM
   set_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
