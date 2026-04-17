@@ -157,6 +157,7 @@ AICORE inline void InvertSingleTile(
     wait_flag(PIPE_S, PIPE_M, event_0);
     wait_flag(PIPE_FIX, PIPE_M, event_0);               // from previous iter
     TMATMUL(c_l0_tile[1], a_l0_tile[1], b_l0_tile[1]);  // c_l0[1] <- 2 * X
+
     set_flag(PIPE_M, PIPE_S, event_0);
     wait_flag(PIPE_M, PIPE_S, event_0);
     set_flag(PIPE_S, PIPE_M, event_0);
