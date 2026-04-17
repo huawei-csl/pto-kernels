@@ -21,6 +21,8 @@ from jit_util_common import (  # noqa: E402
     torch_to_ctypes,
 )
 
+UINT32_MAX = (1 << 32) - 1
+MAX_HIDDEN = 262144  # Must match MAX_HIDDEN in kernel_layernorm.cpp.
 LAYERNORM_ARGTYPES = [
     ctypes.c_uint32,  # blockDim
     ctypes.c_void_p,  # stream
@@ -45,6 +47,8 @@ def _validate_layernorm_io(x, gamma, beta, y):
     for name, t in [("x", x), ("gamma", gamma), ("beta", beta), ("y", y)]:
         if t.dtype != torch.float16:
             raise TypeError(f"{name} must use torch.float16.")
+    if not (x.device == gamma.device == beta.device == y.device):
+        raise ValueError("x, gamma, beta, and y must be on the same device.")
     if not (
         x.is_contiguous()
         and gamma.is_contiguous()
@@ -52,7 +56,15 @@ def _validate_layernorm_io(x, gamma, beta, y):
         and y.is_contiguous()
     ):
         raise ValueError("All tensors must be contiguous.")
-    hidden = x.shape[1]
+    rows, hidden = x.shape
+    if rows <= 0:
+        raise ValueError("x must have at least one row.")
+    if hidden <= 0:
+        raise ValueError("hidden (x.shape[1]) must be positive.")
+    if hidden > MAX_HIDDEN:
+        raise ValueError(f"hidden must be <= {MAX_HIDDEN}.")
+    if rows > UINT32_MAX or hidden > UINT32_MAX:
+        raise ValueError("x dimensions must fit uint32_t kernel arguments.")
     if gamma.shape[0] != hidden or beta.shape[0] != hidden:
         raise ValueError("gamma and beta must have shape [hidden].")
     if y.shape != x.shape:

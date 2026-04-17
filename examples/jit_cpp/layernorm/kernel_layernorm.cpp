@@ -745,7 +745,7 @@ extern "C" __global__ AICORE void layernorm_fp16(GM_ADDR x, GM_ADDR gamma,
                                                  GM_ADDR beta, GM_ADDR y,
                                                  uint32_t rows, uint32_t hidden,
                                                  float eps, float inv_hidden) {
-#if defined(__DAV_VEC__)
+#if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
   runTLayerNorm<half>((__gm__ half *)x, (__gm__ half *)gamma,
                       (__gm__ half *)beta, (__gm__ half *)y, rows, hidden, eps,
                       inv_hidden);
