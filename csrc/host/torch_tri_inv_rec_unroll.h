@@ -35,6 +35,11 @@ at::Tensor run_tri_inv_rec_unroll(
   const at::Device device = M.options().device();
   const auto dtype = M.options().dtype();
   const auto dtype_out = at::kFloat;
+
+  at::Tensor M_half;
+  if (dtype == at::kBFloat16) {
+    M_half = M.to(at::kHalf);
+  }
   if ((dtype != at::kHalf) and (dtype != at::kBFloat16)) {
     throw std::runtime_error(
         "Unsupported dtype for tri_inv_rec_unroll kernel. Supports only "
@@ -78,7 +83,6 @@ at::Tensor run_tri_inv_rec_unroll(
   }
 
   if (dtype == at::kBFloat16) {
-    const at::Tensor M_half = M.to(at::kHalf);
     EXEC_KERNEL_CMD(tri_inv_rec_unroll_fp16, block_dim, M_inv, M_half, I_neg,
                     matrix_size, total_tiles, num_bsnd_heads, cu_seqlens_ptr);
   } else if (dtype == at::kHalf) {
@@ -86,6 +90,6 @@ at::Tensor run_tri_inv_rec_unroll(
                     matrix_size, total_tiles, num_bsnd_heads, cu_seqlens_ptr);
   }
 
-  return M_inv.to(dtype);
+  return M_inv;
 }
 }  // namespace pto_isa_ops
