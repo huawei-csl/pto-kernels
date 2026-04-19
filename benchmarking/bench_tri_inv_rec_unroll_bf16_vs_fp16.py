@@ -3,7 +3,6 @@ Performance benchmark for triangular inverse recursive unroll kernel comparing b
 """
 
 import matplotlib.pyplot as plt
-import numpy as np
 import torch
 import csv
 from pathlib import Path
