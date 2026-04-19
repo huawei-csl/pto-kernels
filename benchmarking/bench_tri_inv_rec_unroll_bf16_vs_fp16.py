@@ -37,6 +37,7 @@ def plot_csv(path):
     plt.ylabel("Bandwidth (GB/s)")
     plt.title("tri_inv_rec_unroll: bf16 vs fp16")
     plt.legend()
+    plt.grid(True)
     plt.tight_layout()
     plt.savefig(str(path).replace(".csv", ".png"))
 

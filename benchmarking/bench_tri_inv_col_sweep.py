@@ -36,6 +36,7 @@ def plot_csv(path):
     plt.xlabel("Matrix size")
     plt.ylabel("Bandwidth (GB/s)")
     plt.legend()
+    plt.grid(True)
     plt.tight_layout()
     plt.savefig(str(path).replace(".csv", ".png"))
 
