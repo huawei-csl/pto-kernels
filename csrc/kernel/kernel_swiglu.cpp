@@ -11,10 +11,6 @@ for the full License text.
 
 #include <pto/pto-inst.hpp>
 
-// clang-format off: so it does not get wrongfully flagged by linter
-#define GM_ADDR __gm__ uint8_t*  // To avoid #include "kernel_operator.h"
-// clang-format on
-
 using namespace pto;
 
 #define DIV_ROUNDUP(x, y) (((x) + (y) - 1) / (y))
@@ -132,8 +128,8 @@ AICORE inline TileConfig makeTileConfig(uint32_t batch, uint32_t output_n,
   };
 }
 
-AICORE inline bool preferTileConfig(const TileConfig &cand,
-                                    const TileConfig &best) {
+AICORE inline bool preferTileConfig(const TileConfig& cand,
+                                    const TileConfig& best) {
   if (cand.meets_target != best.meets_target) {
     return cand.meets_target;
   }
@@ -187,8 +183,8 @@ AICORE inline TileWork makeTileWork(uint32_t global_tile_idx,
 }
 
 template <typename TileData, typename T>
-AICORE inline void computeSwiGLUTile(TileData &x0Tile, TileData &x1Tile,
-                                     TileData &yTile) {
+AICORE inline void computeSwiGLUTile(TileData& x0Tile, TileData& x1Tile,
+                                     TileData& yTile) {
   TMULS(yTile, x0Tile, (T)-1);
   pipe_barrier(PIPE_V);
   TEXP(yTile, yTile);
@@ -204,8 +200,8 @@ AICORE inline void computeSwiGLUTile(TileData &x0Tile, TileData &x1Tile,
 // col_count is padded for UB tile sizing; col_count_store is the actual GM
 // element count so tail columns never read past the tensor end.
 template <typename T, uint32_t kTileRows, uint32_t kTileCols>
-AICORE void issueTLoad(__gm__ T *x, uint32_t input_n, uint32_t output_n,
-                       const TileWork &tile, unsigned x0_base, unsigned x1_base,
+AICORE void issueTLoad(__gm__ T* x, uint32_t input_n, uint32_t output_n,
+                       const TileWork& tile, unsigned x0_base, unsigned x1_base,
                        event_t ev) {
   using TileShapeND = TileShape2D<T, DYNAMIC, DYNAMIC, Layout::ND>;
   using DynStrideND = Stride<1, 1, 1, DYNAMIC, 1>;
@@ -235,7 +231,7 @@ AICORE void issueTLoad(__gm__ T *x, uint32_t input_n, uint32_t output_n,
 // col_count is padded for UB tile sizing; col_count_store is the actual GM
 // element count so tail columns never write past the tensor end.
 template <typename T, uint32_t kTileRows, uint32_t kTileCols>
-AICORE void issueTStore(__gm__ T *y, uint32_t output_n, const TileWork &tile,
+AICORE void issueTStore(__gm__ T* y, uint32_t output_n, const TileWork& tile,
                         unsigned y_base, event_t ev) {
   using TileShapeND = TileShape2D<T, DYNAMIC, DYNAMIC, Layout::ND>;
   using DynStrideND = Stride<1, 1, 1, DYNAMIC, 1>;
@@ -259,7 +255,7 @@ AICORE void issueTStore(__gm__ T *y, uint32_t output_n, const TileWork &tile,
 }
 
 template <uint32_t kTileCols, typename T>
-AICORE void runTSwiGLUTiled(__gm__ T *x, __gm__ T *y, uint32_t batch,
+AICORE void runTSwiGLUTiled(__gm__ T* x, __gm__ T* y, uint32_t batch,
                             uint32_t input_n, uint32_t num_cores, uint32_t vid,
                             uint32_t row_tile_len) {
 #if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
@@ -341,7 +337,7 @@ AICORE void runTSwiGLUTiled(__gm__ T *x, __gm__ T *y, uint32_t batch,
 }
 
 template <typename T>
-AICORE void runTSwiGLUMainTiled(__gm__ T *x, __gm__ T *y, uint32_t batch,
+AICORE void runTSwiGLUMainTiled(__gm__ T* x, __gm__ T* y, uint32_t batch,
                                 uint32_t input_n, uint32_t num_cores,
                                 uint32_t vid) {
 #if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
@@ -372,7 +368,7 @@ AICORE void runTSwiGLUMainTiled(__gm__ T *x, __gm__ T *y, uint32_t batch,
 }
 
 template <typename T>
-AICORE void runTSwiGLU(__gm__ T *x, __gm__ T *y, uint32_t batch,
+AICORE void runTSwiGLU(__gm__ T* x, __gm__ T* y, uint32_t batch,
                        uint32_t input_n, uint32_t num_cores, uint32_t vid) {
 #if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
   set_mask_norm();
@@ -406,8 +402,8 @@ extern "C" __global__ AICORE void swiglu_fp16(GM_ADDR x, GM_ADDR y,
 #if defined(__DAV_VEC__)
   const uint32_t num_cores = get_block_num() * get_subblockdim();
   const uint32_t vid = get_block_idx() * get_subblockdim() + get_subblockid();
-  runTSwiGLU<half>((__gm__ half *)x, (__gm__ half *)y, batch, input_n,
-                   num_cores, vid);
+  runTSwiGLU<half>((__gm__ half*)x, (__gm__ half*)y, batch, input_n, num_cores,
+                   vid);
 #else
   (void)x;
   (void)y;
@@ -416,8 +412,8 @@ extern "C" __global__ AICORE void swiglu_fp16(GM_ADDR x, GM_ADDR y,
 #endif
 }
 
-extern "C" void call_swiglu_kernel(uint32_t blockDim, void *stream, uint8_t *x,
-                                   uint8_t *y, uint32_t batch,
+extern "C" void call_swiglu_kernel(uint32_t blockDim, void* stream, uint8_t* x,
+                                   uint8_t* y, uint32_t batch,
                                    uint32_t input_n) {
   swiglu_fp16<<<blockDim * 2, nullptr, stream>>>(x, y, batch, input_n);
 }
