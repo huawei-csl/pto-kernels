@@ -39,6 +39,29 @@ python3 dynamic_bsnd/verify_dynamic_bsnd.py --device npu:7 --case 21 -v
 python3 dynamic_bsnd/bench_dynamic_bsnd.py
 ```
 
+## Numerical verification (valid error)
+
+The canonical checker is `verify_dynamic_bsnd.py`. Each pipeline stage is compared to a **PyTorch reference on CPU in float32**; NPU tensors are cast to float before the diff. Inputs use fp16 where the kernel does; references are written to match the same numerics the test expects (for example `chunk_o` uses `exp(min(Δg, 0))` gating consistent with this PTO path).
+
+**Per tensor check** — a stage passes if **either** condition holds, and there is no hard failure (below).
+
+1. **Strict elementwise band** (same shape as [`torch.testing.assert_close`](https://docs.pytorch.org/docs/main/testing.html#torch.testing.assert_close) defaults in spirit: tight absolute, modest relative on fp16/bf16-style work):
+   - `|actual − expected| ≤ atol + rtol · |expected|` everywhere,
+   - with **`rtol = 1e-2`**, **`atol = 1e-5`**.
+   - Large fixed `atol` (for example `1e-2`) is intentionally **not** used: when activations are around `1e-2`, that would allow ~100% relative error and is not an acceptable gate.
+
+2. **Global fallback** (when a few outliers break the strict band but the tensor is still correct overall):
+   - Let `RMSE = sqrt(mean((actual − expected)²))` and `mean_abs_ref = mean(|expected|)`.
+   - Require **`RMSE / mean_abs_ref ≤ 0.05`** (RMSE should be much smaller than typical magnitude; this ratio is on the order of one to two orders below the scale of the values in many regimes).
+   - And **`R² ≥ 0.99`** versus the CPU reference, when the reference has enough variance to define R² meaningfully (`std(expected) ≥ 1e-12`).
+   - **Degenerate references:** if `mean(|expected|) < 1e-9`, the fallback uses a small absolute RMSE cap (`RMSE < 5e-4`) instead of R². If the mean is nonzero but `std(expected) < 1e-12`, only the RMSE ratio bound applies (no R² gate).
+
+**Hard failure:** if **`max |actual − expected| > 1.0`** for that stage, the check fails regardless of the above (likely kernel bug or serious corruption).
+
+**Other checks:** selected tensors (`chunk_h` states, `chunk_o`) must be **finite** (`-inf` / `nan` fails). With `-v`, each line shows `rm/|ref|` (RMSE over mean |ref| when defined) and `[allclose]` vs `[stats]` to show which branch passed. With `--fig-dir`, optional per-stage scatter plots (reference on x, kernel on y) are written.
+
+Re-run the same script several times on NPU if you see flakiness; asynchronous execution can make rare races show up as intermittent numerical or hang issues.
+
 ## Benchmark results
 
 Shape: `(N_seq=16, L_seg=16384, H=16, DK=DV=128, C=128)`, packed varlen

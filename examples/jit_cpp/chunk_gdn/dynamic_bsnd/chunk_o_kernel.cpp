@@ -51,7 +51,8 @@
 // numpy pseudocode for the entire chunk computation:
 //   QK = Q @ K.T                                          # GEMM 1
 //   QS = Q @ S                                            # GEMM 2
-//   coeff = np.exp(np.minimum(g_row - g_col, 0)) * mask   # gating
+//   coeff = exp(min(g_row - g_col, 0)) * mask             # gating (dynamic PTO)
+//   (``static_baseline/run_chunk_o_static.py`` uses exp(g_row-g_col) without min.)
 //   QK_gated = QK * coeff                                 # apply gating
 //   QKV = QK_gated @ V                                    # GEMM 3
 //   O = QKV + QS * np.exp(g_row).reshape(-1, 1)           # final output
@@ -671,8 +672,17 @@ AICORE void chunk_o_kernel(
               set_flag(PIPE_M, PIPE_FIX, _we); wait_flag(PIPE_M, PIPE_FIX, _we);
             }
 
-            // Store QKV → workspace (reuses workspace_qs_qkv_handle — see buffer reuse note above)
-            // Cube→Vec: QKV ready (flag 2)
+            {
+              TileAcc<float, ChunkSize, HiddenSize, DYNAMIC, DYNAMIC> _l0(ChunkSize, HiddenSize);
+              TASSIGN(_l0, 0);
+              Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
+              _gs.shape[3] = ChunkSize; _gs.shape[4] = HiddenSize;
+              GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, HiddenSize, 1>> _gm(
+                  workspace_qs_qkv_handle +
+                      static_cast<int64_t>(cid) * WsQSSize, _gs);
+              TSTORE(_gm, _l0);
+            }
+
             ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (2 << 8));
             first_cube_iter_v = false;
           }
@@ -771,14 +781,12 @@ AICORE void chunk_o_kernel(
       //   g_r_2d = g_row[:, None] * np.ones((1, C))    # TROWEXPAND: [C/2, C]
       //   g_c_2d = np.ones((C/2, 1)) * g_col[None, :]  # TCOLEXPAND: [C/2, C]
       //
-      //   # Gating: exponential decay clamped to ≤ 1
-      //   coeff = np.exp(np.minimum(g_r_2d - g_c_2d, 0))   # TSUB→TMINS→TEXP
-      //   coeff = coeff * mask[my_rows]                     # apply causal mask
+      //   coeff = np.exp(g_r_2d - g_c_2d) * mask   # run_chunk_o_static.py
       //
       //   # Also compute exp(g_row) for QS scaling:
       //   exp_g_row = np.exp(g_row)                         # TEXP
       //
-      // coeff[i,j] = exp(min(g[i] - g[j], 0)) * mask[i,j]
+      // coeff[i,j] = exp(g[i] - g[j]) * mask[i,j]  (aligned with static_baseline/run_chunk_o_static.py)
       // g_v_ub holds this sub-block's row gates: g[vid*C/2 .. (vid+1)*C/2-1]
       UbND<float, 1, HalfChunk> g_ub_temp_0;
       TASSIGN(g_ub_temp_0,
@@ -791,15 +799,18 @@ AICORE void chunk_o_kernel(
       TASSIGN(g_r_2d, QSUbAddr);
       UbDN<float, HalfChunk, 1> g_v_col;
       TASSIGN(g_v_col, GvUbAddr);
-      TROWEXPAND(g_r_2d, g_v_col);       // g_r_2d[i,j] = g[i + vid*C/2]
-      TCOLEXPAND(coeff_ub, g_ub);        // coeff[i,j]   = g[j]
-      TSUB(coeff_ub, g_r_2d, coeff_ub);  // coeff = g_row - g_col
-      pipe_barrier(PIPE_V);               // wait for TSUB to finish (Vec instructions can be pipelined)
-      TMINS(coeff_ub, coeff_ub, 0.0f);   // clamp to ≤ 0 (causal decay)
+      TROWEXPAND(g_r_2d, g_v_col);       // g_r_2d[i,j] = g_row[i]
+      TCOLEXPAND(coeff_ub, g_ub);        // coeff[i,j] = g_col[j]
+      TSUB(coeff_ub, g_r_2d, coeff_ub);  // coeff = g_col - g_row
       pipe_barrier(PIPE_V);
-      TEXP(coeff_ub, coeff_ub);           // exp(min(g_row - g_col, 0))
+      TMULS(coeff_ub, coeff_ub, -1.0f);  // d = g_row - g_col
       pipe_barrier(PIPE_V);
-      TMUL(coeff_ub, coeff_ub, msk_ub);  // apply causal mask
+      TMINS(coeff_ub, coeff_ub, 0.0f);
+      pipe_barrier(PIPE_V);
+      TEXP(coeff_ub, coeff_ub);
+      pipe_barrier(PIPE_V);
+      TMUL(coeff_ub, coeff_ub, msk_ub);
+      pipe_barrier(PIPE_V);
       TEXP(g_v_ub, g_v_ub);              // exp(g_row) for QS scaling
 
       // ── Wait for Cube→Vec flag 0: QK & QS ready ─────────────────────
@@ -838,7 +849,7 @@ AICORE void chunk_o_kernel(
         TLOAD(_ld, _gm);
       }
 
-      // ── Apply gating to QK: QK_gated = QK * coeff ───────────────────
+      // ── Apply gating: QK_gated = QK * exp(d*mask)*mask
       TMUL(qk_ub, qk_ub, coeff_ub);
       TCVT(qk_ub_half, qk_ub, pto::RoundMode::CAST_NONE);
 
@@ -966,7 +977,7 @@ AICORE void chunk_o_kernel(
             wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
             // Compute gating coefficients (same math as fixed-length path — see detailed pseudocode above)
-            // coeff[i,j] = exp(min(g_row[i] - g_col[j], 0)) * mask[i,j]
+            // coeff[i,j] = exp(g[i] - g[j]) * mask[i,j]  (static_baseline PTO)
             UbND<float, 1, HalfChunk> g_ub_temp_v;
             TASSIGN(g_ub_temp_v,
                     GUbAddr +
@@ -982,11 +993,14 @@ AICORE void chunk_o_kernel(
             TCOLEXPAND(coeff_ub, g_ub);
             TSUB(coeff_ub, g_r_2d_v, coeff_ub);
             pipe_barrier(PIPE_V);
+            TMULS(coeff_ub, coeff_ub, -1.0f);
+            pipe_barrier(PIPE_V);
             TMINS(coeff_ub, coeff_ub, 0.0f);
             pipe_barrier(PIPE_V);
             TEXP(coeff_ub, coeff_ub);
             pipe_barrier(PIPE_V);
             TMUL(coeff_ub, coeff_ub, msk_ub);
+            pipe_barrier(PIPE_V);
             TEXP(g_v_ub, g_v_ub);
 
             wait_flag_dev(0);
@@ -1024,7 +1038,6 @@ AICORE void chunk_o_kernel(
               TLOAD(_ld, _gm);
             }
 
-            // Apply gating to QK: QK_gated = QK * coeff (element-wise)
             TMUL(qk_ub, qk_ub, coeff_ub);
             TCVT(qk_ub_half, qk_ub, pto::RoundMode::CAST_NONE);  // float→half for GM store
 

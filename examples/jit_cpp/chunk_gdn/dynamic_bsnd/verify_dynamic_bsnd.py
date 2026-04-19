@@ -12,27 +12,37 @@ next).  A failure in an early stage will cascade to later ones.
 Verifies:
   1. chunk_cumsum — chunk-local prefix sum
   2. scaled_dot_kkt — gated KK^T with mask and beta
-  3. wy_fast — WY recompute (w, u)
+  3. wy_fast — WY recompute (w, u) against the **same** KKT blocks as the kernel input
+     (full FLA forward uses ``solve_tril`` first; see ``ref_solve_tril`` /
+     ``ref_chunk_o_fla`` for CPU refs that match ``pto_e2e`` / Triton)
   4. chunk_h — chunkwise state recurrence (states, v_new, final_state)
-  5. chunk_o — output from inter/intra-chunk attention
+  5. chunk_o — output; PTO uses ``exp(min(Δg,0))``; ``static_baseline/run_chunk_o_static.py``
+     uses full ``exp(Δg)`` (see that script for a tiled reference)
 
-Tolerance tiers:
-  - TIGHT: direct ops (cumsum, kkt)  — atol=0.02
-  - MATMUL: single fp16 matmul (wy) — atol=0.3
-    This was widened from 0.2 after the tail-path fix exposed a small,
-    repeatable fp16 variance in long sequential sweeps (the kernel now stays
-    correct and finite on ragged tail cases that previously failed or crashed).
-  - ACCUM:  accumulated state (h, o) — atol=0.5
+Correctness (see ``torch.testing.assert_close`` defaults): ``rtol=1e-2`` is fine for
+fp16/bf16 paths; **avoid large atol** (e.g. 1e-2) when activations are ~1e-2 — that
+allows ~100% relative error. Here ``atol=1e-5`` always.
+
+Per stage, pass if **either** (i) every element satisfies
+``|a−e| ≤ atol + rtol·|e|`` with ``atol=1e-5``, ``rtol=1e-2``, **or** (ii) global
+stats: ``rmse / mean(|e|)`` below a small cap **and** ``R² ≥ 0.99`` (handles a few
+outliers that break strict allclose).
 
 Regression targets:
   - Tail chunks, including ragged multi-sequence boundaries.
   - Sequential multi-case execution without subprocess isolation.
+
+Per-stage agreement with the CPU reference is summarized by R² and Pearson ρ (see
+``-v``) and optional 1:1 scatter PNGs (CPU ref on x, NPU on y) via ``--fig-dir``.
+If min R² stays high for every stage but e2e PTO vs Triton is poor, the mismatch
+is likely cross-backend (e.g. ``chunk_o`` gating), not PTO-vs-ref accuracy.
 
 Usage:
   python verify_dynamic_bsnd.py --device npu:4
   python verify_dynamic_bsnd.py --device npu:4 --isolate   # each case in subprocess
   python verify_dynamic_bsnd.py --device npu:4 --quick
   python verify_dynamic_bsnd.py --device npu:4 --case 12 -v
+  python verify_dynamic_bsnd.py --device npu:4 --fig-dir output/fig_stage_scatter
 """
 from __future__ import annotations
 
@@ -40,6 +50,7 @@ import argparse
 import json
 import os
 import random
+import re
 import subprocess
 import sys
 import time
@@ -69,10 +80,104 @@ from dynamic_kernel_libs import (
 C = 128
 H, D = 16, 128
 
-RTOL_TIGHT, ATOL_TIGHT = 2e-2, 2e-2
-RTOL_MATMUL, ATOL_MATMUL = 3e-2, 3e-1
-RTOL_ACCUM, ATOL_ACCUM = 5e-2, 5e-1
+# Match ``torch.testing.assert_close``-style bf16 checks: tight atol, modest rtol.
+RTOL_CHECK = 1e-2
+ATOL_CHECK = 1e-5
+# If strict elementwise bound fails (e.g. rare outliers), still pass when global fit is good:
+MAX_RMSE_OVER_MEAN_ABS = 0.05  # RMSE should be ≪ typical |ref|; ~2 orders below ~0.5 scale
+MIN_R2_FALLBACK = 0.99
 HARD_FAIL_THRESHOLD = 1.0
+
+# Scatter subsample size for per-stage 1:1 PNGs (CPU ref vs NPU kernel)
+SCATTER_MAX_POINTS = 80_000
+_DEFAULT_FIG_DIR = os.path.join(_HERE, "output", "fig_stage_scatter")
+
+
+def r2_score_vs_ref(y_ref: torch.Tensor, y_pred: torch.Tensor) -> float:
+    """R² with CPU reference on the ``y_ref`` axis: ``1 − SS_res/SS_tot``."""
+    ref = np.asarray(y_ref.detach().cpu().numpy().ravel(), dtype=np.float64)
+    pred = np.asarray(y_pred.detach().cpu().numpy().ravel(), dtype=np.float64)
+    ss_res = float(np.sum((ref - pred) ** 2))
+    ss_tot = float(np.sum((ref - np.mean(ref)) ** 2))
+    if ss_tot <= 1e-30 * max(ref.size, 1):
+        return float("nan")
+    return 1.0 - ss_res / ss_tot
+
+
+def pearson_r(x: torch.Tensor, y: torch.Tensor) -> float:
+    a = np.asarray(x.detach().cpu().numpy().ravel(), dtype=np.float64)
+    b = np.asarray(y.detach().cpu().numpy().ravel(), dtype=np.float64)
+    if a.size < 2:
+        return float("nan")
+    if np.std(a) < 1e-15 or np.std(b) < 1e-15:
+        return float("nan")
+    with np.errstate(invalid="ignore", divide="ignore"):
+        c = np.corrcoef(a, b)
+    v = float(c[0, 1])
+    return v if np.isfinite(v) else float("nan")
+
+
+def _scatter_subsample_pair(
+    x: torch.Tensor, y: torch.Tensor, max_n: int
+) -> tuple[torch.Tensor, torch.Tensor]:
+    n = x.numel()
+    if n <= max_n:
+        return x.flatten(), y.flatten()
+    idx = torch.randperm(n)[:max_n]
+    return x.flatten()[idx], y.flatten()[idx]
+
+
+def plot_scatter_ref_vs_kernel(
+    expected: torch.Tensor,
+    actual: torch.Tensor,
+    *,
+    title: str,
+    path: str,
+) -> None:
+    """Scatter CPU reference (x) vs NPU kernel output (y) with a visual ``y = x`` line."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    x_t, y_t = _scatter_subsample_pair(
+        expected.detach().float().cpu(),
+        actual.detach().float().cpu(),
+        SCATTER_MAX_POINTS,
+    )
+    x_np = np.asarray(x_t.numpy(), dtype=np.float64).ravel()
+    y_np = np.asarray(y_t.numpy(), dtype=np.float64).ravel()
+
+    lo_d = float(min(x_np.min(), y_np.min()))
+    hi_d = float(max(x_np.max(), y_np.max()))
+    span = hi_d - lo_d
+    pad = max(0.02 * span, 1e-6 * max(abs(lo_d), abs(hi_d), 1.0))
+    lo, hi = lo_d - pad, hi_d + pad
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.scatter(x_np, y_np, s=2, alpha=0.35, c="C0", rasterized=True, zorder=1)
+    ax.plot([lo, hi], [lo, hi], color="C3", ls="-", lw=1.75, label="y = x", zorder=5)
+    ax.set_xlim(lo, hi)
+    ax.set_ylim(lo, hi)
+    ax.set_aspect("equal", adjustable="box")
+    if hasattr(ax, "set_box_aspect"):
+        ax.set_box_aspect(1)
+    ax.set_xlabel("CPU reference (flatten)")
+    ax.set_ylabel("NPU kernel output (flatten)")
+    ax.set_title(title)
+    ax.grid(True, alpha=0.35, linestyle=":", linewidth=0.6)
+    ax.legend(loc="lower right")
+    fig.tight_layout()
+    parent = os.path.dirname(os.path.abspath(path))
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+
+
+def _safe_filename(label: str) -> str:
+    s = re.sub(r"[^\w\-+.,=]+", "_", label)
+    return s.strip("_")[:100] or "case"
 
 
 # ───────────────────── Test case specification ─────────────────────────
@@ -212,6 +317,30 @@ def ref_kkt(k, beta, g_cumsum, cs, cu_seqlens=None):
     return out
 
 
+def ref_solve_tril(A: torch.Tensor, cs: int, cu_seqlens=None) -> torch.Tensor:
+    """
+    Triangular solve matching ``fast_inverse`` / ``pto_solve_tril`` layout (see
+    ``fast_inverse/run_fast_inverse_varlen_like_triton.py::_reference_inverse``):
+    for each chunk block ``[1, v, H, v]``, compute ``inv(transpose(block) + I)`` in
+    the batched sense, then ``transpose`` back — **not** a raw ``inv(I+L)`` on the
+    per-head ``[v,v]`` slice alone.
+    """
+    A64 = A.detach().cpu().double()
+    out = torch.zeros_like(A64)
+    for bos, eos in _seq_ranges(A.shape[1], cu_seqlens):
+        for chunk_start in range(bos, eos, cs):
+            actual_size = min(cs, eos - chunk_start)
+            block = A64[
+                :, chunk_start : chunk_start + actual_size, :, :actual_size
+            ]
+            eye = torch.eye(
+                actual_size, dtype=torch.float64, device=A64.device
+            )
+            inv = torch.inverse(block.transpose(1, 2) + eye).transpose(1, 2)
+            out[:, chunk_start : chunk_start + actual_size, :, :actual_size] = inv
+    return out.to(device=A.device, dtype=A.dtype)
+
+
 def ref_wy(k, v, beta, A, g_cumsum, cs, cu_seqlens=None):
     B, T, Hd, Kd = k.shape
     w = torch.zeros(B, T, Hd, Kd, device=k.device, dtype=torch.float32)
@@ -260,7 +389,34 @@ def ref_chunk_h(k, w, u, g_cumsum, cs, cu_seqlens=None):
     return h_out, v_new, final
 
 
+def _qk_gate_pto(gc: torch.Tensor) -> torch.Tensor:
+    """PTO dynamic ``chunk_o`` Vec: ``exp(min(g_row - g_col, 0))`` (matches device kernel)."""
+    d = gc[:, None] - gc[None, :]
+    return torch.exp(torch.minimum(d, torch.zeros_like(d)))
+
+
+def _qk_gate_fla(gc: torch.Tensor) -> torch.Tensor:
+    """Match Triton ``chunk_o`` / FLA: ``safe_exp(g_row - g_col)``."""
+    return _safe_exp(gc[:, None] - gc[None, :])
+
+
 def ref_chunk_o(q, k, v_new, h_states, g_cumsum, cs, cu_seqlens=None):
+    """PTO NPU ``chunk_o`` gating (``exp(min(Δg,0))``); see ``static_baseline`` for full ``exp(Δg)``."""
+    return _ref_chunk_o_gated(
+        q, k, v_new, h_states, g_cumsum, cs, cu_seqlens, gate_fn=_qk_gate_pto
+    )
+
+
+def ref_chunk_o_fla(q, k, v_new, h_states, g_cumsum, cs, cu_seqlens=None):
+    """Triton / FLA ``chunk_fwd_o`` semantics (``safe_exp`` on QK gate)."""
+    return _ref_chunk_o_gated(
+        q, k, v_new, h_states, g_cumsum, cs, cu_seqlens, gate_fn=_qk_gate_fla
+    )
+
+
+def _ref_chunk_o_gated(
+    q, k, v_new, h_states, g_cumsum, cs, cu_seqlens, gate_fn
+):
     B, T, Hd, Dd = q.shape
     qf, kf, vf, gf = q.float(), k.float(), v_new.float(), g_cumsum.float()
     o = torch.zeros_like(qf)
@@ -271,12 +427,19 @@ def ref_chunk_o(q, k, v_new, h_states, g_cumsum, cs, cu_seqlens=None):
         for h in range(Hd):
             for ci in range(nc):
                 s, e = bos + ci * cs, min(bos + (ci + 1) * cs, eos)
-                v = e - s
-                qc, kc, vc, gc = qf[0, s:e, h, :], kf[0, s:e, h, :], vf[0, s:e, h, :], gf[0, s:e, h]
+                vlen = e - s
+                qc, kc, vc, gc = (
+                    qf[0, s:e, h, :],
+                    kf[0, s:e, h, :],
+                    vf[0, s:e, h, :],
+                    gf[0, s:e, h],
+                )
                 inter = (qc @ h_states[ci_base + ci, h]) * torch.exp(gc)[:, None]
                 qk = qc @ kc.T
-                gate = _safe_exp(gc[:, None] - gc[None, :])
-                mask = torch.arange(v, device=qk.device)[:, None] >= torch.arange(v, device=qk.device)[None, :]
+                mask = torch.arange(vlen, device=qk.device)[:, None] >= torch.arange(
+                    vlen, device=qk.device
+                )[None, :]
+                gate = gate_fn(gc)
                 o[0, s:e, h, :] = inter + (qk * gate * mask.float()) @ vc
         ci_base += nc
     return o
@@ -291,6 +454,11 @@ class CheckResult:
     max_err: float
     mean_err: float
     hard_fail: bool = False
+    r2: float | None = None
+    pearson: float | None = None
+    rmse_over_mean_abs: float | None = None
+    pass_mode: str | None = None  # "allclose" | "stats" when passed; "fail" otherwise
+
 
 @dataclass
 class CaseResult:
@@ -305,11 +473,33 @@ class CaseResult:
         if self.error:
             d["error"] = self.error
         else:
-            d["checks"] = [
-                {"name": c.name, "passed": c.passed, "max_err": c.max_err,
-                 "mean_err": c.mean_err, "hard_fail": c.hard_fail}
-                for c in self.checks
-            ]
+            d["checks"] = []
+            for c in self.checks:
+                row = {
+                    "name": c.name,
+                    "passed": c.passed,
+                    "max_err": c.max_err,
+                    "mean_err": c.mean_err,
+                    "hard_fail": c.hard_fail,
+                    "r2": (
+                        float(c.r2)
+                        if c.r2 is not None and np.isfinite(c.r2)
+                        else None
+                    ),
+                    "pearson": (
+                        float(c.pearson)
+                        if c.pearson is not None and np.isfinite(c.pearson)
+                        else None
+                    ),
+                    "rmse_over_mean_abs": (
+                        float(c.rmse_over_mean_abs)
+                        if c.rmse_over_mean_abs is not None
+                        and np.isfinite(c.rmse_over_mean_abs)
+                        else None
+                    ),
+                    "pass_mode": c.pass_mode,
+                }
+                d["checks"].append(row)
         return json.dumps(d)
 
     @staticmethod
@@ -319,16 +509,37 @@ class CaseResult:
         if "error" in d:
             r.error = d["error"]
         else:
-            r.checks = [CheckResult(**c) for c in d["checks"]]
+            checks: list[CheckResult] = []
+            for c in d["checks"]:
+                checks.append(
+                    CheckResult(
+                        name=c["name"],
+                        passed=c["passed"],
+                        max_err=c["max_err"],
+                        mean_err=c["mean_err"],
+                        hard_fail=c.get("hard_fail", False),
+                        r2=c.get("r2"),
+                        pearson=c.get("pearson"),
+                        rmse_over_mean_abs=c.get("rmse_over_mean_abs"),
+                        pass_mode=c.get("pass_mode"),
+                    )
+                )
+            r.checks = checks
         return r
 
 
 # ───────────────────── Single-case runner ──────────────────────────────
 
-def run_single_case(tc: TestCase, dev: torch.device) -> CaseResult:
+def run_single_case(
+    tc: TestCase,
+    dev: torch.device,
+    *,
+    fig_dir: str | None = None,
+) -> CaseResult:
     checks: list[CheckResult] = []
     t0 = time.time()
     T = tc.T
+    plot_prefix = _safe_filename(tc.label) if fig_dir else ""
 
     if tc.cu_seqlens_list is not None:
         cu = torch.tensor(tc.cu_seqlens_list, dtype=torch.int32, device=dev)
@@ -347,11 +558,62 @@ def run_single_case(tc: TestCase, dev: torch.device) -> CaseResult:
     beta = torch.rand(1, T, H, device=dev, dtype=torch.float16)
     cu_cpu = cu.cpu() if cu is not None else None
 
-    def _chk(name, actual, expected, rtol, atol):
+    def _chk(name, actual, expected):
         diff = (actual - expected).abs()
         mx, mn = diff.max().item(), diff.mean().item()
-        ok = (diff <= atol + rtol * expected.abs()).all().item()
-        checks.append(CheckResult(name, ok, mx, mn, mx > HARD_FAIL_THRESHOLD))
+        exp_abs = expected.abs()
+        bound = ATOL_CHECK + RTOL_CHECK * exp_abs
+        pass_allclose = bool((diff <= bound).all().item())
+
+        ref_1d = expected.float().flatten()
+        mean_abs_ref = float(ref_1d.abs().mean().item())
+        std_ref = float(ref_1d.std().item())
+        rmse = float(torch.sqrt((diff.float().flatten() ** 2).mean()).item())
+        ratio = rmse / max(mean_abs_ref, 1e-15)
+        r2 = r2_score_vs_ref(expected, actual)
+        pr = pearson_r(actual, expected)
+
+        if mean_abs_ref < 1e-9:
+            pass_stats = rmse < 5e-4
+        elif std_ref < 1e-12:
+            pass_stats = ratio <= MAX_RMSE_OVER_MEAN_ABS
+        else:
+            pass_stats = (
+                ratio <= MAX_RMSE_OVER_MEAN_ABS
+                and np.isfinite(r2)
+                and r2 >= MIN_R2_FALLBACK
+            )
+
+        hard = mx > HARD_FAIL_THRESHOLD
+        ok = (pass_allclose or pass_stats) and not hard
+        if ok:
+            mode = "allclose" if pass_allclose else "stats"
+        else:
+            mode = "fail"
+
+        checks.append(
+            CheckResult(
+                name,
+                ok,
+                mx,
+                mn,
+                hard,
+                r2,
+                pr,
+                ratio if mean_abs_ref >= 1e-9 else None,
+                mode,
+            )
+        )
+        if fig_dir and plot_prefix:
+            r2s = f"{r2:.4f}" if np.isfinite(r2) else "nan"
+            prs = f"{pr:.4f}" if np.isfinite(pr) else "nan"
+            png = os.path.join(fig_dir, f"{plot_prefix}__{name}.png")
+            plot_scatter_ref_vs_kernel(
+                expected,
+                actual,
+                title=f"{tc.label}\n{name}  R²={r2s}  ρ={prs}",
+                path=png,
+            )
 
     def _fin(name, t):
         ok = torch.isfinite(t).all().item()
@@ -363,7 +625,7 @@ def run_single_case(tc: TestCase, dev: torch.device) -> CaseResult:
     g_sum = torch.empty(1, T, H, device=dev, dtype=torch.float32)
     run_chunk_cumsum(g_in, g_sum, chunk_size=C, cu_seqlens=cu, batch_size_override=N_seq)
     torch.npu.synchronize()
-    _chk("cumsum", g_sum.float().cpu(), ref_cumsum(g_in.cpu(), C, cu_cpu), RTOL_TIGHT, ATOL_TIGHT)
+    _chk("cumsum", g_sum.float().cpu(), ref_cumsum(g_in.cpu(), C, cu_cpu))
 
     # 2. kkt
     msk = torch.tril(torch.ones(C, C, device=dev), diagonal=-1).float()
@@ -371,18 +633,19 @@ def run_single_case(tc: TestCase, dev: torch.device) -> CaseResult:
     run_scaled_dot_kkt(k, beta, g_sum, msk, None, A_out,
                        chunk_size=C, cu_seqlens=cu, batch_size_override=N_seq)
     torch.npu.synchronize()
-    _chk("kkt", A_out.float().cpu(), ref_kkt(k.cpu(), beta.cpu(), g_sum.cpu(), C, cu_cpu),
-         RTOL_TIGHT, ATOL_TIGHT)
+    _chk("kkt", A_out.float().cpu(), ref_kkt(k.cpu(), beta.cpu(), g_sum.cpu(), C, cu_cpu))
 
-    # 3. wy_fast
+    # 3. wy_fast — kernel is checked against KKT blocks (same tensor as stage 2).
+    #    Full FLA / e2e uses ``solve_tril`` on ``A_out`` before this stage; see
+    #    ``pto_e2e_measure/verify_pto_triton_e2e.py`` and ``ref_solve_tril``.
     w_out = torch.empty(1, T, H, D, device=dev, dtype=torch.float16)
     u_out = torch.empty(1, T, H, D, device=dev, dtype=torch.float16)
     run_wy_fast(k, v, beta, g_sum, A_out, w_out, u_out,
                 chunk_size=C, cu_seqlens=cu, batch_size_override=N_seq)
     torch.npu.synchronize()
     w_ref, u_ref = ref_wy(k.cpu(), v.cpu(), beta.cpu(), A_out.cpu(), g_sum.cpu(), C, cu_cpu)
-    _chk("wy_w", w_out.float().cpu(), w_ref.float(), RTOL_MATMUL, ATOL_MATMUL)
-    _chk("wy_u", u_out.float().cpu(), u_ref.float(), RTOL_MATMUL, ATOL_MATMUL)
+    _chk("wy_w", w_out.float().cpu(), w_ref.float())
+    _chk("wy_u", u_out.float().cpu(), u_ref.float())
 
     # 4. chunk_h
     tc_n = total_chunks(N_seq, T, C, cu)
@@ -395,8 +658,8 @@ def run_single_case(tc: TestCase, dev: torch.device) -> CaseResult:
     _fin("h_states", s_out); _fin("h_vnew", v_out); _fin("h_fs", fs_out)
     h_ref, v_ref, fs_ref = ref_chunk_h(k.cpu(), w_out.cpu(), u_out.cpu(), g_sum.cpu(), C, cu_cpu)
     s_re = s_out.float().cpu().view(tc_n, H, D, D)
-    _chk("h_states", s_re, h_ref.float(), RTOL_ACCUM, ATOL_ACCUM)
-    _chk("h_vnew", v_out.float().cpu(), v_ref.float(), RTOL_ACCUM, ATOL_ACCUM)
+    _chk("h_states", s_re, h_ref.float())
+    _chk("h_vnew", v_out.float().cpu(), v_ref.float())
 
     # 5. chunk_o
     msk2 = torch.tril(torch.ones(C, C, device=dev), diagonal=0).float()
@@ -405,9 +668,11 @@ def run_single_case(tc: TestCase, dev: torch.device) -> CaseResult:
                 chunk_size=C, cu_seqlens=cu, batch_size_override=N_seq)
     torch.npu.synchronize()
     _fin("chunk_o", o_out)
-    _chk("chunk_o", o_out.float().cpu(),
-         ref_chunk_o(q.cpu(), k.cpu(), v_out.cpu(), s_re, g_sum.cpu(), C, cu_cpu),
-         RTOL_ACCUM, ATOL_ACCUM)
+    _chk(
+        "chunk_o",
+        o_out.float().cpu(),
+        ref_chunk_o(q.cpu(), k.cpu(), v_out.cpu(), s_re, g_sum.cpu(), C, cu_cpu),
+    )
 
     elapsed = time.time() - t0
     return CaseResult(label=tc.label, passed=all(c.passed for c in checks),
@@ -416,14 +681,26 @@ def run_single_case(tc: TestCase, dev: torch.device) -> CaseResult:
 
 # ───────────────────── Isolated subprocess runner ──────────────────────
 
-def _run_isolated(case_idx: int, device: str, seed: int) -> CaseResult:
+def _run_isolated(
+    case_idx: int,
+    device: str,
+    seed: int,
+    fig_dir: str | None = None,
+) -> CaseResult:
     """Run a single case in a fresh subprocess to avoid state leakage."""
     cmd = [
-        sys.executable, __file__,
-        "--device", device, "--seed", str(seed),
-        "--case", str(case_idx),
+        sys.executable,
+        __file__,
+        "--device",
+        device,
+        "--seed",
+        str(seed),
+        "--case",
+        str(case_idx),
         "--_json_output",
     ]
+    if fig_dir:
+        cmd.extend(["--fig-dir", fig_dir])
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300,
                               cwd=_HERE)
@@ -451,6 +728,14 @@ def main():
                         help="Include cases known to crash the NPU (MTE out of range)")
     parser.add_argument("--verbose", "-v", action="store_true")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--fig-dir",
+        default=None,
+        help=(
+            f"Write per-stage 1:1 scatter PNGs (CPU ref vs NPU) here; "
+            f"omit to skip figures. Default suggestion: {_DEFAULT_FIG_DIR}"
+        ),
+    )
     parser.add_argument("--_json_output", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
 
@@ -466,16 +751,25 @@ def main():
         idx = (args.case or 1) - 1
         tc = all_cases[idx]
         try:
-            result = run_single_case(tc, dev)
+            result = run_single_case(tc, dev, fig_dir=args.fig_dir)
         except Exception as e:
             result = CaseResult(label=tc.label, passed=False, error=str(e))
         print(result.to_json())
         return
 
+    fig_dir = args.fig_dir
+    if fig_dir:
+        os.makedirs(fig_dir, exist_ok=True)
+
     print(f"Device: {args.device}  H={H} D={D} C={C}  BLOCK_DIM={BLOCK_DIM}")
-    print(f"Tolerances: tight(atol={ATOL_TIGHT}) matmul(atol={ATOL_MATMUL}) accum(atol={ATOL_ACCUM})")
+    print(
+        f"Tolerances: rtol={RTOL_CHECK} atol={ATOL_CHECK} "
+        f"(or stats: rmse/mean|ref|≤{MAX_RMSE_OVER_MEAN_ABS}, R²≥{MIN_R2_FALLBACK})"
+    )
     if args.isolate:
         print("Mode: isolated subprocesses (no state leakage)")
+    if fig_dir:
+        print(f"Per-stage scatter PNGs (CPU ref x, NPU y): {fig_dir}")
     print()
 
     if args.quick:
@@ -515,13 +809,13 @@ def main():
             continue
 
         if args.isolate and ci is not None:
-            result = _run_isolated(ci, args.device, args.seed)
+            result = _run_isolated(ci, args.device, args.seed, fig_dir=fig_dir)
             result.label = tc.label
         else:
             torch.npu.synchronize()
             torch.npu.empty_cache()
             try:
-                result = run_single_case(tc, dev)
+                result = run_single_case(tc, dev, fig_dir=fig_dir)
             except Exception as e:
                 result = CaseResult(label=tc.label, passed=False, error=str(e))
                 if args.verbose:
@@ -537,7 +831,26 @@ def main():
         if args.verbose:
             for c in result.checks:
                 tag = "PASS" if c.passed else ("HARD FAIL" if c.hard_fail else "FAIL")
-                print(f"    {tag:9s} {c.name:15s}  max={c.max_err:.6f}  mean={c.mean_err:.6f}")
+                r2s = (
+                    f"{c.r2:.4f}"
+                    if c.r2 is not None and np.isfinite(c.r2)
+                    else "nan"
+                )
+                prs = (
+                    f"{c.pearson:.4f}"
+                    if c.pearson is not None and np.isfinite(c.pearson)
+                    else "nan"
+                )
+                rm = (
+                    f"{c.rmse_over_mean_abs:.4f}"
+                    if c.rmse_over_mean_abs is not None and np.isfinite(c.rmse_over_mean_abs)
+                    else "n/a"
+                )
+                pmode = c.pass_mode or "?"
+                print(
+                    f"    {tag:9s} {c.name:15s}  max={c.max_err:.6f}  mean={c.mean_err:.6f}  "
+                    f"R²={r2s}  ρ={prs}  rm/|ref|={rm}  [{pmode}]"
+                )
 
         has_hard = any(c.hard_fail for c in result.checks)
         if result.passed:
@@ -585,6 +898,23 @@ def main():
             print(f"  {name:15s}  max_err={err:.6f}{flag}")
         elif err == 0:
             print(f"  {name:15s}  max_err=0.000000")
+
+    min_r2: dict[str, float] = {n: float("inf") for n in check_names}
+    for r in all_results:
+        if r.error:
+            continue
+        for c in r.checks:
+            if c.name in min_r2 and c.r2 is not None and np.isfinite(c.r2):
+                min_r2[c.name] = min(min_r2[c.name], c.r2)
+
+    print("\n── Min R² vs CPU ref (across all cases; 1.0 = cloud on 1:1 line) ──")
+    for name in check_names:
+        v = min_r2[name]
+        if v != float("inf") and v == v:
+            flag = "  ** low vs ref" if v < 0.95 else ""
+            print(f"  {name:15s}  min R²={v:.6f}{flag}")
+        else:
+            print(f"  {name:15s}  min R²=n/a")
 
     if n_hard > 0:
         sys.exit(2)

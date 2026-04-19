@@ -35,7 +35,7 @@ from triton_baseline.refs_bthd import ref_chunk_local_cumsum, ref_scaled_dot_kkt
 
 NPU_DEVICE = os.getenv("GDN_TRITON_NPU_DEVICE", "npu:0")
 CHUNK_SIZE = 64
-RTOL, ATOL = 1e-2, 1e-2
+RTOL, ATOL = 1e-2, 1e-5
 
 
 def ref_recompute_w_u(
