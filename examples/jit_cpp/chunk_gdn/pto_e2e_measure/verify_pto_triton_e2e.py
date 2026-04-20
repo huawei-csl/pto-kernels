@@ -205,24 +205,6 @@ def _cu_from_seqlens(seqlens: list[int]) -> list[int]:
     return cu
 
 
-def _transpose_valid_chunks(
-    A: torch.Tensor,
-    cu_seqlens: torch.Tensor,
-    chunk_size: int,
-) -> torch.Tensor:
-    transposed = torch.zeros_like(A)
-    for bos, eos in zip(
-        cu_seqlens[:-1].tolist(), cu_seqlens[1:].tolist(), strict=False
-    ):
-        for chunk_start in range(bos, eos, chunk_size):
-            actual_size = min(chunk_size, eos - chunk_start)
-            chunk = A[:, chunk_start : chunk_start + actual_size, :, :actual_size]
-            transposed[:, chunk_start : chunk_start + actual_size, :, :actual_size] = (
-                chunk.transpose(1, 3)
-            )
-    return transposed
-
-
 def _make_minus_identity(matrix_size: int, device: torch.device) -> torch.Tensor:
     minus_identity = torch.zeros(
         (matrix_size, matrix_size),
