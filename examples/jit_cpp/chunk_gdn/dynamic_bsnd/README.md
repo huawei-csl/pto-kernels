@@ -79,8 +79,7 @@ BSND with `T=262144`.
 | wy_fast | 6.82 | 15.63 | 2.29x | 20.1 |
 | chunk_h | 10.14 | 30.83 | 3.04x | 27.1 |
 | chunk_o | 11.52 | 16.15 | 1.40x | 29.8 |
-| **total_summed** | **49.40** | **68.47** | **1.39x** | **17.2** |
-| **total_measured** | **54.00** | — | — | **15.7** |
+| **total (exclude solve_tril)** | **33.49** | **68.47** | **2.04x** | **24.6** |
 
 ## Design notes
 
@@ -120,4 +119,4 @@ BSND with `T=262144`.
 - **safe_exp via TMINS**: `scaled_dot_kkt` and `chunk_o` clamp
   `g_row - g_col` to `min(x, 0)` via `TMINS(coeff, coeff, 0.0f)` before
   `TEXP` to prevent IEEE 754 `Inf * 0 = NaN`.
-- **solve_tril omitted**: Consistent with the benchmark configuration.
+- **solve_tril**: Timed separately for PTO only (no Triton equivalent in this split). The **total_summed** row sums the five kernels that appear in both columns so PTO and Triton totals are comparable.
