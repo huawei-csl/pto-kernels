@@ -135,10 +135,14 @@ AICORE inline void InvertSingleTile(
   wait_flag(PIPE_MTE1, PIPE_M, event_0);
 
   set_flag(PIPE_FIX, PIPE_M, event_1);
+  set_flag(PIPE_MTE1, PIPE_M, event_1);
   for (uint32_t i = 0; i < num_iters; ++i) {
+    pipe_barrier(PIPE_M);
     TMATMUL(c_l0_tile[0], a_l0_tile[0], b_l0_tile[0]);  // c_l0[0] <- X @ (-A)
     set_flag(PIPE_M, PIPE_FIX, event_0);
     pipe_barrier(PIPE_M);
+    wait_flag(PIPE_FIX, PIPE_M, event_1);  // from previous iter
+    wait_flag(PIPE_MTE1, PIPE_M, event_1);
     TMATMUL(c_l0_tile[1], a_l0_tile[1], b_l0_tile[1]);  // c_l0[1] <- 2 * X
     pipe_barrier(PIPE_M);
 
@@ -150,15 +154,12 @@ AICORE inline void InvertSingleTile(
     TMOV(a_l0_tile[0], Y_l1_tile);
     set_flag(PIPE_MTE1, PIPE_M, event_0);
 
-    wait_flag(PIPE_FIX, PIPE_M, event_1);  // from previous iter
     wait_flag(PIPE_MTE1, PIPE_M, event_0);
     TMATMUL_ACC(c_l0_tile[1], c_l0_tile[1], a_l0_tile[0],
                 b_l0_tile[1]);  // c_l0[1] <- Y @ X + 2 * X
     set_flag(PIPE_M, PIPE_FIX, event_0);
     wait_flag(PIPE_M, PIPE_FIX, event_0);
     set_flag(PIPE_M, PIPE_MTE1, event_0);
-    wait_flag(PIPE_M, PIPE_MTE1, event_0);
-    pipe_barrier(PIPE_M);
 
     if (i < num_iters - 1) {
       TMOV(X_l1_tile, c_l0_tile[1]);        // X_l1 now contains X_new
@@ -166,12 +167,15 @@ AICORE inline void InvertSingleTile(
       set_flag(PIPE_FIX, PIPE_MTE1, event_0);
 
       wait_flag(PIPE_FIX, PIPE_MTE1, event_0);
-      TMOV(b_l0_tile[1], X_l1_tile);
+      wait_flag(PIPE_M, PIPE_MTE1, event_0);
       TMOV(a_l0_tile[0], X_l1_tile);
       set_flag(PIPE_MTE1, PIPE_M, event_0);
       wait_flag(PIPE_MTE1, PIPE_M, event_0);
+      TMOV(b_l0_tile[1], X_l1_tile);
+      set_flag(PIPE_MTE1, PIPE_M, event_1);
     }
   }
+  wait_flag(PIPE_M, PIPE_MTE1, event_0);
 }
 
 /**
