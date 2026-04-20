@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import torch
 
-from ._common import k_head_index, safe_exp_torch
+from ._common import k_head_index, prepare_chunk_indices, safe_exp_torch
 
 
 def _prepare_chunk_offsets_cpu(cu_seqlens: torch.Tensor, chunk_size: int) -> torch.Tensor:
@@ -21,15 +21,6 @@ def _prepare_chunk_offsets_cpu(cu_seqlens: torch.Tensor, chunk_size: int) -> tor
     nchunks = (lens + chunk_size - 1) // chunk_size
     z = cu_seqlens.new_zeros(1)
     return torch.cat([z, nchunks], dim=0).cumsum(-1)
-
-
-def _prepare_chunk_indices_cpu(cu_seqlens: torch.Tensor, chunk_size: int) -> torch.Tensor:
-    lens = cu_seqlens[1:] - cu_seqlens[:-1]
-    nc = (lens + chunk_size - 1) // chunk_size
-    parts = [torch.arange(int(x), device=cu_seqlens.device, dtype=torch.long) for x in nc.tolist()]
-    indices = torch.cat(parts, dim=0) if parts else cu_seqlens.new_empty(0, dtype=torch.long)
-    seq_ids = (indices == 0).cumsum(0) - 1
-    return torch.stack([seq_ids, indices], dim=1).to(cu_seqlens)
 
 
 def _pack_h_from_tiles(
@@ -72,7 +63,7 @@ def chunk_gated_delta_rule_fwd_h(
     tile_k, tile_v = 128, 64
 
     if cu_seqlens is not None and chunk_indices is None:
-        chunk_indices = _prepare_chunk_indices_cpu(cu_seqlens, chunk_size)
+        chunk_indices = prepare_chunk_indices(cu_seqlens, chunk_size)
     if cu_seqlens is None:
         n, nt = b, (t_max + bt - 1) // bt
         chunk_offsets_t = None

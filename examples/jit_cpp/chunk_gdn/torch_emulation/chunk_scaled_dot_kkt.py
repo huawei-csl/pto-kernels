@@ -10,13 +10,16 @@ Within each time chunk of length ``BT``, form the local Gram matrix and apply th
 
 (strictly lower triangular; causal mask). This is the local KKT / local attention block
 used to build the WY / delta-rule factors.
+
+Iteration follows Triton ``chunk_indices``: every chunk tile (including partial tails) is a
+separate program; invalid rows are zero-padded to ``BT`` like ``tl.load(..., boundary_check)``.
 """
 
 from __future__ import annotations
 
 import torch
 
-from ._common import k_head_index, safe_exp_torch
+from ._common import iter_packed_bt_chunks, k_head_index, prepare_chunk_indices, safe_exp_torch
 
 
 def chunk_scaled_dot_kkt_fwd(
@@ -37,39 +40,34 @@ def chunk_scaled_dot_kkt_fwd(
     bt = chunk_size
     out = torch.zeros(b, t, h, bt, device=k.device, dtype=output_dtype)
 
-    if cu_seqlens is None:
-        seg_ranges = [(0, t - (t % bt))]
-    else:
-        cu = cu_seqlens.detach().cpu().tolist()
-        seg_ranges = []
-        for i in range(len(cu) - 1):
-            bos, eos = cu[i], cu[i + 1]
-            seg_ranges.append((bos, eos - ((eos - bos) % bt)))
+    if cu_seqlens is not None and chunk_indices is None:
+        chunk_indices = prepare_chunk_indices(cu_seqlens, bt)
 
-    for bos, eos in seg_ranges:
-        for i in range((eos - bos) // bt):
-            s = bos + i * bt
-            e = s + bt
-            # GLOBAL: full chunk tensors (DRAM)
-            k_c = k[:, s:e, :, :]
-            g_c = g_cumsum[:, s:e, :] if g_cumsum is not None else None
-            b_c = beta[:, s:e, :]
+    dev = k.device
+    idx = torch.arange(bt, device=dev, dtype=torch.long)
+    mask = idx[:, None] > idx[None, :]
 
-            for i_h in range(h):
-                hk = k_head_index(i_h, h, hg)
-                # Conceptual SRAM tiles (float32 on device; mirrors tl.load blocks)
-                k_tile = k_c[0, :, hk, :].float()
-                beta_tile = b_c[0, :, i_h].float()
-                kk = torch.matmul(k_tile, k_tile.transpose(0, 1))
-                if g_c is not None:
-                    g_tile = g_c[0, :, i_h].float()
-                    gi = g_tile[:, None]
-                    gj = g_tile[None, :]
-                    kk = kk * safe_exp_torch(gi - gj)
-                blk = kk * beta_tile[:, None]
-                idx = torch.arange(bt, device=k.device, dtype=torch.long)
-                mask = idx[:, None] > idx[None, :]
-                blk = torch.where(mask, blk, torch.zeros_like(blk))
-                out[0, s:e, i_h, :] = blk.to(output_dtype)
+    for bos, _i_tc, span in iter_packed_bt_chunks(
+        cu_seqlens=cu_seqlens, total_t=t, bt=bt, chunk_indices=chunk_indices
+    ):
+        if span <= 0:
+            continue
+        s = bos + _i_tc * bt
+        for i_h in range(h):
+            hk = k_head_index(i_h, h, hg)
+            k_pad = torch.zeros(bt, kdim, device=dev, dtype=torch.float32)
+            k_pad[:span] = k[0, s : s + span, hk, :].float()
+            beta_pad = torch.zeros(bt, device=dev, dtype=torch.float32)
+            beta_pad[:span] = beta[0, s : s + span, i_h].float()
+            kk = torch.matmul(k_pad, k_pad.transpose(0, 1))
+            if g_cumsum is not None:
+                g_pad = torch.zeros(bt, device=dev, dtype=torch.float32)
+                g_pad[:span] = g_cumsum[0, s : s + span, i_h].float()
+                gi = g_pad[:, None]
+                gj = g_pad[None, :]
+                kk = kk * safe_exp_torch(gi - gj)
+            blk = kk * beta_pad[:, None]
+            blk = torch.where(mask, blk, torch.zeros_like(blk))
+            out[0, s : s + span, i_h, :] = blk[:span, :].to(output_dtype)
 
     return out

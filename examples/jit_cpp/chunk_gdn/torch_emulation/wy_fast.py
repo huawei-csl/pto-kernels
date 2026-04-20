@@ -10,13 +10,15 @@ and gates :math:`\\exp(G^{\\mathrm{cum}})`, compute
     w_t = \\sum_j A_{tj} \\, \\beta_j \\exp(G^{\\mathrm{cum}}_j)\\, k_j,
 
 i.e. :math:`u = A(\\beta \\odot v)` and :math:`w = A(\\beta \\odot e^G \\odot k)` in block form.
+
+Chunk iteration matches Triton ``chunk_indices`` (partial tiles zero-padded to ``BT``).
 """
 
 from __future__ import annotations
 
 import torch
 
-from ._common import k_head_index
+from ._common import iter_packed_bt_chunks, k_head_index, prepare_chunk_indices
 
 
 def recompute_w_u_fwd(
@@ -39,37 +41,37 @@ def recompute_w_u_fwd(
     w = k.new_empty(b, t, h, kdim)
     u = torch.empty_like(v)
 
-    if cu_seqlens is None:
-        seg_ranges = [(0, t - (t % bt))]
-    else:
-        cu = cu_seqlens.detach().cpu().tolist()
-        seg_ranges = []
-        for i in range(len(cu) - 1):
-            bos, eos = cu[i], cu[i + 1]
-            seg_ranges.append((bos, eos - ((eos - bos) % bt)))
+    if cu_seqlens is not None and chunk_indices is None:
+        chunk_indices = prepare_chunk_indices(cu_seqlens, bt)
 
-    for bos, eos in seg_ranges:
-        for ic in range((eos - bos) // bt):
-            s = bos + ic * bt
-            e = s + bt
-            for i_h in range(h):
-                hk = k_head_index(i_h, h, hg)
-                a_tile = A[0, s:e, i_h, :].float()
-                g_vec = g_cumsum[0, s:e, i_h].float()
-                b_vec = beta[0, s:e, i_h].float()
-                exp_g = torch.exp(g_vec)
+    dev = k.device
+    for bos, _i_tc, span in iter_packed_bt_chunks(
+        cu_seqlens=cu_seqlens, total_t=t, bt=bt, chunk_indices=chunk_indices
+    ):
+        if span <= 0:
+            continue
+        s = bos + _i_tc * bt
+        for i_h in range(h):
+            hk = k_head_index(i_h, h, hg)
+            a_pad = torch.zeros(bt, bt, device=dev, dtype=torch.float32)
+            a_pad[:span, :] = A[0, s : s + span, i_h, :].float()
+            g_pad = torch.zeros(bt, device=dev, dtype=torch.float32)
+            g_pad[:span] = g_cumsum[0, s : s + span, i_h].float()
+            b_pad = torch.zeros(bt, device=dev, dtype=torch.float32)
+            b_pad[:span] = beta[0, s : s + span, i_h].float()
+            exp_g = torch.exp(g_pad)
 
-                k_tile = k[0, s:e, hk, :].float()
-                v_tile = v[0, s:e, i_h, :].float()
+            k_pad = torch.zeros(bt, kdim, device=dev, dtype=torch.float32)
+            k_pad[:span] = k[0, s : s + span, hk, :].float()
+            v_pad = torch.zeros(bt, vdim, device=dev, dtype=torch.float32)
+            v_pad[:span] = v[0, s : s + span, i_h, :].float()
 
-                # u = A @ (beta * v)
-                vb = v_tile * b_vec[:, None]
-                u_tile = torch.matmul(a_tile, vb)
-                # w = A @ (beta * exp(g) * k)
-                kb = k_tile * b_vec[:, None] * exp_g[:, None]
-                w_tile = torch.matmul(a_tile, kb)
+            vb = v_pad * b_pad[:, None]
+            u_tile = torch.matmul(a_pad, vb)
+            kb = k_pad * b_pad[:, None] * exp_g[:, None]
+            w_tile = torch.matmul(a_pad, kb)
 
-                u[0, s:e, i_h, :] = u_tile.to(u.dtype)
-                w[0, s:e, i_h, :] = w_tile.to(w.dtype)
+            u[0, s : s + span, i_h, :] = u_tile[:span, :].to(u.dtype)
+            w[0, s : s + span, i_h, :] = w_tile[:span, :].to(w.dtype)
 
     return w, u

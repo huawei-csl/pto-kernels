@@ -7,7 +7,55 @@ This is the pairwise gate factor exp(g_i - g_j) with causal decay outside the va
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import torch
+
+
+def prepare_chunk_indices(cu_seqlens: torch.Tensor, chunk_size: int) -> torch.Tensor:
+    """
+    Match ``fla_vendor.utils.prepare_chunk_indices``: rows ``(seq_id, chunk_idx_in_seq)``
+    for every ``chunk_size`` block along packed time (including partial tail chunks).
+    """
+    lens = cu_seqlens[1:] - cu_seqlens[:-1]
+    nc = (lens + chunk_size - 1) // chunk_size
+    parts = [torch.arange(int(n), device=cu_seqlens.device, dtype=torch.long) for n in nc.tolist()]
+    indices = torch.cat(parts, dim=0) if parts else cu_seqlens.new_empty(0, dtype=torch.long)
+    seq_ids = (indices == 0).cumsum(0) - 1
+    return torch.stack([seq_ids, indices], dim=1).to(cu_seqlens)
+
+
+def iter_packed_bt_chunks(
+    *,
+    cu_seqlens: torch.Tensor | None,
+    total_t: int,
+    bt: int,
+    chunk_indices: torch.Tensor | None,
+) -> Iterator[tuple[int, int, int]]:
+    """
+    Yield ``(bos, i_tc, span)`` for each block of width ``bt`` in Triton program order.
+
+    ``bos`` is the sequence start offset in the packed ``[B, T, ...]`` tensor; ``i_tc`` is the
+    chunk index within that sequence; ``global_slice = bos + i_tc * bt : bos + i_tc * bt + span``.
+    ``span`` may be ``< bt`` for the last chunk of a sequence (or when ``total_t`` is not a
+    multiple of ``bt`` and ``cu_seqlens is None``).
+    """
+    if cu_seqlens is None:
+        nt = (total_t + bt - 1) // bt
+        for i_tc in range(nt):
+            span = min(bt, total_t - i_tc * bt)
+            yield 0, i_tc, span
+    else:
+        if chunk_indices is None:
+            chunk_indices = prepare_chunk_indices(cu_seqlens, bt)
+        for row in chunk_indices:
+            i_n = int(row[0].item())
+            i_tc = int(row[1].item())
+            bos = int(cu_seqlens[i_n].item())
+            eos = int(cu_seqlens[i_n + 1].item())
+            t_seg = eos - bos
+            span = min(bt, t_seg - i_tc * bt)
+            yield bos, i_tc, span
 
 
 def safe_exp_torch(x: torch.Tensor) -> torch.Tensor:
