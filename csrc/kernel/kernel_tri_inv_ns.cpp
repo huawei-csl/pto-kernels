@@ -107,14 +107,18 @@ AICORE inline void InvertSingleTile(
 
   TMOV(a_l0_tile[0], I_neg_l1_tile);
   TMOV(b_l0_tile[1], I_l1_tile);
-  TMOV(b_l0_tile[0], A_neg_l1_tile);
   set_flag(PIPE_MTE1, PIPE_M, event_0);
+
+  TMOV(b_l0_tile[0], A_neg_l1_tile);
+  set_flag(PIPE_MTE1, PIPE_M, event_1);
 
   TMOV(a_l0_tile[1], two_I_l1_tile);  // a_l0[1] <- 2 * I (will stay constant)
   wait_flag(PIPE_MTE1, PIPE_M, event_0);
   TMATMUL(c_l0_tile[0], a_l0_tile[0],
           b_l0_tile[1]);  // c_l0[0] <- -I
   pipe_barrier(PIPE_M);
+
+  wait_flag(PIPE_MTE1, PIPE_M, event_1);
   TMATMUL_ACC(c_l0_tile[0], c_l0_tile[0], a_l0_tile[0],
               b_l0_tile[0]);  // c_l0[0] <- -I-M = -A
 
