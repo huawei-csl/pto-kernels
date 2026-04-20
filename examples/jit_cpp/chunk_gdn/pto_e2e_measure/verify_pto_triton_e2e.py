@@ -198,6 +198,13 @@ def _count_varlen_chunks(cu_seqlens: torch.Tensor, chunk_size: int) -> int:
     )
 
 
+def _cu_from_seqlens(seqlens: list[int]) -> list[int]:
+    cu = [0]
+    for slen in seqlens:
+        cu.append(cu[-1] + slen)
+    return cu
+
+
 def _transpose_valid_chunks(
     A: torch.Tensor,
     cu_seqlens: torch.Tensor,
@@ -617,10 +624,33 @@ def main() -> int:
         ("single seq T=256", 256, [0, 256]),
         ("single seq T=512", 512, [0, 512]),
         ("single seq T=1024", 1024, [0, 1024]),
+        ("single seq T=2048", 2048, [0, 2048]),
+        ("single seq T=4096", 4096, [0, 4096]),
         ("varlen [256,256]", 512, [0, 256, 512]),
         ("varlen [128,128,128]", 384, [0, 128, 256, 384]),
         ("varlen 1×384", 384, [0, 384]),
         ("varlen [150,300] tails", 450, [0, 150, 450]),
+        ("varlen [129,255] tails", 384, [0, 129, 384]),
+        (
+            "varlen [1,17,128,129,255] boundary mix",
+            530,
+            _cu_from_seqlens([1, 17, 128, 129, 255]),
+        ),
+        (
+            "varlen [1,17,31,32,33,95,127,128,129,191,192,193,367] dense ladder",
+            1536,
+            _cu_from_seqlens([1, 17, 31, 32, 33, 95, 127, 128, 129, 191, 192, 193, 367]),
+        ),
+        (
+            "varlen [128,256,384,512,768] long mix",
+            2048,
+            _cu_from_seqlens([128, 256, 384, 512, 768]),
+        ),
+        (
+            "varlen [1,63,64,65,127,128,129,447,512,640,1920] long ladder",
+            4096,
+            _cu_from_seqlens([1, 63, 64, 65, 127, 128, 129, 447, 512, 640, 1920]),
+        ),
     ]
 
     csv_rows: list[dict[str, object]] = []
