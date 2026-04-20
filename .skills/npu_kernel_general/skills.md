@@ -175,4 +175,4 @@ In most cases `torch.npu.synchronize()` can be used for the `end.synchronize()` 
 
 Definitely avoid `atol=1e-2` in correctness checks. The values of intermediate activations are often on the magnitude of `1e-2`, thus passing asserts with `atol=1e-2` can mean 100% relative error, which is a meaningless check. Keep atol very small like `1e-5`. In comparison, `rtol=1e-2` is fine for bfloat16 dtype, ref [`torch.testing.assert_close` defaults](https://docs.pytorch.org/docs/main/testing.html#torch.testing.assert_close).
 
-In case of few outliers that break `rtol`, can also check `rmse` vs average output magnitude (`rmse` should be 1~2 orders of magnitudes smalelr than output values themselves). Also check R2 score between kernel output and reference output (should get R2=0.99 even with a few outliers). 
+In case of few outliers that break `rtol`, can also check `rmse` vs average output magnitude (`rmse` should be 1~2 orders of magnitudes smaller than output values themselves). Also check R2 score between kernel output and reference output (should get R2=0.99 even with a few outliers). 
