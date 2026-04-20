@@ -60,7 +60,7 @@ at::Tensor run_tri_inv_ns(const at::Tensor& M, uint32_t num_iters = 0,
 
   if (num_iters == 0) {
     num_iters = static_cast<uint32_t>(std::ceil(2.0f * std::log2(n)));
-    num_iters = std::max<uint32_t>(num_iters, 8);
+    num_iters = std::max<uint32_t>(num_iters, 12);
   }
   uint32_t block_dim = GetNumCubeCores();
   if (num_matrices < block_dim) {

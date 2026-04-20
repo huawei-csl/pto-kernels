@@ -88,7 +88,7 @@ def _test_tri_inv_ns(
     U_npu = U.npu()
 
     torch.npu.synchronize()
-    num_iters = int(4.0 * math.ceil(math.log2(U.shape[-1])))
+    num_iters = max([int(2.0 * math.ceil(math.log2(U.shape[-1]))), 12])
     # num_iters = 1
     actual = pto_tri_inv_ns(U_npu, num_iters=num_iters)
     torch.npu.synchronize()
@@ -112,9 +112,6 @@ def _test_tri_inv_ns(
 @pytest.mark.parametrize("n", [16, 32, 64, 96, 128])
 @pytest.mark.parametrize("block_dim_x", [1, 3, 7, 16])
 @pytest.mark.parametrize("block_dim_y", [1, 2, 4, 16])
-# @pytest.mark.parametrize("n", [96])
-# @pytest.mark.parametrize("block_dim_x", [16])
-# @pytest.mark.parametrize("block_dim_y", [2])
 @pytest.mark.parametrize(
     "matrix_gen,atol,rtol,ftol",
     [
