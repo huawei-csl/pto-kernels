@@ -11,6 +11,8 @@ for the full License text.
 
 #include <pto/pto-inst.hpp>
 
+#include "kernel_utils.h"
+
 using namespace pto;
 
 #define DIV_ROUNDUP(x, y) (((x) + (y) - 1) / (y))

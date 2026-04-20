@@ -18,8 +18,13 @@ for s in [16, 32, 64, 128]:
 #define MEMORY_BASE
 #include <pto/pto-inst.hpp>
 
+// clang-format off: so it does not get wrongfully flagged by linter
+#ifndef GM_ADDR
+#define GM_ADDR __gm__ uint8_t*  // To avoid #include "kernel_operator.h"
+#endif
+
 #define CONST_HALF_TO_GM(x) \
-  reinterpret_cast<GM_ADDR>(const_cast<__gm__ half*>((x)))
+  reinterpret_cast<__gm__ half*>(const_cast<__gm__ half*>((x)))
 
 // clang format off
 const static __gm__ half minus_eye_fp16_16[256] = {};
@@ -28,14 +33,13 @@ const static __gm__ half minus_eye_fp16_64[4096] = {};
 const static __gm__ half minus_eye_fp16_128[16384] = {};
 // clang format on
 
-__aicore__ inline GM_ADDR load_minus_eye_fp16_matrix(uint32_t matmul_size) {
-  if (matmul_size == 16) {
-    return CONST_HALF_TO_GM(minus_eye_fp16_16);
-  } else if (matmul_size == 32) {
+AICORE inline __gm__ half* load_minus_eye_fp16_matrix(uint32_t matmul_size) {
+  if (matmul_size == 32) {
     return CONST_HALF_TO_GM(minus_eye_fp16_32);
   } else if (matmul_size == 64) {
     return CONST_HALF_TO_GM(minus_eye_fp16_64);
   } else if (matmul_size == 128) {
     return CONST_HALF_TO_GM(minus_eye_fp16_128);
   }
+  return CONST_HALF_TO_GM(minus_eye_fp16_16);
 }

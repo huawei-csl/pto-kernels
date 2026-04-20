@@ -6,33 +6,13 @@ See LICENSE in the root of the software repository:
 https://github.com/huawei-csl/pto-kernels/
 for the full License text.
 */
-#if defined __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
-
-// Placeholder for VEC compilation (the real kernel is CUBE-only).
-#define MEMORY_BASE
-#include <pto/common/type.hpp>
-
-extern "C" __global__ AICORE void simple_matmul_fp16(__gm__ void* a,
-                                                     __gm__ void* b,
-                                                     __gm__ void* c,
-                                                     uint32_t matrix_size) {}
-
-extern "C" __global__ AICORE void simple_matmul_bf16(__gm__ void* a,
-                                                     __gm__ void* b,
-                                                     __gm__ void* c,
-                                                     uint32_t matrix_size) {}
-
-extern "C" __global__ AICORE void simple_matmul_fp32(__gm__ void* a,
-                                                     __gm__ void* b,
-                                                     __gm__ void* c,
-                                                     uint32_t matrix_size) {}
-
-#elif (__CHECK_FEATURE_AT_PRECOMPILE) || \
-    (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))
 
 #define MEMORY_BASE
-
 #include <pto/pto-inst.hpp>
+
+// clang-format off: so it does not get wrongfully flagged by linter
+#define GM_ADDR __gm__ uint8_t*  // To avoid #include "kernel_operator.h"
+// clang-format on
 
 using namespace pto;
 
@@ -51,6 +31,9 @@ AICORE inline void WaitFlag(uint32_t id) {
 template <typename InputT, typename OutputT, uint32_t matrix_size>
 AICORE void runKernelSimpleMatMul(__gm__ InputT* a, __gm__ InputT* b,
                                   __gm__ OutputT* c) {
+#if (__CHECK_FEATURE_AT_PRECOMPILE) || \
+    (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))
+
   constexpr uint32_t tile_len = matrix_size * matrix_size;
 
   /* Global Memory / Tensors */
@@ -119,6 +102,7 @@ AICORE void runKernelSimpleMatMul(__gm__ InputT* a, __gm__ InputT* b,
   SetFlag<PIPE_M, PIPE_FIX>(0);   // M pipe sets flag for FIX pipe
   WaitFlag<PIPE_M, PIPE_FIX>(0);  // FIX pipe waits for M pipe to set flag
   TSTORE(c_global_out, c_l0_tile);
+#endif
 }
 
 template <typename T>
@@ -173,5 +157,3 @@ extern "C" __global__ AICORE void simple_matmul_fp32(__gm__ void* a,
   run_simple_matmul<float>((__gm__ float*)a, (__gm__ float*)b, (__gm__ float*)c,
                            matrix_size);
 }
-
-#endif
