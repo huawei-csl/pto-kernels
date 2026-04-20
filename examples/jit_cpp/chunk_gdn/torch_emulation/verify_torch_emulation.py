@@ -1,5 +1,7 @@
 """
-Compare ``torch_emulation`` against Triton ``fla_vendor`` kernels (same dtypes / layouts).
+**Test harness** (not part of the reference math): compares ``torch_emulation`` to Triton
+``fla_vendor`` kernels (same dtypes / layouts). For algorithm documentation, see each emulator’s
+module docstring and ``torch_emulation._common``.
 
 For ``chunk_gated_delta_rule_fwd_h`` and ``chunk_fwd_o``, Triton bf16 matmul ordering can
 differ slightly from PyTorch; we accept either ``torch.allclose`` (tight) or high :math:`R^2`

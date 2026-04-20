@@ -2,6 +2,14 @@
 Educational PyTorch emulation of ``triton_baseline/fla_vendor`` GDN kernels.
 
 API mirrors the Triton entry points (same argument lists and tensor layouts).
+
+**Reading order:** start with ``_common`` for the **global vs tile** memory model, ``prepare_chunk_indices``,
+and ``iter_packed_bt_chunks`` (how varlen **chunk programs** map to global time). Then the pipeline is
+typically ``chunk_scaled_dot_kkt`` → ``solve_tril`` → ``wy_fast`` → ``chunk_delta_h`` → ``chunk_o``,
+with ``chunk_local_cumsum`` feeding cumulative gates upstream.
+
+Each submodule’s module docstring documents **math**, **tensor shapes**, and **indexing** (``bos`` / ``span`` /
+``h_out`` chunk rows, etc.).
 """
 
 from ._common import prepare_chunk_indices, relative_rmse, tensor_r2_score

@@ -1,8 +1,21 @@
 """
-Shared helpers for educational torch emulation of GDN Triton kernels.
+Shared helpers for educational PyTorch emulation of GDN Triton kernels.
 
-``safe_exp`` matches ``fla_vendor.utils.safe_exp`` (Triton): exp(x) where x<=0, else 0.
-This is the pairwise gate factor exp(g_i - g_j) with causal decay outside the valid cone.
+Memory model (conceptual)
+---------------------------
+Triton kernels distinguish **on-chip** state (registers / shared memory tiles loaded with
+``tl.load``, computed with ``tl.dot``, then written with ``tl.store``) from **global** tensors
+in device memory (DRAM). In this emulation:
+
+- Variables named like ``*_pad``, ``blk``, ``a_tile``, or holding a full ``BT × BT`` / ``BT × K``
+  micro-block are **tile / SRAM stand-ins**: float32 workspace that mirrors what a block of
+  threads holds **before** scattering results back to the output tensor.
+- ``prepare_chunk_indices`` / ``iter_packed_bt_chunks`` encode the same **launch grid** as
+  Triton: one logical program per ``(sequence, chunk_index)`` pair, including **partial** tail
+  chunks (``span < BT``) with zero-padding like ``boundary_check``.
+
+``safe_exp`` matches ``fla_vendor.utils.safe_exp`` (Triton): ``exp(x)`` where ``x <= 0``, else
+``0``. Used for pairwise gate factors ``exp(g_i - g_j)`` so non-causal pairs do not contribute.
 """
 
 from __future__ import annotations
@@ -14,14 +27,27 @@ import torch
 
 def prepare_chunk_indices(cu_seqlens: torch.Tensor, chunk_size: int) -> torch.Tensor:
     """
-    Match ``fla_vendor.utils.prepare_chunk_indices``: rows ``(seq_id, chunk_idx_in_seq)``
-    for every ``chunk_size`` block along packed time (including partial tail chunks).
+    Build the **varlen chunk launch table** (same as ``fla_vendor.utils.prepare_chunk_indices``).
+
+    **Global input:** ``cu_seqlens`` shape ``[N+1]`` with cumulative starts of packed sequences.
+
+    **Output:** shape ``[num_chunks, 2]``, dtype long, on the same device as ``cu_seqlens``.
+    Row ``r`` is ``(i_n, i_t)`` where:
+
+    - ``i_n`` = which sequence in the batch (0 .. N-1),
+    - ``i_t`` = chunk index **within that sequence** (0 .. ceil(seq_len/chunk_size)-1).
+
+    Rows are concatenated in order over all sequences—this is the iteration order Triton uses
+    when ``IS_VARLEN`` is true. Partial last chunks are **included** (one row per chunk tile).
     """
     lens = cu_seqlens[1:] - cu_seqlens[:-1]
     nc = (lens + chunk_size - 1) // chunk_size
+    # indices: flat list of **within-sequence** chunk indices 0,1,..,n0-1, 0,1,..,n1-1, ...
     parts = [torch.arange(int(n), device=cu_seqlens.device, dtype=torch.long) for n in nc.tolist()]
     indices = torch.cat(parts, dim=0) if parts else cu_seqlens.new_empty(0, dtype=torch.long)
+    # seq_ids: which sequence each row belongs to (increment at each restart of chunk index at 0).
     seq_ids = (indices == 0).cumsum(0) - 1
+    # Column 0 = sequence id i_n; column 1 = chunk index i_t within that sequence.
     return torch.stack([seq_ids, indices], dim=1).to(cu_seqlens)
 
 
@@ -33,12 +59,19 @@ def iter_packed_bt_chunks(
     chunk_indices: torch.Tensor | None,
 ) -> Iterator[tuple[int, int, int]]:
     """
-    Yield ``(bos, i_tc, span)`` for each block of width ``bt`` in Triton program order.
+    Iterate chunk tiles in **Triton program order** for kernels that use fixed ``BT × …`` tiles.
 
-    ``bos`` is the sequence start offset in the packed ``[B, T, ...]`` tensor; ``i_tc`` is the
-    chunk index within that sequence; ``global_slice = bos + i_tc * bt : bos + i_tc * bt + span``.
-    ``span`` may be ``< bt`` for the last chunk of a sequence (or when ``total_t`` is not a
-    multiple of ``bt`` and ``cu_seqlens is None``).
+    Yields ``(bos, i_tc, span)``:
+
+    - ``bos`` — **global** offset in the packed time dimension where the current sequence starts.
+    - ``i_tc`` — chunk index **within** that sequence (the ``i_t`` in ``chunk_indices``).
+    - ``span`` — valid timesteps in this tile: ``min(BT, seq_end - (bos + i_tc*BT))``, so
+      ``span < BT`` for a **partial** final chunk.
+
+    **Global slice** written/read by that program: ``times [bos + i_tc*BT, bos + i_tc*BT + span)``.
+
+    When ``cu_seqlens is None``, there is one sequence of length ``total_t`` starting at 0, and
+    ``bos`` is always 0 (matches non-varlen Triton with batch stride in the kernel).
     """
     if cu_seqlens is None:
         nt = (total_t + bt - 1) // bt
@@ -54,16 +87,27 @@ def iter_packed_bt_chunks(
             bos = int(cu_seqlens[i_n].item())
             eos = int(cu_seqlens[i_n + 1].item())
             t_seg = eos - bos
+            # Remaining timesteps in this sequence after skipping i_tc full BT blocks: clip to BT.
             span = min(bt, t_seg - i_tc * bt)
             yield bos, i_tc, span
 
 
 def safe_exp_torch(x: torch.Tensor) -> torch.Tensor:
+    """
+    Elementwise: ``exp(x)`` if ``x <= 0``, else ``0`` (Triton ``safe_exp``).
+
+    **Shape:** same as ``x`` (broadcasting preserved). Used so ``exp(g_i - g_j)`` is zero for
+    non-causal or masked pairs where the exponent would be positive.
+    """
     return torch.where(x <= 0, torch.exp(x), torch.zeros_like(x))
 
 
 def k_head_index(i_h: int, num_heads: int, num_k_heads: int) -> int:
-    """Map output head ``i_h`` to key head index (GQA): ``i_h // (H // Hg)`` (see Triton kernels)."""
+    """
+    GQA head map: output head ``i_h`` (0 .. H-1) → key/value head index ``i_h // (H // Hg)``.
+
+    **Global tensors** ``k``, ``w`` use this to pick the correct head slice along ``Hg``.
+    """
     return i_h // (num_heads // num_k_heads)
 
 
