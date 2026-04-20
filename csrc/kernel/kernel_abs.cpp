@@ -7,13 +7,7 @@ https://github.com/huawei-csl/pto-kernels/
 for the full License text.
 */
 
-#if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
-
-#define MEMORY_BASE
-
-#include <pto/pto-inst.hpp>
-
-#define GM_ADDR __gm__ uint8_t*  // To avoid #include "kernel_operator.h"
+#include "kernel_utils.h"
 
 using namespace pto;
 
@@ -113,14 +107,25 @@ AICORE void runTAbs(__gm__ T* x, __gm__ T* z, uint32_t total_size) {
 
 extern "C" __global__ AICORE void vabs_fp16(GM_ADDR x, GM_ADDR z,
                                             uint32_t in_length) {
+#if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
   constexpr uint32_t TILE_LEN = 128;
   runTAbs<half, TILE_LEN>((__gm__ half*)x, (__gm__ half*)z, in_length);
+#else
+  (void)x;
+  (void)z;
+  (void)in_length;
+#endif
 }
 
 extern "C" __global__ AICORE void vabs_fp32(GM_ADDR x, GM_ADDR z,
                                             uint32_t in_length) {
+#if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
+
   constexpr uint32_t TILE_LEN = 128;
   runTAbs<float, TILE_LEN>((__gm__ float*)x, (__gm__ float*)z, in_length);
-}
-
+#else
+  (void)x;
+  (void)z;
+  (void)in_length;
 #endif
+}

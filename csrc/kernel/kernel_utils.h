@@ -8,9 +8,18 @@ for the full License text.
 */
 #pragma once
 
+// FIXME(zouzias): Current development is based on A2/A3 architectures.
+#ifndef MEMORY_BASE && !defined(REGISTER_BASE)
 #define MEMORY_BASE
+#endif
 #include <pto/pto-inst.hpp>
 #include <type_traits>
+
+// clang-format off: so it does not get wrongfully flagged by linter
+#ifndef GM_ADDR
+#define GM_ADDR __gm__ uint8_t*  // To avoid #include "kernel_operator.h"
+#endif
+// clang-format on
 
 namespace kernel_utils {
 /**
