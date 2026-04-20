@@ -248,13 +248,13 @@ AICORE void chunk_o_kernel(
   TASSIGN(g_v_ub, GvUbAddr);
   UbND<float, HalfChunk, ChunkSize> coeff_ub;
   TASSIGN(coeff_ub, CoeffUbAddr);
-  UbND<half, HalfChunk, ChunkSize> qk_ub_half;
+  UbND<half, HalfChunk, ChunkSize, HalfChunk, ChunkSize, PadValue::Zero> qk_ub_half;
   TASSIGN(qk_ub_half, QKHalfUbAddr);
-  UbND<half, HalfChunk, HiddenSize> qs_ub_half;
+  UbND<half, HalfChunk, HiddenSize, HalfChunk, HiddenSize, PadValue::Zero> qs_ub_half;
   TASSIGN(qs_ub_half, QSHalfUbAddr);
   UbND<float, HalfChunk, HiddenSize> qs_ub;
   TASSIGN(qs_ub, QSUbAddr);
-  UbND<half, HalfChunk, HiddenSize> o_ub_half;
+  UbND<half, HalfChunk, HiddenSize, HalfChunk, HiddenSize, PadValue::Zero> o_ub_half;
   TASSIGN(o_ub_half, OHalfUbAddr);
   UbND<float, HalfChunk, HiddenSize> o_ub;
   TASSIGN(o_ub, OUbAddr);
@@ -300,6 +300,10 @@ AICORE void chunk_o_kernel(
       int32_t valid_rows = static_cast<int32_t>(
           remaining < ChunkSize ? remaining : ChunkSize);
       int64_t chunk_token_start = bos + chunk_start;
+      int32_t row_offset = static_cast<int32_t>(vid) * HalfChunk;
+      int32_t local_rows = valid_rows - row_offset;
+      if (local_rows < 0) local_rows = 0;
+      if (local_rows > HalfChunk) local_rows = HalfChunk;
 
       int64_t qkv_offset =
           (chunk_token_start * NumHeads + head_idx) *
@@ -749,84 +753,93 @@ AICORE void chunk_o_kernel(
       int32_t valid_rows = static_cast<int32_t>(
           remaining < ChunkSize ? remaining : ChunkSize);
       int64_t chunk_token_start = bos + chunk_start;
+      int32_t row_offset = static_cast<int32_t>(vid) * HalfChunk;
+      int32_t local_rows = valid_rows - row_offset;
+      if (local_rows < 0) local_rows = 0;
+      if (local_rows > HalfChunk) local_rows = HalfChunk;
 
-      // ── Load G [1 × valid_rows] — gate values for this chunk ────────
-      // G is pre-transposed to [H, total_tokens], contiguous per head.
-      {
-        Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
-        _gs.shape[3] = 1; _gs.shape[4] = valid_rows;
-        GlobalTensor<float, decltype(_gs), Stride<1, 1, 1, 1, 1>> _gm(
-            G_handle + static_cast<int64_t>(head_idx) * total_tokens
-                     + chunk_token_start, _gs);
-        UbND<float, 1, ChunkSize, DYNAMIC, DYNAMIC, PadValue::Zero> _ld(1, valid_rows);
-        TASSIGN(_ld, GUbAddr);
-        TLOAD(_ld, _gm);
-        if (valid_rows != ChunkSize) {
-          UbND<float, 1, ChunkSize, 1, ChunkSize, PadValue::Zero> _pd;
-          TASSIGN(_pd, GUbAddr);
-          TFILLPAD_INPLACE(_pd, _ld);
+      if (local_rows > 0) {
+        // ── Load G [1 × valid_rows] — gate values for this chunk ────────
+        // G is pre-transposed to [H, total_tokens], contiguous per head.
+        {
+          Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
+          _gs.shape[3] = 1; _gs.shape[4] = valid_rows;
+          GlobalTensor<float, decltype(_gs), Stride<1, 1, 1, 1, 1>> _gm(
+              G_handle + static_cast<int64_t>(head_idx) * total_tokens
+                       + chunk_token_start, _gs);
+          UbND<float, 1, ChunkSize, DYNAMIC, DYNAMIC, PadValue::Zero> _ld(1, valid_rows);
+          TASSIGN(_ld, GUbAddr);
+          TLOAD(_ld, _gm);
+          if (valid_rows != ChunkSize) {
+            UbND<float, 1, ChunkSize, 1, ChunkSize, PadValue::Zero> _pd;
+            TASSIGN(_pd, GUbAddr);
+            TFILLPAD_INPLACE(_pd, _ld);
+          }
         }
+        set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+        wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+
+        // ── Compute gating coefficients ──────────────────────────────────
+        // ── Gating coefficient computation (numpy pseudocode) ─────────────
+        // For this sub-block's rows (vid=0: rows 0..C/2-1, vid=1: rows C/2..C-1):
+        //
+        //   g_row = g[my_start:my_start+C/2]    # my gates (shape [C/2])
+        //   g_col = g[0:C]                       # full chunk gates (shape [C])
+        //
+        //   # Broadcast to 2D matrices:
+        //   g_r_2d = g_row[:, None] * np.ones((1, C))    # TROWEXPAND: [C/2, C]
+        //   g_c_2d = np.ones((C/2, 1)) * g_col[None, :]  # TCOLEXPAND: [C/2, C]
+        //   coeff = exp(min(g_r_2d - g_c_2d, 0)) * mask
+        //
+        //   # Also compute exp(g_row) for QS scaling:
+        //   exp_g_row = np.exp(g_row)                     # TEXP
+        UbND<float, 1, HalfChunk> g_ub_temp_0;
+        TASSIGN(g_ub_temp_0,
+                GUbAddr + static_cast<int32_t>(vid) * HalfChunk *
+                              static_cast<int32_t>(sizeof(float)));
+        TMOV(g_v_ub, g_ub_temp_0);
+
+        // Broadcast g_row into [C/2 × C] and g_col into [C/2 × C]
+        UbND<float, HalfChunk, ChunkSize> g_r_2d;
+        TASSIGN(g_r_2d, QSUbAddr);
+        UbDN<float, HalfChunk, 1> g_v_col;
+        TASSIGN(g_v_col, GvUbAddr);
+        TROWEXPAND(g_r_2d, g_v_col);       // g_r_2d[i,j] = g_row[i]
+        TCOLEXPAND(coeff_ub, g_ub);        // coeff[i,j] = g_col[j]
+        TSUB(coeff_ub, g_r_2d, coeff_ub);  // d = g_row - g_col
+        pipe_barrier(PIPE_V);
+        TMINS(coeff_ub, coeff_ub, 0.0f);
+        pipe_barrier(PIPE_V);
+        TEXP(coeff_ub, coeff_ub);
+        pipe_barrier(PIPE_V);
+        TMUL(coeff_ub, coeff_ub, msk_ub);
+        pipe_barrier(PIPE_V);
+        TEXP(g_v_ub, g_v_ub);              // exp(g_row) for QS scaling
       }
-      set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
-      wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
-
-      // ── Compute gating coefficients ──────────────────────────────────
-      // ── Gating coefficient computation (numpy pseudocode) ─────────────
-      // For this sub-block's rows (vid=0: rows 0..C/2-1, vid=1: rows C/2..C-1):
-      //
-      //   g_row = g[my_start:my_start+C/2]    # my gates (shape [C/2])
-      //   g_col = g[0:C]                       # full chunk gates (shape [C])
-      //
-      //   # Broadcast to 2D matrices:
-      //   g_r_2d = g_row[:, None] * np.ones((1, C))    # TROWEXPAND: [C/2, C]
-      //   g_c_2d = np.ones((C/2, 1)) * g_col[None, :]  # TCOLEXPAND: [C/2, C]
-      //
-      //   coeff = np.exp(g_r_2d - g_c_2d) * mask   # run_chunk_o_static.py
-      //
-      //   # Also compute exp(g_row) for QS scaling:
-      //   exp_g_row = np.exp(g_row)                         # TEXP
-      //
-      // coeff[i,j] = exp(g[i] - g[j]) * mask[i,j]  (aligned with static_baseline/run_chunk_o_static.py)
-      // g_v_ub holds this sub-block's row gates: g[vid*C/2 .. (vid+1)*C/2-1]
-      UbND<float, 1, HalfChunk> g_ub_temp_0;
-      TASSIGN(g_ub_temp_0,
-              GUbAddr + static_cast<int32_t>(vid) * HalfChunk *
-                            static_cast<int32_t>(sizeof(float)));
-      TMOV(g_v_ub, g_ub_temp_0);
-
-      // Broadcast g_row into [C/2 × C] and g_col into [C/2 × C]
-      UbND<float, HalfChunk, ChunkSize> g_r_2d;
-      TASSIGN(g_r_2d, QSUbAddr);
-      UbDN<float, HalfChunk, 1> g_v_col;
-      TASSIGN(g_v_col, GvUbAddr);
-      TROWEXPAND(g_r_2d, g_v_col);       // g_r_2d[i,j] = g_row[i]
-      TCOLEXPAND(coeff_ub, g_ub);        // coeff[i,j] = g_col[j]
-      TSUB(coeff_ub, g_r_2d, coeff_ub);  // coeff = g_col - g_row
-      pipe_barrier(PIPE_V);
-      TMULS(coeff_ub, coeff_ub, -1.0f);  // d = g_row - g_col
-      pipe_barrier(PIPE_V);
-      TMINS(coeff_ub, coeff_ub, 0.0f);
-      pipe_barrier(PIPE_V);
-      TEXP(coeff_ub, coeff_ub);
-      pipe_barrier(PIPE_V);
-      TMUL(coeff_ub, coeff_ub, msk_ub);
-      pipe_barrier(PIPE_V);
-      TEXP(g_v_ub, g_v_ub);              // exp(g_row) for QS scaling
 
       // ── Wait for Cube→Vec flag 0: QK & QS ready ─────────────────────
       wait_flag_dev(0);
+      if (local_rows == 0) {
+        ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (1 << 8));
+        wait_flag_dev(2);
+        ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (3 << 8));
+        continue;
+      }
 
       // ── Load QK [C/2 × C] from workspace → UB ───────────────────────
       {
         Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
-        _gs.shape[3] = HalfChunk; _gs.shape[4] = ChunkSize;
+        _gs.shape[3] = local_rows; _gs.shape[4] = ChunkSize;
         GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, ChunkSize, 1>> _gm(
             workspace_qk_handle +
                 static_cast<int64_t>(cid) * WsQKSize +
                 static_cast<int64_t>(vid) * HalfChunk * ChunkSize, _gs);
-        UbND<half, HalfChunk, ChunkSize, DYNAMIC, DYNAMIC, PadValue::Zero> _ld(HalfChunk, ChunkSize);
+        UbND<half, HalfChunk, ChunkSize, DYNAMIC, DYNAMIC, PadValue::Zero> _ld(local_rows, ChunkSize);
         TASSIGN(_ld, QKHalfUbAddr);
         TLOAD(_ld, _gm);
+        if (local_rows != HalfChunk) {
+          TFILLPAD_INPLACE(qk_ub_half, _ld);
+        }
       }
 
       set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
@@ -839,14 +852,17 @@ AICORE void chunk_o_kernel(
       // ── Load QS [C/2 × D] from workspace → UB ───────────────────────
       {
         Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
-        _gs.shape[3] = HalfChunk; _gs.shape[4] = HiddenSize;
+        _gs.shape[3] = local_rows; _gs.shape[4] = HiddenSize;
         GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, HiddenSize, 1>> _gm(
             workspace_qs_qkv_handle +
                 static_cast<int64_t>(cid) * WsQSSize +
                 static_cast<int64_t>(vid) * HalfChunk * HiddenSize, _gs);
-        UbND<half, HalfChunk, HiddenSize, DYNAMIC, DYNAMIC, PadValue::Zero> _ld(HalfChunk, HiddenSize);
+        UbND<half, HalfChunk, HiddenSize, DYNAMIC, DYNAMIC, PadValue::Zero> _ld(local_rows, HiddenSize);
         TASSIGN(_ld, QSHalfUbAddr);
         TLOAD(_ld, _gm);
+        if (local_rows != HalfChunk) {
+          TFILLPAD_INPLACE(qs_ub_half, _ld);
+        }
       }
 
       // ── Apply gating: QK_gated = QK * exp(d*mask)*mask
@@ -858,12 +874,12 @@ AICORE void chunk_o_kernel(
       wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
       {
         Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
-        _gs.shape[3] = HalfChunk; _gs.shape[4] = ChunkSize;
+        _gs.shape[3] = local_rows; _gs.shape[4] = ChunkSize;
         GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, ChunkSize, 1>> _gm(
             workspace_qk_gated_handle +
                 static_cast<int64_t>(cid) * WsGatedSize +
                 static_cast<int64_t>(vid) * HalfChunk * ChunkSize, _gs);
-        UbND<half, HalfChunk, ChunkSize, DYNAMIC, DYNAMIC> _st(HalfChunk, ChunkSize);
+        UbND<half, HalfChunk, ChunkSize, DYNAMIC, DYNAMIC> _st(local_rows, ChunkSize);
         TASSIGN(_st, QKHalfUbAddr);
         TSTORE(_gm, _st);
       }
@@ -893,14 +909,17 @@ AICORE void chunk_o_kernel(
       // ── Load QKV [C/2 × D] from workspace → UB ──────────────────────
       {
         Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
-        _gs.shape[3] = HalfChunk; _gs.shape[4] = HiddenSize;
+        _gs.shape[3] = local_rows; _gs.shape[4] = HiddenSize;
         GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, HiddenSize, 1>> _gm(
             workspace_qs_qkv_handle +
                 static_cast<int64_t>(cid) * WsQSSize +
                 static_cast<int64_t>(vid) * HalfChunk * HiddenSize, _gs);
-        UbND<half, HalfChunk, HiddenSize, DYNAMIC, DYNAMIC, PadValue::Zero> _ld(HalfChunk, HiddenSize);
+        UbND<half, HalfChunk, HiddenSize, DYNAMIC, DYNAMIC, PadValue::Zero> _ld(local_rows, HiddenSize);
         TASSIGN(_ld, OHalfUbAddr);
         TLOAD(_ld, _gm);
+        if (local_rows != HalfChunk) {
+          TFILLPAD_INPLACE(o_ub_half, _ld);
+        }
       }
 
       set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
@@ -926,10 +945,10 @@ AICORE void chunk_o_kernel(
 
       {
         Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
-        _gs.shape[3] = HalfChunk; _gs.shape[4] = HiddenSize;
+        _gs.shape[3] = local_rows; _gs.shape[4] = HiddenSize;
         GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, NumHeads * HiddenSize, 1>> _gm(
             O_handle + o_offset, _gs);
-        UbND<half, HalfChunk, HiddenSize, DYNAMIC, DYNAMIC> _st(HalfChunk, HiddenSize);
+        UbND<half, HalfChunk, HiddenSize, DYNAMIC, DYNAMIC> _st(local_rows, HiddenSize);
         TASSIGN(_st, OHalfUbAddr);
         TSTORE(_gm, _st);
       }
@@ -956,167 +975,184 @@ AICORE void chunk_o_kernel(
                 remaining < ChunkSize ? remaining : ChunkSize);
             int64_t chunk_token_start = bos + chunk_start;
             int32_t head_idx = h;
+            int32_t row_offset = static_cast<int32_t>(vid) * HalfChunk;
+            int32_t local_rows = valid_rows - row_offset;
+            if (local_rows < 0) local_rows = 0;
+            if (local_rows > HalfChunk) local_rows = HalfChunk;
 
-            // Load G
-            {
-              Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
-              _gs.shape[3] = 1; _gs.shape[4] = valid_rows;
-              GlobalTensor<float, decltype(_gs), Stride<1, 1, 1, 1, 1>> _gm(
-                  G_handle + static_cast<int64_t>(head_idx) * total_tokens
-                           + chunk_token_start, _gs);
-              UbND<float, 1, ChunkSize, DYNAMIC, DYNAMIC, PadValue::Zero> _ld(1, valid_rows);
-              TASSIGN(_ld, GUbAddr);
-              TLOAD(_ld, _gm);
-              if (valid_rows != ChunkSize) {
-                UbND<float, 1, ChunkSize, 1, ChunkSize, PadValue::Zero> _pd;
-                TASSIGN(_pd, GUbAddr);
-                TFILLPAD_INPLACE(_pd, _ld);
+            if (local_rows > 0) {
+              // Load G
+              {
+                Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
+                _gs.shape[3] = 1; _gs.shape[4] = valid_rows;
+                GlobalTensor<float, decltype(_gs), Stride<1, 1, 1, 1, 1>> _gm(
+                    G_handle + static_cast<int64_t>(head_idx) * total_tokens
+                             + chunk_token_start, _gs);
+                UbND<float, 1, ChunkSize, DYNAMIC, DYNAMIC, PadValue::Zero> _ld(1, valid_rows);
+                TASSIGN(_ld, GUbAddr);
+                TLOAD(_ld, _gm);
+                if (valid_rows != ChunkSize) {
+                  UbND<float, 1, ChunkSize, 1, ChunkSize, PadValue::Zero> _pd;
+                  TASSIGN(_pd, GUbAddr);
+                  TFILLPAD_INPLACE(_pd, _ld);
+                }
               }
+              set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+              wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+
+              // Compute gating coefficients (same math as fixed-length path — see detailed pseudocode above)
+              UbND<float, 1, HalfChunk> g_ub_temp_v;
+              TASSIGN(g_ub_temp_v,
+                      GUbAddr +
+                          static_cast<int32_t>(vid) * HalfChunk *
+                              static_cast<int32_t>(sizeof(float)));
+              TMOV(g_v_ub, g_ub_temp_v);
+
+              UbND<float, HalfChunk, ChunkSize> g_r_2d_v;
+              TASSIGN(g_r_2d_v, QSUbAddr);
+              UbDN<float, HalfChunk, 1> g_v_col_v;
+              TASSIGN(g_v_col_v, GvUbAddr);
+              TROWEXPAND(g_r_2d_v, g_v_col_v);
+              TCOLEXPAND(coeff_ub, g_ub);
+              TSUB(coeff_ub, g_r_2d_v, coeff_ub);  // d = g_row - g_col
+              pipe_barrier(PIPE_V);
+              TMINS(coeff_ub, coeff_ub, 0.0f);
+              pipe_barrier(PIPE_V);
+              TEXP(coeff_ub, coeff_ub);
+              pipe_barrier(PIPE_V);
+              TMUL(coeff_ub, coeff_ub, msk_ub);
+              pipe_barrier(PIPE_V);
+              TEXP(g_v_ub, g_v_ub);
             }
-            set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
-            wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
-
-            // Compute gating coefficients (same math as fixed-length path — see detailed pseudocode above)
-            // coeff[i,j] = exp(g[i] - g[j]) * mask[i,j]  (static_baseline PTO)
-            UbND<float, 1, HalfChunk> g_ub_temp_v;
-            TASSIGN(g_ub_temp_v,
-                    GUbAddr +
-                        static_cast<int32_t>(vid) * HalfChunk *
-                            static_cast<int32_t>(sizeof(float)));
-            TMOV(g_v_ub, g_ub_temp_v);
-
-            UbND<float, HalfChunk, ChunkSize> g_r_2d_v;
-            TASSIGN(g_r_2d_v, QSUbAddr);
-            UbDN<float, HalfChunk, 1> g_v_col_v;
-            TASSIGN(g_v_col_v, GvUbAddr);
-            TROWEXPAND(g_r_2d_v, g_v_col_v);
-            TCOLEXPAND(coeff_ub, g_ub);
-            TSUB(coeff_ub, g_r_2d_v, coeff_ub);
-            pipe_barrier(PIPE_V);
-            TMULS(coeff_ub, coeff_ub, -1.0f);
-            pipe_barrier(PIPE_V);
-            TMINS(coeff_ub, coeff_ub, 0.0f);
-            pipe_barrier(PIPE_V);
-            TEXP(coeff_ub, coeff_ub);
-            pipe_barrier(PIPE_V);
-            TMUL(coeff_ub, coeff_ub, msk_ub);
-            pipe_barrier(PIPE_V);
-            TEXP(g_v_ub, g_v_ub);
 
             wait_flag_dev(0);
+            if (local_rows == 0) {
+              ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (1 << 8));
+              wait_flag_dev(2);
+              ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (3 << 8));
+            } else {
+              // Load QK from workspace
+              {
+                Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
+                _gs.shape[3] = local_rows; _gs.shape[4] = ChunkSize;
+                GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, ChunkSize, 1>> _gm(
+                    workspace_qk_handle +
+                        static_cast<int64_t>(cid) * WsQKSize +
+                        static_cast<int64_t>(vid) * HalfChunk * ChunkSize, _gs);
+                UbND<half, HalfChunk, ChunkSize, DYNAMIC, DYNAMIC, PadValue::Zero> _ld(local_rows, ChunkSize);
+                TASSIGN(_ld, QKHalfUbAddr);
+                TLOAD(_ld, _gm);
+                if (local_rows != HalfChunk) {
+                  TFILLPAD_INPLACE(qk_ub_half, _ld);
+                }
+              }
 
-            // Load QK from workspace
-            {
-              Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
-              _gs.shape[3] = HalfChunk; _gs.shape[4] = ChunkSize;
-              GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, ChunkSize, 1>> _gm(
-                  workspace_qk_handle +
-                      static_cast<int64_t>(cid) * WsQKSize +
-                      static_cast<int64_t>(vid) * HalfChunk * ChunkSize, _gs);
-              UbND<half, HalfChunk, ChunkSize, DYNAMIC, DYNAMIC, PadValue::Zero> _ld(HalfChunk, ChunkSize);
-              TASSIGN(_ld, QKHalfUbAddr);
-              TLOAD(_ld, _gm);
+              set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+              wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+              TCVT(qk_ub, qk_ub_half, pto::RoundMode::CAST_NONE);
+
+              set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+              wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+
+              // Load QS from workspace
+              {
+                Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
+                _gs.shape[3] = local_rows; _gs.shape[4] = HiddenSize;
+                GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, HiddenSize, 1>> _gm(
+                    workspace_qs_qkv_handle +
+                        static_cast<int64_t>(cid) * WsQSSize +
+                        static_cast<int64_t>(vid) * HalfChunk * HiddenSize, _gs);
+                UbND<half, HalfChunk, HiddenSize, DYNAMIC, DYNAMIC, PadValue::Zero> _ld(local_rows, HiddenSize);
+                TASSIGN(_ld, QSHalfUbAddr);
+                TLOAD(_ld, _gm);
+                if (local_rows != HalfChunk) {
+                  TFILLPAD_INPLACE(qs_ub_half, _ld);
+                }
+              }
+
+              TMUL(qk_ub, qk_ub, coeff_ub);
+              TCVT(qk_ub_half, qk_ub, pto::RoundMode::CAST_NONE);  // float→half for GM store
+
+              // Store QK_gated → workspace
+              set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+              wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+              {
+                Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
+                _gs.shape[3] = local_rows; _gs.shape[4] = ChunkSize;
+                GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, ChunkSize, 1>> _gm(
+                    workspace_qk_gated_handle +
+                        static_cast<int64_t>(cid) * WsGatedSize +
+                        static_cast<int64_t>(vid) * HalfChunk * ChunkSize, _gs);
+                UbND<half, HalfChunk, ChunkSize, DYNAMIC, DYNAMIC> _st(local_rows, ChunkSize);
+                TASSIGN(_st, QKHalfUbAddr);
+                TSTORE(_gm, _st);
+              }
+              // Vec→Cube: QK_gated ready (flag 1)
+              ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (1 << 8));
+
+              // Scale QS by exp(g): QS_scaled = QS * exp(g_row)[:, None]
+              // (same inter-chunk state scaling as fixed-length path)
+              set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+              wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+              TCVT(qs_ub, qs_ub_half, pto::RoundMode::CAST_NONE);  // half→float for Vec math
+
+              UbND<float, HalfChunk, HiddenSize> g_exp_2d_v;
+              TASSIGN(g_exp_2d_v, CoeffUbAddr);
+              UbDN<float, HalfChunk, 1> g_v_col2_v;
+              TASSIGN(g_v_col2_v, GvUbAddr);
+              TROWEXPAND(g_exp_2d_v, g_v_col2_v);
+              pipe_barrier(PIPE_V);
+              TMUL(qs_ub, qs_ub, g_exp_2d_v);
+
+              wait_flag_dev(2);
+
+              // Load QKV from workspace
+              {
+                Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
+                _gs.shape[3] = local_rows; _gs.shape[4] = HiddenSize;
+                GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, HiddenSize, 1>> _gm(
+                    workspace_qs_qkv_handle +
+                        static_cast<int64_t>(cid) * WsQSSize +
+                        static_cast<int64_t>(vid) * HalfChunk * HiddenSize, _gs);
+                UbND<half, HalfChunk, HiddenSize, DYNAMIC, DYNAMIC, PadValue::Zero> _ld(local_rows, HiddenSize);
+                TASSIGN(_ld, OHalfUbAddr);
+                TLOAD(_ld, _gm);
+                if (local_rows != HalfChunk) {
+                  TFILLPAD_INPLACE(o_ub_half, _ld);
+                }
+              }
+
+              set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+              wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+
+              // O = QS_gated + QKV  (final output: intra-chunk attention + inter-chunk state)
+              TCVT(o_ub, o_ub_half, pto::RoundMode::CAST_NONE);  // half→float
+              TADD(o_ub, qs_ub, o_ub);                            // O = QS_scaled + QKV
+              TCVT(o_ub_half, o_ub, pto::RoundMode::CAST_NONE);  // float→half for GM store
+
+              // Store O → GM
+              set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+              wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+
+              int64_t o_offset =
+                  (chunk_token_start * NumHeads + head_idx) *
+                      static_cast<int64_t>(HiddenSize) +
+                  static_cast<int64_t>(vid) * HalfChunk *
+                      NumHeads * HiddenSize;
+
+              {
+                Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
+                _gs.shape[3] = local_rows; _gs.shape[4] = HiddenSize;
+                GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, NumHeads * HiddenSize, 1>> _gm(
+                    O_handle + o_offset, _gs);
+                UbND<half, HalfChunk, HiddenSize, DYNAMIC, DYNAMIC> _st(local_rows, HiddenSize);
+                TASSIGN(_st, OHalfUbAddr);
+                TSTORE(_gm, _st);
+              }
+
+              // Vec→Cube: done with this chunk (flag 3)
+              ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (3 << 8));
             }
-
-            set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
-            wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
-            TCVT(qk_ub, qk_ub_half, pto::RoundMode::CAST_NONE);
-
-            set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
-            wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
-
-            // Load QS from workspace
-            {
-              Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
-              _gs.shape[3] = HalfChunk; _gs.shape[4] = HiddenSize;
-              GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, HiddenSize, 1>> _gm(
-                  workspace_qs_qkv_handle +
-                      static_cast<int64_t>(cid) * WsQSSize +
-                      static_cast<int64_t>(vid) * HalfChunk * HiddenSize, _gs);
-              UbND<half, HalfChunk, HiddenSize, DYNAMIC, DYNAMIC, PadValue::Zero> _ld(HalfChunk, HiddenSize);
-              TASSIGN(_ld, QSHalfUbAddr);
-              TLOAD(_ld, _gm);
-            }
-
-            TMUL(qk_ub, qk_ub, coeff_ub);
-            TCVT(qk_ub_half, qk_ub, pto::RoundMode::CAST_NONE);  // float→half for GM store
-
-            // Store QK_gated → workspace
-            set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
-            wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
-            {
-              Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
-              _gs.shape[3] = HalfChunk; _gs.shape[4] = ChunkSize;
-              GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, ChunkSize, 1>> _gm(
-                  workspace_qk_gated_handle +
-                      static_cast<int64_t>(cid) * WsGatedSize +
-                      static_cast<int64_t>(vid) * HalfChunk * ChunkSize, _gs);
-              UbND<half, HalfChunk, ChunkSize, DYNAMIC, DYNAMIC> _st(HalfChunk, ChunkSize);
-              TASSIGN(_st, QKHalfUbAddr);
-              TSTORE(_gm, _st);
-            }
-            // Vec→Cube: QK_gated ready (flag 1)
-            ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (1 << 8));
-
-            // Scale QS by exp(g): QS_scaled = QS * exp(g_row)[:, None]
-            // (same inter-chunk state scaling as fixed-length path)
-            set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
-            wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
-            TCVT(qs_ub, qs_ub_half, pto::RoundMode::CAST_NONE);  // half→float for Vec math
-
-            UbND<float, HalfChunk, HiddenSize> g_exp_2d_v;
-            TASSIGN(g_exp_2d_v, CoeffUbAddr);
-            UbDN<float, HalfChunk, 1> g_v_col2_v;
-            TASSIGN(g_v_col2_v, GvUbAddr);
-            TROWEXPAND(g_exp_2d_v, g_v_col2_v);
-            pipe_barrier(PIPE_V);
-            TMUL(qs_ub, qs_ub, g_exp_2d_v);
-
-            wait_flag_dev(2);
-
-            // Load QKV from workspace
-            {
-              Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
-              _gs.shape[3] = HalfChunk; _gs.shape[4] = HiddenSize;
-              GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, HiddenSize, 1>> _gm(
-                  workspace_qs_qkv_handle +
-                      static_cast<int64_t>(cid) * WsQSSize +
-                      static_cast<int64_t>(vid) * HalfChunk * HiddenSize, _gs);
-              UbND<half, HalfChunk, HiddenSize, DYNAMIC, DYNAMIC, PadValue::Zero> _ld(HalfChunk, HiddenSize);
-              TASSIGN(_ld, OHalfUbAddr);
-              TLOAD(_ld, _gm);
-            }
-
-            set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
-            wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
-
-            // O = QS_gated + QKV  (final output: intra-chunk attention + inter-chunk state)
-            TCVT(o_ub, o_ub_half, pto::RoundMode::CAST_NONE);  // half→float
-            TADD(o_ub, qs_ub, o_ub);                            // O = QS_scaled + QKV
-            TCVT(o_ub_half, o_ub, pto::RoundMode::CAST_NONE);  // float→half for GM store
-
-            // Store O → GM
-            set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
-            wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
-
-            int64_t o_offset =
-                (chunk_token_start * NumHeads + head_idx) *
-                    static_cast<int64_t>(HiddenSize) +
-                static_cast<int64_t>(vid) * HalfChunk *
-                    NumHeads * HiddenSize;
-
-            {
-              Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
-              _gs.shape[3] = HalfChunk; _gs.shape[4] = HiddenSize;
-              GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, NumHeads * HiddenSize, 1>> _gm(
-                  O_handle + o_offset, _gs);
-              UbND<half, HalfChunk, HiddenSize, DYNAMIC, DYNAMIC> _st(HalfChunk, HiddenSize);
-              TASSIGN(_st, OHalfUbAddr);
-              TSTORE(_gm, _st);
-            }
-
-            // Vec→Cube: done with this chunk (flag 3)
-            ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (3 << 8));
           }
           gi++;
         }

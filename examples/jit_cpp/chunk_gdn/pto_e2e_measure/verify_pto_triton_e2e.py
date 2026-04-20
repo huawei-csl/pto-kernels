@@ -2,25 +2,14 @@
 """
 End-to-end GDN: PTO chain (``C=128``) + ``fast_inverse`` vs Triton (``C=64``).
 
-**Why direct PTO vs Triton correlation can look broken**
+**Pass criteria:** both backends must agree with their float32 CPU references, and the
+final PTO output must also agree directly with the Triton output. We use fixed
+``atol=1e-5``, ``rtol=1e-2`` (see ``torch.testing.assert_close``); the primary gates are
+``rmse / mean(|ref|)``, ``R²`` and Pearson ``ρ``. ``frac_close`` (share of elements
+within the rtol/atol band) is reported for context but is not the primary gate.
 
-1. **Chunk_o gating**: PTO Vec uses ``exp(min(g_row−g_col, 0))``; Triton ``chunk_fwd_o``
-   uses FLA ``safe_exp`` (zero when ``g_row > g_col``). That changes intra-chunk attention
-   if you compare backends directly.
-2. **Per-stage tests** (``verify_dynamic_bsnd.py``) match each kernel against a
-   reference that uses **KKT blocks** for ``wy_fast`` (not ``solve_tril``) so the
-   matmul stage is isolated; full FLA uses ``solve_tril`` before ``wy`` (as this
-   script does for both backends).
-3. Chunk sizes **64 vs 128** are tiling choices; float64 refs match within ~1e⁻⁶ for
-   the same gates.
-
-**Pass criteria:** vs the float32 CPU reference for that backend — fixed
-``atol=1e-5``, ``rtol=1e-2`` (see ``torch.testing.assert_close``); primary gates are
-``rmse / mean(|ref|)`` well below typical magnitude, ``R² ≥ 0.99`` and high ``|ρ|``
-when the reference has variance. ``frac_close`` (share of elements within the
-rtol/atol band) is reported but **not** required — a few outliers may fail strict
-allclose while global RMSE/R² still pass. PTO fp16 may use slightly looser RMSE
-floors (see constants). Direct PTO–Triton agreement is **not** required.
+In this end-to-end chain, the corrected PTO ``chunk_o`` gating matches Triton on the
+causal domain exercised by the model, so direct PTO-vs-Triton agreement is expected.
 
 Q/K are L2-normalized in float32 before casting to fp16/bf16.
 
@@ -106,9 +95,13 @@ MAX_RMSE_OVER_MEAN_ABS_TRI = 0.09
 MAX_RMSE_OVER_MEAN_ABS_PTO = 0.15
 MIN_R2 = 0.99
 MIN_PEARSON = 0.995
-# PTO fp16 vs float32 ref: same R² target; RMSE cap may be slightly looser
+# PTO fp16 vs float32 ref: same R² target; RMSE cap may be slightly looser.
 MIN_R2_PTO = 0.99
 MIN_PEARSON_PTO = 0.995
+# PTO vs Triton should be much tighter than either backend vs CPU fp32 ref.
+MAX_RMSE_OVER_MEAN_ABS_CROSS = 0.02
+MIN_R2_CROSS = 0.999
+MIN_PEARSON_CROSS = 0.999
 
 # Scatter plot: max points (random subsample if larger)
 SCATTER_MAX_POINTS = 80_000
@@ -691,7 +684,15 @@ def main() -> int:
             min_pearson=MIN_PEARSON,
         )
         ok_tri, mt = qt
-        rel_ok = ok_pto and ok_tri
+        qc = _quality_vs_ref(
+            pto_f,
+            tri_f,
+            max_rmse_over_mean_abs=MAX_RMSE_OVER_MEAN_ABS_CROSS,
+            min_r2=MIN_R2_CROSS,
+            min_pearson=MIN_PEARSON_CROSS,
+        )
+        ok_cross, mc = qc
+        rel_ok = ok_pto and ok_tri and ok_cross
 
         rmse_pto = float(mp["rmse"])
         rmse_tri = float(mt["rmse"])
@@ -713,12 +714,19 @@ def main() -> int:
         r2_cross = r2_score(tri_f, pto_f)
         pr = f"{r_pto_ref:.4f}" if np.isfinite(r_pto_ref) else "nan"
         tr = f"{r_tri_ref:.4f}" if np.isfinite(r_tri_ref) else "nan"
+        cr = (
+            f"{float(mc['pearson']):.4f}"
+            if np.isfinite(float(mc["pearson"]))
+            else "nan"
+        )
         print(
             f"{label}: "
             f"PTO rmse/|ref|={mp['rmse_over_mean_abs']:.3f} r2={r2_pto:.4f} ρ={pr} "
             f"close%={100.0 * float(mp['frac_close']):.2f} ok={ok_pto} | "
             f"Tri rmse/|ref|={mt['rmse_over_mean_abs']:.4f} r2={r2_tri:.4f} ρ={tr} "
-            f"close%={100.0 * float(mt['frac_close']):.2f} ok={ok_tri}"
+            f"close%={100.0 * float(mt['frac_close']):.2f} ok={ok_tri} | "
+            f"PTO~Tri rmse/|tri|={mc['rmse_over_mean_abs']:.4f} r2={r2_cross:.4f} ρ={cr} "
+            f"close%={100.0 * float(mc['frac_close']):.2f} ok={ok_cross}"
         )
         csv_rows.append(
             {
@@ -744,9 +752,12 @@ def main() -> int:
                 "ok_pto": ok_pto,
                 "ok_tri": ok_tri,
                 "rmse_pto_vs_tri": rmse_cross,
+                "rmse_over_mean_abs_pto_vs_tri": mc["rmse_over_mean_abs"],
                 "max_abs_pto_vs_tri": mx_cross,
                 "mean_abs_pto_vs_tri": mean_cross,
+                "frac_close_pto_vs_tri": mc["frac_close"],
                 "r2_pto_vs_tri": r2_cross if np.isfinite(r2_cross) else "",
+                "ok_pto_vs_tri": ok_cross,
                 "pearson_pto_vs_tri": r_pto_tri if np.isfinite(r_pto_tri) else "",
                 "pearson_pto_vs_ref": r_pto_ref if np.isfinite(r_pto_ref) else "",
                 "pearson_tri_vs_ref": r_tri_ref if np.isfinite(r_tri_ref) else "",
@@ -757,6 +768,7 @@ def main() -> int:
                 "atol_ref": ATOL_REF,
                 "max_rmse_over_mean_abs_pto": MAX_RMSE_OVER_MEAN_ABS_PTO,
                 "max_rmse_over_mean_abs_tri": MAX_RMSE_OVER_MEAN_ABS_TRI,
+                "max_rmse_over_mean_abs_cross": MAX_RMSE_OVER_MEAN_ABS_CROSS,
                 "device": str(dev),
                 "fig_png": "",
             }
@@ -776,7 +788,7 @@ def main() -> int:
             csv_rows[-1]["fig_png"] = png
 
         if not rel_ok:
-            print("  FAIL vs float32 ref (PTO and/or Triton)")
+            print("  FAIL: PTO-vs-ref, Triton-vs-ref, and/or PTO-vs-Triton gate failed")
         else:
             ok += 1
 
@@ -797,8 +809,9 @@ def main() -> int:
         print(f"Also: {latest}")
 
     print(
-        f"\n{ok}/{len(cases)} cases passed vs CPU float32 ref "
-        f"(rtol={RTOL_REF}, atol={ATOL_REF}; gates: RMSE ratio, R², |ρ|)"
+        f"\n{ok}/{len(cases)} cases passed "
+        f"(PTO-vs-ref, Triton-vs-ref, PTO-vs-Triton; "
+        f"rtol={RTOL_REF}, atol={ATOL_REF}; gates: RMSE ratio, R², |ρ|)"
     )
     if not args.no_plots:
         print(f"Scatter plots: {fig_dir}")

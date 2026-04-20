@@ -29,11 +29,15 @@ cd /workdir/pto-kernels/examples/jit_cpp/chunk_gdn
 # Verify numerical correctness
 python3 dynamic_bsnd/verify_dynamic_bsnd.py
 
-# Reproduce the full NPU verification sweep used during development
-python3 dynamic_bsnd/verify_dynamic_bsnd.py --device npu:7
+# Reproduce the strict per-stage sweep used during development
+# (isolated subprocesses + shell timeout help catch rare cross-core deadlocks)
+timeout 600s python3 dynamic_bsnd/verify_dynamic_bsnd.py --device npu:7 --isolate
 
 # Re-run the previously failing ragged-tail regression directly
-python3 dynamic_bsnd/verify_dynamic_bsnd.py --device npu:7 --case 21 -v
+timeout 240s python3 dynamic_bsnd/verify_dynamic_bsnd.py --device npu:7 --isolate --case 21 -v
+
+# End-to-end PTO vs Triton agreement check
+timeout 420s python3 pto_e2e_measure/verify_pto_triton_e2e.py --device npu:7 --no-plots
 
 # Benchmark (N_seq=16, L_seg=16384, H=16, D=128, C=128)
 python3 dynamic_bsnd/bench_dynamic_bsnd.py
@@ -69,12 +73,12 @@ BSND with `T=262144`.
 
 | Kernel | PTO (ms) | Triton (ms) | Speedup | TFLOPS |
 | :-- | --: | --: | --: | --: |
-| chunk_cumsum | 0.37 | 1.00 | 2.7x | 0.012 |
-| chunk_scaled_dot_kkt | 4.69 | 4.81 | 1.03x | 14.6 |
-| wy_fast | 6.85 | 15.57 | 2.27x | 20.1 |
-| chunk_h | 9.57 | 30.82 | 3.22x | 28.7 |
-| chunk_o | 10.73 | 16.13 | 1.50x | 32.0 |
-| **total** | **32.20** | **68.34** | **2.12x** | **25.6** |
+| chunk_cumsum | 0.34 | 1.02 | 3.00x | 0.012 |
+| chunk_scaled_dot_kkt | 2.78 | 4.84 | 1.74x | 24.8 |
+| wy_fast | 6.85 | 15.63 | 2.28x | 20.1 |
+| chunk_h | 9.43 | 30.83 | 3.27x | 29.1 |
+| chunk_o | 11.35 | 16.15 | 1.42x | 30.3 |
+| **total** | **30.75** | **68.47** | **2.23x** | **26.8** |
 
 ## Design notes
 

@@ -492,6 +492,7 @@ AICORE void wy_fast_kernel(
                   a2_shape, a2_stride);
               TSTORE(workspace_a2_global, a2_ub_half);
             }
+            pipe_barrier(PIPE_ALL);
             ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (2 << 8));
 
             // G is pre-transposed to [H, total_tokens] for contiguous loads.
@@ -542,6 +543,7 @@ AICORE void wy_fast_kernel(
                   a1_shape, a1_stride);
               TSTORE(workspace_a1_global, a1_ub_half);
             }
+            pipe_barrier(PIPE_ALL);
             ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (1 << 8));
             first_iter = false;
           }
@@ -649,6 +651,7 @@ AICORE void wy_fast_kernel(
                   a2_shape, a2_stride);
               TSTORE(workspace_a2_global, a2_ub_half);
             }
+            pipe_barrier(PIPE_ALL);
             ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (2 << 8));
 
             // G is pre-transposed to [H, total_tokens] for contiguous loads.
@@ -695,6 +698,7 @@ AICORE void wy_fast_kernel(
                   a1_shape, a1_stride);
               TSTORE(workspace_a1_global, a1_ub_half);
             }
+            pipe_barrier(PIPE_ALL);
             ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (1 << 8));
             first_iter_v = false;
           }

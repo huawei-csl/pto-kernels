@@ -19,7 +19,7 @@ From the repository root or from this folder:
 ```bash
 cd /workdir/pto-kernels/examples/jit_cpp/chunk_gdn/pto_e2e_measure
 export PTO_LIB_PATH="${PTO_LIB_PATH:-/sources/pto-isa}"
-python verify_pto_triton_e2e.py --device npu:4
+timeout 420s python3 verify_pto_triton_e2e.py --device npu:7 --no-plots
 ```
 
 Defaults: scatter PNGs under `output/fig/`, metrics CSV under `csv/` (`e2e_metrics_<UTC>.csv` and
@@ -27,11 +27,12 @@ Defaults: scatter PNGs under `output/fig/`, metrics CSV under `csv/` (`e2e_metri
 
 Optional: `--seed N` to change the base CPU RNG (each shape case adds an offset so cases differ).
 
-The script prints **max / mean absolute error**, **MSE**, **std** of PTO and Triton outputs,
-**R²** (Triton as reference; can be negative if MSE exceeds reference variance), and **Pearson r**
-(`nan` if either side is nearly constant). Scatter plots use **PTO** on the x-axis and **Triton**
-on the y-axis with a red **1:1** line (subsampled to 80k points if needed). Use `--no-plots` to skip figures.
+The script prints PTO-vs-ref, Triton-vs-ref, and direct PTO-vs-Triton metrics:
+RMSE over mean absolute reference magnitude, **R²**, **Pearson r**, and the fraction
+of elements inside the `rtol` / `atol` band. Scatter plots use **PTO** on the x-axis
+and **Triton** on the y-axis with a red **1:1** line (subsampled to 80k points if needed).
+Use `--no-plots` to skip figures.
 
 The script compiles `../fast_inverse/fast_inverse.cpp` once (JIT `.so` next to the
-CPP file), runs the full pipeline on NPU, and asserts `torch.allclose` between PTO
-and Triton final outputs (fp16 vs bf16 — tolerances are documented in the script).
+CPP file), runs the full pipeline on NPU, and requires all three agreement gates to pass:
+PTO-vs-CPU reference, Triton-vs-CPU reference, and direct PTO-vs-Triton agreement.
