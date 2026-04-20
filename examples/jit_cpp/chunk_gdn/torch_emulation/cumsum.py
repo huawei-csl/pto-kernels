@@ -8,7 +8,6 @@ This is the cumulative gate used later as :math:`e^{G}` in the gated delta rule.
 
 from __future__ import annotations
 
-import numpy as np
 import torch
 
 
@@ -28,9 +27,8 @@ def chunk_local_cumsum(
     Global tensor: ``g`` is the full sequence gate (e.g. ``log \\sigma(\\cdot)``) in
     ``[B, T, H]`` layout when ``head_first=False``.
 
-    For each SRAM conceptual tile (one time block), we copy the slice to a float32 numpy
-    buffer, apply ``cumsum`` (optionally reversed), matching the Triton ``tl.cumsum``
-    over the micro-chunks inside the optimization block.
+    For each conceptual tile (one time block), take a float32 slice on device and apply
+    ``cumsum`` (optionally reversed), matching the Triton ``tl.cumsum`` over the block.
     """
     if cu_seqlens is not None:
         assert g.shape[0] == 1, "Only batch size 1 is supported when cu_seqlens are provided"
@@ -60,18 +58,16 @@ def chunk_local_cumsum(
         acc_list = []
         for j in range(0, seg_len, chunk_size):
             e = min(j + chunk_size, seg_len)
-            # SRAM tile: numpy copy of the micro-chunk (mirrors tl.load + reshape + cumsum path)
-            tile_np = g_seg[j:e, :].detach().cpu().numpy().astype(np.float32).copy()
-            # Prefix along time inside the chunk: G_cum[t] = sum_{s=j}^{t} g[s]
+            tile = g_seg[j:e, :]
             if reverse:
-                tile_np = np.flip(tile_np, axis=0)
-                tile_np = np.cumsum(tile_np, axis=0)
-                tile_np = np.flip(tile_np, axis=0)
+                tile = torch.flip(tile, dims=[0])
+                tile = torch.cumsum(tile, dim=0)
+                tile = torch.flip(tile, dims=[0])
             else:
-                tile_np = np.cumsum(tile_np, axis=0)
+                tile = torch.cumsum(tile, dim=0)
             if scale is not None:
-                tile_np = tile_np * float(scale)
-            acc_list.append(torch.from_numpy(np.ascontiguousarray(tile_np)).to(device=g.device))
+                tile = tile * scale
+            acc_list.append(tile)
 
         acc = torch.cat(acc_list, dim=0) if acc_list else g_seg.new_zeros((0, h))
         out[0, bos:eos, :] = acc.to(out_dt)

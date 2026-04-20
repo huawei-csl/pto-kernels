@@ -14,10 +14,9 @@ used to build the WY / delta-rule factors.
 
 from __future__ import annotations
 
-import numpy as np
 import torch
 
-from ._common import k_head_index, safe_exp_np
+from ._common import k_head_index, safe_exp_torch
 
 
 def chunk_scaled_dot_kkt_fwd(
@@ -58,25 +57,19 @@ def chunk_scaled_dot_kkt_fwd(
 
             for i_h in range(h):
                 hk = k_head_index(i_h, h, hg)
-                # SRAM tiles: float32 numpy buffers (mirrors tl.load of K block, beta, g)
-                k_tile = k_c[0, :, hk, :].float().detach().cpu().numpy().astype(np.float32).copy()
-                beta_tile = b_c[0, :, i_h].float().detach().cpu().numpy().astype(np.float32).copy()
-                # K K^T
-                kk = k_tile @ k_tile.T
+                # Conceptual SRAM tiles (float32 on device; mirrors tl.load blocks)
+                k_tile = k_c[0, :, hk, :].float()
+                beta_tile = b_c[0, :, i_h].float()
+                kk = torch.matmul(k_tile, k_tile.transpose(0, 1))
                 if g_c is not None:
-                    g_tile = g_c[0, :, i_h].detach().cpu().numpy().astype(np.float32).copy()
-                    # exp(G_i - G_j) where i>j kept via safe_exp in the reference
+                    g_tile = g_c[0, :, i_h].float()
                     gi = g_tile[:, None]
                     gj = g_tile[None, :]
-                    gam = gi - gj
-                    kk = kk * safe_exp_np(gam).astype(np.float32)
-                blk = (kk * beta_tile[:, None]).astype(np.float32)
-                # Strictly lower mask: row index > col index
-                idx = np.arange(bt, dtype=np.int64)
+                    kk = kk * safe_exp_torch(gi - gj)
+                blk = kk * beta_tile[:, None]
+                idx = torch.arange(bt, device=k.device, dtype=torch.long)
                 mask = idx[:, None] > idx[None, :]
-                blk = np.where(mask, blk, np.float32(0.0))
-                out[0, s:e, i_h, :] = torch.from_numpy(np.ascontiguousarray(blk)).to(
-                    device=k.device, dtype=output_dtype
-                )
+                blk = torch.where(mask, blk, torch.zeros_like(blk))
+                out[0, s:e, i_h, :] = blk.to(output_dtype)
 
     return out

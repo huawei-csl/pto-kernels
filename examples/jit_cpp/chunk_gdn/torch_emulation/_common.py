@@ -1,5 +1,5 @@
 """
-Shared helpers for educational torch/numpy emulation of GDN Triton kernels.
+Shared helpers for educational torch emulation of GDN Triton kernels.
 
 ``safe_exp`` matches ``fla_vendor.utils.safe_exp`` (Triton): exp(x) where x<=0, else 0.
 This is the pairwise gate factor exp(g_i - g_j) with causal decay outside the valid cone.
@@ -7,16 +7,11 @@ This is the pairwise gate factor exp(g_i - g_j) with causal decay outside the va
 
 from __future__ import annotations
 
-import numpy as np
 import torch
 
 
 def safe_exp_torch(x: torch.Tensor) -> torch.Tensor:
     return torch.where(x <= 0, torch.exp(x), torch.zeros_like(x))
-
-
-def safe_exp_np(x: np.ndarray) -> np.ndarray:
-    return np.where(x <= 0, np.exp(x), np.zeros_like(x, dtype=np.float64))
 
 
 def k_head_index(i_h: int, num_heads: int, num_k_heads: int) -> int:

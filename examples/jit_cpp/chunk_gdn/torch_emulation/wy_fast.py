@@ -14,7 +14,6 @@ i.e. :math:`u = A(\\beta \\odot v)` and :math:`w = A(\\beta \\odot e^G \\odot k)
 
 from __future__ import annotations
 
-import numpy as np
 import torch
 
 from ._common import k_head_index
@@ -55,31 +54,22 @@ def recompute_w_u_fwd(
             e = s + bt
             for i_h in range(h):
                 hk = k_head_index(i_h, h, hg)
-                # SRAM: tile of A [BT, BT] — conceptual buffer after tl.load rows
-                a_tile = (
-                    A[0, s:e, i_h, :].detach().float().cpu().numpy().astype(np.float32).copy()
-                )
-                g_np = (
-                    g_cumsum[0, s:e, i_h].detach().float().cpu().numpy().astype(np.float32).copy()
-                )
-                b_np = beta[0, s:e, i_h].detach().float().cpu().numpy().astype(np.float32).copy()
-                exp_g = np.exp(g_np)
+                a_tile = A[0, s:e, i_h, :].float()
+                g_vec = g_cumsum[0, s:e, i_h].float()
+                b_vec = beta[0, s:e, i_h].float()
+                exp_g = torch.exp(g_vec)
 
-                k_tile = k[0, s:e, hk, :].detach().float().cpu().numpy().astype(np.float32).copy()
-                v_tile = v[0, s:e, i_h, :].detach().float().cpu().numpy().astype(np.float32).copy()
+                k_tile = k[0, s:e, hk, :].float()
+                v_tile = v[0, s:e, i_h, :].float()
 
                 # u = A @ (beta * v)
-                vb = v_tile * b_np[:, None]
-                u_tile = (a_tile @ vb).astype(np.float32)
+                vb = v_tile * b_vec[:, None]
+                u_tile = torch.matmul(a_tile, vb)
                 # w = A @ (beta * exp(g) * k)
-                kb = k_tile * b_np[:, None] * exp_g[:, None]
-                w_tile = (a_tile @ kb).astype(np.float32)
+                kb = k_tile * b_vec[:, None] * exp_g[:, None]
+                w_tile = torch.matmul(a_tile, kb)
 
-                u[0, s:e, i_h, :] = torch.from_numpy(np.ascontiguousarray(u_tile)).to(
-                    device=u.device, dtype=u.dtype
-                )
-                w[0, s:e, i_h, :] = torch.from_numpy(np.ascontiguousarray(w_tile)).to(
-                    device=w.device, dtype=w.dtype
-                )
+                u[0, s:e, i_h, :] = u_tile.to(u.dtype)
+                w[0, s:e, i_h, :] = w_tile.to(w.dtype)
 
     return w, u

@@ -11,7 +11,6 @@ to the inverse WY factor used in the recurrence.
 
 from __future__ import annotations
 
-import numpy as np
 import torch
 
 
@@ -49,19 +48,9 @@ def solve_tril(
             s = bos + ic * bt
             e = s + bt
             for i_h in range(h):
-                # SRAM tile: one BT x BT block (rows loaded from A's packed layout)
-                rows = []
-                for r in range(bt):
-                    # GLOBAL row s+r stores L[r, :]
-                    row_global = A[0, s + r, i_h, :].detach().float().cpu().numpy().astype(np.float32)
-                    rows.append(row_global.copy())
-                l_mat = np.stack(rows, axis=0)
-                # Strictly lower: zero diagonal and upper (matches KKT construction)
-                l_t = np.tril(l_mat, k=-1).astype(np.float32)
-                l_torch = torch.from_numpy(np.ascontiguousarray(l_t)).to(device=A.device)
-                # (I + L)^{-1}
-                inv_block = torch.linalg.inv(eye + l_torch)
-                for r in range(bt):
-                    ai[0, s + r, i_h, :] = inv_block[r, :].to(out_dt)
+                l_mat = A[0, s:e, i_h, :].float()
+                l_t = torch.tril(l_mat, diagonal=-1)
+                inv_block = torch.linalg.inv(eye + l_t)
+                ai[0, s:e, i_h, :] = inv_block.to(out_dt)
 
     return ai

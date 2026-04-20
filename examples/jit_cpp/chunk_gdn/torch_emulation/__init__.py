@@ -1,5 +1,5 @@
 """
-Educational PyTorch/numpy emulation of ``triton_baseline/fla_vendor`` GDN kernels.
+Educational PyTorch emulation of ``triton_baseline/fla_vendor`` GDN kernels.
 
 API mirrors the Triton entry points (same argument lists and tensor layouts).
 """
