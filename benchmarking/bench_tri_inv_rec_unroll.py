@@ -41,7 +41,7 @@ def plot_csv(path):
     plt.savefig(str(path).replace(".csv", ".png"))
 
 
-def bench(path: str = "benchmark_data/tri_inv_rec_unroll_bf16_vs_fp16.csv"):
+def bench(path: str = "benchmark_data/tri_inv_rec_unroll.csv"):
     rows = [
         [
             "dtype",
@@ -54,7 +54,13 @@ def bench(path: str = "benchmark_data/tri_inv_rec_unroll_bf16_vs_fp16.csv"):
     ]
     for dtype in (torch.float16,):
         for n in (16, 32, 64, 128):
-            for block_dim_x, block_dim_y in ((20, 4), (20, 16), (32, 16)):
+            for block_dim_x, block_dim_y in (
+                (20, 4),
+                (20, 8),
+                (20, 16),
+                (32, 16),
+                (32, 32),
+            ):
                 U = random_triu_matrix(n, block_dim_x, block_dim_y).to(dtype).npu()
                 ms = do_bench(
                     lambda inp=U: pto_tri_inv_rec_unroll(inp, is_bsnd_format=False),
