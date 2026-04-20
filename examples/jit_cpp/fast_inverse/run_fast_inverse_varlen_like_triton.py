@@ -117,7 +117,8 @@ def _transpose_valid_chunks(
 
 
 def _run_pto_varlen(
-    tri_inv_func, A: torch.Tensor, cu_seqlens: torch.Tensor
+    tri_inv_func, A: torch.Tensor, cu_seqlens: torch.Tensor,
+    is_lower: bool = False,
 ) -> torch.Tensor:
     chunk_size = A.shape[-1]
     num_heads = A.shape[-2]
@@ -134,6 +135,7 @@ def _run_pto_varlen(
         num_matrices,
         num_heads,
         cu_seqlens=cu_seqlens,
+        is_lower=is_lower,
     )
     torch.npu.synchronize()
     return tensor_out.cpu().to(torch.float64)
@@ -166,16 +168,31 @@ def _run_case(
     )
 
     ref = _reference_inverse(A, cu_seqlens, chunk_size)
-    tri = _run_pto_varlen(
+
+    # Test upper-triangular path (legacy: transpose to upper, invert, transpose back)
+    tri_upper = _run_pto_varlen(
         tri_inv_func,
         _transpose_valid_chunks(A, cu_seqlens, chunk_size),
         cu_seqlens,
+        is_lower=False,
     )
-    tri = _transpose_valid_chunks(tri, cu_seqlens, chunk_size)
+    tri_upper = _transpose_valid_chunks(tri_upper, cu_seqlens, chunk_size)
 
-    frob = torch.sqrt(torch.sum((ref - tri) ** 2) / torch.sum(ref**2)).item()
-    torch.testing.assert_close(tri, ref, atol=atol, rtol=rtol)
-    assert frob <= ftol, f"Frobenius error {frob:.2e} > {ftol:.2e}"
+    frob = torch.sqrt(torch.sum((ref - tri_upper) ** 2) / torch.sum(ref**2)).item()
+    torch.testing.assert_close(tri_upper, ref, atol=atol, rtol=rtol)
+    assert frob <= ftol, f"Upper-tri Frobenius error {frob:.2e} > {ftol:.2e}"
+
+    # Test lower-triangular path (new: pass lower-tri directly, no transpose)
+    tri_lower = _run_pto_varlen(
+        tri_inv_func,
+        A,
+        cu_seqlens,
+        is_lower=True,
+    )
+
+    frob_lower = torch.sqrt(torch.sum((ref - tri_lower) ** 2) / torch.sum(ref**2)).item()
+    torch.testing.assert_close(tri_lower, ref, atol=atol, rtol=rtol)
+    assert frob_lower <= ftol, f"Lower-tri Frobenius error {frob_lower:.2e} > {ftol:.2e}"
 
 
 def main() -> int:

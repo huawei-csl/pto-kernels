@@ -26,6 +26,9 @@ for the full License text.
  * @param num_matrices  Total number of matrices to invert.
  * @param num_bsnd_heads  0 for standard (B…ND) layout;
  *                        N (number of heads) for BSND layout.
+ *                        Bit 16 encodes is_lower: if set, the input is
+ *                        lower-triangular and the kernel transposes on
+ *                        load/store. Actual heads = num_bsnd_heads & 0xFFFF.
  * @param cu_seqlens  Optional int32 pointer used only for varlen BSND. Matches
  *                    the Triton-style API and stores cumulative sequence
  *                    boundaries for the packed BSND tensor.

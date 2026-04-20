@@ -241,24 +241,23 @@ def pto_solve_tril(
     num_heads: int,
 ) -> torch.Tensor:
     """(I+L)^{-1} in BSND layout; returns fp16 same shape as ``A_fp16``."""
-    A_wrk = _transpose_valid_chunks(A_fp16, cu_seqlens, chunk_size)
     num_matrices = _count_varlen_chunks(cu_seqlens, chunk_size) * num_heads
     tensor_out = torch.zeros_like(A_fp16, dtype=torch.float32)
     minus_identity = _make_minus_identity(chunk_size, A_fp16.device)
     torch.npu.synchronize()
     tri_inv_func(
         tensor_out,
-        A_wrk,
+        A_fp16,
         minus_identity,
         chunk_size,
         num_matrices,
         num_heads,
         cu_seqlens=cu_seqlens,
         block_dim=BLOCK_DIM,
+        is_lower=True,
     )
     torch.npu.synchronize()
-    out = _transpose_valid_chunks(tensor_out.to(torch.float16), cu_seqlens, chunk_size)
-    return out
+    return tensor_out.to(torch.float16)
 
 
 def run_pto_e2e(
