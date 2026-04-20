@@ -7,22 +7,12 @@ https://github.com/huawei-csl/pto-kernels/
 for the full License text.
 */
 
-#define MEMORY_BASE
-#include <pto/pto-inst.hpp>
-
-// clang-format off: so it does not get wrongfully flagged by linter
-#ifndef GM_ADDR
-#define GM_ADDR __gm__ uint8_t*  // To avoid #include "kernel_operator.h"
-#endif
-// clang-format on
+#include "kernel_utils.h"
 
 using namespace pto;
 
 template <typename InputT, typename OutputT, uint32_t MatrixSize>
 AICORE void runKernelBatchMatrixSquare(__gm__ OutputT* z, __gm__ InputT* x) {
-#if (__CHECK_FEATURE_AT_PRECOMPILE) || \
-    (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))  // Cube compilation
-
   constexpr uint32_t TileLen = MatrixSize * MatrixSize;
   const uint32_t global_index = get_block_idx() * TileLen;
 
@@ -83,9 +73,6 @@ AICORE void runKernelBatchMatrixSquare(__gm__ OutputT* z, __gm__ InputT* x) {
   wait_flag(PIPE_M, PIPE_FIX,
             EVENT_ID0);  // FIX pipe waits for M pipe to set flag
   TSTORE(z_global_out, c_l0_tile);
-#else
-// Nothing to do on AIV
-#endif
 }
 
 template <typename InputT>
@@ -114,11 +101,28 @@ AICORE void run_batch_matrix_square(__gm__ float* z, __gm__ InputT* x,
 
 extern "C" __global__ AICORE void batch_matrix_square_fp16(
     __gm__ void* z, __gm__ void* x, uint32_t matrix_size) {
+#if (__CHECK_FEATURE_AT_PRECOMPILE) || \
+    (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))  // AIC
   run_batch_matrix_square<half>((__gm__ float*)z, (__gm__ half*)x, matrix_size);
+#else
+  // Nothing to do on AIV
+  (void)z;
+  (void)x;
+  (void)matrix_size;
+#endif
 }
 
 extern "C" __global__ AICORE void batch_matrix_square_fp32(
     __gm__ void* z, __gm__ void* x, uint32_t matrix_size) {
+#if (__CHECK_FEATURE_AT_PRECOMPILE) || \
+    (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))  // AIC
+
   run_batch_matrix_square<float>((__gm__ float*)z, (__gm__ float*)x,
                                  matrix_size);
+#else
+  // Nothing to do on AIV
+  (void)z;
+  (void)x;
+  (void)matrix_size;
+#endif
 }

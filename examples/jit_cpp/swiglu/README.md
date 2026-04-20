@@ -35,11 +35,17 @@ python bench_swiglu.py --npu 0
 python plot_swiglu.py
 ```
 
-JIT benchmark without repeated Python stream lookup:
+JIT benchmark with cached stream pointer reuse (enabled by default):
 
 ```bash
-python bench_swiglu.py --cache-stream --npu npu:0 --csv-dir outputs/csv/cached_stream
+python bench_swiglu.py --npu npu:0 --csv-dir outputs/csv/cached_stream
 python plot_swiglu.py --csv-dir outputs/csv/cached_stream --plot-dir outputs/plots/cached_stream
+```
+
+Disable cached stream pointer reuse when needed:
+
+```bash
+python bench_swiglu.py --no-cache-stream --npu npu:0
 ```
 
 CMake/pybind benchmark:

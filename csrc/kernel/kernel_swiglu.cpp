@@ -7,8 +7,6 @@ https://github.com/huawei-csl/pto-kernels/
 for the full License text.
 */
 
-#define MEMORY_BASE
-
 #include <pto/pto-inst.hpp>
 
 #include "kernel_utils.h"

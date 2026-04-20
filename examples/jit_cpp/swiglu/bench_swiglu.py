@@ -46,10 +46,12 @@ def _parse_args():
         description="Benchmark PTO SwiGLU against torch_npu.npu_swiglu."
     )
     parser.add_argument(
-        "--cache-stream",
-        action="store_true",
-        help="Resolve the current NPU stream once and reuse it for PTO launches.",
+        "--no-cache-stream",
+        dest="cache_stream",
+        action="store_false",
+        help="Disable cached stream pointer reuse for PTO launches.",
     )
+    parser.set_defaults(cache_stream=True)
     return add_common_benchmark_args(
         parser,
         default_warmup=DEFAULT_WARMUP,

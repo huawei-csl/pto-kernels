@@ -15,6 +15,7 @@ for the full License text.
 #define GM_ADDR __gm__ uint8_t*  // To avoid #include "kernel_operator.h"
 #endif
 // clang-format on
+#include "kernel_utils.h"
 
 using namespace pto;
 

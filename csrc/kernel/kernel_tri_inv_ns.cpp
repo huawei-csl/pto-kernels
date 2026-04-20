@@ -7,16 +7,7 @@ https://github.com/huawei-csl/pto-kernels/
 for the full License text.
 */
 
-#ifndef MEMORY_BASE
-#define MEMORY_BASE
-#endif
-#include <pto/pto-inst.hpp>
-
-// clang-format off: so it does not get wrongfully flagged by linter
-#ifndef GM_ADDR
-#define GM_ADDR __gm__ uint8_t*  // To avoid #include "kernel_operator.h"
-#endif
-// clang-format on
+#include "kernel_utils.h"
 
 using namespace pto;
 
