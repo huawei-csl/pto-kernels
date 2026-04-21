@@ -146,13 +146,6 @@ AICORE void runKernelScanUl1(__gm__ InputT* x, __gm__ InputT* o,
   pipe_barrier(PIPE_M);
   TMATMUL(sL0, xL0, uL0);
 
-  // // >>>> DEBUG
-  // //For debugging: store C2 to GM
-  // set_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
-  // wait_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
-  // TSTORE(c1GM, sL0);
-  // // <<<< DEBUG
-
   // Wait for store to complete before loading C1
   set_flag(PIPE_FIX, PIPE_MTE2, EVENT_ID0);
   wait_flag(PIPE_FIX, PIPE_MTE2, EVENT_ID0);
@@ -185,14 +178,6 @@ AICORE void runKernelScanUl1(__gm__ InputT* x, __gm__ InputT* o,
   // In the paper notation C2 += Ls @ C1
   pipe_barrier(PIPE_M);
   TMATMUL_ACC(sL0, sL0, lL0, c1L0);
-
-  // // >>>> DEBUG
-  // TMATMUL(sL0, lL0, c1L0);
-  // // For debugging: store L @ C1 to GM
-  // set_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
-  // wait_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
-  // TSTORE(sGlobal, sL0);
-  // // <<<< DEBUG
 
   // Wait for matmul to complete before storing result back to GM
   set_flag(PIPE_M, PIPE_FIX, EVENT_ID0);

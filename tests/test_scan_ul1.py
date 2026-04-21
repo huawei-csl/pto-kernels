@@ -25,3 +25,7 @@ def test_pto_scan_ul1(scan_size: int, dtype: torch.dtype):
     ref = torch.cumsum(a.to(torch.float32), dim=0)
 
     assert torch.allclose(scan_npu.cpu(), ref)
+
+
+if __name__ == "__main__":
+    test_pto_scan_ul1(128 * 128, torch.float32)
