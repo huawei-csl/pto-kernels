@@ -31,6 +31,9 @@ at the start of ``scaled_dot_kkt_fwd`` and reused for every sequence, head, and 
 
 **Cube↔Vec** GM buffer: ``workspace_kk`` fp16 **``[C×C]``** — **C²/512** KiB (e.g. **32 KiB** @ C=128); Vec reads stripes into ``a_ub_half`` **``[C/2×C]``** — **C²/1024** KiB.
 
+**Index conventions** — same ``bos``/``eos``/``chunk_start_rel``/``s``/``e``/``valid`` as ``wy_fast_fwd``.
+The Vec loop uses ``vid ∈ {0,1}`` to cover ``C/2`` rows per half-chunk stripe; ``row_off = vid * (C/2)``.
+
 Global tensors (Torch layout)
 -----------------------------
 ``k``: ``[B, T, H, D]``; ``beta``, ``g_cumsum``: ``[B, T, H]``; output ``A``: ``[B, T, H, C]``.
@@ -92,21 +95,23 @@ def scaled_dot_kkt_fwd(
     )
 
     for bos, eos in seq_ranges(t, cu_seqlens):
+        n_tokens = eos - bos
         for h in range(hd):
-            for j in range(0, eos - bos, chunk_size):
-                s, e = bos + j, min(bos + j + chunk_size, eos)
-                v = e - s
+            for chunk_start_rel in range(0, n_tokens, chunk_size):
+                s = bos + chunk_start_rel
+                e = min(s + chunk_size, eos)
+                valid = e - s
 
                 # ── Cube: GM → L1 → L0C → **Cube→Vec** ``TSTORE`` ``workspace_kk`` (fp16) ──
                 tload_bsnd_chunk_rows_to_l1(
                     k_l1,
                     k[0],
                     token_start=s,
-                    valid_rows=v,
+                    valid_rows=valid,
                     head_idx=h,
                     hidden_size=d,
                 )
-                tfillpad_k_l1_tail_rows(k_l1, valid_rows=v, chunk_size=chunk_size)
+                tfillpad_k_l1_tail_rows(k_l1, valid_rows=valid, chunk_size=chunk_size)
 
                 a_l0_fp32 = tmatmul_kkt_l1_to_l0c(
                     k_l1,
@@ -126,12 +131,12 @@ def scaled_dot_kkt_fwd(
                 # ── Vec: ``TLOAD`` ``workspace_kk`` → UB stripes (two ``vid`` halves), gating, ``TSTORE`` out ──
                 gc = gf[0, s:e, h]
                 coeff = safe_exp_torch(gc[:, None] - gc[None, :]) * bf[0, s:e, h, None]
-                mask_vv = torch.arange(v, device=device)[:, None] > torch.arange(
-                    v, device=device
+                mask_vv = torch.arange(valid, device=device)[:, None] > torch.arange(
+                    valid, device=device
                 )[None, :]
                 for vid in (0, 1):
                     row_off = vid * half_c
-                    local_valid = min(max(v - row_off, 0), half_c)
+                    local_valid = min(max(valid - row_off, 0), half_c)
                     if local_valid <= 0:
                         continue
                     tload_workspace_kk_half_to_ub_rows(
@@ -141,10 +146,10 @@ def scaled_dot_kkt_fwd(
                         n_rows=local_valid,
                         chunk_size=chunk_size,
                     )
-                    cstripe = coeff[row_off : row_off + local_valid, :v]
+                    cstripe = coeff[row_off : row_off + local_valid, :valid]
                     mstripe = mask_vv[row_off : row_off + local_valid, :]
                     gated = (
-                        a_ub_half[:local_valid, :v].float() * cstripe * mstripe.float()
+                        a_ub_half[:local_valid, :valid].float() * cstripe * mstripe.float()
                     )
                     a_ub_half_out = gated.half()
                     tstore_ub_half_to_gm_a_rows(
@@ -153,7 +158,7 @@ def scaled_dot_kkt_fwd(
                         token_begin=s + row_off,
                         head_idx=h,
                         n_rows=local_valid,
-                        n_cols=v,
+                        n_cols=valid,
                         chunk_size=chunk_size,
                     )
 

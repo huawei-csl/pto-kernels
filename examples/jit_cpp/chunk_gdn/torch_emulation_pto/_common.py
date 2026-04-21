@@ -27,11 +27,27 @@ explicit L1→L0A/L0B stripes).
 Sequential Torch code does not model **set_flag / wait_flag** or **ffts_cross_core_sync**;
 we express the same mathematics as if Cube and Vec ran one after another.
 
-Chunk iteration
----------------
-``prepare_chunk_indices`` / ``iter_packed_bt_chunks`` follow the same packed-sequence
-convention as the Triton emulation: one logical program per ``(sequence, chunk_index)``
-when ``cu_seqlens`` is set.
+Chunk iteration (packed batch / varlen)
+---------------------------------------
+**Packed time axis.** With batch size 1, all sequences are concatenated along token dimension ``T``.
+``cu_seqlens`` (length ``N+1``) gives boundaries: sequence ``i`` occupies **half-open** indices
+``[cu_seqlens[i], cu_seqlens[i+1])``. If ``cu_seqlens`` is omitted, one sequence spans ``[0, T)``.
+
+**Chunking.** Kernels use a fixed tile length ``C`` (``chunk_size``). For a sequence segment
+``[bos, eos)`` of length ``n_tokens = eos - bos``, the number of chunks is::
+
+    n_chunks = ceil_div(n_tokens, C) = (n_tokens + C - 1) // C
+
+The ``+ C - 1`` is integer **ceil** without floats: the last chunk may hold fewer than ``C`` tokens
+(**partial tail**); ``valid = e - s`` counts active rows in L1 for that chunk.
+
+**Global chunk index.** Outputs like ``h_states[num_chunks, ...]`` use one row per chunk **across all
+sequences** in order. While iterating sequence ``seq_idx``, ``global_chunk_base`` is the offset such
+that chunk ``chunk_idx`` within that sequence maps to row ``global_chunk_base + chunk_idx`` in the
+packed output. ``total_chunks(...)`` precomputes ``num_chunks`` for buffer allocation.
+
+``prepare_chunk_indices`` / ``iter_packed_bt_chunks`` follow the same packed-sequence convention as
+the Triton emulation: one logical program per ``(sequence, chunk_index)`` when ``cu_seqlens`` is set.
 """
 
 from __future__ import annotations
@@ -92,7 +108,11 @@ def total_chunks(
     chunk_size: int,
     cu_seqlens: torch.Tensor | None,
 ) -> int:
-    """Same chunk count as ``dynamic_bsnd.dynamic_kernel_libs.total_chunks``."""
+    """
+    Total number of **kernel chunks** over the packed batch (sum of per-sequence chunk counts).
+
+    Same chunk count as ``dynamic_bsnd.dynamic_kernel_libs.total_chunks``.
+    """
     if cu_seqlens is None:
         return batch_size * ((seq_len + chunk_size - 1) // chunk_size)
     cu = cu_seqlens.detach().cpu().tolist()
@@ -100,7 +120,12 @@ def total_chunks(
 
 
 def seq_ranges(total_t: int, cu_seqlens: torch.Tensor | None) -> list[tuple[int, int]]:
-    """Inclusive-exclusive ``(bos, eos)`` segments in packed time."""
+    """
+    Sequence spans in **packed** token coordinates.
+
+    Returns a list of half-open ``(bos, eos)`` pairs: sequence ``k`` uses indices ``bos <= t < eos``.
+    If ``cu_seqlens`` is ``None``, a single segment ``(0, total_t)`` is returned (dense batch).
+    """
     if cu_seqlens is None:
         return [(0, total_t)]
     cu = cu_seqlens.tolist() if hasattr(cu_seqlens, "tolist") else list(cu_seqlens)

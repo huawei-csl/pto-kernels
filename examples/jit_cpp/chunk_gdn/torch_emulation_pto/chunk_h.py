@@ -30,6 +30,12 @@ SRAM tiles are **pre-allocated once at the start of** ``chunk_h_fwd`` and reused
 sequence, head, and chunk; GM state ``S`` is a single ``[D×D]`` buffer reset with ``zero_()`` per
 head. Data paths use helpers in ``_memory.py`` (``TLOAD``/``TFILLPAD``/``TMOV``/``gemm_v0``).
 
+**Index conventions (loops below)** — See ``_common.seq_ranges`` and the "Chunk iteration" section
+in ``_common.py``. Here: ``C`` = ``chunk_size``; ``bos``/``eos`` bound one sequence in packed ``T``;
+``n_chunks_this_seq = ceil_div(eos - bos, C)``; ``s``/``e`` are the chunk's token span; ``valid`` =
+``e - s`` (``< C`` on the last chunk only). ``global_chunk_base`` indexes the leading dimension of
+``h_out`` (cumulative chunk count over prior sequences).
+
 Outputs match ``verify_dynamic_bsnd.ref_chunk_h``.
 """
 
@@ -71,8 +77,8 @@ def chunk_h_fwd(
     device = k.device
     kf, wf, uf, gf = k.float(), w.float(), u.float(), g_cumsum.float()
     ranges = seq_ranges(t, cu_seqlens)
-    n_seq = len(ranges)
-    tc = total_chunks(n_seq, t, chunk_size, cu_seqlens)
+    n_seq = len(ranges)  # number of sequences in the packed batch (1 if no cu_seqlens)
+    tc = total_chunks(n_seq, t, chunk_size, cu_seqlens)  # total kernel chunks = h_out.shape[0]
     h_out = torch.zeros(tc, hd, d, d, device=device, dtype=torch.float32)
     v_new = torch.zeros_like(uf)
     final = torch.zeros(n_seq, hd, d, d, device=device, dtype=torch.float32)
@@ -110,18 +116,23 @@ def chunk_h_fwd(
     ws_ub_fp32 = torch.zeros(chunk_size, d, device=device, dtype=torch.float32)
     kv_ub_fp32 = torch.zeros(d, d, device=device, dtype=torch.float32)
 
-    ci_base = 0
-    for si, (bos, eos) in enumerate(ranges):
-        nc = (eos - bos + chunk_size - 1) // chunk_size
+    # Row index into h_out[:, h, :, :] — advances by n_chunks_this_seq after each sequence.
+    global_chunk_base = 0
+    for seq_idx, (bos, eos) in enumerate(ranges):
+        # Tokens for this sequence live at packed indices [bos, eos). Split into C-wide tiles.
+        n_tokens = eos - bos
+        n_chunks_this_seq = (n_tokens + chunk_size - 1) // chunk_size  # ceil_div(n_tokens, C)
         for h in range(hd):
-            S.zero_()
-            for ci in range(nc):
-                s, e = bos + ci * chunk_size, min(bos + (ci + 1) * chunk_size, eos)
-                valid = e - s
+            S.zero_()  # recurrent state S is per (sequence, head), not shared across chunks
+            for chunk_idx in range(n_chunks_this_seq):
+                # Chunk `chunk_idx`: token range [s, e) ⊆ [bos, eos); last chunk may have e-s < C.
+                s = bos + chunk_idx * chunk_size
+                e = min(bos + (chunk_idx + 1) * chunk_size, eos)
+                valid = e - s  # active rows in [C×D] L1 tiles (TFILLPAD fills the rest with 0)
                 gc = gf[0, s:e, h]
-                gl = gc[e - s - 1]
+                gl = gc[valid - 1]  # g at last token of chunk (scalar); used in K̃ scaling and S update
 
-                h_out[ci_base + ci, h] = S.clone()
+                h_out[global_chunk_base + chunk_idx, h] = S.clone()
 
                 # ── GEMM 1: ``WS = W @ S`` ──
                 tload_bsnd_chunk_rows_to_l1(
@@ -175,8 +186,8 @@ def chunk_h_fwd(
                 )
                 tload_workspace_dd_half_to_fp32(kv_ub_fp32, workspace_kv, d=d)
                 S = torch.exp(gl) * S + kv_ub_fp32
-            final[si, h] = S
-        ci_base += nc
+            final[seq_idx, h] = S
+        global_chunk_base += n_chunks_this_seq
 
     return h_out, v_new, final
 

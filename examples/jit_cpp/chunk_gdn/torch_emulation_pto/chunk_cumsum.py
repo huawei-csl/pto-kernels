@@ -23,6 +23,9 @@ start of ``chunk_cumsum_fwd`` and reused for every sequence and chunk (same fixe
 - Tail rows ``valid..C-1``: ``s_ub[i] = 0`` (``TEXPANDS`` + row copies in C++).
 - ``TSTORE``: write ``s_ub[:valid]`` back to ``g_sum_gm``.
 
+**Index conventions** — ``chunk_start_rel`` steps by ``C`` within ``[bos, eos)``; ``chunk_start`` is the
+global packed token index of the chunk’s first row; ``valid`` tokens may be ``< C`` on the last chunk.
+
 Reference: ``verify_dynamic_bsnd.ref_cumsum``.
 """
 
@@ -72,9 +75,11 @@ def chunk_cumsum_fwd(
     acc_ub = torch.zeros(1, htc, device=device, dtype=torch.float32)
 
     for bos, eos in seq_ranges(t, cu_seqlens):
-        for j in range(0, eos - bos, chunk_size):
-            chunk_start = bos + j
-            s, e = chunk_start, min(bos + j + chunk_size, eos)
+        n_tokens = eos - bos
+        for chunk_start_rel in range(0, n_tokens, chunk_size):
+            # Global token index where this chunk begins in the packed batch; [s, e) ⊆ [bos, eos).
+            chunk_start = bos + chunk_start_rel
+            s, e = chunk_start, min(chunk_start + chunk_size, eos)
             valid = e - s
 
             # TLOAD: GM → UB

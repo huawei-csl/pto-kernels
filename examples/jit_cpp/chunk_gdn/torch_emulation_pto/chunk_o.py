@@ -30,6 +30,10 @@ and reused for every sequence, head, and chunk; data movement uses ``_memory`` h
 Global tensors
 --------------
 ``q``, ``k``, ``v``: ``[B, T, H, D]``; ``h_states``: ``[num_chunks, H, D, D]``; ``g_cumsum``: ``[B, T, H]``.
+
+**Index conventions** — same packed-time / chunk tiling as ``chunk_h_fwd`` (see ``_common.seq_ranges``):
+``(bos, eos)`` per sequence; ``n_chunks_this_seq = ceil_div(eos - bos, C)``; ``s``, ``e``, ``vlen`` for
+the current chunk; ``global_chunk_base`` indexes ``h_states`` and advances after each sequence.
 """
 
 from __future__ import annotations
@@ -69,7 +73,7 @@ def chunk_o_fwd(
     Parameters
     ----------
     h_states :
-        ``[num_chunks, H, D, D]`` — pre-chunk snapshots (``h_states[ci]`` is ``S`` **before** chunk ``ci``).
+        ``[num_chunks, H, D, D]`` — pre-chunk snapshots (row ``chunk_idx`` is ``S`` **before** that chunk).
     """
     b, t, hd, d = q.shape
     assert b == 1
@@ -77,7 +81,7 @@ def chunk_o_fwd(
     o = torch.zeros_like(q, dtype=torch.float32)
     qf, kf, vf, gf = q.float(), k.float(), v.float(), g_cumsum.float()
     ranges = seq_ranges(t, cu_seqlens)
-    ci_base = 0
+    global_chunk_base = 0  # row into h_states for the first chunk of the current sequence
     k_tile = 128
     mx = max(chunk_size, d)
 
@@ -108,11 +112,13 @@ def chunk_o_fwd(
     )
 
     for bos, eos in ranges:
-        nc = (eos - bos + chunk_size - 1) // chunk_size
+        n_tokens = eos - bos
+        n_chunks_this_seq = (n_tokens + chunk_size - 1) // chunk_size
         for h in range(hd):
-            for ci in range(nc):
-                s, e = bos + ci * chunk_size, min(bos + (ci + 1) * chunk_size, eos)
-                vlen = e - s
+            for chunk_idx in range(n_chunks_this_seq):
+                s = bos + chunk_idx * chunk_size
+                e = min(bos + (chunk_idx + 1) * chunk_size, eos)
+                vlen = e - s  # valid Q/K/V rows; causal mask is vlen×vlen
                 gc = gf[0, s:e, h]
 
                 tload_bsnd_chunk_rows_to_l1(
@@ -145,7 +151,7 @@ def chunk_o_fwd(
                     l0b_buf=l0b_buf,
                 )
 
-                S = h_states[ci_base + ci, h]
+                S = h_states[global_chunk_base + chunk_idx, h]
                 tload_gm_fp32_dd_to_l1_half(s_l1, S)
                 qs_l0 = gemm_v0_accum_fp16(
                     q_l1,
@@ -197,7 +203,7 @@ def chunk_o_fwd(
                     l0b_buf=l0b_buf,
                 )
                 o[0, s:e, h, :] = inter[:vlen, :] + qkv_l0[:vlen, :]
-        ci_base += nc
+        global_chunk_base += n_chunks_this_seq
     return o.to(dtype=q.dtype)
 
 
@@ -223,7 +229,7 @@ def chunk_o_fwd_fla(
     o = torch.zeros_like(q, dtype=torch.float32)
     qf, kf, vf, gf = q.float(), k.float(), v.float(), g_cumsum.float()
     ranges = seq_ranges(t, cu_seqlens)
-    ci_base = 0
+    global_chunk_base = 0  # same indexing as ``chunk_o_fwd``
     k_tile = 128
     mx = max(chunk_size, d)
     dev = q.device
@@ -253,10 +259,12 @@ def chunk_o_fwd_fla(
     )
 
     for bos, eos in ranges:
-        nc = (eos - bos + chunk_size - 1) // chunk_size
+        n_tokens = eos - bos
+        n_chunks_this_seq = (n_tokens + chunk_size - 1) // chunk_size
         for h in range(hd):
-            for ci in range(nc):
-                s, e = bos + ci * chunk_size, min(bos + (ci + 1) * chunk_size, eos)
+            for chunk_idx in range(n_chunks_this_seq):
+                s = bos + chunk_idx * chunk_size
+                e = min(bos + (chunk_idx + 1) * chunk_size, eos)
                 vlen = e - s
                 gc = gf[0, s:e, h]
 
@@ -289,7 +297,7 @@ def chunk_o_fwd_fla(
                     l0b_buf=l0b_buf,
                 )
 
-                S = h_states[ci_base + ci, h]
+                S = h_states[global_chunk_base + chunk_idx, h]
                 tload_gm_fp32_dd_to_l1_half(s_l1, S)
                 qs_l0 = gemm_v0_accum_fp16(
                     q_l1,
@@ -340,5 +348,5 @@ def chunk_o_fwd_fla(
                     l0b_buf=l0b_buf,
                 )
                 o[0, s:e, h, :] = inter[:vlen, :] + qkv_l0[:vlen, :]
-        ci_base += nc
+        global_chunk_base += n_chunks_this_seq
     return o.to(dtype=q.dtype)

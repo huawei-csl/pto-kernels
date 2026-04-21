@@ -24,6 +24,9 @@ Emulation uses shared **``workspace_a``** fp16 **``[C×C]``** as the Vec→Cube 
 ``a_l1``, ``v_l1``, ``k_l1``, L0 stripes, and a shared L0C buffer are **pre-allocated once** at the
 start of ``wy_fast_fwd`` and reused for every chunk (PTO-style fixed SRAM).
 
+**Index conventions** — ``(bos, eos)`` from ``seq_ranges``; ``chunk_start_rel`` steps by ``C`` along
+``[bos, eos)``; ``s``, ``e``, ``valid`` bound the current tile (``valid < C`` on the last chunk only).
+
 Reference: ``verify_dynamic_bsnd.ref_wy``.
 """
 
@@ -85,9 +88,12 @@ def wy_fast_fwd(
     )
 
     for bos, eos in seq_ranges(t, cu_seqlens):
+        n_tokens = eos - bos
         for h in range(hd):
-            for j in range(0, eos - bos, chunk_size):
-                s, e = bos + j, min(bos + j + chunk_size, eos)
+            # Walk chunks: chunk_start_rel is the offset from bos (0, C, 2C, …) within this sequence.
+            for chunk_start_rel in range(0, n_tokens, chunk_size):
+                s = bos + chunk_start_rel
+                e = min(s + chunk_size, eos)
                 valid = e - s
                 Ab = Af[0, s:e, h, :valid]
                 gc = gf[0, s:e, h]
