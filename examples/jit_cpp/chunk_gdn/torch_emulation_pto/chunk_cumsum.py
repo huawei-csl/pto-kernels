@@ -38,9 +38,9 @@ from ._memory import (
     htc_align,
     tadd,
     tfillpad_ub_g_inplace,
-    tload_gm_to_ub_g_chunk,
+    tload,
     tmov,
-    tstore_ub_to_gm_gsum,
+    tstore,
 )
 
 
@@ -83,12 +83,12 @@ def chunk_cumsum_fwd(
             valid = e - s
 
             # TLOAD: GM → UB
-            tload_gm_to_ub_g_chunk(
+            tload(
                 g_ub,
                 g32[0, s:e, :],
-                valid=valid,
-                num_heads=h,
-                htc=htc,
+                direction="gm_to_ub",
+                nrows=valid,
+                ncols=h,
             )
             tfillpad_ub_g_inplace(
                 g_ub, valid=valid, chunk_size=chunk_size, num_heads=h, htc=htc
@@ -108,7 +108,14 @@ def chunk_cumsum_fwd(
                     tmov(s_ub[i : i + 1, :], acc_ub)
 
             # TSTORE: UB → GM
-            tstore_ub_to_gm_gsum(out[0], s_ub, chunk_start=chunk_start, valid=valid, num_heads=h)
+            tstore(
+                out[0],
+                s_ub,
+                direction="ub_to_gm",
+                nrows=valid,
+                ncols=h,
+                dst_row0=chunk_start,
+            )
 
     return out.to(dtype=g.dtype)
 

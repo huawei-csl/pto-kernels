@@ -24,11 +24,15 @@ Buffer sizes (fp16 on GM unless noted; ``C`` = chunk size, ``D`` = hidden):
 - ``workspace_ws`` **``[C×D]``** fp16 — ``2·C·D`` B → **C·D/512** KiB (Cube→Vec ``WS``).
 - ``workspace_k`` **``[D×C]``** fp16 — same numel as ``[C×D]`` → **C·D/512** KiB (Vec→Cube ``K̃``).
 - ``workspace_kv`` **``[D×D]``** fp16 — ``2·D²`` B → **D²/512** KiB (Cube→Vec ``KV``).
-- Vec UB fp32 staging: ``ws_ub_fp32`` **``[C×D]``** — **C·D/256** KiB; ``kv_ub_fp32`` **``[D×D]``** — **D²/256** KiB (after ``TLOAD`` from workspace).
+- Vec UB fp32 staging: ``ws_ub_fp32`` **``[C×D]``** — **C·D/256** KiB; ``kv_ub_fp32`` **``[D×D]``** — **D²/256** KiB (after ``TLOAD`` from workspace); ``u_chunk_ub_fp32`` **``[C×D]``** — ``TLOAD`` of ``U`` from GM before ``v_new = U - WS``.
+
+In ``_memory.tload`` / ``tstore``, these ``workspace_*`` tensors use ``direction`` values **``gm_to_ub``**,
+**``gm_to_l1``**, **``l0c_to_gm``**, **``ub_to_gm``** (they are normal GM; there is no separate
+``workspace_*`` direction label).
 
 SRAM tiles are **pre-allocated once at the start of** ``chunk_h_fwd`` and reused for every
 sequence, head, and chunk; GM state ``S`` is a single ``[D×D]`` buffer reset with ``zero_()`` per
-head. Data paths use helpers in ``_memory.py`` (``TLOAD``/``TFILLPAD``/``TMOV``/``gemm_v0``).
+head. Data paths use helpers in ``_memory.py`` (``tload``/``tstore``, ``TLOAD``/``TFILLPAD``/``TMOV``/``gemm_v0``).
 
 **Index conventions (loops below)** — See ``_common.seq_ranges`` and the "Chunk iteration" section
 in ``_common.py``. Here: ``C`` = ``chunk_size``; ``bos``/``eos`` bound one sequence in packed ``T``;
@@ -49,15 +53,11 @@ from ._memory import (
     alloc_l1_cd,
     gemm_v0_accum_fp16,
     tfillpad_k_l1_tail_rows,
-    tload_bsnd_chunk_rows_to_l1,
+    tload,
+    tload_bsnd_rows,
     tload_gm_fp32_dd_to_l1_half,
-    tload_workspace_cd_half_to_fp32_ub,
-    tload_workspace_dc_half_to_k_l1,
-    tload_workspace_dd_half_to_fp32,
     tmov_l1_half_rows,
-    tstore_l0c_fp32_to_workspace_cd_half,
-    tstore_l0c_fp32_to_workspace_dd_half,
-    tstore_vec_ktilde_to_workspace_dc_half,
+    tstore,
 )
 
 
@@ -115,6 +115,8 @@ def chunk_h_fwd(
     # Vec UB fp32 — ``TLOAD`` from ``workspace_ws`` / ``workspace_kv`` (**C·D/256** KiB and **D²/256** KiB)
     ws_ub_fp32 = torch.zeros(chunk_size, d, device=device, dtype=torch.float32)
     kv_ub_fp32 = torch.zeros(d, d, device=device, dtype=torch.float32)
+    # Vec UB — ``TLOAD`` ``U`` chunk from GM before ``v_new = U - WS`` (same footprint as ``ws_ub_fp32``)
+    u_chunk_ub_fp32 = torch.zeros(chunk_size, d, device=device, dtype=torch.float32)
 
     # Row index into h_out[:, h, :, :] — advances by n_chunks_this_seq after each sequence.
     global_chunk_base = 0
@@ -135,7 +137,7 @@ def chunk_h_fwd(
                 h_out[global_chunk_base + chunk_idx, h] = S.clone()
 
                 # ── GEMM 1: ``WS = W @ S`` ──
-                tload_bsnd_chunk_rows_to_l1(
+                tload_bsnd_rows(
                     w_l1,
                     wf[0],
                     token_start=s,
@@ -153,23 +155,46 @@ def chunk_h_fwd(
                     l0b_buf=l0b_buf,
                 )
                 # Cube→Vec: ``TSTORE`` ``WS`` L0C → GM ``workspace_ws``; Vec ``TLOAD`` → UB → ``v_new = U - WS``
-                tstore_l0c_fp32_to_workspace_cd_half(
-                    workspace_ws, ws_l0, nrows=valid, ncols=d
+                tstore(
+                    workspace_ws,
+                    ws_l0,
+                    direction="l0c_to_gm",
+                    nrows=valid,
+                    ncols=d,
                 )
-                tload_workspace_cd_half_to_fp32_ub(
-                    ws_ub_fp32, workspace_ws, valid_rows=valid, ncols=d
+                tload(
+                    ws_ub_fp32,
+                    workspace_ws,
+                    direction="gm_to_ub",
+                    nrows=valid,
+                    ncols=d,
                 )
-                vc = uf[0, s:e, h, :] - ws_ub_fp32[:valid, :]
+                tload(
+                    u_chunk_ub_fp32,
+                    uf[0, s:e, h, :],
+                    direction="gm_to_ub",
+                    nrows=valid,
+                    ncols=d,
+                )
+                vc = u_chunk_ub_fp32[:valid, :] - ws_ub_fp32[:valid, :]
                 v_new[0, s:e, h, :] = vc
 
                 # ── GEMM 2: ``KV = K̃^T @ V`` with ``k_l1`` ``[D×C]``, ``v_l1`` ``[C×D]`` ──
                 kt = kf[0, s:e, h, :] * torch.exp(gl - gc)[:, None]
                 # Vec→Cube: ``TSTORE`` ``K̃`` → ``workspace_k``; Cube ``TLOAD`` → ``k_l1``
-                tstore_vec_ktilde_to_workspace_dc_half(
-                    workspace_k, kt, valid_cols=valid
+                tstore(
+                    workspace_k,
+                    kt.T,
+                    direction="ub_to_gm",
+                    nrows=d,
+                    ncols=valid,
                 )
-                tload_workspace_dc_half_to_k_l1(
-                    k_l1, workspace_k, valid_cols=valid
+                tload(
+                    k_l1,
+                    workspace_k,
+                    direction="gm_to_l1",
+                    nrows=d,
+                    ncols=valid,
                 )
                 tmov_l1_half_rows(v_l1, vc.half(), valid_rows=valid)
                 tfillpad_k_l1_tail_rows(v_l1, valid_rows=valid, chunk_size=chunk_size)
@@ -181,10 +206,20 @@ def chunk_h_fwd(
                     l0b_buf=l0b_buf,
                 )
                 # Cube→Vec: ``TSTORE`` ``KV`` → ``workspace_kv``; Vec ``TLOAD`` for ``S += KV``
-                tstore_l0c_fp32_to_workspace_dd_half(
-                    workspace_kv, kv_l0, d=d
+                tstore(
+                    workspace_kv,
+                    kv_l0,
+                    direction="l0c_to_gm",
+                    nrows=d,
+                    ncols=d,
                 )
-                tload_workspace_dd_half_to_fp32(kv_ub_fp32, workspace_kv, d=d)
+                tload(
+                    kv_ub_fp32,
+                    workspace_kv,
+                    direction="gm_to_ub",
+                    nrows=d,
+                    ncols=d,
+                )
                 S = torch.exp(gl) * S + kv_ub_fp32
             final[seq_idx, h] = S
         global_chunk_base += n_chunks_this_seq

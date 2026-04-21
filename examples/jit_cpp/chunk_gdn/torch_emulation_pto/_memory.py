@@ -19,10 +19,16 @@ Memory roles:
 Each function is a **synchronous** copy or pad. Real hardware uses async MTE2/MTE3/MTE1 pipes
 with ``set_flag`` / ``wait_flag``; we omit sync but keep the **read/write sites** explicit.
 
-Higher-level helpers include ``tload_bsnd_chunk_rows_to_l1`` (BSND row ``TLOAD`` into ``[C×D]`` L1),
-``tload_gm_fp32_dd_to_l1_half`` (state ``S`` tile), ``tmov_l1_half_rows`` / ``tmov_l1_half_dc_cols``,
-``tmov_l1_cc_gate_mask_from_l0c`` (Vec QK gate), ``alloc_l0_stripes_gemm_v0`` / ``alloc_l0c_fp32`` for
-**reused** L0 tiles during ``gemm_v0_accum_fp16``.
+API sketch
+~~~~~~~~~~
+- **Dense 2D tiles** — ``tload(dst, src, *, direction=..., nrows, ncols, dst_row0=0, …)`` and
+  ``tstore(dst, src, *, direction=..., nrows, ncols, …, clear_dst=False)``. ``direction`` tags the path
+  (e.g. ``gm_to_ub``, ``gm_to_l1``, ``ub_to_gm``, ``l0c_to_gm``). **Workspace** tensors are GM—use
+  ``gm_*`` / ``*_to_gm``, not ``workspace_*`` in ``direction``.
+- **Flat L0C→workspace** (``C²`` elements) — ``tstore_l0c_flat``.
+- **BSND row gather/scatter** — ``tload_bsnd_rows`` (``[T,H,D]`` → L1 ``[C,D]``), ``tstore_bsnd_rows`` (UB → ``A``).
+- **GEMM / Vec** — ``tmov_l1_half_rows``, ``tmov_l1_half_dc_cols``, ``tmov_l1_cc_gate_mask_from_l0c``,
+  ``alloc_l0_stripes_gemm_v0`` / ``alloc_l0c_fp32``, ``gemm_v0_accum_fp16``.
 
 Tile size (comments in call sites)
 ----------------------------------
@@ -130,20 +136,57 @@ def htc_align(num_heads: int) -> int:
     return ((num_heads + 7) // 8) * 8
 
 
-def tload_gm_to_ub_g_chunk(
-    g_ub: torch.Tensor,
-    g_gm: torch.Tensor,
+def tload(
+    dst: torch.Tensor,
+    src: torch.Tensor,
     *,
-    valid: int,
-    num_heads: int,
-    htc: int,
+    direction: str = "gm_to_ub",
+    nrows: int,
+    ncols: int,
+    dst_row0: int = 0,
+    dst_col0: int = 0,
+    src_row0: int = 0,
+    src_col0: int = 0,
 ) -> None:
     """
-    ``TLOAD(g_load, g_gm)`` in ``chunk_cumsum_kernel.cpp``:
+    ``TLOAD`` — copy a dense 2D tile **into** ``dst`` from ``src`` (cast to ``dst.dtype``).
 
-    ``g_ub[:valid, :num_heads] = g_gm[chunk rows]``; caller owns ``g_ub`` shape ``[C, HTC]``.
+    ``direction`` documents the logical path only (copy semantics are identical). **Workspace** buffers in
+    these emulations are ordinary **GM** tensors—use ``"gm_to_ub"`` / ``"gm_to_l1"``, not a separate
+    ``workspace_*`` label.
     """
-    g_ub[:valid, :num_heads] = g_gm[:valid, :num_heads].to(g_ub.dtype)
+    _ = direction
+    dst[dst_row0 : dst_row0 + nrows, dst_col0 : dst_col0 + ncols] = src[
+        src_row0 : src_row0 + nrows, src_col0 : src_col0 + ncols
+    ].to(dst.dtype)
+
+
+def tstore(
+    dst: torch.Tensor,
+    src: torch.Tensor,
+    *,
+    direction: str = "ub_to_gm",
+    nrows: int,
+    ncols: int,
+    dst_row0: int = 0,
+    dst_col0: int = 0,
+    src_row0: int = 0,
+    src_col0: int = 0,
+    clear_dst: bool = False,
+) -> None:
+    """
+    ``TSTORE`` — copy a dense 2D tile **into** ``dst`` from ``src`` (cast to ``dst.dtype``).
+
+    ``direction`` documents roles (e.g. ``"ub_to_gm"``, ``"l0c_to_gm"``). Staging buffers named
+    ``workspace_*`` are still **GM**; Cube ``TSTORE`` from L0C uses ``"l0c_to_gm"``.
+    If ``clear_dst`` is True, ``dst`` is zeroed first (e.g. sparse top-left write to a full ``[C×C]`` tile).
+    """
+    _ = direction
+    if clear_dst:
+        dst.zero_()
+    dst[dst_row0 : dst_row0 + nrows, dst_col0 : dst_col0 + ncols] = src[
+        src_row0 : src_row0 + nrows, src_col0 : src_col0 + ncols
+    ].to(dst.dtype)
 
 
 def tfillpad_ub_g_inplace(g_ub: torch.Tensor, *, valid: int, chunk_size: int, num_heads: int, htc: int) -> None:
@@ -154,20 +197,6 @@ def tfillpad_ub_g_inplace(g_ub: torch.Tensor, *, valid: int, chunk_size: int, nu
         g_ub[valid:chunk_size, :].zero_()
     if num_heads < htc:
         g_ub[:, num_heads:htc].zero_()
-
-
-def tstore_ub_to_gm_gsum(
-    g_sum_gm: torch.Tensor,
-    s_ub: torch.Tensor,
-    *,
-    chunk_start: int,
-    valid: int,
-    num_heads: int,
-) -> None:
-    """
-    ``TSTORE(gs_gm, s_store)`` — UB → GM for the prefix-sum output tile.
-    """
-    g_sum_gm[chunk_start : chunk_start + valid, :num_heads] = s_ub[:valid, :num_heads].to(g_sum_gm.dtype)
 
 
 def alloc_l1_cd(
@@ -185,7 +214,7 @@ def alloc_l1_cd(
     return torch.empty((chunk_size, hidden_size), device=device, dtype=dtype)
 
 
-def tload_bsnd_chunk_rows_to_l1(
+def tload_bsnd_rows(
     l1: torch.Tensor,
     gm_bsnd: torch.Tensor,
     *,
@@ -204,20 +233,13 @@ def tload_bsnd_chunk_rows_to_l1(
         l1[i, :] = gm_bsnd[t, head_idx, :].to(l1.dtype)
 
 
-# Back-compat alias (older name referenced ``K`` only).
-tload_k_bsnd_chunk_to_k_l1 = tload_bsnd_chunk_rows_to_l1
-
-
 def tload_gm_fp32_dd_to_l1_half(
     s_l1: torch.Tensor,
     s_gm_fp32: torch.Tensor,
 ) -> None:
-    """
-    ``TLOAD`` fp32 ``S`` ``[D×D]`` from GM into L1 fp16 (``chunk_h`` / ``chunk_o`` state tile).
-
-    Numerically ``s_l1.copy_(s_gm_fp32.half())``.
-    """
-    s_l1.copy_(s_gm_fp32.to(dtype=s_l1.dtype))
+    """``TLOAD`` fp32 ``S`` ``[D×D]`` from GM into L1 fp16 (``chunk_h`` / ``chunk_o`` state tile)."""
+    m, n = s_gm_fp32.shape
+    tload(s_l1, s_gm_fp32, direction="gm_to_l1", nrows=m, ncols=n)
 
 
 def tmov_l1_half_rows(
@@ -250,38 +272,22 @@ def tfillpad_k_l1_tail_rows(l1: torch.Tensor, *, valid_rows: int, chunk_size: in
         l1[valid_rows:chunk_size, :].zero_()
 
 
-def tstore_l0c_to_workspace_kk_half(
-    workspace_kk: torch.Tensor,
-    a_l0_fp32: torch.Tensor,
+def tstore_l0c_flat(
+    workspace: torch.Tensor,
+    l0c_fp32: torch.Tensor,
     *,
-    slot: int,
     chunk_square: int,
 ) -> None:
     """
-    ``TSTORE(_gm, _l0)`` after KKT — fp32 L0C cast to fp16 in GM workspace for Vec consumption.
-    ``workspace_kk`` is the flat per-slot buffer of length ``chunk_square`` (``C*C``).
+    ``TSTORE`` — fp32 L0C ``[C×C]`` cast to fp16 into a **flattened** GM workspace view (``C²`` elements).
+
+    Used after ``K K^T`` / raw ``QK`` before Vec consumes the tile (``scaled_dot_kkt`` / ``chunk_o``).
     """
-    h = a_l0_fp32.half()
-    workspace_kk.view(-1)[: chunk_square].copy_(h.view(-1))
+    h = l0c_fp32.half()
+    workspace.view(-1)[:chunk_square].copy_(h.view(-1))
 
 
-def tload_workspace_kk_half_to_ub_rows(
-    a_ub_half: torch.Tensor,
-    workspace_kk: torch.Tensor,
-    *,
-    row_begin: int,
-    n_rows: int,
-    chunk_size: int,
-) -> None:
-    """
-    Vec ``TLOAD(_ld, _gm)`` — load ``[n_rows, C]`` stripe of KK^T from workspace into UB.
-    ``a_ub_half`` shape ``[HalfChunk, C]`` or subset rows.
-    """
-    w = workspace_kk.view(chunk_size, chunk_size)
-    a_ub_half[:n_rows, :].copy_(w[row_begin : row_begin + n_rows, :])
-
-
-def tstore_ub_half_to_gm_a_rows(
+def tstore_bsnd_rows(
     a_gm: torch.Tensor,
     a_ub_half: torch.Tensor,
     *,
@@ -292,7 +298,7 @@ def tstore_ub_half_to_gm_a_rows(
     chunk_size: int,
 ) -> None:
     """
-    ``TSTORE(_gm, _st)`` — write gated ``A`` sub-block to BSND ``A`` tensor ``[T,H,C]``.
+    ``TSTORE`` — scatter UB rows into BSND ``A`` ``[T, H, C]`` (``scaled_dot_kkt`` gated output).
     """
     for i in range(n_rows):
         t = token_begin + i
@@ -304,152 +310,6 @@ def tstore_ub_half_to_gm_a_rows(
 # --- GM ``workspace`` handoffs (Cube ``L0C`` / Vec ``UB`` ↔ GM, matching PTO ``TSTORE``/``TLOAD``) ---
 # Typical GM buffer sizes (fp16): ``[C×D]`` → **C·D/512** KiB; ``[C×C]`` or ``[D×D]`` square tiles
 # → **C²/512** or **D²/512** KiB (examples in ``chunk_h`` / ``chunk_o`` / ``wy_fast`` / ``scaled_dot_kkt``).
-
-
-def tstore_l0c_fp32_to_workspace_cd_half(
-    workspace_cd: torch.Tensor,
-    l0c_fp32: torch.Tensor,
-    *,
-    nrows: int,
-    ncols: int,
-) -> None:
-    """
-    Cube ``TSTORE`` — fp32 L0C tile (e.g. ``WS = W@S``, ``[C×D]``) → GM workspace fp16 ``[C×D]``
-    (``chunk_h_kernel`` ``WS_WS``).
-    """
-    workspace_cd[:nrows, :ncols].copy_(l0c_fp32[:nrows, :ncols].half())
-
-
-def tload_workspace_cd_half_to_fp32_ub(
-    ub_fp32: torch.Tensor,
-    workspace_cd: torch.Tensor,
-    *,
-    valid_rows: int,
-    ncols: int,
-) -> None:
-    """
-    Vec ``TLOAD`` — GM workspace fp16 ``[C×D]`` → fp32 UB rows for ``v_new = U - WS`` (``chunk_h``).
-    """
-    ub_fp32[:valid_rows, :ncols].copy_(workspace_cd[:valid_rows, :ncols].float())
-
-
-def tstore_vec_ktilde_to_workspace_dc_half(
-    workspace_dc: torch.Tensor,
-    kt_rowmajor: torch.Tensor,
-    *,
-    valid_cols: int,
-) -> None:
-    """
-    Vec ``TSTORE`` — scaled ``K̃`` ``[valid, D]`` → GM ``[D, C]`` workspace (``chunk_h`` ``WS_K``).
-    """
-    workspace_dc[:, :valid_cols].copy_(kt_rowmajor.T.to(dtype=workspace_dc.dtype))
-
-
-def tload_workspace_dc_half_to_k_l1(
-    k_l1: torch.Tensor,
-    workspace_dc: torch.Tensor,
-    *,
-    valid_cols: int,
-) -> None:
-    """
-    Cube ``TLOAD`` — GM ``[D, C]`` workspace → ``k_l1`` ``[D, C]`` L1.
-    """
-    k_l1[:, :valid_cols].copy_(workspace_dc[:, :valid_cols])
-
-
-def tstore_l0c_fp32_to_workspace_dd_half(
-    workspace_dd: torch.Tensor,
-    kv_l0_fp32: torch.Tensor,
-    *,
-    d: int,
-) -> None:
-    """
-    Cube ``TSTORE`` — fp32 L0C ``[D×D]`` (``KV``) → GM workspace fp16 (``chunk_h`` ``WS_KV``).
-    """
-    workspace_dd[:d, :d].copy_(kv_l0_fp32[:d, :d].half())
-
-
-def tload_workspace_dd_half_to_fp32(
-    dst_fp32: torch.Tensor,
-    workspace_dd: torch.Tensor,
-    *,
-    d: int,
-) -> None:
-    """
-    Vec ``TLOAD`` — GM ``[D×D]`` workspace fp16 → fp32 for state update ``S += KV`` (``chunk_h``).
-    """
-    dst_fp32[:d, :d].copy_(workspace_dd[:d, :d].float())
-
-
-def tstore_vec_a_top_left_to_workspace_cc_half(
-    workspace_cc: torch.Tensor,
-    a_top_left_half: torch.Tensor,
-    *,
-    valid: int,
-) -> None:
-    """
-    Vec ``TSTORE`` — top-left ``A`` block ``[valid, valid]`` fp16 → GM ``[C×C]`` workspace (``wy_fast``).
-    """
-    workspace_cc.zero_()
-    workspace_cc[:valid, :valid].copy_(a_top_left_half)
-
-
-def tload_workspace_cc_half_to_l1(
-    a_l1: torch.Tensor,
-    workspace_cc: torch.Tensor,
-) -> None:
-    """
-    Cube ``TLOAD`` — GM ``[C×C]`` workspace fp16 → ``a_l1`` L1 (``wy_fast``).
-    """
-    a_l1.copy_(workspace_cc)
-
-
-def tstore_l0c_qk_to_workspace_cc_raw_half(
-    workspace_qk_raw: torch.Tensor,
-    qk_l0_fp32: torch.Tensor,
-    *,
-    chunk_square: int,
-) -> None:
-    """
-    Cube ``TSTORE`` — fp32 ``QK`` L0C ``[C×C]`` → GM workspace fp16 before Vec gating (``chunk_o``).
-    Same layout as ``tstore_l0c_to_workspace_kk_half`` / ``scaled_dot_kkt``.
-    """
-    tstore_l0c_to_workspace_kk_half(
-        workspace_qk_raw,
-        qk_l0_fp32,
-        slot=0,
-        chunk_square=chunk_square,
-    )
-
-
-def vec_apply_qk_gate_workspace_cc(
-    workspace_qk_gated: torch.Tensor,
-    workspace_qk_raw: torch.Tensor,
-    gate: torch.Tensor,
-    mask: torch.Tensor,
-    *,
-    vlen: int,
-) -> None:
-    """
-    Vec path — ``TLOAD`` raw ``QK`` from GM workspace, apply PTO gate + mask, ``TSTORE`` gated tile back
-    to GM (second workspace slot) for Cube ``TLOAD`` into ``qk_gated_l1`` (``chunk_o``).
-    """
-    x = (
-        workspace_qk_raw[:vlen, :vlen].float()
-        * gate.to(dtype=torch.float32)
-        * mask.to(dtype=torch.float32)
-    )
-    workspace_qk_gated[:vlen, :vlen].copy_(x.half())
-
-
-def tload_workspace_qk_gated_half_to_l1(
-    qk_gated_l1: torch.Tensor,
-    workspace_qk_gated: torch.Tensor,
-    *,
-    vlen: int,
-) -> None:
-    """Cube ``TLOAD`` — gated ``QK`` GM workspace fp16 → ``qk_gated_l1`` L1 top ``[vlen×vlen]`` (``chunk_o``)."""
-    qk_gated_l1[:vlen, :vlen].copy_(workspace_qk_gated[:vlen, :vlen])
 
 
 def gemm_v0_accum_fp16(

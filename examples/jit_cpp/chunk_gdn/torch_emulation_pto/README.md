@@ -6,7 +6,7 @@ PyTorch CPU emulation of the five **PTO** kernels under `dynamic_bsnd/` (`chunk_
 
 - **Named SRAM roles** — Tensors tagged as UB, L1, L0A/L0B/L0C follow the same roles as in the C++ / PTO sources (`_memory.py` lists the op stand-ins).
 - **Pre-allocate and reuse** — On-chip–style tiles are allocated **once at the start of each** ``*_fwd`` (before any sequence/head/chunk loop) and **reused** for every iteration; recurrent GM state (e.g. ``chunk_h``’s ``S``) is reset in place with ``zero_()`` where needed. That matches a fixed kernel tile budget instead of allocating inside the hot loop.
-- **Explicit movement** — Loads, pads, and `TMOV`-style copies go through `_memory` helpers (`tload_bsnd_chunk_rows_to_l1`, `tfillpad_k_l1_tail_rows`, `tmov`, `tload_gm_fp32_dd_to_l1_half`, `tmov_l1_cc_gate_mask_from_l0c`, etc.) so the call graph lines up with the original PTO dataflow.
+- **Explicit movement** — Loads, pads, and `TMOV`-style copies go through `_memory` helpers (`tload` / `tstore`, `tload_bsnd_rows`, `tfillpad_k_l1_tail_rows`, `tmov`, `tload_gm_fp32_dd_to_l1_half`, `tmov_l1_cc_gate_mask_from_l0c`, etc.) so the call graph lines up with the original PTO dataflow.
 - **`gemm_v0`** — Cube matmul uses `textract_*` into **reused** L0A/L0B stripes plus a **reused** fp32 L0C buffer (`gemm_v0_accum_fp16(..., l0c_out=..., l0a_buf=..., l0b_buf=...)`), matching repeated `TEXTRACT` / accumulate behavior.
 
 The goal is **readability and traceability to PTO**, not cycle-accurate async DMA (no `set_flag` / `wait_flag`).

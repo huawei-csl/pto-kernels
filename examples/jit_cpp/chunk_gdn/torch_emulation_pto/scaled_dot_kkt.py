@@ -17,7 +17,7 @@ Memory / PTO mapping
 2. ``TFILLPAD`` — tail rows if ``valid < C``.
 3. ``TRESHAPE`` → ``K^T`` (``transpose_b`` in ``gemm_v0_accum_fp16``), then ``TEXTRACT`` K‑tiles
    into L0A/L0B and ``TMATMUL`` / ``TMATMUL_ACC`` into fp32 ``L0C`` (see ``_memory.tmatmul_kkt_l1_to_l0c``).
-4. **Cube→Vec** ``TSTORE`` — ``L0C`` fp32 → fp16 in GM **`workspace_kk`** (same GM channel as ``chunk_o`` / ``chunk_h`` workspace; double-buffer slots ``ci & 1`` on device).
+4. **Cube→Vec** ``TSTORE`` — ``L0C`` fp32 → fp16 in GM ``workspace_kk`` via ``tstore_l0c_flat`` (same GM channel as ``chunk_o`` / ``chunk_h`` workspace; double-buffer slots ``ci & 1`` on device).
 
 **Vec (``__DAV_C220_VEC__``)**
 
@@ -48,11 +48,11 @@ from ._memory import (
     alloc_l0_stripes_gemm_v0,
     alloc_l1_cd,
     tfillpad_k_l1_tail_rows,
-    tload_bsnd_chunk_rows_to_l1,
-    tload_workspace_kk_half_to_ub_rows,
+    tload,
+    tload_bsnd_rows,
     tmatmul_kkt_l1_to_l0c,
-    tstore_l0c_to_workspace_kk_half,
-    tstore_ub_half_to_gm_a_rows,
+    tstore_l0c_flat,
+    tstore_bsnd_rows,
 )
 
 
@@ -103,7 +103,7 @@ def scaled_dot_kkt_fwd(
                 valid = e - s
 
                 # ── Cube: GM → L1 → L0C → **Cube→Vec** ``TSTORE`` ``workspace_kk`` (fp16) ──
-                tload_bsnd_chunk_rows_to_l1(
+                tload_bsnd_rows(
                     k_l1,
                     k[0],
                     token_start=s,
@@ -121,14 +121,14 @@ def scaled_dot_kkt_fwd(
                     l0b_buf=l0b_buf,
                 )
 
-                tstore_l0c_to_workspace_kk_half(
+                tstore_l0c_flat(
                     workspace_kk,
                     a_l0_fp32,
-                    slot=0,
                     chunk_square=chunk_size * chunk_size,
                 )
 
-                # ── Vec: ``TLOAD`` ``workspace_kk`` → UB stripes (two ``vid`` halves), gating, ``TSTORE`` out ──
+                # ── Vec: ``TLOAD`` ``workspace_kk`` → UB ``a_ub_half``, gating in UB, ``TSTORE`` BSND out ──
+                # (coeff/mask are full-tensor Vec inputs; ``KK^T`` stripes move only via ``tload``/``tstore``.)
                 gc = gf[0, s:e, h]
                 coeff = safe_exp_torch(gc[:, None] - gc[None, :]) * bf[0, s:e, h, None]
                 mask_vv = torch.arange(valid, device=device)[:, None] > torch.arange(
@@ -139,20 +139,22 @@ def scaled_dot_kkt_fwd(
                     local_valid = min(max(valid - row_off, 0), half_c)
                     if local_valid <= 0:
                         continue
-                    tload_workspace_kk_half_to_ub_rows(
+                    tload(
                         a_ub_half,
-                        workspace_kk,
-                        row_begin=row_off,
-                        n_rows=local_valid,
-                        chunk_size=chunk_size,
+                        workspace_kk.view(chunk_size, chunk_size),
+                        direction="gm_to_ub",
+                        nrows=local_valid,
+                        ncols=chunk_size,
+                        src_row0=row_off,
                     )
                     cstripe = coeff[row_off : row_off + local_valid, :valid]
                     mstripe = mask_vv[row_off : row_off + local_valid, :]
+                    # Vec math on UB rows (``a_ub_half`` already loaded from GM via ``tload`` above).
                     gated = (
                         a_ub_half[:local_valid, :valid].float() * cstripe * mstripe.float()
                     )
                     a_ub_half_out = gated.half()
-                    tstore_ub_half_to_gm_a_rows(
+                    tstore_bsnd_rows(
                         out[0],
                         a_ub_half_out,
                         token_begin=s + row_off,

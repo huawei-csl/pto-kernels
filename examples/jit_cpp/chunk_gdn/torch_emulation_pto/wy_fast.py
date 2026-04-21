@@ -40,9 +40,9 @@ from ._memory import (
     alloc_l1_cd,
     gemm_v0_accum_fp16,
     tfillpad_k_l1_tail_rows,
-    tload_workspace_cc_half_to_l1,
+    tload,
     tmov_l1_half_rows,
-    tstore_vec_a_top_left_to_workspace_cc_half,
+    tstore,
 )
 
 
@@ -101,10 +101,21 @@ def wy_fast_fwd(
                 kb = kf[0, s:e, h, :] * bf[0, s:e, h, None] * torch.exp(gc)[:, None]
 
                 # Vec→Cube: ``TSTORE`` top-left ``A`` → ``workspace_a``; Cube ``TLOAD`` → ``a_l1``
-                tstore_vec_a_top_left_to_workspace_cc_half(
-                    workspace_a, Ab.half(), valid=valid
+                tstore(
+                    workspace_a,
+                    Ab.half(),
+                    direction="ub_to_gm",
+                    nrows=valid,
+                    ncols=valid,
+                    clear_dst=True,
                 )
-                tload_workspace_cc_half_to_l1(a_l1, workspace_a)
+                tload(
+                    a_l1,
+                    workspace_a,
+                    direction="gm_to_l1",
+                    nrows=chunk_size,
+                    ncols=chunk_size,
+                )
 
                 tmov_l1_half_rows(v_l1, vb.half(), valid_rows=valid)
                 tfillpad_k_l1_tail_rows(v_l1, valid_rows=valid, chunk_size=chunk_size)
