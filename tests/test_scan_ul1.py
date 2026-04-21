@@ -11,7 +11,7 @@ import pytest
 from pto_kernels import pto_scan_ul1
 
 
-@pytest.mark.parametrize("scan_size", [16*16])
+@pytest.mark.parametrize("scan_size", [16 * 16])
 @pytest.mark.parametrize("dtype", [torch.float32], ids=str)
 def test_pto_scan_ul1(scan_size: int, dtype: torch.dtype):
     a = torch.ones(scan_size, dtype=dtype)
@@ -23,5 +23,5 @@ def test_pto_scan_ul1(scan_size: int, dtype: torch.dtype):
 
     print("Scan result on NPU:", scan_npu.cpu())
     print("Reference result:", ref)
-    
+
     assert torch.allclose(scan_npu.cpu(), ref)

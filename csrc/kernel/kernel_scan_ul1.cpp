@@ -104,8 +104,9 @@ AICORE void runKernelScanUl1(__gm__ InputT* x, __gm__ InputT* o,
   // Move C1 from L0C to L1
   // TMOV_FLOAT(c1L1, sL0);
 
-  // Move C1 from L0C to GM  in the float case
-  // we cannot move to L1 because of downcasting
+  // Move C1 from L0C to GM, in the float case,
+  // we cannot move to L1 directly
+  // because of downcasting
   TSTORE(c1GM, sL0);
 
   // Wait for FP
@@ -126,7 +127,7 @@ AICORE void runKernelScanUl1(__gm__ InputT* x, __gm__ InputT* o,
   pipe_barrier(PIPE_M);
   TMATMUL(sL0, xL0, uL0);
 
-  // // >>>> DEBUG 
+  // // >>>> DEBUG
   // //For debugging: store C2 to GM
   // set_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
   // wait_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
@@ -166,7 +167,7 @@ AICORE void runKernelScanUl1(__gm__ InputT* x, __gm__ InputT* o,
   pipe_barrier(PIPE_M);
   TMATMUL_ACC(sL0, sL0, lL0, c1L0);
 
-  // // >>>> DEBUG 
+  // // >>>> DEBUG
   // TMATMUL(sL0, lL0, c1L0);
   // // For debugging: store L @ C1 to GM
   // set_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
@@ -213,10 +214,8 @@ AICORE void run_scan_ul1(__gm__ T* x, __gm__ T* o, __gm__ T* u, __gm__ float* l,
   }
 }
 
-extern "C" __global__ AICORE void scan_ul1_fp16(__gm__ void* x, __gm__ void*
-o,
-                                                __gm__ void* u, __gm__ void*
-                                                l,
+extern "C" __global__ AICORE void scan_ul1_fp16(__gm__ void* x, __gm__ void* o,
+                                                __gm__ void* u, __gm__ void* l,
                                                 __gm__ void* s,
                                                 uint32_t matrix_size) {
   run_scan_ul1<half>((__gm__ half*)x, (__gm__ half*)o, (__gm__ half*)u,
