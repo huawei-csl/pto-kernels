@@ -17,17 +17,19 @@ Memory / PTO mapping
 2. ``TFILLPAD`` — tail rows if ``valid < C``.
 3. ``TRESHAPE`` → ``K^T`` (``transpose_b`` in ``gemm_v0_accum_fp16``), then ``TEXTRACT`` K‑tiles
    into L0A/L0B and ``TMATMUL`` / ``TMATMUL_ACC`` into fp32 ``L0C`` (see ``_memory.tmatmul_kkt_l1_to_l0c``).
-4. ``TSTORE`` — ``L0C`` fp32 → fp16 in **workspace** GM (double-buffer slots ``ci & 1`` on device).
+4. **Cube→Vec** ``TSTORE`` — ``L0C`` fp32 → fp16 in GM **`workspace_kk`** (same GM channel as ``chunk_o`` / ``chunk_h`` workspace; double-buffer slots ``ci & 1`` on device).
 
 **Vec (``__DAV_C220_VEC__``)**
 
 5. ``TLOAD`` — causal mask stripe, ``G``, ``Beta`` rows into UB (omitted as full-tensor math).
 6. ``wait_flag_dev`` / cross-core — not emulated.
-7. ``TLOAD`` — KK^T stripe from workspace → ``a_ub_half`` ``[C/2×C]`` per sub-block.
-8. Gating + ``TMUL`` with mask; ``TSTORE`` — ``A`` BSND rows.
+7. **Vec** ``TLOAD`` — ``KK^T`` stripe from **`workspace_kk`** → ``a_ub_half`` ``[C/2×C]`` per sub-block (GM→UB).
+8. Gating + ``TMUL`` with mask; **Vec** ``TSTORE`` — ``A`` BSND rows (Vec→GM output, not Cube).
 
 ``k_l1``, ``l0c_kkt``, L0 stripes, ``workspace_kk``, and ``a_ub_half`` are **pre-allocated once**
 at the start of ``scaled_dot_kkt_fwd`` and reused for every sequence, head, and chunk.
+
+**Cube↔Vec** GM buffer: ``workspace_kk`` fp16 **``[C×C]``** — **C²/512** KiB (e.g. **32 KiB** @ C=128); Vec reads stripes into ``a_ub_half`` **``[C/2×C]``** — **C²/1024** KiB.
 
 Global tensors (Torch layout)
 -----------------------------
@@ -74,7 +76,7 @@ def scaled_dot_kkt_fwd(
 
     # L1 fp16 ``k_l1`` [C×D] — **C·D/512** KiB (e.g. **32 KiB** @ C=D=128)
     k_l1 = alloc_l1_cd(chunk_size, d, device=device, dtype=torch.float16)
-    # GM workspace fp16 [C×C] (Cube→Vec) — **C²/256** KiB (e.g. **32 KiB** @ C=128)
+    # GM ``workspace_kk`` fp16 [C×C] (Cube→Vec ``TSTORE``) — **C²/512** KiB (e.g. **32 KiB** @ C=128)
     workspace_kk = torch.empty(
         chunk_size, chunk_size, device=device, dtype=torch.float16
     )
@@ -95,7 +97,7 @@ def scaled_dot_kkt_fwd(
                 s, e = bos + j, min(bos + j + chunk_size, eos)
                 v = e - s
 
-                # ── Cube: GM → L1 → L0C → workspace (fp16) ──────────────────
+                # ── Cube: GM → L1 → L0C → **Cube→Vec** ``TSTORE`` ``workspace_kk`` (fp16) ──
                 tload_bsnd_chunk_rows_to_l1(
                     k_l1,
                     k[0],
@@ -121,7 +123,7 @@ def scaled_dot_kkt_fwd(
                     chunk_square=chunk_size * chunk_size,
                 )
 
-                # ── Vec: workspace → UB stripes (two ``vid`` halves), gating, GM store ──
+                # ── Vec: ``TLOAD`` ``workspace_kk`` → UB stripes (two ``vid`` halves), gating, ``TSTORE`` out ──
                 gc = gf[0, s:e, h]
                 coeff = safe_exp_torch(gc[:, None] - gc[None, :]) * bf[0, s:e, h, None]
                 mask_vv = torch.arange(v, device=device)[:, None] > torch.arange(

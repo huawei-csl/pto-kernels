@@ -10,11 +10,11 @@ Memory / PTO mapping (``chunk_o_kernel.cpp``)
 **Cube**
 
 1. ``TLOAD`` ``Q``, ``K`` → ``q_l1``, ``k_l1`` ``[C×D]``; ``TFILLPAD`` tail rows.
-2. ``TMATMUL`` ``QK = Q @ K^T`` → ``qk_l0`` ``[C×C]`` fp32; ``TSTORE`` workspace.
+2. ``TMATMUL`` ``QK = Q @ K^T`` → ``qk_l0`` ``[C×C]`` fp32; **Cube** ``TSTORE`` → GM ``workspace_qk_raw`` fp16.
 3. ``TLOAD`` ``S`` ``[D×D]`` → ``s_l1``.
-4. ``TMATMUL`` ``QS = Q @ S`` → ``qs_l0`` ``[C×D]``; ``TSTORE`` workspace.
-5. (Vec writes gated ``QK`` back to GM.)
-6. ``TLOAD`` ``QK_gated``, ``V`` → ``qk_gated_l1``, ``v_l1``.
+4. ``TMATMUL`` ``QS = Q @ S`` → ``qs_l0`` ``[C×D]`` (stays in L0C / UB for Vec blend; not the ``QK`` workspace path).
+5. **Vec** ``TLOAD`` raw ``QK`` from ``workspace_qk_raw``, gate + mask, **Vec** ``TSTORE`` → ``workspace_qk_gated``; **Cube** ``TLOAD`` → ``qk_gated_l1``.
+6. ``TLOAD`` ``V`` → ``v_l1`` (``QK_gated`` already in L1 from workspace).
 7. ``TMATMUL`` ``QKV = QK_gated @ V`` → ``qkv_l0`` ``[C×D]``.
 
 **Vec** applies ``exp(min(Δg,0))`` gate and causal mask (PTO recipe).
@@ -22,6 +22,10 @@ Memory / PTO mapping (``chunk_o_kernel.cpp``)
 SRAM **L1 / L0** tiles are pre-allocated once at the start of ``chunk_o_fwd`` / ``chunk_o_fwd_fla``
 and reused for every sequence, head, and chunk; data movement uses ``_memory`` helpers
 (``TLOAD``/``TFILLPAD``/``tmov_*``/``gemm_v0``).
+
+**GM workspace (Cube ↔ Vec)** — two fp16 **``[C×C]``** tiles: ``workspace_qk_raw`` (Cube→Vec raw ``QK``) and
+``workspace_qk_gated`` (Vec→Cube after gate+mask). Each: ``2·C²`` B → **C²/512** KiB (e.g. **32 KiB** @ C=128);
+**total** **C²/256** KiB for both (e.g. **64 KiB** @ C=128).
 
 Global tensors
 --------------
@@ -40,7 +44,9 @@ from ._memory import (
     tfillpad_k_l1_tail_rows,
     tload_bsnd_chunk_rows_to_l1,
     tload_gm_fp32_dd_to_l1_half,
-    tmov_l1_cc_gate_mask_from_l0c,
+    tload_workspace_qk_gated_half_to_l1,
+    tstore_l0c_qk_to_workspace_cc_raw_half,
+    vec_apply_qk_gate_workspace_cc,
 )
 
 
@@ -92,6 +98,13 @@ def chunk_o_fwd(
     # L0A/L0B fp16 stripes — **mx·K_tile/512** KiB each (e.g. **32 KiB** @ mx=K_tile=128)
     l0a_buf, l0b_buf = alloc_l0_stripes_gemm_v0(
         mx, mx, k_tile, device=device, dtype=torch.float16
+    )
+    # GM ``workspace`` fp16 [C×C] each — **C²/512** KiB per buffer (Cube↔Vec ``QK``; ``chunk_o_kernel``)
+    workspace_qk_raw = torch.empty(
+        chunk_size, chunk_size, device=device, dtype=torch.float16
+    )
+    workspace_qk_gated = torch.empty(
+        chunk_size, chunk_size, device=device, dtype=torch.float16
     )
 
     for bos, eos in ranges:
@@ -148,8 +161,21 @@ def chunk_o_fwd(
                 mask = torch.arange(vlen, device=device)[:, None] >= torch.arange(
                     vlen, device=device
                 )[None, :]
-                tmov_l1_cc_gate_mask_from_l0c(
-                    qk_gated_l1, qk_l0, gate, mask.float(), vlen=vlen
+                # Cube→Vec: ``TSTORE`` ``QK`` L0C → ``workspace_qk_raw``; Vec gate+mask → ``workspace_qk_gated``; Cube ``TLOAD`` → L1
+                tstore_l0c_qk_to_workspace_cc_raw_half(
+                    workspace_qk_raw,
+                    qk_l0,
+                    chunk_square=chunk_size * chunk_size,
+                )
+                vec_apply_qk_gate_workspace_cc(
+                    workspace_qk_gated,
+                    workspace_qk_raw,
+                    gate,
+                    mask,
+                    vlen=vlen,
+                )
+                tload_workspace_qk_gated_half_to_l1(
+                    qk_gated_l1, workspace_qk_gated, vlen=vlen
                 )
 
                 tload_bsnd_chunk_rows_to_l1(
@@ -218,6 +244,13 @@ def chunk_o_fwd_fla(
     l0a_buf, l0b_buf = alloc_l0_stripes_gemm_v0(
         mx, mx, k_tile, device=dev, dtype=torch.float16
     )
+    # GM ``workspace`` fp16 [C×C] each — **C²/512** KiB per buffer (same as ``chunk_o_fwd``)
+    workspace_qk_raw = torch.empty(
+        chunk_size, chunk_size, device=dev, dtype=torch.float16
+    )
+    workspace_qk_gated = torch.empty(
+        chunk_size, chunk_size, device=dev, dtype=torch.float16
+    )
 
     for bos, eos in ranges:
         nc = (eos - bos + chunk_size - 1) // chunk_size
@@ -272,8 +305,20 @@ def chunk_o_fwd_fla(
                 mask = torch.arange(vlen, device=q.device)[:, None] >= torch.arange(
                     vlen, device=q.device
                 )[None, :]
-                tmov_l1_cc_gate_mask_from_l0c(
-                    qk_gated_l1, qk_l0, gate, mask.float(), vlen=vlen
+                tstore_l0c_qk_to_workspace_cc_raw_half(
+                    workspace_qk_raw,
+                    qk_l0,
+                    chunk_square=chunk_size * chunk_size,
+                )
+                vec_apply_qk_gate_workspace_cc(
+                    workspace_qk_gated,
+                    workspace_qk_raw,
+                    gate,
+                    mask,
+                    vlen=vlen,
+                )
+                tload_workspace_qk_gated_half_to_l1(
+                    qk_gated_l1, workspace_qk_gated, vlen=vlen
                 )
 
                 tload_bsnd_chunk_rows_to_l1(

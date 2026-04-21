@@ -11,7 +11,7 @@ There is **no** carry across chunk boundaries.
 
 Memory / PTO mapping (``chunk_cumsum_kernel.cpp``)
 --------------------------------------------------
-**Vec-only** — no L1/L0. UB tiles ``g_ub`` / ``s_ub`` / ``acc_ub`` are **pre-allocated once** at the
+**Vec-only** — no Cube core, no L1/L0, and **no Cube↔Vec GM ``workspace``** handoff (only GM↔UB on the vector path). UB tiles ``g_ub`` / ``s_ub`` / ``acc_ub`` are **pre-allocated once** at the
 start of ``chunk_cumsum_fwd`` and reused for every sequence and chunk (same fixed SRAM budget as PTO). Data path::
 
     GM --TLOAD(MTE2)--> UB ``g_ub`` --Vec scan--> UB ``s_ub`` --TSTORE(MTE3)--> GM ``g_sum``
