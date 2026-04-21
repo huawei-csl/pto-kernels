@@ -45,16 +45,23 @@ at::Tensor run_scan_ul1(const at::Tensor& x) {
 
   const uint32_t matrix_size = ceil(sqrt(scan_size));
 
+  // FIXME: pad to support other sizes
+  if (matrix_size % 16 != 0) {
+    throw std::runtime_error(
+        "Matrix size must be a multiple of 16. Matrix size: " +
+        std::to_string(matrix_size));
+  }
+
   // FIXME: use vector or scalar cores to generate O, U and L directly on the
   // device Upper triangular matrix
   const at::Tensor u =
       torch::triu(torch::ones({matrix_size, matrix_size},
                               at::TensorOptions().dtype(dtype).device(device)));
   // Lower triangular matrix
-  const at::Tensor l = torch::tril(
-      torch::ones({matrix_size, matrix_size},
-                  at::TensorOptions().dtype(dtype_out).device(device)),
-      -1);
+  const at::Tensor l =
+      torch::tril(torch::ones({matrix_size, matrix_size},
+                              at::TensorOptions().dtype(dtype).device(device)),
+                  -1);
   // Ones matrix
   const at::Tensor o =
       torch::ones({matrix_size, matrix_size},

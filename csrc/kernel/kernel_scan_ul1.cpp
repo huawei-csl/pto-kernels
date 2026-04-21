@@ -16,7 +16,7 @@ constexpr unsigned UB_SIZE = 0x30000;  // 192KB UB of A2A3
 
 template <typename InputT, typename OutputT, uint32_t matrix_size>
 AICORE void runKernelScanUl1(__gm__ InputT* x, __gm__ InputT* o,
-                             __gm__ InputT* u, __gm__ OutputT* l,
+                             __gm__ InputT* u, __gm__ InputT* l,
                              __gm__ OutputT* s) {
 #if (__CHECK_FEATURE_AT_PRECOMPILE) || \
     (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))
@@ -47,16 +47,17 @@ AICORE void runKernelScanUl1(__gm__ InputT* x, __gm__ InputT* o,
   GlobalDataIn xGlobal(x);
   GlobalDataIn oGlobal(o);
   GlobalDataIn uGlobal(u);
-  GlobalDataOut lGlobal(l);
+  GlobalDataIn lGlobal(l);
   GlobalDataOut sGlobal(s);
-  GlobalDataOut c1GM(s);  // Reuse output buffer for intermediate result C1
+  // Reuse output buffer for intermediate result C1
+  GlobalDataIn c1GM(reinterpret_cast<__gm__ InputT*>(s));
 
   // Load data from GM to L1
   TileL1In xL1;
   TileL1In oL1;
   TileL1In uL1;
-  TileL1Out c1L1;
-  TileL1Out lL1;
+  TileL1In c1L1;
+  TileL1In lL1;
   TASSIGN(xL1, 0x0);
   const uint32_t tile_l1_in_byte_size =
       matrix_size * matrix_size * sizeof(InputT);
@@ -65,7 +66,7 @@ AICORE void runKernelScanUl1(__gm__ InputT* x, __gm__ InputT* o,
   TASSIGN(oL1, 0x0 + tile_l1_in_byte_size);
   TASSIGN(uL1, 0x0 + 2 * tile_l1_in_byte_size);
   TASSIGN(c1L1, 0x0 + 3 * tile_l1_in_byte_size);
-  TASSIGN(lL1, 0x0 + 3 * tile_l1_in_byte_size + tile_l1_out_byte_size);
+  TASSIGN(lL1, 0x0 + 4 * tile_l1_in_byte_size);
 
   TLOAD(xL1, xGlobal);
   TLOAD(oL1, oGlobal);
@@ -150,12 +151,12 @@ AICORE void runKernelScanUl1(__gm__ InputT* x, __gm__ InputT* o,
   wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);
 
   // Load Ls from L1 to L0
-  TileL0AOut lL0;
+  TileL0A lL0;
   TASSIGN(lL0, 0x0);
   TMOV(lL0, lL1);
 
   // Load C1 from L1 to L0
-  TileL0BOut c1L0;
+  TileL0B c1L0;
   TASSIGN(c1L0, 0x0);
   TMOV(c1L0, c1L1);
 
@@ -187,7 +188,7 @@ AICORE void runKernelScanUl1(__gm__ InputT* x, __gm__ InputT* o,
 }
 
 template <typename T>
-AICORE void run_scan_ul1(__gm__ T* x, __gm__ T* o, __gm__ T* u, __gm__ float* l,
+AICORE void run_scan_ul1(__gm__ T* x, __gm__ T* o, __gm__ T* u, __gm__ T* l,
                          __gm__ float* s, uint32_t matrix_size) {
   static_assert(std::is_same_v<T, half> or std::is_same_v<T, float>,
                 "scan_ul1 supports only fp16/fp32.");
@@ -199,15 +200,12 @@ AICORE void run_scan_ul1(__gm__ T* x, __gm__ T* o, __gm__ T* u, __gm__ float* l,
     case 32:
       runKernelScanUl1<T, float, 32>(x, o, u, l, s);
       break;
-
     case 64:
       runKernelScanUl1<T, float, 64>(x, o, u, l, s);
       break;
-
     case 96:
       runKernelScanUl1<T, float, 96>(x, o, u, l, s);
       break;
-
     case 128:
       runKernelScanUl1<T, float, 128>(x, o, u, l, s);
       break;
@@ -218,8 +216,8 @@ extern "C" __global__ AICORE void scan_ul1_fp16(__gm__ void* x, __gm__ void* o,
                                                 __gm__ void* u, __gm__ void* l,
                                                 __gm__ void* s,
                                                 uint32_t matrix_size) {
-  run_scan_ul1<half>((__gm__ half*)x, (__gm__ half*)o, (__gm__ half*)u,
-                     (__gm__ float*)l, (__gm__ float*)s, matrix_size);
+  run_scan_ul1((__gm__ half*)x, (__gm__ half*)o, (__gm__ half*)u,
+               (__gm__ half*)l, (__gm__ float*)s, matrix_size);
 }
 
 extern "C" __global__ AICORE void scan_ul1_fp32(__gm__ void* x, __gm__ void* o,
@@ -227,6 +225,6 @@ extern "C" __global__ AICORE void scan_ul1_fp32(__gm__ void* x, __gm__ void* o,
 
                                                 __gm__ void* l, __gm__ void* s,
                                                 uint32_t matrix_size) {
-  run_scan_ul1<float>((__gm__ float*)x, (__gm__ float*)o, (__gm__ float*)u,
-                      (__gm__ float*)l, (__gm__ float*)s, matrix_size);
+  run_scan_ul1((__gm__ float*)x, (__gm__ float*)o, (__gm__ float*)u,
+               (__gm__ float*)l, (__gm__ float*)s, matrix_size);
 }
