@@ -13,7 +13,8 @@ using namespace kernel_utils;
 using namespace pto;
 
 #include "constants.h"
-/*
+
+/**
  * @brief: Takes as input two matrices of size MatrixSize * MatrixSize each.
  * The src matrix lies in L1, while the dst matrix lies either in L0A or L0B.
  * This kernel copies only the diagonal blocks (fractals) of size FractalSize *
@@ -51,7 +52,7 @@ AICORE inline void CopyDiagonalFractalsL1ToL0(SrcL1TileT src, DstL0TileT dst) {
   }
 }
 
-/*
+/**
  * @brief: Takes as input two matrices of size MatrixSize * MatrixSize each,
  * and an integer block_size. The src matrix lies in L1, while the dst matrix
  * either in L0A or L0B. This method copies some of the diagonal blocks from the
@@ -110,7 +111,7 @@ AICORE inline void CopyOddOrEvenBlocksL1ToL0(SrcL1TileT src, DstL0TileT dst,
   }
 }
 
-/*
+/**
  * @brief: Prepares Identity and Zeros matrix.
  *
  * @tparam TileL1AB The type of the input tiles in L1.
@@ -157,7 +158,7 @@ AICORE inline void PrepareAuxiliaryMatrices(
   wait_flag(PIPE_FIX, PIPE_MTE1, static_cast<event_t>(0));
 }
 
-/*
+/**
  * @brief: Inverts a single matrix / tile of the global tensor.
  * The first part of the algorithm inverts the FractalSize * FractalSize
  * diagonal blocks of the input matrix (inv_trick part). The second phase
@@ -411,7 +412,7 @@ AICORE inline void InvertSingleTile(TileL1AB X_l1_tile, TileL1AB I_l1_tile,
   wait_flag(PIPE_FIX, PIPE_MTE1, event_1);  // Write c_l0[1] to X_l1
 }
 
-/*
+/**
  * @brief: Runs the main kernel (inverts all matrices in the tensor)
  *
  * @tparam InputT The type of the input elements.
