@@ -31,7 +31,7 @@ SINKHORN_DS_ARGTYPES = [
     ctypes.c_uint32,  # N
     ctypes.c_uint32,  # K
     ctypes.c_uint32,  # repeat
-    ctypes.c_float,   # eps
+    ctypes.c_float,  # eps
 ]
 
 

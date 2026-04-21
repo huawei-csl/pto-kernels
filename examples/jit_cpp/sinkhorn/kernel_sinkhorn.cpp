@@ -39,12 +39,13 @@ constexpr uint32_t MAX_DIM = 128;
 namespace UbOfs {
 constexpr unsigned MAT_HALF = 0;
 constexpr unsigned MAT_FP32 = MAT_HALF + MAX_DIM * MAX_DIM * sizeof(half);
-constexpr unsigned TMP      = MAT_FP32 + MAX_DIM * MAX_DIM * sizeof(float);
-constexpr unsigned VEC_BUF  = TMP + MAX_DIM * MAX_DIM * sizeof(float);
-constexpr unsigned TOTAL    = VEC_BUF + MAX_DIM * sizeof(float);
+constexpr unsigned TMP = MAT_FP32 + MAX_DIM * MAX_DIM * sizeof(float);
+constexpr unsigned VEC_BUF = TMP + MAX_DIM * MAX_DIM * sizeof(float);
+constexpr unsigned TOTAL = VEC_BUF + MAX_DIM * sizeof(float);
 }  // namespace UbOfs
 
-static_assert(UbOfs::TOTAL <= UB_USABLE_BYTES, "Sinkhorn DS UB exceeds 192 KB.");
+static_assert(UbOfs::TOTAL <= UB_USABLE_BYTES,
+              "Sinkhorn DS UB exceeds 192 KB.");
 
 #if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
 
@@ -57,7 +58,8 @@ template <typename T, uint32_t N>
 using Global1D = GlobalTensor<T, Shape<1, 1, 1, 1, N>, StrideDim5>;
 
 template <typename T, uint32_t R, uint32_t C>
-using Tile2D = Tile<TileType::Vec, T, R, C, BLayout::RowMajor, DYNAMIC, DYNAMIC>;
+using Tile2D =
+    Tile<TileType::Vec, T, R, C, BLayout::RowMajor, DYNAMIC, DYNAMIC>;
 
 using DynStride = Stride<1, 1, 1, DYNAMIC, 1>;
 template <typename T>
@@ -66,7 +68,8 @@ template <typename T, uint32_t C>
 using Global2D = GlobalTensor<T, Shape2D<T>, DynStride, Layout::ND>;
 
 template <typename T, uint32_t R>
-using ColVec = Tile<TileType::Vec, T, R, 1, BLayout::ColMajor, DYNAMIC, DYNAMIC>;
+using ColVec =
+    Tile<TileType::Vec, T, R, 1, BLayout::ColMajor, DYNAMIC, DYNAMIC>;
 
 AICORE inline void initPipeFlags() {
   set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
@@ -93,9 +96,8 @@ AICORE void colNormDiv(uint32_t K) {
 }
 
 template <typename T>
-AICORE void runSinkhornDS(__gm__ T *input, __gm__ T *output,
-                          uint32_t N, uint32_t K,
-                          uint32_t repeat, float eps) {
+AICORE void runSinkhornDS(__gm__ T *input, __gm__ T *output, uint32_t N,
+                          uint32_t K, uint32_t repeat, float eps) {
   set_mask_norm();
   set_vector_mask(-1, -1);
   if (K == 0 || K > MAX_DIM) return;
@@ -109,7 +111,7 @@ AICORE void runSinkhornDS(__gm__ T *input, __gm__ T *output,
   initPipeFlags();
 
   for (uint32_t bi = wid; bi < N; bi += num_workers) {
-    __gm__ T *gm_in  = input  + static_cast<size_t>(bi) * KK;
+    __gm__ T *gm_in = input + static_cast<size_t>(bi) * KK;
     __gm__ T *gm_out = output + static_cast<size_t>(bi) * KK;
 
     // ---- Zero fp16 buffer, then load (K, K) ----
@@ -133,7 +135,7 @@ AICORE void runSinkhornDS(__gm__ T *input, __gm__ T *output,
     wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
     // fp16 → fp32
-    Vec1D<T, MAX_DIM * MAX_DIM>     hFlat(1, flat);
+    Vec1D<T, MAX_DIM * MAX_DIM> hFlat(1, flat);
     Vec1D<float, MAX_DIM * MAX_DIM> fFlat(1, flat);
     TASSIGN(hFlat, UbOfs::MAT_HALF);
     TASSIGN(fFlat, UbOfs::MAT_FP32);
@@ -253,22 +255,26 @@ AICORE void runSinkhornDS(__gm__ T *input, __gm__ T *output,
 #endif
 
 extern "C" __global__ AICORE void sinkhorn_ds_fp16(GM_ADDR input,
-                                                    GM_ADDR output,
-                                                    uint32_t N, uint32_t K,
-                                                    uint32_t repeat,
-                                                    float eps) {
+                                                   GM_ADDR output, uint32_t N,
+                                                   uint32_t K, uint32_t repeat,
+                                                   float eps) {
 #if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
-  runSinkhornDS<half>((__gm__ half *)input, (__gm__ half *)output,
-                      N, K, repeat, eps);
+  runSinkhornDS<half>((__gm__ half *)input, (__gm__ half *)output, N, K, repeat,
+                      eps);
 #else
-  (void)input; (void)output; (void)N; (void)K; (void)repeat; (void)eps;
+  (void)input;
+  (void)output;
+  (void)N;
+  (void)K;
+  (void)repeat;
+  (void)eps;
 #endif
 }
 
 extern "C" void call_sinkhorn_ds_kernel(uint32_t blockDim, void *stream,
                                         uint8_t *input, uint8_t *output,
-                                        uint32_t N, uint32_t K,
-                                        uint32_t repeat, float eps) {
-  sinkhorn_ds_fp16<<<blockDim * 2, nullptr, stream>>>(
-      input, output, N, K, repeat, eps);
+                                        uint32_t N, uint32_t K, uint32_t repeat,
+                                        float eps) {
+  sinkhorn_ds_fp16<<<blockDim * 2, nullptr, stream>>>(input, output, N, K,
+                                                      repeat, eps);
 }

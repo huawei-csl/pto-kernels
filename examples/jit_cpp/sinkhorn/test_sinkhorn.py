@@ -8,6 +8,7 @@ Reference: DeepSeek MHC sinkhorn_normalize_ref
       x = x / (x.sum(-1, keepdim=True) + eps)
       x = x / (x.sum(-2, keepdim=True) + eps)
 """
+
 from pathlib import Path
 
 import pytest

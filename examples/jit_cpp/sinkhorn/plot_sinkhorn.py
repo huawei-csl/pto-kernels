@@ -66,6 +66,63 @@ def _parse_args():
     return add_common_plot_args(parser).parse_args()
 
 
+def _make_2x3_line_plot(
+    rows, block_dim, output_path, series, y_label, title, log_y=False
+):
+    """2x3 subplot grid with optional log y-scale."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib import ticker
+    from plot_common import (
+        group_by_batch,
+        normalize_axes,
+        save_figure,
+        format_log2_ticks,
+    )
+
+    batches = sorted({int(row["batch"]) for row in rows})
+    grouped = group_by_batch(rows, [key for key, _, _, _ in series])
+
+    fig, axes = plt.subplots(2, 3, figsize=(13.5, 7.2))
+    axes = normalize_axes(axes)
+
+    for idx, batch in enumerate(batches):
+        if idx >= len(axes):
+            break
+        ax = axes[idx]
+        ns = sorted(grouped[batch].keys())
+        for key, label, color, style in series:
+            ax.plot(
+                ns,
+                [grouped[batch][n][key] for n in ns],
+                style,
+                color=color,
+                label=label,
+                linewidth=2,
+                markersize=5,
+            )
+        ax.set_xscale("log", base=2)
+        if log_y:
+            ax.set_yscale("log")
+        ax.set_title(f"batch = {batch}", fontsize=11, fontweight="bold")
+        ax.set_xlabel("N")
+        ax.set_ylabel(y_label)
+        ax.xaxis.set_major_formatter(ticker.FuncFormatter(format_log2_ticks))
+        ax.grid(True, alpha=0.3)
+        if idx == 0:
+            ax.legend(fontsize=8)
+
+    for idx in range(len(batches), len(axes)):
+        axes[idx].set_visible(False)
+
+    fig.suptitle(f"{title} (BLOCK_DIM={block_dim})", fontsize=14, fontweight="bold")
+    fig.tight_layout()
+    save_figure(fig, output_path)
+    plt.close(fig)
+
+
 def plot_sinkhorn(csv_path: Path, plot_dir: Path):
     if not ensure_matplotlib():
         return
@@ -77,18 +134,35 @@ def plot_sinkhorn(csv_path: Path, plot_dir: Path):
     block_dim = block_dim_from_path(csv_path, CSV_PREFIX)
     ensure_plot_dir(plot_dir)
 
-    for plot in (DURATION_LINE_PLOT, BANDWIDTH_LINE_PLOT):
-        make_batched_line_plot(
-            rows, block_dim,
-            plot_dir / plot["filename"].format(block_dim=block_dim),
-            plot["series"], plot["y_label"], plot["title"],
-        )
+    # Duration: log y-scale, 2x3 layout
+    _make_2x3_line_plot(
+        rows,
+        block_dim,
+        plot_dir / DURATION_LINE_PLOT["filename"].format(block_dim=block_dim),
+        DURATION_LINE_PLOT["series"],
+        DURATION_LINE_PLOT["y_label"],
+        DURATION_LINE_PLOT["title"],
+        log_y=True,
+    )
+
+    # Bandwidth: linear y-scale, 2x3 layout
+    _make_2x3_line_plot(
+        rows,
+        block_dim,
+        plot_dir / BANDWIDTH_LINE_PLOT["filename"].format(block_dim=block_dim),
+        BANDWIDTH_LINE_PLOT["series"],
+        BANDWIDTH_LINE_PLOT["y_label"],
+        BANDWIDTH_LINE_PLOT["title"],
+        log_y=False,
+    )
 
     for heatmap in HEATMAPS:
         make_speedup_heatmap(
-            rows, block_dim,
+            rows,
+            block_dim,
             plot_dir / heatmap["filename"].format(block_dim=block_dim),
-            heatmap["key"], heatmap["title"],
+            heatmap["key"],
+            heatmap["title"],
             colorbar_label=heatmap.get("colorbar_label", "log2(speedup)"),
         )
 
@@ -102,8 +176,10 @@ def main():
     plot_dir = resolve_dir_arg(base, args.plot_dir)
 
     plot_csv_collection(
-        csv_dir, plot_dir,
-        pattern=CSV_PATTERN, prefix=CSV_PREFIX,
+        csv_dir,
+        plot_dir,
+        pattern=CSV_PATTERN,
+        prefix=CSV_PREFIX,
         warning="no Sinkhorn benchmark CSV files found",
         plot_csv_fn=plot_sinkhorn,
     )

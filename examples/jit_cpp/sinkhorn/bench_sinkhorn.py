@@ -65,12 +65,16 @@ def _parse_args():
         description="Benchmark PTO Sinkhorn (doubly-stochastic) against PyTorch reference."
     )
     parser.add_argument(
-        "--no-cache-stream", dest="cache_stream", action="store_false",
+        "--no-cache-stream",
+        dest="cache_stream",
+        action="store_false",
         help="Disable cached stream pointer reuse for PTO launches.",
     )
     parser.set_defaults(cache_stream=True)
     return add_common_benchmark_args(
-        parser, default_warmup=DEFAULT_WARMUP, default_repeats=DEFAULT_REPEATS,
+        parser,
+        default_warmup=DEFAULT_WARMUP,
+        default_repeats=DEFAULT_REPEATS,
     ).parse_args()
 
 
@@ -85,19 +89,29 @@ def _effective_bandwidth_gbs(batch, K, duration_us):
 def _make_shape_pools(batch, K, warmup, repeats, device):
     return {
         "x": make_buffer_pool(
-            warmup, repeats,
+            warmup,
+            repeats,
             lambda: torch.randn(batch, K, K, device=device, dtype=torch.float16),
         ),
         "y": make_buffer_pool(
-            warmup, repeats,
+            warmup,
+            repeats,
             lambda: torch.empty(batch, K, K, device=device, dtype=torch.float16),
         ),
     }
 
 
 def benchmark(
-    sinq_func, *, warmup, repeats, trials, output_dir, device, batches,
-    hidden_dims, stream_ptr=None,
+    sinq_func,
+    *,
+    warmup,
+    repeats,
+    trials,
+    output_dir,
+    device,
+    batches,
+    hidden_dims,
+    stream_ptr=None,
 ):
     ensure_output_dir(output_dir)
     block_dim = sinq_func.block_dim
@@ -123,10 +137,13 @@ def benchmark(
             pto_stats = benchmark_trials_us(
                 trials,
                 lambda x_list=x_list, y_list=y_list: benchmark_npu_us(
-                    warmup, repeats,
+                    warmup,
+                    repeats,
                     lambda i: sinq_func(
-                        pool_item(x_list, i), pool_item(y_list, i),
-                        repeat=SINKHORN_REPEAT, eps=SINKHORN_EPS,
+                        pool_item(x_list, i),
+                        pool_item(y_list, i),
+                        repeat=SINKHORN_REPEAT,
+                        eps=SINKHORN_EPS,
                         stream_ptr=stream_ptr,
                     ),
                 ),
@@ -134,10 +151,12 @@ def benchmark(
             torch_stats = benchmark_trials_us(
                 trials,
                 lambda x_list=x_list: benchmark_npu_us(
-                    warmup, repeats,
+                    warmup,
+                    repeats,
                     lambda i: sinkhorn_ref(
                         pool_item(x_list, i),
-                        repeat=SINKHORN_REPEAT, eps=SINKHORN_EPS,
+                        repeat=SINKHORN_REPEAT,
+                        eps=SINKHORN_EPS,
                     ),
                 ),
             )
