@@ -87,17 +87,27 @@ def r2_score_vs_ref(y_ref: torch.Tensor, y: torch.Tensor) -> float:
     pred = np.asarray(y.detach().cpu().numpy().ravel(), dtype=np.float64)
     ss_res = float(np.sum((ref - pred) ** 2))
     ss_tot = float(np.sum((ref - np.mean(ref)) ** 2))
-    if ss_tot <= 1e-30 * max(ref.size, 1):
-        return float("nan")
+    n = max(ref.size, 1)
+    eps = 1e-30 * n
+    if ss_tot <= eps:
+        # ``chunk_h_states`` (and similar) can be **all zeros** when every chunk’s pre-state ``S`` is
+        # zero — then total variance is 0 and the usual R² is undefined. Convention: 1.0 if no residual.
+        return 1.0 if ss_res <= eps else 0.0
     return 1.0 - ss_res / ss_tot
 
 
 def pearson_r(x: torch.Tensor, y: torch.Tensor) -> float:
     a = np.asarray(x.detach().cpu().numpy().ravel(), dtype=np.float64)
     b = np.asarray(y.detach().cpu().numpy().ravel(), dtype=np.float64)
-    if a.size < 2:
+    if a.size == 0:
         return float("nan")
-    if np.std(a) < 1e-15 or np.std(b) < 1e-15:
+    if a.size == 1:
+        return 1.0 if np.isclose(a[0], b[0], rtol=0.0, atol=1e-12) else float("nan")
+    std_a, std_b = float(np.std(a)), float(np.std(b))
+    if std_a < 1e-15 and std_b < 1e-15:
+        # Both constant (e.g. all-zero ``h_states``): ρ = 1 if identical, else undefined → 0.0
+        return 1.0 if np.allclose(a, b, rtol=0.0, atol=1e-12) else 0.0
+    if std_a < 1e-15 or std_b < 1e-15:
         return float("nan")
     with np.errstate(invalid="ignore", divide="ignore"):
         c = np.corrcoef(a, b)
