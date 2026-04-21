@@ -49,6 +49,7 @@ AICORE void runKernelScanUl1(__gm__ InputT* x, __gm__ InputT* o,
   GlobalDataIn uGlobal(u);
   GlobalDataOut lGlobal(l);
   GlobalDataOut sGlobal(s);
+  GlobalDataOut c1GM(s);  // Reuse output buffer for intermediate result C1
 
   // Load data from GM to L1
   TileL1In xL1;
@@ -101,7 +102,11 @@ AICORE void runKernelScanUl1(__gm__ InputT* x, __gm__ InputT* o,
   wait_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
 
   // Move C1 from L0C to L1
-  TMOV(c1L1, sL0);
+  // TMOV_FLOAT(c1L1, sL0);
+
+  // Move C1 from L0C to GM  in the float case
+  // we cannot move to L1 because of downcasting
+  TSTORE(c1GM, sL0);
 
   // Wait for FP
   set_flag(PIPE_FIX, PIPE_MTE1, EVENT_ID0);
@@ -112,9 +117,32 @@ AICORE void runKernelScanUl1(__gm__ InputT* x, __gm__ InputT* o,
   TASSIGN(uL0, 0x0);
   TMOV(uL0, uL1);
 
+  // Cube unit waits for MTE1
+  set_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+  wait_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+
   // Int the paper notation C2 = A @ U
   // row-wise inclusive scan for the A tile
+  pipe_barrier(PIPE_M);
   TMATMUL(sL0, xL0, uL0);
+
+  // // >>>> DEBUG 
+  // //For debugging: store C2 to GM
+  // set_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
+  // wait_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
+  // TSTORE(c1GM, sL0);
+  // // <<<< DEBUG
+
+  // Wait for store to complete before loading C1
+  set_flag(PIPE_FIX, PIPE_MTE2, EVENT_ID0);
+  wait_flag(PIPE_FIX, PIPE_MTE2, EVENT_ID0);
+
+  // Load C1 from GM to L1
+  TLOAD(c1L1, c1GM);
+
+  // Wait for load to be complete before moving C1 to L0
+  set_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID1);
+  wait_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID1);
 
   // Wait for matmul to complet before loading Ls and C1
   set_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);
@@ -135,7 +163,16 @@ AICORE void runKernelScanUl1(__gm__ InputT* x, __gm__ InputT* o,
   wait_flag(PIPE_MTE1, PIPE_M, EVENT_ID1);
 
   // In the paper notation C2 += Ls @ C1
+  pipe_barrier(PIPE_M);
   TMATMUL_ACC(sL0, sL0, lL0, c1L0);
+
+  // // >>>> DEBUG 
+  // TMATMUL(sL0, lL0, c1L0);
+  // // For debugging: store L @ C1 to GM
+  // set_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
+  // wait_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
+  // TSTORE(sGlobal, sL0);
+  // // <<<< DEBUG
 
   // Wait for matmul to complete before storing result back to GM
   set_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
@@ -176,8 +213,10 @@ AICORE void run_scan_ul1(__gm__ T* x, __gm__ T* o, __gm__ T* u, __gm__ float* l,
   }
 }
 
-extern "C" __global__ AICORE void scan_ul1_fp16(__gm__ void* x, __gm__ void* o,
-                                                __gm__ void* u, __gm__ void* l,
+extern "C" __global__ AICORE void scan_ul1_fp16(__gm__ void* x, __gm__ void*
+o,
+                                                __gm__ void* u, __gm__ void*
+                                                l,
                                                 __gm__ void* s,
                                                 uint32_t matrix_size) {
   run_scan_ul1<half>((__gm__ half*)x, (__gm__ half*)o, (__gm__ half*)u,

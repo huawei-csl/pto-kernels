@@ -53,7 +53,7 @@ at::Tensor run_scan_ul1(const at::Tensor& x) {
   // Lower triangular matrix
   const at::Tensor l = torch::tril(
       torch::ones({matrix_size, matrix_size},
-                  at::TensorOptions().dtype(dtype_out).device(device)));
+                  at::TensorOptions().dtype(dtype_out).device(device)), -1);
   // Ones matrix
   const at::Tensor o = torch::ones({matrix_size, matrix_size},
                                   at::TensorOptions().dtype(dtype).device(device)); 
