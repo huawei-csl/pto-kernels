@@ -60,17 +60,20 @@ at::Tensor run_tri_inv_ns(const at::Tensor& M, uint32_t num_iters = 0,
 
   if (num_iters == 0) {
     num_iters = static_cast<uint32_t>(std::ceil(2.0f * std::log2(n)));
-    num_iters = std::max<uint32_t>(num_iters, 8);
+    num_iters = std::max<uint32_t>(num_iters, 12);
   }
-
-  const at::Tensor I_neg = -at::eye(n, M.options());
+  uint32_t block_dim = GetNumCubeCores();
+  if (num_matrices < block_dim) {
+    block_dim = num_matrices;
+  }
+  const at::Tensor I_neg = -1 * at::eye(n, M.options());
   const at::Tensor I_scaled = I_neg / (-scale_value);
 
   const at::Tensor M_inv =
       at::zeros_like(M, at::TensorOptions().dtype(dtype_out).device(device));
 
-  EXEC_KERNEL_CMD(tri_inv_ns_fp16, num_matrices, M_inv, M, I_neg, I_scaled, n,
-                  num_iters);
+  EXEC_KERNEL_CMD(tri_inv_ns_fp16, block_dim, M_inv, M, I_neg, I_scaled, n,
+                  num_iters, num_matrices);
 
   return M_inv;
 }

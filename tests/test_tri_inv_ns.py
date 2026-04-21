@@ -88,7 +88,8 @@ def _test_tri_inv_ns(
     U_npu = U.npu()
 
     torch.npu.synchronize()
-    num_iters = int(4.0 * math.ceil(math.log2(U.shape[-1])))
+    num_iters = max([int(2.0 * math.ceil(math.log2(U.shape[-1]))), 12])
+    # num_iters = 1
     actual = pto_tri_inv_ns(U_npu, num_iters=num_iters)
     torch.npu.synchronize()
 
@@ -101,6 +102,7 @@ def _test_tri_inv_ns(
 
     actual_numpy = actual_cpu.numpy()
     golden_numpy = golden_cpu.numpy()
+
     assert np.allclose(
         actual_numpy, golden_numpy, atol=atol, rtol=rtol
     ), f"Error at allclose - tensor shape: {U.shape} - rtol: {rtol}."
