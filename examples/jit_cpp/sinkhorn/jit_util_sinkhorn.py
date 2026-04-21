@@ -38,7 +38,6 @@ SINKHORN_DS_ARGTYPES = [
 def _validate(input_tensor, output_tensor, K):
     if input_tensor.dim() != 3:
         raise ValueError("input must be 3D (N, K, K).")
-    N = input_tensor.shape[0]
     if input_tensor.shape[1] != K or input_tensor.shape[2] != K:
         raise ValueError(f"input must have shape (N, {K}, {K}).")
     if output_tensor.shape != input_tensor.shape:

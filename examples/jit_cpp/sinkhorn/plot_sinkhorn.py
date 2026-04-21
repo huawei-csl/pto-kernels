@@ -20,7 +20,6 @@ from plot_common import (  # noqa: E402
     ensure_matplotlib,
     ensure_plot_dir,
     load_nonempty_rows,
-    make_batched_line_plot,
     make_speedup_heatmap,
     plot_csv_collection,
     resolve_dir_arg,
