@@ -490,8 +490,8 @@ AICORE inline void InvertSingleTile(TileL1AB X_l1_tile, TileL1AB I_l1_tile,
  * @param num_bsnd_heads The number of heads, only for BSND format.
  */
 template <typename InputT, typename OutputT, uint32_t MatrixSize,
-          uint32_t NumTilesPerCubeIter, bool IsBSND>
-AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
+          uint32_t NumTilesPerCubeIter, bool IsBSND, typename StoreT = OutputT>
+AICORE inline void TriInvRecUnrollKernel(__gm__ StoreT* M_inv,
                                          __gm__ InputT* M, __gm__ InputT* I_neg,
                                          uint32_t total_tiles,
                                          uint32_t num_bsnd_heads = 0,
@@ -524,14 +524,14 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
                                       GlobalTileStridesINeg, Layout::ND>;
 
   using GlobalTileShapeOut =
-      TileShape2D<OutputT, MatrixSize, MatrixSize, Layout::ND>;
+      TileShape2D<StoreT, MatrixSize, MatrixSize, Layout::ND>;
   using GlobalTileStridesOut = typename std::conditional<
-      !IsBSND, BaseShape2D<OutputT, MatrixSize, MatrixSize, Layout::ND>,
+      !IsBSND, BaseShape2D<StoreT, MatrixSize, MatrixSize, Layout::ND>,
       Stride<1, 1, 1, -1, 1>>::type;
-  using GlobalTileOut = GlobalTensor<OutputT, GlobalTileShapeOut,
+  using GlobalTileOut = GlobalTensor<StoreT, GlobalTileShapeOut,
                                      GlobalTileStridesOut, Layout::ND>;
   using GlobalTileDynamicOut =
-      GlobalTensor<OutputT, GlobalTileDynamicShape, GlobalTileDynamicStride,
+      GlobalTensor<StoreT, GlobalTileDynamicShape, GlobalTileDynamicStride,
                    Layout::ND>;
   using TileL1AB =
       Tile<TileType::Mat, InputT, MatrixSize, MatrixSize, BLayout::ColMajor,
@@ -707,8 +707,8 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
  * @brief: Computes the inverses of the blocks of tensor M
  */
 template <typename InputT, typename OutputT, uint32_t MatrixSize,
-          uint32_t NumTilesPerCubeIter, bool IsBSND>
-AICORE void runKernelTriInvRecUnroll(__gm__ OutputT* M_inv, __gm__ InputT* M,
+          uint32_t NumTilesPerCubeIter, bool IsBSND, typename StoreT = OutputT>
+AICORE void runKernelTriInvRecUnroll(__gm__ StoreT* M_inv, __gm__ InputT* M,
                                      __gm__ InputT* I_neg, uint32_t total_tiles,
                                      uint32_t num_bsnd_heads = 0,
                                      __gm__ int32_t* cu_seqlens = nullptr,
@@ -717,7 +717,7 @@ AICORE void runKernelTriInvRecUnroll(__gm__ OutputT* M_inv, __gm__ InputT* M,
     (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))  // Cube compilation
 
   TriInvRecUnrollKernel<InputT, OutputT, MatrixSize, NumTilesPerCubeIter,
-                        IsBSND>(M_inv, M, I_neg, total_tiles, num_bsnd_heads,
+                        IsBSND, StoreT>(M_inv, M, I_neg, total_tiles, num_bsnd_heads,
                                 cu_seqlens, is_lower);
 #else
 // Nothing to do on AIV
