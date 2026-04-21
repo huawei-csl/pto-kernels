@@ -1,5 +1,5 @@
 """
-Performance benchmark for triangular inverse recursive unroll kernel comparing bf16 and fp16 data types.
+Performance benchmark for triangular inverse recursive unroll kernel.
 """
 
 import matplotlib.pyplot as plt
