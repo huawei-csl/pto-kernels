@@ -14,6 +14,24 @@ using namespace pto;
 
 constexpr unsigned UB_SIZE = 0x30000;  // 192KB UB of A2A3
 
+/**
+ * @brief Kernel implementation for scan operation on a single cube.
+ *
+ * The implemetation follows the ScanUL1 algorithm described in [1]
+ *
+ * [1] Parallel Scan on Ascend AI Accelerators
+ * (https://arxiv.org/abs/2505.15112v1).
+ *
+ * @tparam InputT Input data type. Supports `fp16` or `fp32`
+ * @tparam OutputT Output data type 'fp32`
+ * @tparam matrix_size Size of the square matrix
+ *
+ * @param x Input matrix in GM
+ * @param o Ones matrix in GM
+ * @param u Upper triangular matrix in GM
+ * @param l Lower triangular matrix in GM
+ * @param s Output matrix in GM, also used as intermediate buffer for C1
+ */
 template <typename InputT, typename OutputT, uint32_t matrix_size>
 AICORE void runKernelScanUl1(__gm__ InputT* x, __gm__ InputT* o,
                              __gm__ InputT* u, __gm__ InputT* l,
