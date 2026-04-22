@@ -49,8 +49,8 @@ TEST_SHAPES = [
 TEST_REPEATS = [1, 5, 10]
 TEST_SEEDS = [0, 42]
 TEST_CASES = [
-    (N, K, repeat, seed)
-    for N, K in TEST_SHAPES
+    (batch, K, repeat, seed)
+    for batch, K in TEST_SHAPES
     for repeat in TEST_REPEATS
     for seed in TEST_SEEDS
 ]
@@ -61,10 +61,12 @@ def sinkhorn_kernel(npu_device):
     return jit_compile(str(KERNEL_CPP), verbose=True, device=npu_device)
 
 
-@pytest.mark.parametrize("N,K,repeat,seed", TEST_CASES)
-def test_sinkhorn_ds_matches_reference(sinkhorn_kernel, npu_device, N, K, repeat, seed):
+@pytest.mark.parametrize("batch,K,repeat,seed", TEST_CASES)
+def test_sinkhorn_ds_matches_reference(
+    sinkhorn_kernel, npu_device, batch, K, repeat, seed
+):
     torch.manual_seed(seed)
-    x = torch.randn(N, K, K, device=npu_device, dtype=DTYPE)
+    x = torch.randn(batch, K, K, device=npu_device, dtype=DTYPE)
     out = torch.empty_like(x)
 
     sinkhorn_kernel(x, out, repeat=repeat, eps=1e-6)

@@ -208,8 +208,14 @@ def main():
     if stream_ptr is not None:
         print("Using cached NPU stream pointer for PTO launches.")
 
-    # Override default grids for sinkhorn: batch=N (matrices), K=dim
-    batches = args.batches if args.batches else [1, 4, 8, 16, 32, 64]
+    # Default: mHC use case (hc_mult=4, varying num_tokens).
+    # In DeepSeek MHC, sinkhorn always runs on (num_tokens, 4, 4) matrices.
+    # Pass --hidden-dims to benchmark other K values (general fallback path).
+    batches = (
+        args.batches
+        if args.batches
+        else [1, 4, 16, 64, 256, 512, 1024, 2048, 4096, 8192]
+    )
     dims = args.hidden_dims if args.hidden_dims else [4, 8, 16, 32, 64, 128]
 
     benchmark(

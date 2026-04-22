@@ -65,10 +65,10 @@ def _parse_args():
     return add_common_plot_args(parser).parse_args()
 
 
-def _make_2x3_line_plot(
+def _make_per_batch_line_plot(
     rows, block_dim, output_path, series, y_label, title, log_y=False
 ):
-    """2x3 subplot grid with optional log y-scale."""
+    """One subplot per batch size, x-axis = K."""
     import matplotlib
 
     matplotlib.use("Agg")
@@ -84,7 +84,9 @@ def _make_2x3_line_plot(
     batches = sorted({int(row["batch"]) for row in rows})
     grouped = group_by_batch(rows, [key for key, _, _, _ in series])
 
-    fig, axes = plt.subplots(2, 3, figsize=(13.5, 7.2))
+    ncols = min(len(batches), 4)
+    nrows = (len(batches) + ncols - 1) // ncols
+    fig, axes = plt.subplots(nrows, ncols, figsize=(2.8 * ncols, 2.8 * nrows))
     axes = normalize_axes(axes)
 
     for idx, batch in enumerate(batches):
@@ -106,7 +108,7 @@ def _make_2x3_line_plot(
         if log_y:
             ax.set_yscale("log")
         ax.set_title(f"batch = {batch}", fontsize=11, fontweight="bold")
-        ax.set_xlabel("N")
+        ax.set_xlabel("K")
         ax.set_ylabel(y_label)
         ax.xaxis.set_major_formatter(ticker.FuncFormatter(format_log2_ticks))
         ax.grid(True, alpha=0.3)
@@ -134,7 +136,7 @@ def plot_sinkhorn(csv_path: Path, plot_dir: Path):
     ensure_plot_dir(plot_dir)
 
     # Duration: log y-scale, 2x3 layout
-    _make_2x3_line_plot(
+    _make_per_batch_line_plot(
         rows,
         block_dim,
         plot_dir / DURATION_LINE_PLOT["filename"].format(block_dim=block_dim),
@@ -145,7 +147,7 @@ def plot_sinkhorn(csv_path: Path, plot_dir: Path):
     )
 
     # Bandwidth: linear y-scale, 2x3 layout
-    _make_2x3_line_plot(
+    _make_per_batch_line_plot(
         rows,
         block_dim,
         plot_dir / BANDWIDTH_LINE_PLOT["filename"].format(block_dim=block_dim),
