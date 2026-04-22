@@ -1,8 +1,19 @@
 /**
- * Lower triangular all-ones matrices statically allocated in the binary of the
+Copyright (c) 2026 Huawei Technologies Co., Ltd.
+All rights reserved.
+
+See LICENSE in the root of the software repository:
+https://github.com/huawei-csl/pto-kernels/
+for the full License text.
+*/
+
+/**
+ * Minus identity matrices statically allocated in the binary of the
  * kernel.
  *
- * To generate these matrices:
+ * To generate these matrices below, you can run the following Python code and
+copy-paste the output into this file. Each matrix is stored in row-major order,
+and has a trailing comma after each row to facilitate copy-pasting.:
  *
  *
 ```python
