@@ -7,8 +7,9 @@ https://github.com/huawei-csl/pto-kernels/
 for the full License text.
 */
 
-#include "kernel_utils.h"
 #include <pto/pto-inst.hpp>
+
+#include "kernel_utils.h"
 
 using namespace pto;
 

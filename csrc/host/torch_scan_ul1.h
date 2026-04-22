@@ -54,7 +54,7 @@ at::Tensor run_scan_ul1(const at::Tensor& x) {
 
   // FIXME: use vector or scalar cores to generate O, U and L directly on the
   // device
-  
+
   // Ones matrix
   const at::Tensor o =
       torch::ones({matrix_size, matrix_size},
@@ -62,8 +62,7 @@ at::Tensor run_scan_ul1(const at::Tensor& x) {
   // Upper triangular matrix
   const at::Tensor u = torch::triu(o);
   // Lower triangular matrix
-  const at::Tensor l =
-      torch::tril(o, -1);
+  const at::Tensor l = torch::tril(o, -1);
 
   if (dtype == at::kHalf) {
     EXEC_KERNEL_CMD(scan_ul1_fp16, block_dim, x, o, u, l, scan, matrix_size);
