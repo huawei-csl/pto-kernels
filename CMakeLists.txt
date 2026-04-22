@@ -114,6 +114,7 @@ ascendc_library(
   csrc/kernel/kernel_tri_inv_col_sweep.cpp
   csrc/kernel/kernel_abs.cpp
   csrc/kernel/kernel_csr_gather.cpp
+  csrc/kernel/kernel_scan_ul1.cpp
   csrc/kernel/kernel_simple_matmul.cpp
   csrc/kernel/kernel_batch_matrix_square.cpp
   csrc/kernel/kernel_tri_inv_ns.cpp
