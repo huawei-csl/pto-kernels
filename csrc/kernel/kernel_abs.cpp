@@ -22,8 +22,6 @@ using namespace pto;
  */
 template <typename T, uint32_t TILE_SIZE>
 AICORE void runTAbs(__gm__ T* x, __gm__ T* z, uint32_t total_size) {
-#if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
-
   // Define GM tile type
   using ShapeDim5 = pto::Shape<1, 1, 1, 1, DYNAMIC>;
   using StrideDim5 = pto::Stride<1, 1, 1, 1, 1>;
@@ -105,7 +103,6 @@ AICORE void runTAbs(__gm__ T* x, __gm__ T* z, uint32_t total_size) {
   // Cleanup flags
   wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
   wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
-#endif
 }
 
 extern "C" __global__ AICORE void vabs_fp16(GM_ADDR x, GM_ADDR z,

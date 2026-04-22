@@ -13,6 +13,7 @@ for the full License text.
 #define MEMORY_BASE
 #endif
 #include <pto/pto-inst.hpp>
+#include <type_traits>
 
 // clang-format off: so it does not get wrongfully flagged by linter
 #ifndef GM_ADDR

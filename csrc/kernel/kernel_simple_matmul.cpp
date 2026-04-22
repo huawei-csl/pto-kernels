@@ -26,9 +26,6 @@ AICORE inline void WaitFlag(uint32_t id) {
 template <typename InputT, typename OutputT, uint32_t matrix_size>
 AICORE void runKernelSimpleMatMul(__gm__ InputT* a, __gm__ InputT* b,
                                   __gm__ OutputT* c) {
-#if (__CHECK_FEATURE_AT_PRECOMPILE) || \
-    (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))
-
   constexpr uint32_t tile_len = matrix_size * matrix_size;
 
   /* Global Memory / Tensors */
@@ -97,7 +94,6 @@ AICORE void runKernelSimpleMatMul(__gm__ InputT* a, __gm__ InputT* b,
   SetFlag<PIPE_M, PIPE_FIX>(0);   // M pipe sets flag for FIX pipe
   WaitFlag<PIPE_M, PIPE_FIX>(0);  // FIX pipe waits for M pipe to set flag
   TSTORE(c_global_out, c_l0_tile);
-#endif
 }
 
 template <typename T>
