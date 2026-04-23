@@ -160,11 +160,11 @@ def test_tri_inv_rec_unroll(
     n: int,
     block_dim_x: int,
     block_dim_y: int,
+    dtype: torch.dtype,
     matrix_gen: Callable,
     atol: float,
     rtol: float,
     ftol: float,
-    dtype: torch.dtype,
 ):
     U = matrix_gen(n, block_dim_x, block_dim_y)
     _test_tri_inv_rec_unroll(U, atol, rtol, ftol, dtype)
@@ -173,7 +173,7 @@ def test_tri_inv_rec_unroll(
 @pytest.mark.parametrize("B", [1, 4])
 @pytest.mark.parametrize("S", [128, 256, 1024])
 @pytest.mark.parametrize("N", [4, 8])
-@pytest.mark.parametrize("D", [16, 32, 64, 128])
+@pytest.mark.parametrize("C", [16, 32, 64, 128])
 @pytest.mark.parametrize(
     "matrix_gen,atol,rtol,ftol,dtype",
     [
@@ -191,15 +191,15 @@ def test_tri_inv_rec_unroll_bsnd(
     B: int,
     S: int,
     N: int,
-    D: int,
+    C: int,
+    dtype: torch.dtype,
     matrix_gen: Callable,
     atol: float,
     rtol: float,
     ftol: float,
-    dtype: torch.dtype,
 ):
     # only test cases where the sequence length is a multiple of the chunk size are accepted
-    if S % D != 0:
-        pytest.skip("Sequence length must be a multiple of chunk size D.")
-    U = matrix_gen(D, B * S // D, N)
-    _test_tri_inv_rec_unroll_bsnd(U, B, S, N, D, atol, rtol, ftol, dtype)
+    if S % C != 0:
+        pytest.skip("Sequence length must be a multiple of chunk size C.")
+    U = matrix_gen(C, B * S // C, N)
+    _test_tri_inv_rec_unroll_bsnd(U, B, S, N, C, atol, rtol, ftol, dtype)

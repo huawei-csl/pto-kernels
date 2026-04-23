@@ -11,6 +11,7 @@ for the full License text.
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
+#include "aclrtlaunch_tri_inv_rec_unroll_bf16.h"
 #include "aclrtlaunch_tri_inv_rec_unroll_fp16.h"
 #include "utils.h"
 
@@ -36,10 +37,6 @@ at::Tensor run_tri_inv_rec_unroll(
   const auto dtype = M.options().dtype();
   const auto dtype_out = at::kFloat;
 
-  at::Tensor M_half;
-  if (dtype == at::kBFloat16) {
-    M_half = M.to(at::kHalf);
-  }
   if ((dtype != at::kHalf) and (dtype != at::kBFloat16)) {
     throw std::runtime_error(
         "Unsupported dtype for tri_inv_rec_unroll kernel. Supports only "
@@ -74,7 +71,7 @@ at::Tensor run_tri_inv_rec_unroll(
 
   const at::Tensor I_neg =
       at::zeros({matrix_size, matrix_size},
-                at::TensorOptions().dtype(at::kHalf).device(device));
+                at::TensorOptions().dtype(dtype).device(device));
   I_neg.fill_diagonal_(-1);
 
   void* cu_seqlens_ptr = nullptr;
@@ -83,7 +80,7 @@ at::Tensor run_tri_inv_rec_unroll(
   }
 
   if (dtype == at::kBFloat16) {
-    EXEC_KERNEL_CMD(tri_inv_rec_unroll_fp16, block_dim, M_inv, M_half, I_neg,
+    EXEC_KERNEL_CMD(tri_inv_rec_unroll_bf16, block_dim, M_inv, M, I_neg,
                     matrix_size, total_tiles, num_bsnd_heads, cu_seqlens_ptr);
   } else if (dtype == at::kHalf) {
     EXEC_KERNEL_CMD(tri_inv_rec_unroll_fp16, block_dim, M_inv, M, I_neg,

@@ -413,7 +413,7 @@ AICORE inline void InvertSingleTile(TileL1AB X_l1_tile, TileL1AB I_l1_tile,
 /**
  * @brief: Runs the main kernel (inverts all matrices in the tensor)
  *
- * @tparam InputT The type of the input elements.
+ * @tparam InputT The type of the input elements. Supports fp16 and bf16.
  * @tparam OutputT The type of the output elements.
  * @tparam MatrixSize Size of the entire input/output matrices.
  * @tparam NumTilesPerCubeIter How many matrices to load and invert in a single
@@ -441,7 +441,7 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
                                          __gm__ int32_t* cu_seqlens = nullptr) {
   /* Initializations */
   constexpr uint32_t TileLen = MatrixSize * MatrixSize;
-  constexpr uint32_t FractalSize = 16;  // fractal size for half
+  constexpr uint32_t FractalSize = 16;  // fractal size for half /bf16
   constexpr uint32_t NumFractalsRowWise = MatrixSize / FractalSize;
   constexpr uint32_t NumL0Buffers = 2;
 
@@ -669,10 +669,11 @@ AICORE void run_tri_inv_rec_unroll(__gm__ float* tensor_out,
                                    __gm__ InputT* tensor_in,
                                    __gm__ InputT* minus_identity_in,
                                    uint32_t matrix_size, uint32_t num_matrices,
-                                   uint32_t num_bsnd_heads,
+                                   uint32_t num_bsnd_heads = 0,
                                    __gm__ int32_t* cu_seqlens = nullptr) {
-  static_assert(std::is_same_v<InputT, half>,
-                "tri_inv_rec_unroll supports only fp16.");
+  static_assert(
+      std::is_same_v<InputT, half> or std::is_same_v<InputT, bfloat16_t>,
+      "tri_inv_rec_unroll supports only fp16 or bfloat16.");
   switch (matrix_size) {
     case 16:
       runKernelTriInvRecUnroll<InputT, float, 16, NumTilesPerCubeIter, IsBSND>(
@@ -698,7 +699,7 @@ AICORE void run_tri_inv_rec_unroll(__gm__ float* tensor_out,
 }
 
 /*
- * @brief: Wrapper for the kernel, "half" type (fp16).
+ * @brief: Wrapper for the kernel supporting fp16 and bfloat16 types.
  *
  * @param tensor_out pointer to the global memory to store the final inverse.
  * @param tensor_in Pointer to the global tensor matrix in global memory.
@@ -713,49 +714,74 @@ AICORE void run_tri_inv_rec_unroll(__gm__ float* tensor_out,
  * strided accesses. If each tile is stored consecutively (and row-wise) in
  * memory, then num_bsnd_heads=0.
  */
-extern "C" __global__ AICORE void tri_inv_rec_unroll_fp16(
+template <typename InputT>
+AICORE void tri_inv_rec_unroll_dtype_in(
     __gm__ void* tensor_out, __gm__ void* tensor_in,
     __gm__ void* minus_identity_in, uint32_t matrix_size, uint32_t num_matrices,
     uint32_t num_bsnd_heads, __gm__ void* cu_seqlens) {
   if (num_bsnd_heads == 0) {
     if (num_matrices <= get_block_num()) {
-      run_tri_inv_rec_unroll<half, 1 /* NumTilesPerCubeIter */,
+      run_tri_inv_rec_unroll<InputT, 1 /* NumTilesPerCubeIter */,
                              false /* IsBSND */>(
-          (__gm__ float*)tensor_out, (__gm__ half*)tensor_in,
-          (__gm__ half*)minus_identity_in, matrix_size, num_matrices,
+          (__gm__ float*)tensor_out, (__gm__ InputT*)tensor_in,
+          (__gm__ InputT*)minus_identity_in, matrix_size, num_matrices,
           num_bsnd_heads, (__gm__ int32_t*)cu_seqlens);
     } else if (num_matrices <= 2 * get_block_num()) {
-      run_tri_inv_rec_unroll<half, 2 /* NumTilesPerCubeIter */,
+      run_tri_inv_rec_unroll<InputT, 2 /* NumTilesPerCubeIter */,
                              false /* IsBSND */>(
-          (__gm__ float*)tensor_out, (__gm__ half*)tensor_in,
-          (__gm__ half*)minus_identity_in, matrix_size, num_matrices,
+          (__gm__ float*)tensor_out, (__gm__ InputT*)tensor_in,
+          (__gm__ InputT*)minus_identity_in, matrix_size, num_matrices,
           num_bsnd_heads, (__gm__ int32_t*)cu_seqlens);
     } else {
-      run_tri_inv_rec_unroll<half, 4 /* NumTilesPerCubeIter */,
+      run_tri_inv_rec_unroll<InputT, 4 /* NumTilesPerCubeIter */,
                              false /* IsBSND */>(
-          (__gm__ float*)tensor_out, (__gm__ half*)tensor_in,
-          (__gm__ half*)minus_identity_in, matrix_size, num_matrices,
+          (__gm__ float*)tensor_out, (__gm__ InputT*)tensor_in,
+          (__gm__ InputT*)minus_identity_in, matrix_size, num_matrices,
           num_bsnd_heads, (__gm__ int32_t*)cu_seqlens);
     }
   } else {
     if (num_matrices <= get_block_num()) {
-      run_tri_inv_rec_unroll<half, 1 /* NumTilesPerCubeIter */,
+      run_tri_inv_rec_unroll<InputT, 1 /* NumTilesPerCubeIter */,
                              true /* IsBSND */>(
-          (__gm__ float*)tensor_out, (__gm__ half*)tensor_in,
-          (__gm__ half*)minus_identity_in, matrix_size, num_matrices,
+          (__gm__ float*)tensor_out, (__gm__ InputT*)tensor_in,
+          (__gm__ InputT*)minus_identity_in, matrix_size, num_matrices,
           num_bsnd_heads, (__gm__ int32_t*)cu_seqlens);
     } else if (num_matrices <= 2 * get_block_num()) {
-      run_tri_inv_rec_unroll<half, 2 /* NumTilesPerCubeIter */,
+      run_tri_inv_rec_unroll<InputT, 2 /* NumTilesPerCubeIter */,
                              true /* IsBSND */>(
-          (__gm__ float*)tensor_out, (__gm__ half*)tensor_in,
-          (__gm__ half*)minus_identity_in, matrix_size, num_matrices,
+          (__gm__ float*)tensor_out, (__gm__ InputT*)tensor_in,
+          (__gm__ InputT*)minus_identity_in, matrix_size, num_matrices,
           num_bsnd_heads, (__gm__ int32_t*)cu_seqlens);
     } else {
-      run_tri_inv_rec_unroll<half, 4 /* NumTilesPerCubeIter */,
+      run_tri_inv_rec_unroll<InputT, 4 /* NumTilesPerCubeIter */,
                              true /* IsBSND */>(
-          (__gm__ float*)tensor_out, (__gm__ half*)tensor_in,
-          (__gm__ half*)minus_identity_in, matrix_size, num_matrices,
+          (__gm__ float*)tensor_out, (__gm__ InputT*)tensor_in,
+          (__gm__ InputT*)minus_identity_in, matrix_size, num_matrices,
           num_bsnd_heads, (__gm__ int32_t*)cu_seqlens);
     }
   }
+}
+
+/*
+ * @brief: Wrapper for the kernel, "half" type (fp16).
+ */
+extern "C" __global__ AICORE void tri_inv_rec_unroll_fp16(
+    __gm__ void* tensor_out, __gm__ void* tensor_in,
+    __gm__ void* minus_identity_in, uint32_t matrix_size, uint32_t num_matrices,
+    uint32_t num_bsnd_heads, __gm__ void* cu_seqlens) {
+  tri_inv_rec_unroll_dtype_in<half>(tensor_out, tensor_in, minus_identity_in,
+                                    matrix_size, num_matrices, num_bsnd_heads,
+                                    cu_seqlens);
+}
+
+/*
+ * @brief: Wrapper for the kernel, "bfloat16_t" type (bf16).
+ */
+extern "C" __global__ AICORE void tri_inv_rec_unroll_bf16(
+    __gm__ void* tensor_out, __gm__ void* tensor_in,
+    __gm__ void* minus_identity_in, uint32_t matrix_size, uint32_t num_matrices,
+    uint32_t num_bsnd_heads, __gm__ void* cu_seqlens) {
+  tri_inv_rec_unroll_dtype_in<bfloat16_t>(
+      tensor_out, tensor_in, minus_identity_in, matrix_size, num_matrices,
+      num_bsnd_heads, cu_seqlens);
 }

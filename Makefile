@@ -8,7 +8,7 @@
 .PHONY: clean setup_once build_wheel install test
 
 clean:
-	rm -rf build/ dist/ extra-info/ *.egg-info/ kernel_meta/
+	rm -rf build/ dist/ extra-info/ *.egg-info/ kernel_meta/ pto_kernels-*.whl
 
 setup_once:
 	pip3 install -r requirements.txt
@@ -17,7 +17,7 @@ setup_once:
 build_cmake: clean
 	bash scripts/build.sh
 
-build_wheel:
+build_wheel: clean
 	export CMAKE_GENERATOR="Unix Makefiles" && pip wheel -v  . --extra-index-url https://download.pytorch.org/whl/cpu
 
 install:
