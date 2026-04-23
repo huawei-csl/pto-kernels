@@ -2,5 +2,4 @@
 # See https://github.com/facebookresearch/pytorch3d/issues/1531#issuecomment-1538198217
 import torch  # noqa
 
-from .benchmarking import do_bench  # noqa
 from .pto_kernels_ops import *  # noqa

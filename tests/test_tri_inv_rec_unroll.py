@@ -68,7 +68,11 @@ def linalg_inv(U: torch.tensor) -> torch.tensor:
 
 
 def _test_tri_inv_rec_unroll(
-    U: torch.tensor, atol: float, rtol: float, ftol: float, dtype=torch.half
+    U: torch.tensor,
+    atol: float,
+    rtol: float,
+    ftol: float,
+    dtype: torch.dtype = torch.float16,
 ):
 
     U = U.to(dtype)
@@ -104,7 +108,7 @@ def _test_tri_inv_rec_unroll_bsnd(
     atol: float,
     rtol: float,
     ftol: float,
-    dtype=torch.half,
+    dtype: torch.dtype = torch.float16,
 ):
 
     U = U.to(dtype)
@@ -161,6 +165,7 @@ def test_tri_inv_rec_unroll(
     atol: float,
     rtol: float,
     ftol: float,
+    dtype: torch.dtype,
 ):
     U = matrix_gen(n, block_dim_x, block_dim_y)
     _test_tri_inv_rec_unroll(U, atol, rtol, ftol, dtype)
@@ -193,6 +198,7 @@ def test_tri_inv_rec_unroll_bsnd(
     atol: float,
     rtol: float,
     ftol: float,
+    dtype: torch.dtype,
 ):
     # only test cases where the sequence length is a multiple of the chunk size are accepted
     if S % C != 0:
