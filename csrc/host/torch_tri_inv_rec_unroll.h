@@ -79,8 +79,13 @@ at::Tensor run_tri_inv_rec_unroll(
     cu_seqlens_ptr = ConvertType(cu_seqlens);
   }
 
-  EXEC_KERNEL_CMD(tri_inv_rec_unroll_bf16, block_dim, M_inv, M, I_neg,
-                  matrix_size, total_tiles, num_bsnd_heads, cu_seqlens_ptr);
+  if (dtype == at::kBFloat16) {
+    EXEC_KERNEL_CMD(tri_inv_rec_unroll_bf16, block_dim, M_inv, M, I_neg,
+                    matrix_size, total_tiles, num_bsnd_heads, cu_seqlens_ptr);
+  } else if (dtype == at::kHalf) {
+    EXEC_KERNEL_CMD(tri_inv_rec_unroll_fp16, block_dim, M_inv, M, I_neg,
+                    matrix_size, total_tiles, num_bsnd_heads, cu_seqlens_ptr);
+  }
 
   return M_inv;
 }
