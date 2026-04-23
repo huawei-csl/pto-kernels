@@ -128,8 +128,8 @@ AICORE void run_scan_single_core_pto(
     // Wait for AIV to finish processing this chunk before advancing.
     CustomTSync<1, VecToCube>().wait();
   }
-
-#elif (__CHECK_FEATURE_AT_PRECOMPILE) || \
+#endif 
+#if (__CHECK_FEATURE_AT_PRECOMPILE) || \
     (__CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__))
   // AIV code path
 

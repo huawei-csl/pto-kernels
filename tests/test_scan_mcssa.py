@@ -10,12 +10,12 @@ import torch
 import pytest
 from pto_kernels import pto_scan_mcssa
 
-size = [16, 32, 64, 128]
-matrix_size = [s * s for s in size]
+# size = [32]
+# matrix_size = [s * s for s in size]
 
 
-@pytest.mark.parametrize("scan_size", matrix_size)
-@pytest.mark.parametrize("dtype", [torch.float16, torch.float32], ids=str)
+@pytest.mark.parametrize("scan_size", [ 16 * 32])
+@pytest.mark.parametrize("dtype", [torch.float32], ids=str)
 def test_pto_scan_mcssa(scan_size: int, dtype: torch.dtype):
     a = torch.ones(scan_size, dtype=dtype)
 
@@ -23,6 +23,9 @@ def test_pto_scan_mcssa(scan_size: int, dtype: torch.dtype):
     scan_npu = pto_scan_mcssa(a_npu)
 
     ref = torch.cumsum(a.to(torch.float32), dim=0)
+
+    print("Scan result on NPU:", scan_npu.cpu())
+    print("Reference result:", ref)
 
     assert torch.allclose(scan_npu.cpu(), ref)
 

@@ -55,9 +55,13 @@ add_link_options(-s -Wl,-z,relro -Wl,-z,now)
 set(CMAKE_CPP_COMPILE_OPTIONS -xc++ "SHELL:-include stdint.h"
                               "SHELL:-include stddef.h")
 
-include_directories(${ASCEND_HOME_PATH}/include
+include_directories(${ASCEND_CANN_PACKAGE_PATH}/include
+                    ${ASCEND_CANN_PACKAGE_PATH}/pkg_inc/runtime 
                     ${ASCEND_DRIVER_PATH}/kernel/inc)
 
+message(" >>>>> ASCEND_HOME_PATH: ${ASCEND_HOME_PATH}")
+message(" >>>>> ASCEND_CANN_PACKAGE_PATH: ${ASCEND_CANN_PACKAGE_PATH}")
+                    
 if(EXISTS ${ASCEND_CANN_PACKAGE_PATH}/tools/tikcpp/ascendc_kernel_cmake)
   set(ASCENDC_CMAKE_DIR
       ${ASCEND_CANN_PACKAGE_PATH}/tools/tikcpp/ascendc_kernel_cmake)
@@ -124,8 +128,11 @@ ascendc_library(
   csrc/kernel/kernel_swiglu.cpp)
 
 ascendc_include_directories(
-  no_workspace_kernel PRIVATE ${libpto_isa_headers_SOURCE_DIR}/include
-  ${libpto_isa_headers_SOURCE_DIR}/include/pto/common)
+  no_workspace_kernel PRIVATE 
+  ${libpto_isa_headers_SOURCE_DIR}/include
+  ${libpto_isa_headers_SOURCE_DIR}/include/pto/common
+)
+
 
 pybind11_add_module(pto_kernels_ops csrc/host/pybind11.cpp)
 
@@ -139,7 +146,11 @@ target_include_directories(
   pto_kernels_ops
   PRIVATE ${TORCH_NPU_PATH}/include ${TORCH_INCLUDE_DIRS}
           ${TORCH_INSTALL_PREFIX}/include
-          ${TORCH_INSTALL_PREFIX}/include/torch/csrc/api/include)
+          ${TORCH_INSTALL_PREFIX}/include/torch/csrc/api/include
+          ${ASCEND_CANN_PACKAGE_PATH}/include
+          ${ASCEND_CANN_PACKAGE_PATH}/pkg_inc
+          ${ASCEND_CANN_PACKAGE_PATH}/pkg_inc/runtime
+          ${ASCEND_CANN_PACKAGE_PATH}/pkg_inc/profiling)
 
 if(PIP_INSTALL)
   message(STATUS ">>> Running under scikit-build-core (pip install)")
