@@ -10,6 +10,7 @@ for the full License text.
 
 #include <ATen/ATen.h>
 #include <torch/library.h>
+#include <runtime/rt.h>
 
 #include "aclrtlaunch_scan_mcssa_fp16.h"
 #include "aclrtlaunch_scan_mcssa_fp32.h"
@@ -38,36 +39,35 @@ at::Tensor run_scan_mcssa(const at::Tensor& x) {
     throw std::runtime_error("Only 1D scan is supported.\n");
   }
 
-  constexpr uint32_t block_dim = 1;
-
   const at::Tensor scan = at::zeros(
       {scan_size}, at::TensorOptions().dtype(dtype_out).device(device));
 
-  const uint32_t matrix_size = ceil(sqrt(scan_size));
 
   // FIXME: pad to support other sizes
-  if (matrix_size % 16 != 0) {
-    throw std::runtime_error(
-        "Matrix size must be a multiple of 16. Matrix size: " +
-        std::to_string(matrix_size));
-  }
-
+  constexpr uint32_t tile_size = 16;
+  uint32_t number_of_tiles = (scan_size + tile_size*tile_size - 1) / tile_size*tile_size;
+  const uint32_t block_dim = number_of_tiles;
+  
   // FIXME: use vector or scalar cores to generate O, U and L directly on the
   // device
 
   // Ones matrix
   const at::Tensor o =
-      torch::ones({matrix_size, matrix_size},
+      torch::ones({tile_size, tile_size},
                   at::TensorOptions().dtype(dtype).device(device));
   // Upper triangular matrix
   const at::Tensor u = torch::triu(o);
   // Lower triangular matrix
   const at::Tensor l = torch::tril(o, -1);
 
+
+  void *ffts_addr;
+  uint32_t ffts_len;
+  rtGetC2cCtrlAddr((uint64_t *)&ffts_addr, &ffts_len);
   if (dtype == at::kHalf) {
-    EXEC_KERNEL_CMD(scan_mcssa_fp16, block_dim, x, o, u, l, scan, matrix_size);
+    EXEC_KERNEL_CMD(scan_mcssa_fp16, block_dim, x, o, u, l, scan, scan_size, tile_size, ffts_addr);
   } else if (dtype == at::kFloat) {
-    EXEC_KERNEL_CMD(scan_mcssa_fp32, block_dim, x, o, u, l, scan, matrix_size);
+    EXEC_KERNEL_CMD(scan_mcssa_fp32, block_dim, x, o, u, l, scan, scan_size, tile_size, ffts_addr);
   }
 
   return scan;

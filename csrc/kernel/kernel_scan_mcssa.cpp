@@ -8,8 +8,10 @@ for the full License text.
 */
 
 #include <pto/pto-inst.hpp>
+// #include <runtime/rt.h>
 
 #include "kernel_utils.h"
+#include "inter_core_flag.hpp"
 
 using namespace pto;
 
@@ -25,7 +27,7 @@ constexpr unsigned UB_SIZE = 0x30000;  // 192KB UB of A2A3
  *
  * @tparam InputT Input data type. Supports `fp16` or `fp32`
  * @tparam OutputT Output data type 'fp32`
- * @tparam matrix_size Size of the square matrix
+ * @tparam tile_size Size of the square matrix
  *
  * @param x Input matrix in GM
  * @param o Ones matrix in GM
@@ -33,43 +35,48 @@ constexpr unsigned UB_SIZE = 0x30000;  // 192KB UB of A2A3
  * @param l Lower triangular matrix in GM
  * @param s Output matrix in GM, also used as intermediate buffer for C1
  */
-template <typename InputT, typename OutputT, uint32_t matrix_size>
+template <typename InputT, typename OutputT, uint32_t tile_size>
 AICORE void runKernelScanMCSSA(__gm__ InputT* x, __gm__ InputT* o,
                              __gm__ InputT* u, __gm__ InputT* l,
-                             __gm__ OutputT* s) {
+                             __gm__ OutputT* s, uint32_t scan_size, __gm__ uint64_t* ffts_addr) {
 #if (__CHECK_FEATURE_AT_PRECOMPILE) || \
     (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))
+  // Cube unit code path
+  set_ffts_base_addr((uint64_t)ffts_addr);
 
   // Type definitions for different memory levels
   // GM
-  using Shape = pto::Shape<1, 1, 1, matrix_size, matrix_size>;
-  using Stride = pto::Stride<1, 1, 1, matrix_size, 1>;
+  using Shape = pto::Shape<1, 1, 1, tile_size, tile_size>;
+  using Stride = pto::Stride<1, 1, 1, tile_size, 1>;
   using GlobalDataIn = pto::GlobalTensor<InputT, Shape, Stride, Layout::ND>;
   using GlobalDataOut = pto::GlobalTensor<OutputT, Shape, Stride, Layout::ND>;
 
   // L1
   using TileL1In =
-      Tile<TileType::Mat, InputT, matrix_size, matrix_size, BLayout::ColMajor,
-           matrix_size, matrix_size, SLayout::RowMajor, 512>;
+      Tile<TileType::Mat, InputT, tile_size, tile_size, BLayout::ColMajor,
+           tile_size, tile_size, SLayout::RowMajor, 512>;
   using TileL1Out =
-      Tile<TileType::Mat, OutputT, matrix_size, matrix_size, BLayout::ColMajor,
-           matrix_size, matrix_size, SLayout::RowMajor, 512>;
+      Tile<TileType::Mat, OutputT, tile_size, tile_size, BLayout::ColMajor,
+           tile_size, tile_size, SLayout::RowMajor, 512>;
 
   // L0
-  using TileL0A = TileLeft<InputT, matrix_size, matrix_size>;
-  using TileL0AOut = TileLeft<OutputT, matrix_size, matrix_size>;
-  using TileL0B = TileRight<InputT, matrix_size, matrix_size>;
-  using TileL0BOut = TileRight<OutputT, matrix_size, matrix_size>;
-  using TileL0C = TileAcc<OutputT, matrix_size, matrix_size>;
+  using TileL0A = TileLeft<InputT, tile_size, tile_size>;
+  using TileL0AOut = TileLeft<OutputT, tile_size, tile_size>;
+  using TileL0B = TileRight<InputT, tile_size, tile_size>;
+  using TileL0BOut = TileRight<OutputT, tile_size, tile_size>;
+  using TileL0C = TileAcc<OutputT, tile_size, tile_size>;
+
+  if (get_block_idx() > 2) return;  // Only process 2 tiles
 
   // GM Data
-  GlobalDataIn xGlobal(x);
+  uint32_t tile_shift = tile_size * tile_size * get_block_idx();
+  GlobalDataIn xGlobal(x + tile_shift);
   GlobalDataIn oGlobal(o);
   GlobalDataIn uGlobal(u);
   GlobalDataIn lGlobal(l);
-  GlobalDataOut sGlobal(s);
+  GlobalDataOut sGlobal(s + tile_shift);
   // Reuse output buffer for intermediate result C1
-  GlobalDataIn c1GM(reinterpret_cast<__gm__ InputT*>(s));
+  GlobalDataIn c1GM(reinterpret_cast<__gm__ InputT*>(s + tile_shift));
 
   // Load data from GM to L1
   TileL1In xL1;
@@ -79,9 +86,9 @@ AICORE void runKernelScanMCSSA(__gm__ InputT* x, __gm__ InputT* o,
   TileL1In lL1;
   TASSIGN(xL1, 0x0);
   const uint32_t tile_l1_in_byte_size =
-      matrix_size * matrix_size * sizeof(InputT);
+      tile_size * tile_size * sizeof(InputT);
   const uint32_t tile_l1_out_byte_size =
-      matrix_size * matrix_size * sizeof(OutputT);
+      tile_size * tile_size * sizeof(OutputT);
   TASSIGN(oL1, 0x0 + tile_l1_in_byte_size);
   TASSIGN(uL1, 0x0 + 2 * tile_l1_in_byte_size);
   TASSIGN(c1L1, 0x0 + 3 * tile_l1_in_byte_size);
@@ -186,49 +193,60 @@ AICORE void runKernelScanMCSSA(__gm__ InputT* x, __gm__ InputT* o,
 
   TSTORE(sGlobal, sL0);
 
-#else
-// Nothing to do on VEC
+  // set_inter_flag(PIPE_FIX, IC_EVENT_ID0);
+  // wait_inter_flag(IC_EVENT_ID1);
+
+#endif
+#if (__CHECK_FEATURE_AT_PRECOMPILE) || \
+    (__CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__))
+  // Vec unit code path
+  set_ffts_base_addr((uint64_t)ffts_addr);
+  set_mask_norm();
+  set_vector_mask(-1, -1);
+
+  // wait_inter_flag(IC_EVENT_ID0);
+  // set_inter_flag(PIPE_MTE3, IC_EVENT_ID1);
+
 #endif
 }
 
 template <typename T>
 AICORE void run_scan_mcssa(__gm__ T* x, __gm__ T* o, __gm__ T* u, __gm__ T* l,
-                         __gm__ float* s, uint32_t matrix_size) {
+                         __gm__ float* s, uint32_t scan_size, uint32_t tile_size, __gm__ uint64_t *ffts_addr) {
   static_assert(std::is_same_v<T, half> or std::is_same_v<T, float>,
                 "scan_mcssa supports only fp16/fp32.");
-
-  switch (matrix_size) {
+  switch (tile_size) {
     case 16:
-      runKernelScanMCSSA<T, float, 16>(x, o, u, l, s);
+      runKernelScanMCSSA<T, float, 16>(x, o, u, l, s, scan_size, ffts_addr);
       break;
     case 32:
-      runKernelScanMCSSA<T, float, 32>(x, o, u, l, s);
+      runKernelScanMCSSA<T, float, 32>(x, o, u, l, s, scan_size, ffts_addr);
       break;
     case 64:
-      runKernelScanMCSSA<T, float, 64>(x, o, u, l, s);
+      runKernelScanMCSSA<T, float, 64>(x, o, u, l, s, scan_size, ffts_addr);
       break;
     case 96:
-      runKernelScanMCSSA<T, float, 96>(x, o, u, l, s);
+      runKernelScanMCSSA<T, float, 96>(x, o, u, l, s, scan_size, ffts_addr);
       break;
     case 128:
-      runKernelScanMCSSA<T, float, 128>(x, o, u, l, s);
+      runKernelScanMCSSA<T, float, 128>(x, o, u, l, s, scan_size, ffts_addr);
       break;
   }
 }
 
+
 extern "C" __global__ AICORE void scan_mcssa_fp16(__gm__ void* x, __gm__ void* o,
                                                   __gm__ void* u, __gm__ void* l,
                                                   __gm__ void* s,
-                                                  uint32_t matrix_size) {
+                                                  uint32_t scan_size, uint32_t tile_size, __gm__ uint64_t* ffts_addr) {
   run_scan_mcssa((__gm__ half*)x, (__gm__ half*)o, (__gm__ half*)u,
-                 (__gm__ half*)l, (__gm__ float*)s, matrix_size);
+                 (__gm__ half*)l, (__gm__ float*)s, scan_size, tile_size, ffts_addr);
 }
 
 extern "C" __global__ AICORE void scan_mcssa_fp32(__gm__ void* x, __gm__ void* o,
                                                   __gm__ void* u,
-
                                                   __gm__ void* l, __gm__ void* s,
-                                                  uint32_t matrix_size) {
+                                                  uint32_t scan_size, uint32_t tile_size, __gm__ uint64_t* ffts_addr) {
   run_scan_mcssa((__gm__ float*)x, (__gm__ float*)o, (__gm__ float*)u,
-                 (__gm__ float*)l, (__gm__ float*)s, matrix_size);
+                 (__gm__ float*)l, (__gm__ float*)s, scan_size, tile_size, ffts_addr);
 }
