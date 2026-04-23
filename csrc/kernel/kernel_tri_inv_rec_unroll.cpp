@@ -699,7 +699,7 @@ AICORE void run_tri_inv_rec_unroll(__gm__ float* tensor_out,
 }
 
 /*
- * @brief: Wrapper for the kernel, "half" type (fp16).
+ * @brief: Wrapper for the kernel supporting fp16 and bfloat16 types.
  *
  * @param tensor_out pointer to the global memory to store the final inverse.
  * @param tensor_in Pointer to the global tensor matrix in global memory.
@@ -714,112 +714,74 @@ AICORE void run_tri_inv_rec_unroll(__gm__ float* tensor_out,
  * strided accesses. If each tile is stored consecutively (and row-wise) in
  * memory, then num_bsnd_heads=0.
  */
-extern "C" __global__ AICORE void tri_inv_rec_unroll_fp16(
+template <typename InputT>
+AICORE void tri_inv_rec_unroll_dtype_in(
     __gm__ void* tensor_out, __gm__ void* tensor_in,
     __gm__ void* minus_identity_in, uint32_t matrix_size, uint32_t num_matrices,
     uint32_t num_bsnd_heads, __gm__ void* cu_seqlens) {
   if (num_bsnd_heads == 0) {
     if (num_matrices <= get_block_num()) {
-      run_tri_inv_rec_unroll<half, 1 /* NumTilesPerCubeIter */,
+      run_tri_inv_rec_unroll<InputT, 1 /* NumTilesPerCubeIter */,
                              false /* IsBSND */>(
-          (__gm__ float*)tensor_out, (__gm__ half*)tensor_in,
-          (__gm__ half*)minus_identity_in, matrix_size, num_matrices,
+          (__gm__ float*)tensor_out, (__gm__ InputT*)tensor_in,
+          (__gm__ InputT*)minus_identity_in, matrix_size, num_matrices,
           num_bsnd_heads, (__gm__ int32_t*)cu_seqlens);
     } else if (num_matrices <= 2 * get_block_num()) {
-      run_tri_inv_rec_unroll<half, 2 /* NumTilesPerCubeIter */,
+      run_tri_inv_rec_unroll<InputT, 2 /* NumTilesPerCubeIter */,
                              false /* IsBSND */>(
-          (__gm__ float*)tensor_out, (__gm__ half*)tensor_in,
-          (__gm__ half*)minus_identity_in, matrix_size, num_matrices,
+          (__gm__ float*)tensor_out, (__gm__ InputT*)tensor_in,
+          (__gm__ InputT*)minus_identity_in, matrix_size, num_matrices,
           num_bsnd_heads, (__gm__ int32_t*)cu_seqlens);
     } else {
-      run_tri_inv_rec_unroll<half, 4 /* NumTilesPerCubeIter */,
+      run_tri_inv_rec_unroll<InputT, 4 /* NumTilesPerCubeIter */,
                              false /* IsBSND */>(
-          (__gm__ float*)tensor_out, (__gm__ half*)tensor_in,
-          (__gm__ half*)minus_identity_in, matrix_size, num_matrices,
+          (__gm__ float*)tensor_out, (__gm__ InputT*)tensor_in,
+          (__gm__ InputT*)minus_identity_in, matrix_size, num_matrices,
           num_bsnd_heads, (__gm__ int32_t*)cu_seqlens);
     }
   } else {
     if (num_matrices <= get_block_num()) {
-      run_tri_inv_rec_unroll<half, 1 /* NumTilesPerCubeIter */,
+      run_tri_inv_rec_unroll<InputT, 1 /* NumTilesPerCubeIter */,
                              true /* IsBSND */>(
-          (__gm__ float*)tensor_out, (__gm__ half*)tensor_in,
-          (__gm__ half*)minus_identity_in, matrix_size, num_matrices,
+          (__gm__ float*)tensor_out, (__gm__ InputT*)tensor_in,
+          (__gm__ InputT*)minus_identity_in, matrix_size, num_matrices,
           num_bsnd_heads, (__gm__ int32_t*)cu_seqlens);
     } else if (num_matrices <= 2 * get_block_num()) {
-      run_tri_inv_rec_unroll<half, 2 /* NumTilesPerCubeIter */,
+      run_tri_inv_rec_unroll<InputT, 2 /* NumTilesPerCubeIter */,
                              true /* IsBSND */>(
-          (__gm__ float*)tensor_out, (__gm__ half*)tensor_in,
-          (__gm__ half*)minus_identity_in, matrix_size, num_matrices,
+          (__gm__ float*)tensor_out, (__gm__ InputT*)tensor_in,
+          (__gm__ InputT*)minus_identity_in, matrix_size, num_matrices,
           num_bsnd_heads, (__gm__ int32_t*)cu_seqlens);
     } else {
-      run_tri_inv_rec_unroll<half, 4 /* NumTilesPerCubeIter */,
+      run_tri_inv_rec_unroll<InputT, 4 /* NumTilesPerCubeIter */,
                              true /* IsBSND */>(
-          (__gm__ float*)tensor_out, (__gm__ half*)tensor_in,
-          (__gm__ half*)minus_identity_in, matrix_size, num_matrices,
+          (__gm__ float*)tensor_out, (__gm__ InputT*)tensor_in,
+          (__gm__ InputT*)minus_identity_in, matrix_size, num_matrices,
           num_bsnd_heads, (__gm__ int32_t*)cu_seqlens);
     }
   }
 }
 
 /*
+ * @brief: Wrapper for the kernel, "half" type (fp16).
+ */
+extern "C" __global__ AICORE void tri_inv_rec_unroll_fp16(
+    __gm__ void* tensor_out, __gm__ void* tensor_in,
+    __gm__ void* minus_identity_in, uint32_t matrix_size, uint32_t num_matrices,
+    uint32_t num_bsnd_heads, __gm__ void* cu_seqlens) {
+  tri_inv_rec_unroll_dtype_in<half>(tensor_out, tensor_in, minus_identity_in,
+                                    matrix_size, num_matrices, num_bsnd_heads,
+                                    cu_seqlens);
+}
+
+/*
  * @brief: Wrapper for the kernel, "bfloat16_t" type (bf16).
- *
- * @param tensor_out pointer to the global memory to store the final inverse.
- * @param tensor_in Pointer to the global tensor matrix in global memory.
- * @param minus_identity_in Pointer to global memory that contains the negative
- * identity.
- * @param matrix_size The size if each individual matrix / tile. Can take
- * values: {16, 32, 64, 128}.
- * @param num_matrices The total number of matrices / tiles in the global
- * tensor.
- * @param num_bsnd_heads The number of heads, which is only greater than zero
- * if the matrix is in BSND format, that is, the tiles need to be loaded with
- * strided accesses. If each tile is stored consecutively (and row-wise) in
- * memory, then num_bsnd_heads=0.
  */
 extern "C" __global__ AICORE void tri_inv_rec_unroll_bf16(
     __gm__ void* tensor_out, __gm__ void* tensor_in,
     __gm__ void* minus_identity_in, uint32_t matrix_size, uint32_t num_matrices,
     uint32_t num_bsnd_heads, __gm__ void* cu_seqlens) {
-  if (num_bsnd_heads == 0) {
-    if (num_matrices <= get_block_num()) {
-      run_tri_inv_rec_unroll<bfloat16_t, 1 /* NumTilesPerCubeIter */,
-                             false /* IsBSND */>(
-          (__gm__ float*)tensor_out, (__gm__ bfloat16_t*)tensor_in,
-          (__gm__ bfloat16_t*)minus_identity_in, matrix_size, num_matrices,
-          num_bsnd_heads, (__gm__ int32_t*)cu_seqlens);
-    } else if (num_matrices <= 2 * get_block_num()) {
-      run_tri_inv_rec_unroll<bfloat16_t, 2 /* NumTilesPerCubeIter */,
-                             false /* IsBSND */>(
-          (__gm__ float*)tensor_out, (__gm__ bfloat16_t*)tensor_in,
-          (__gm__ bfloat16_t*)minus_identity_in, matrix_size, num_matrices,
-          num_bsnd_heads, (__gm__ int32_t*)cu_seqlens);
-    } else {
-      run_tri_inv_rec_unroll<bfloat16_t, 4 /* NumTilesPerCubeIter */,
-                             false /* IsBSND */>(
-          (__gm__ float*)tensor_out, (__gm__ bfloat16_t*)tensor_in,
-          (__gm__ bfloat16_t*)minus_identity_in, matrix_size, num_matrices,
-          num_bsnd_heads, (__gm__ int32_t*)cu_seqlens);
-    }
-  } else {
-    if (num_matrices <= get_block_num()) {
-      run_tri_inv_rec_unroll<bfloat16_t, 1 /* NumTilesPerCubeIter */,
-                             true /* IsBSND */>(
-          (__gm__ float*)tensor_out, (__gm__ bfloat16_t*)tensor_in,
-          (__gm__ bfloat16_t*)minus_identity_in, matrix_size, num_matrices,
-          num_bsnd_heads, (__gm__ int32_t*)cu_seqlens);
-    } else if (num_matrices <= 2 * get_block_num()) {
-      run_tri_inv_rec_unroll<bfloat16_t, 2 /* NumTilesPerCubeIter */,
-                             true /* IsBSND */>(
-          (__gm__ float*)tensor_out, (__gm__ bfloat16_t*)tensor_in,
-          (__gm__ bfloat16_t*)minus_identity_in, matrix_size, num_matrices,
-          num_bsnd_heads, (__gm__ int32_t*)cu_seqlens);
-    } else {
-      run_tri_inv_rec_unroll<bfloat16_t, 4 /* NumTilesPerCubeIter */,
-                             true /* IsBSND */>(
-          (__gm__ float*)tensor_out, (__gm__ bfloat16_t*)tensor_in,
-          (__gm__ bfloat16_t*)minus_identity_in, matrix_size, num_matrices,
-          num_bsnd_heads, (__gm__ int32_t*)cu_seqlens);
-    }
-  }
+  tri_inv_rec_unroll_dtype_in<bfloat16_t>(
+      tensor_out, tensor_in, minus_identity_in, matrix_size, num_matrices,
+      num_bsnd_heads, cu_seqlens);
 }
