@@ -58,10 +58,7 @@ set(CMAKE_CPP_COMPILE_OPTIONS -xc++ "SHELL:-include stdint.h"
 include_directories(${ASCEND_CANN_PACKAGE_PATH}/include
                     ${ASCEND_CANN_PACKAGE_PATH}/pkg_inc/runtime 
                     ${ASCEND_DRIVER_PATH}/kernel/inc)
-
-message(" >>>>> ASCEND_HOME_PATH: ${ASCEND_HOME_PATH}")
-message(" >>>>> ASCEND_CANN_PACKAGE_PATH: ${ASCEND_CANN_PACKAGE_PATH}")
-                    
+                 
 if(EXISTS ${ASCEND_CANN_PACKAGE_PATH}/tools/tikcpp/ascendc_kernel_cmake)
   set(ASCENDC_CMAKE_DIR
       ${ASCEND_CANN_PACKAGE_PATH}/tools/tikcpp/ascendc_kernel_cmake)
