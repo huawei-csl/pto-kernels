@@ -7,15 +7,15 @@ ASCEND_TOOLKIT_HOME = os.environ.get("ASCEND_TOOLKIT_HOME", "")
 PTO_LIB_PATH = os.environ.get("PTO_LIB_PATH", ASCEND_TOOLKIT_HOME)
 
 
-def _get_lib_path(kernel_cpp: str, tile_size: int) -> str:
+def _get_lib_path(kernel_cpp: str) -> str:
     basename = kernel_cpp.replace(".cpp", "")
-    return f"{basename}_{tile_size}_jit.so"
+    return f"{basename}_jit.so"
 
 
 def compile_cpp(
-    kernel_cpp: str, tile_size=64, verbose: bool = False, timeout: int = 120
+    kernel_cpp: str, verbose: bool = False, timeout: int = 120
 ) -> str:
-    lib_path = _get_lib_path(kernel_cpp, tile_size)
+    lib_path = _get_lib_path(kernel_cpp)
 
     flags = [
         "-fPIC",
@@ -23,7 +23,6 @@ def compile_cpp(
         "-xcce",
         "--npu-arch=dav-2201",
         "-DMEMORY_BASE",
-        "-DSCAN_TILE_SIZE=" + str(tile_size),
         "-O2",
         "-std=c++17",
         f"-I{PTO_LIB_PATH}/include",
@@ -79,12 +78,12 @@ def load_lib(lib_path, check_type=True):
             ctypes.c_void_p,  # u
             ctypes.c_void_p,  # l
             ctypes.c_void_p,  # s
+            ctypes.c_uint32,  # tile_size
             ctypes.c_uint32,  # scan_size
-            ctypes.c_uint32,  # total_len
         ]
         lib.scan_fp32.restype = None
 
-    def scan_func(x, o, u, l, s, scan_size, total_len, block_dim=default_block_dim, stream_ptr=None):
+    def scan_func(x, o, u, l, s, scan_size, tile_size=16, block_dim=default_block_dim, stream_ptr=None):
         if stream_ptr is None:
             stream_ptr = torch.npu.current_stream()._as_parameter_  # noqa
 
@@ -96,20 +95,20 @@ def load_lib(lib_path, check_type=True):
             torch_to_ctypes(u),
             torch_to_ctypes(l),
             torch_to_ctypes(s),
+            tile_size,
             scan_size,
-            total_len,
         )
 
     return scan_func
 
 
-def jit_compile(src_path, tile_size=64):
-    lib_path = compile_cpp(src_path, tile_size=tile_size, verbose=False)
+def jit_compile(src_path):
+    lib_path = compile_cpp(src_path, verbose=False)
     func = load_lib(lib_path, check_type=True)
     return func
 
 
-def clean_up(kernel_cpp: str, tile_size: int):
-    lib_path = _get_lib_path(kernel_cpp, tile_size)
+def clean_up(kernel_cpp: str):
+    lib_path = _get_lib_path(kernel_cpp)
     if os.path.exists(lib_path):
         os.remove(lib_path)

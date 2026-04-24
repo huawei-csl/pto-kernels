@@ -61,13 +61,13 @@ at::Tensor run_scan_mcssa(const at::Tensor& x) {
   const at::Tensor l = torch::tril(o, -1);
 
 
-  void *ffts_addr;
-  uint32_t ffts_len;
-  rtGetC2cCtrlAddr((uint64_t *)&ffts_addr, &ffts_len);
+  // void *ffts_addr;
+  // uint32_t ffts_len;
+  // rtGetC2cCtrlAddr((uint64_t *)&ffts_addr, &ffts_len);
   if (dtype == at::kHalf) {
-    EXEC_KERNEL_CMD(scan_mcssa_fp16, block_dim, x, o, u, l, scan, scan_size, tile_size, ffts_addr);
+    EXEC_KERNEL_CMD(scan_mcssa_fp16, block_dim, x, o, u, l, scan, scan_size, tile_size);
   } else if (dtype == at::kFloat) {
-    EXEC_KERNEL_CMD(scan_mcssa_fp32, block_dim, x, o, u, l, scan, scan_size, tile_size, ffts_addr);
+    EXEC_KERNEL_CMD(scan_mcssa_fp32, block_dim, x, o, u, l, scan, scan_size, tile_size);
   }
 
   return scan;
