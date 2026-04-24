@@ -35,7 +35,8 @@ from jit_util_sinkhorn import jit_compile  # noqa: E402
 
 DEFAULT_WARMUP = 10
 DEFAULT_REPEATS = 100
-SINKHORN_REPEAT = 10
+SINKHORN_REPEAT = 8
+TORCH_REF_REPEAT = 10  # fixed for consistent baseline
 SINKHORN_EPS = 1e-6
 BYTES_PER_ELEMENT = 2  # fp16
 
@@ -117,7 +118,9 @@ def benchmark(
     block_dim = sinq_func.block_dim
 
     print(f"\n{'=' * 92}")
-    print(f"SINKHORN DS BENCHMARK (BLOCK_DIM={block_dim}, repeat={SINKHORN_REPEAT})")
+    print(
+        f"SINKHORN DS BENCHMARK (BLOCK_DIM={block_dim}, pto_repeat={SINKHORN_REPEAT}, torch_repeat={TORCH_REF_REPEAT})"
+    )
     print(f"{'=' * 92}")
     header = (
         f"{'batch':>6s}  {'K':>6s}"
@@ -155,7 +158,7 @@ def benchmark(
                     repeats,
                     lambda i: sinkhorn_ref(
                         pool_item(x_list, i),
-                        repeat=SINKHORN_REPEAT,
+                        repeat=TORCH_REF_REPEAT,
                         eps=SINKHORN_EPS,
                     ),
                 ),
@@ -214,7 +217,7 @@ def main():
     batches = (
         args.batches
         if args.batches
-        else [1, 4, 16, 64, 256, 512, 1024, 2048, 4096, 8192]
+        else [1, 4, 16, 64, 256, 512, 1024, 2048, 4096, 8192, 16384, 65536]
     )
     dims = args.hidden_dims if args.hidden_dims else [4, 8, 16, 32, 64, 128]
 
