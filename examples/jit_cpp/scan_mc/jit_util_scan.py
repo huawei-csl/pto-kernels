@@ -67,8 +67,6 @@ def load_lib(lib_path, check_type=True):
     lib_path = os.path.abspath(lib_path)
     lib = ctypes.CDLL(lib_path)
 
-    default_block_dim = 2
-
     if check_type:
         lib.scan_fp32.argtypes = [
             ctypes.c_uint32,  # blockDim
@@ -78,14 +76,19 @@ def load_lib(lib_path, check_type=True):
             ctypes.c_void_p,  # u
             ctypes.c_void_p,  # l
             ctypes.c_void_p,  # s
-            ctypes.c_uint32,  # tile_size
             ctypes.c_uint32,  # scan_size
+            ctypes.c_uint32,  # tile_size
         ]
         lib.scan_fp32.restype = None
 
-    def scan_func(x, o, u, l, s, scan_size, tile_size=16, block_dim=default_block_dim, stream_ptr=None):
+    def scan_func(x, o, u, l, s, scan_size, tile_size=16, stream_ptr=None):
         if stream_ptr is None:
             stream_ptr = torch.npu.current_stream()._as_parameter_  # noqa
+
+        num_ele_tile = tile_size * tile_size
+        print(f"scan_size={scan_size}, tile_size={tile_size}, num_ele_tile={num_ele_tile}")
+        block_dim = (scan_size + num_ele_tile - 1) // (num_ele_tile)
+        print(f"Launching scan kernel with block_dim={block_dim}, stream={stream_ptr}")
 
         lib.scan_fp32(
             block_dim,
@@ -95,8 +98,8 @@ def load_lib(lib_path, check_type=True):
             torch_to_ctypes(u),
             torch_to_ctypes(l),
             torch_to_ctypes(s),
-            tile_size,
             scan_size,
+            tile_size,
         )
 
     return scan_func
