@@ -8,8 +8,7 @@ for the full License text.
 */
 
 #include <pto/pto-inst.hpp>
-#include "runtime/rt.h"
-// #include <runtime/rt.h>
+#include <runtime/rt.h>
 
 #include "inter_core_flag.hpp"
 #include "kernel_utils.h"
@@ -66,8 +65,6 @@ AICORE void runKernelScanMCSSA(__gm__ InputT* x, __gm__ InputT* o,
   using TileL0B = TileRight<InputT, tile_size, tile_size>;
   using TileL0BOut = TileRight<OutputT, tile_size, tile_size>;
   using TileL0C = TileAcc<OutputT, tile_size, tile_size>;
-
-  if (get_block_idx() > 2) return;  // Only process 2 tiles
 
   // GM Data
   uint32_t tile_shift = tile_size * tile_size * get_block_idx();
@@ -193,13 +190,9 @@ AICORE void runKernelScanMCSSA(__gm__ InputT* x, __gm__ InputT* o,
 
   TSTORE(sGlobal, sL0);
 
-  pipe_barrier(PIPE_ALL);
+  // pipe_barrier(PIPE_ALL);
 
   set_inter_flag(PIPE_FIX, IC_EVENT_ID0);
-  // CustomTSync<0, CubeToVec>().record();
-
-  // wait_inter_flag(IC_EVENT_ID1);
-  // CustomTSync<1, VecToCube>().wait();
 
 #endif
 #if (__CHECK_FEATURE_AT_PRECOMPILE) || \
@@ -210,8 +203,7 @@ AICORE void runKernelScanMCSSA(__gm__ InputT* x, __gm__ InputT* o,
 
   wait_inter_flag(IC_EVENT_ID0);
 
-  // if (get_block_idx() != 0 && get_subblockid() != 0) {
-  if (get_block_idx() != 0) {
+  if (get_block_idx() != 0 || get_subblockid() != 0) {
     return;  // Only one vector core process the data
   }
 
