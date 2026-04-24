@@ -9,7 +9,6 @@ on:
   pull_request:
 
 jobs:
-
   build_aicpu_exmple:
     name: Cmake build inside quay.io/ascend/cann (${{ matrix.npu_device }}, py${{ matrix.python_version }})
     runs-on: ubuntu-latest
@@ -46,5 +45,6 @@ jobs:
         run: |
           source /usr/local/Ascend/ascend-toolkit/set_env.sh
           source /usr/local/Ascend/nnal/atb/set_env.sh
+          apt-get install libc6-dev-i386 # To avoid "/usr/include/x86_64-linux-gnu/gnu/stubs.h:7:11: fatal error: 'gnu/stubs-32.h' file not found"
           cd examples/aicpu
           make build
