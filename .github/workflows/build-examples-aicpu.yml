@@ -45,6 +45,7 @@ jobs:
         run: |
           source /usr/local/Ascend/ascend-toolkit/set_env.sh
           source /usr/local/Ascend/nnal/atb/set_env.sh
-          apt-get install gcc-multilib # To avoid "/usr/include/x86_64-linux-gnu/gnu/stubs.h:7:11: fatal error: 'gnu/stubs-32.h' file not found"
+          apt-get update
+          apt-get install -yq gcc-multilib # To avoid "/usr/include/x86_64-linux-gnu/gnu/stubs.h:7:11: fatal error: 'gnu/stubs-32.h' file not found"
           cd examples/aicpu
           make build
