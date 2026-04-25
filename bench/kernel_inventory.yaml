@@ -1,0 +1,167 @@
+target: ascend910b
+excluded_note: AI CPU scheduler ops and A3-only MC2 ops are excluded from the current A3 kernel set.
+default_checklist:
+  - baseline_adapter
+  - pto_dsl_source
+  - artifact_trace
+  - correctness
+  - benchmark
+  - parity
+seed_kernels:
+  - apply_rotary_pos_emb
+  - grouped_matmul
+  - ffn
+  - moe_token_permute
+  - flash_attention_score
+  - matmul_reduce_scatter
+external_tilekernels:
+  status: local_ptoas_migrated
+  source_repo: PTO-Gym/examples/ptodsl/tilekernels
+  registry: python/pto_kernels/ops/tilekernels_registry.py
+  note: These PTO-DSL builders are integrated under the pto-kernels family/op package hierarchy. Bench adapters and Ascend/CANN validation remain pending.
+  migrated_ptodsl_sources:
+    - {family: moe, name: normalize_weight, path: python/pto_kernels/ops/moe/normalize_weight/kernel.py}
+    - {family: moe, name: mask_indices_by_tp, path: python/pto_kernels/ops/moe/mask_indices_by_tp/kernel.py}
+    - {family: moe, name: group_count, path: python/pto_kernels/ops/moe/group_count/kernel.py}
+    - {family: moe, name: aux_fi, path: python/pto_kernels/ops/moe/aux_fi/kernel.py}
+    - {family: moe, name: inplace_unique_group_indices, path: python/pto_kernels/ops/moe/inplace_unique_group_indices/kernel.py}
+    - {family: moe, name: topk, path: python/pto_kernels/ops/moe/topk/kernel.py}
+    - {family: transpose, name: transpose, path: python/pto_kernels/ops/transpose/transpose/kernel.py}
+    - {family: engram, name: fused_weight, path: python/pto_kernels/ops/engram/fused_weight/kernel.py}
+    - {family: engram, name: engram_hash, path: python/pto_kernels/ops/engram/engram_hash/kernel.py}
+    - {family: engram, name: grad_w_reduce, path: python/pto_kernels/ops/engram/grad_w_reduce/kernel.py}
+    - {family: engram, name: gate, path: python/pto_kernels/ops/engram/gate/kernel.py}
+    - {family: mhc, name: expand_to_mhc, path: python/pto_kernels/ops/mhc/expand_to_mhc/kernel.py}
+    - {family: mhc, name: sinkhorn_normalize, path: python/pto_kernels/ops/mhc/sinkhorn_normalize/kernel.py}
+    - {family: mhc, name: head_compute_mix, path: python/pto_kernels/ops/mhc/head_compute_mix/kernel.py}
+    - {family: mhc, name: pre_split_mixes, path: python/pto_kernels/ops/mhc/pre_split_mixes/kernel.py}
+    - {family: mhc, name: pre_apply_mix, path: python/pto_kernels/ops/mhc/pre_apply_mix/kernel.py}
+    - {family: mhc, name: post, path: python/pto_kernels/ops/mhc/post/kernel.py}
+    - {family: mhc, name: norm_fn, path: python/pto_kernels/ops/mhc/norm_fn/kernel.py}
+included:
+  - {name: normalize_weight, family: moe, wave: tilekernels, status: local_ptoas, ops_transformer_path: tilekernels/moe/normalize_weight}
+  - {name: mask_indices_by_tp, family: moe, wave: tilekernels, status: local_ptoas, ops_transformer_path: tilekernels/moe/mask_indices_by_tp}
+  - {name: group_count, family: moe, wave: tilekernels, status: local_ptoas, ops_transformer_path: tilekernels/moe/group_count}
+  - {name: aux_fi, family: moe, wave: tilekernels, status: local_ptoas, ops_transformer_path: tilekernels/moe/aux_fi}
+  - {name: topk_gate, family: moe, wave: tilekernels, status: local_ptoas, ops_transformer_path: tilekernels/moe/topk_gate}
+  - {name: topk_sum_and_topk_group_idx, family: moe, wave: tilekernels, status: local_ptoas, ops_transformer_path: tilekernels/moe/topk_sum_and_topk_group_idx}
+  - {name: inplace_unique_group_indices, family: moe, wave: tilekernels, status: local_ptoas, ops_transformer_path: tilekernels/moe/inplace_unique_group_indices}
+  - {name: transpose, family: transpose, wave: tilekernels, status: local_ptoas, ops_transformer_path: tilekernels/transpose/transpose}
+  - {name: batched_transpose, family: transpose, wave: tilekernels, status: local_ptoas, ops_transformer_path: tilekernels/transpose/batched_transpose}
+  - {name: fused_weight, family: engram, wave: tilekernels, status: local_ptoas, ops_transformer_path: tilekernels/engram/fused_weight}
+  - {name: engram_hash, family: engram, wave: tilekernels, status: local_ptoas, ops_transformer_path: tilekernels/engram/engram_hash}
+  - {name: grad_w_reduce, family: engram, wave: tilekernels, status: local_ptoas, ops_transformer_path: tilekernels/engram/grad_w_reduce}
+  - {name: engram_gate_fwd, family: engram, wave: tilekernels, status: local_ptoas, ops_transformer_path: tilekernels/engram/engram_gate_fwd}
+  - {name: engram_gate_bwd, family: engram, wave: tilekernels, status: local_ptoas, ops_transformer_path: tilekernels/engram/engram_gate_bwd}
+  - {name: expand_to_mhc_fwd, family: mhc, wave: tilekernels, status: local_ptoas, ops_transformer_path: tilekernels/mhc/expand_to_mhc_fwd}
+  - {name: expand_to_mhc_bwd, family: mhc, wave: tilekernels, status: local_ptoas, ops_transformer_path: tilekernels/mhc/expand_to_mhc_bwd}
+  - {name: pre_apply_mix_fwd, family: mhc, wave: tilekernels, status: local_ptoas, ops_transformer_path: tilekernels/mhc/pre_apply_mix_fwd}
+  - {name: pre_apply_mix_bwd, family: mhc, wave: tilekernels, status: local_ptoas, ops_transformer_path: tilekernels/mhc/pre_apply_mix_bwd}
+  - {name: post_fwd, family: mhc, wave: tilekernels, status: local_ptoas, ops_transformer_path: tilekernels/mhc/post_fwd}
+  - {name: post_bwd, family: mhc, wave: tilekernels, status: local_ptoas, ops_transformer_path: tilekernels/mhc/post_bwd}
+  - {name: pre_norm_fn_fwd, family: mhc, wave: tilekernels, status: local_ptoas, ops_transformer_path: tilekernels/mhc/pre_norm_fn_fwd}
+  - {name: fn_normw_merge_fwd, family: mhc, wave: tilekernels, status: local_ptoas, ops_transformer_path: tilekernels/mhc/fn_normw_merge_fwd}
+  - {name: fn_normw_merge_bwd, family: mhc, wave: tilekernels, status: local_ptoas, ops_transformer_path: tilekernels/mhc/fn_normw_merge_bwd}
+  - {name: sinkhorn_normalize_fwd, family: mhc, wave: tilekernels, status: local_ptoas, ops_transformer_path: tilekernels/mhc/sinkhorn_normalize_fwd}
+  - {name: head_compute_mix_fwd, family: mhc, wave: tilekernels, status: local_ptoas, ops_transformer_path: tilekernels/mhc/head_compute_mix_fwd}
+  - {name: head_compute_mix_bwd, family: mhc, wave: tilekernels, status: local_ptoas, ops_transformer_path: tilekernels/mhc/head_compute_mix_bwd}
+  - {name: pre_split_mixes_fwd, family: mhc, wave: tilekernels, status: local_ptoas, ops_transformer_path: tilekernels/mhc/pre_split_mixes_fwd}
+  - {name: pre_split_mixes_bwd, family: mhc, wave: tilekernels, status: local_ptoas, ops_transformer_path: tilekernels/mhc/pre_split_mixes_bwd}
+  - {name: sinkhorn_normalize_bwd, family: mhc, wave: tilekernels, status: local_ptoas, ops_transformer_path: tilekernels/mhc/sinkhorn_normalize_bwd}
+  - {name: apply_rotary_pos_emb, family: posembedding, wave: wave1, status: planned, ops_transformer_path: posembedding/apply_rotary_pos_emb}
+  - {name: dequant_rope_quant_kvcache, family: posembedding, wave: wave1, status: planned, ops_transformer_path: posembedding/dequant_rope_quant_kvcache}
+  - {name: interleave_rope, family: posembedding, wave: wave1, status: planned, ops_transformer_path: posembedding/interleave_rope}
+  - {name: qkv_rms_norm_rope_cache, family: posembedding, wave: wave1, status: planned, ops_transformer_path: posembedding/qkv_rms_norm_rope_cache}
+  - {name: rope_quant_kvcache, family: posembedding, wave: wave1, status: planned, ops_transformer_path: posembedding/rope_quant_kvcache}
+  - {name: rope_with_sin_cos_cache, family: posembedding, wave: wave1, status: planned, ops_transformer_path: posembedding/rope_with_sin_cos_cache}
+  - {name: rotary_position_embedding, family: posembedding, wave: wave1, status: planned, ops_transformer_path: posembedding/rotary_position_embedding}
+  - {name: rotary_position_embedding_grad, family: posembedding, wave: wave1, status: planned, ops_transformer_path: posembedding/rotary_position_embedding_grad}
+  - {name: grouped_matmul, family: gmm, wave: wave1, status: planned, ops_transformer_path: gmm/grouped_matmul}
+  - {name: grouped_matmul_add, family: gmm, wave: wave1, status: planned, ops_transformer_path: gmm/grouped_matmul_add}
+  - {name: grouped_matmul_finalize_routing, family: gmm, wave: wave1, status: planned, ops_transformer_path: gmm/grouped_matmul_finalize_routing}
+  - {name: grouped_matmul_swiglu_quant, family: gmm, wave: wave1, status: planned, ops_transformer_path: gmm/grouped_matmul_swiglu_quant}
+  - {name: grouped_matmul_swiglu_quant_v2, family: gmm, wave: wave1, status: planned, ops_transformer_path: gmm/grouped_matmul_swiglu_quant_v2}
+  - {name: quant_grouped_matmul_inplace_add, family: gmm, wave: wave1, status: planned, ops_transformer_path: gmm/quant_grouped_matmul_inplace_add}
+  - {name: ffn, family: ffn, wave: wave1, status: planned, ops_transformer_path: ffn/ffn}
+  - {name: swin_attention_ffn, family: ffn, wave: wave1, status: planned, ops_transformer_path: ffn/swin_attention_ffn}
+  - {name: swin_transformer_ln_qkv, family: ffn, wave: wave1, status: planned, ops_transformer_path: ffn/swin_transformer_ln_qkv}
+  - {name: swin_transformer_ln_qkv_quant, family: ffn, wave: wave1, status: planned, ops_transformer_path: ffn/swin_transformer_ln_qkv_quant}
+  - {name: moe_compute_expert_tokens, family: moe, wave: wave2, status: planned, ops_transformer_path: moe/moe_compute_expert_tokens}
+  - {name: moe_finalize_routing, family: moe, wave: wave2, status: planned, ops_transformer_path: moe/moe_finalize_routing}
+  - {name: moe_finalize_routing_v2, family: moe, wave: wave2, status: planned, ops_transformer_path: moe/moe_finalize_routing_v2}
+  - {name: moe_finalize_routing_v2_grad, family: moe, wave: wave2, status: planned, ops_transformer_path: moe/moe_finalize_routing_v2_grad}
+  - {name: moe_gating_top_k, family: moe, wave: wave2, status: planned, ops_transformer_path: moe/moe_gating_top_k}
+  - {name: moe_gating_top_k_softmax, family: moe, wave: wave2, status: planned, ops_transformer_path: moe/moe_gating_top_k_softmax}
+  - {name: moe_gating_top_k_softmax_v2, family: moe, wave: wave2, status: planned, ops_transformer_path: moe/moe_gating_top_k_softmax_v2}
+  - {name: moe_init_routing, family: moe, wave: wave2, status: planned, ops_transformer_path: moe/moe_init_routing}
+  - {name: moe_init_routing_quant, family: moe, wave: wave2, status: planned, ops_transformer_path: moe/moe_init_routing_quant}
+  - {name: moe_init_routing_quant_v2, family: moe, wave: wave2, status: planned, ops_transformer_path: moe/moe_init_routing_quant_v2}
+  - {name: moe_init_routing_v2, family: moe, wave: wave2, status: planned, ops_transformer_path: moe/moe_init_routing_v2}
+  - {name: moe_init_routing_v2_grad, family: moe, wave: wave2, status: planned, ops_transformer_path: moe/moe_init_routing_v2_grad}
+  - {name: moe_init_routing_v3, family: moe, wave: wave2, status: planned, ops_transformer_path: moe/moe_init_routing_v3}
+  - {name: moe_re_routing, family: moe, wave: wave2, status: planned, ops_transformer_path: moe/moe_re_routing}
+  - {name: moe_token_permute, family: moe, wave: wave2, status: planned, ops_transformer_path: moe/moe_token_permute}
+  - {name: moe_token_permute_grad, family: moe, wave: wave2, status: planned, ops_transformer_path: moe/moe_token_permute_grad}
+  - {name: moe_token_permute_with_ep, family: moe, wave: wave2, status: planned, ops_transformer_path: moe/moe_token_permute_with_ep}
+  - {name: moe_token_permute_with_ep_grad, family: moe, wave: wave2, status: planned, ops_transformer_path: moe/moe_token_permute_with_ep_grad}
+  - {name: moe_token_permute_with_routing_map, family: moe, wave: wave2, status: planned, ops_transformer_path: moe/moe_token_permute_with_routing_map}
+  - {name: moe_token_permute_with_routing_map_grad, family: moe, wave: wave2, status: planned, ops_transformer_path: moe/moe_token_permute_with_routing_map_grad}
+  - {name: moe_token_unpermute, family: moe, wave: wave2, status: planned, ops_transformer_path: moe/moe_token_unpermute}
+  - {name: moe_token_unpermute_grad, family: moe, wave: wave2, status: planned, ops_transformer_path: moe/moe_token_unpermute_grad}
+  - {name: moe_token_unpermute_with_ep, family: moe, wave: wave2, status: planned, ops_transformer_path: moe/moe_token_unpermute_with_ep}
+  - {name: moe_token_unpermute_with_ep_grad, family: moe, wave: wave2, status: planned, ops_transformer_path: moe/moe_token_unpermute_with_ep_grad}
+  - {name: moe_token_unpermute_with_routing_map, family: moe, wave: wave2, status: planned, ops_transformer_path: moe/moe_token_unpermute_with_routing_map}
+  - {name: moe_token_unpermute_with_routing_map_grad, family: moe, wave: wave2, status: planned, ops_transformer_path: moe/moe_token_unpermute_with_routing_map_grad}
+  - {name: attention_update, family: attention, wave: wave3, status: planned, ops_transformer_path: attention/attention_update}
+  - {name: flash_attention_score, family: attention, wave: wave3, status: planned, ops_transformer_path: attention/flash_attention_score}
+  - {name: flash_attention_score_grad, family: attention, wave: wave3, status: planned, ops_transformer_path: attention/flash_attention_score_grad}
+  - {name: fused_infer_attention_score, family: attention, wave: wave3, status: planned, ops_transformer_path: attention/fused_infer_attention_score}
+  - {name: incre_flash_attention, family: attention, wave: wave3, status: planned, ops_transformer_path: attention/incre_flash_attention}
+  - {name: prompt_flash_attention, family: attention, wave: wave3, status: planned, ops_transformer_path: attention/prompt_flash_attention}
+  - {name: recurrent_gated_delta_rule, family: attention, wave: wave3, status: planned, ops_transformer_path: attention/recurrent_gated_delta_rule}
+  - {name: ring_attention_update, family: attention, wave: wave3, status: planned, ops_transformer_path: attention/ring_attention_update}
+  - {name: scatter_pa_cache, family: attention, wave: wave3, status: planned, ops_transformer_path: attention/scatter_pa_cache}
+  - {name: gather_pa_kv_cache, family: attention, wave: wave4, status: planned, ops_transformer_path: attention/gather_pa_kv_cache}
+  - {name: kv_quant_sparse_flash_attention, family: attention, wave: wave4, status: planned, ops_transformer_path: attention/kv_quant_sparse_flash_attention}
+  - {name: lightning_indexer, family: attention, wave: wave4, status: planned, ops_transformer_path: attention/lightning_indexer}
+  - {name: mla_preprocess, family: attention, wave: wave4, status: planned, ops_transformer_path: attention/mla_preprocess}
+  - {name: mla_prolog, family: attention, wave: wave4, status: planned, ops_transformer_path: attention/mla_prolog}
+  - {name: mla_prolog_v2, family: attention, wave: wave4, status: planned, ops_transformer_path: attention/mla_prolog_v2}
+  - {name: mla_prolog_v3, family: attention, wave: wave4, status: planned, ops_transformer_path: attention/mla_prolog_v3}
+  - {name: nsa_compress, family: attention, wave: wave4, status: planned, ops_transformer_path: attention/nsa_compress}
+  - {name: nsa_compress_attention, family: attention, wave: wave4, status: planned, ops_transformer_path: attention/nsa_compress_attention}
+  - {name: nsa_compress_attention_infer, family: attention, wave: wave4, status: planned, ops_transformer_path: attention/nsa_compress_attention_infer}
+  - {name: nsa_compress_grad, family: attention, wave: wave4, status: planned, ops_transformer_path: attention/nsa_compress_grad}
+  - {name: nsa_compress_with_cache, family: attention, wave: wave4, status: planned, ops_transformer_path: attention/nsa_compress_with_cache}
+  - {name: nsa_selected_attention, family: attention, wave: wave4, status: planned, ops_transformer_path: attention/nsa_selected_attention}
+  - {name: nsa_selected_attention_grad, family: attention, wave: wave4, status: planned, ops_transformer_path: attention/nsa_selected_attention_grad}
+  - {name: nsa_selected_attention_infer, family: attention, wave: wave4, status: planned, ops_transformer_path: attention/nsa_selected_attention_infer}
+  - {name: quant_lightning_indexer, family: attention, wave: wave4, status: planned, ops_transformer_path: attention/quant_lightning_indexer}
+  - {name: sparse_flash_attention, family: attention, wave: wave4, status: planned, ops_transformer_path: attention/sparse_flash_attention}
+  - {name: all_gather_matmul, family: mc2, wave: wave5, status: planned, ops_transformer_path: mc2/all_gather_matmul}
+  - {name: grouped_mat_mul_all_reduce, family: mc2, wave: wave5, status: planned, ops_transformer_path: mc2/grouped_mat_mul_all_reduce}
+  - {name: inplace_matmul_all_reduce_add_rms_norm, family: mc2, wave: wave5, status: planned, ops_transformer_path: mc2/inplace_matmul_all_reduce_add_rms_norm}
+  - {name: matmul_all_reduce, family: mc2, wave: wave5, status: planned, ops_transformer_path: mc2/matmul_all_reduce}
+  - {name: matmul_all_reduce_add_rms_norm, family: mc2, wave: wave5, status: planned, ops_transformer_path: mc2/matmul_all_reduce_add_rms_norm}
+  - {name: matmul_reduce_scatter, family: mc2, wave: wave5, status: planned, ops_transformer_path: mc2/matmul_reduce_scatter}
+  - {name: moe_distribute_combine, family: mc2, wave: wave5, status: planned, ops_transformer_path: mc2/moe_distribute_combine}
+  - {name: moe_distribute_combine_v2, family: mc2, wave: wave5, status: planned, ops_transformer_path: mc2/moe_distribute_combine_v2}
+  - {name: moe_distribute_dispatch, family: mc2, wave: wave5, status: planned, ops_transformer_path: mc2/moe_distribute_dispatch}
+  - {name: moe_distribute_dispatch_v2, family: mc2, wave: wave5, status: planned, ops_transformer_path: mc2/moe_distribute_dispatch_v2}
+  - {name: moe_distribute_dispatch_v3, family: mc2, wave: wave5, status: planned, ops_transformer_path: mc2/moe_distribute_dispatch_v3}
+excluded:
+  ai_cpu:
+    - {name: attention_worker_scheduler, family: attention, ops_transformer_path: attention/attention_worker_scheduler}
+    - {name: ffn_worker_scheduler, family: ffn, ops_transformer_path: ffn/ffn_worker_scheduler}
+  a3_only:
+    - {name: allto_all_all_gather_batch_mat_mul, family: mc2, ops_transformer_path: mc2/allto_all_all_gather_batch_mat_mul}
+    - {name: allto_all_matmul, family: mc2, ops_transformer_path: mc2/allto_all_matmul}
+    - {name: allto_allv_grouped_mat_mul, family: mc2, ops_transformer_path: mc2/allto_allv_grouped_mat_mul}
+    - {name: ffn_to_attention, family: mc2, ops_transformer_path: mc2/ffn_to_attention}
+    - {name: attention_to_ffn, family: mc2, ops_transformer_path: mc2/attention_to_ffn}
+    - {name: batch_mat_mul_reduce_scatter_allto_all, family: mc2, ops_transformer_path: mc2/batch_mat_mul_reduce_scatter_allto_all}
+    - {name: distribute_barrier, family: mc2, ops_transformer_path: mc2/distribute_barrier}
+    - {name: grouped_mat_mul_allto_allv, family: mc2, ops_transformer_path: mc2/grouped_mat_mul_allto_allv}
+    - {name: matmul_allto_all, family: mc2, ops_transformer_path: mc2/matmul_allto_all}
+    - {name: moe_distribute_combine_add_rms_norm, family: mc2, ops_transformer_path: mc2/moe_distribute_combine_add_rms_norm}
+    - {name: moe_update_expert, family: mc2, ops_transformer_path: mc2/moe_update_expert}

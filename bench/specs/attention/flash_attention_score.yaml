@@ -1,0 +1,15 @@
+name: flash_attention_score
+family: attention
+wave: wave3
+inventory_ref: attention/flash_attention_score
+status: planned
+baseline:
+  adapter: bench/adapters/ops_transformer/attention/flash_attention_score.py
+pto:
+  adapter: bench/adapters/ptodsl/attention/flash_attention_score.py
+  kernel: python/pto_kernels/ops/attention/flash_attention_score/kernel.py
+  meta: python/pto_kernels/ops/attention/flash_attention_score/meta.py
+notes:
+  - Seed kernel for attention core wave.
+correctness:
+  atol: 0.002

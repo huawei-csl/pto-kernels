@@ -1,0 +1,18 @@
+from __future__ import annotations
+
+from pto_kernels.bench.adapter_utils import describe_baseline
+
+
+def describe(repo_root, spec):
+    return describe_baseline(repo_root, "<category>", "<kernel>", spec.inventory_ref)
+
+
+def compile_kernel(repo_root, spec, artifacts_dir):
+    return {
+        "status": "blocked",
+        "reason": "Add baseline compile/runtime details for <category>/<kernel>",
+    }
+
+
+def benchmark(repo_root, spec, artifacts_dir):
+    raise NotImplementedError("Add baseline benchmark once runtime inputs are defined")

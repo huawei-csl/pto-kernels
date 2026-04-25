@@ -10,6 +10,8 @@ import torch
 import pytest
 from pto_kernels import pto_scan_ul1
 
+pytestmark = pytest.mark.npu
+
 size = [16, 32, 64, 128]
 matrix_size = [s * s for s in size]
 

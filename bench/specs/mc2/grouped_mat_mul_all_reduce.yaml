@@ -1,0 +1,13 @@
+name: grouped_mat_mul_all_reduce
+family: mc2
+wave: wave5
+inventory_ref: mc2/grouped_mat_mul_all_reduce
+status: prototype
+baseline:
+  adapter: bench/adapters/ops_transformer/mc2/grouped_mat_mul_all_reduce.py
+pto:
+  adapter: bench/adapters/ptodsl/mc2/grouped_mat_mul_all_reduce.py
+  kernel: python/pto_kernels/ops/mc2/grouped_mat_mul_all_reduce/kernel.py
+  meta: python/pto_kernels/ops/mc2/grouped_mat_mul_all_reduce/meta.py
+notes:
+  - Phase-2 MC2 seed for upstream-shaped grouped_mat_mul_all_reduce traversal on 910B.

@@ -1,0 +1,21 @@
+name: matmul_all_reduce
+family: mc2
+wave: wave5
+inventory_ref: mc2/matmul_all_reduce
+status: prototype
+baseline:
+  adapter: bench/adapters/ops_transformer/mc2/matmul_all_reduce.py
+pto:
+  adapter: bench/adapters/ptodsl/mc2/matmul_all_reduce.py
+  kernel: python/pto_kernels/ops/mc2/matmul_all_reduce/kernel.py
+  meta: python/pto_kernels/ops/mc2/matmul_all_reduce/meta.py
+bench:
+  warmup: 20
+  repeat: 100
+correctness:
+  atol: 0.001
+  rtol: 0.001
+device:
+  id: 0
+notes:
+  - Phase-2 MC2 seed for upstream-shaped matmul_all_reduce traversal on 910B.

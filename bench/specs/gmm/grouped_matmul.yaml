@@ -1,0 +1,13 @@
+name: grouped_matmul
+family: gmm
+wave: wave1
+inventory_ref: gmm/grouped_matmul
+status: planned
+baseline:
+  adapter: bench/adapters/ops_transformer/gmm/grouped_matmul.py
+pto:
+  adapter: bench/adapters/ptodsl/gmm/grouped_matmul.py
+  kernel: python/pto_kernels/ops/gmm/grouped_matmul/kernel.py
+  meta: python/pto_kernels/ops/gmm/grouped_matmul/meta.py
+notes:
+  - Seed kernel for grouped matmul and routing-heavy GEMM behavior.

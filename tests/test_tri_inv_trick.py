@@ -13,6 +13,8 @@ import numpy as np
 import random
 from typing import Callable
 
+pytestmark = pytest.mark.npu
+
 random.seed(42)
 torch.manual_seed(42)
 np.random.seed(42)

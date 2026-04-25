@@ -16,6 +16,8 @@ import torch
 
 from pto_kernels import pto_tri_inv_ns
 
+pytestmark = pytest.mark.npu
+
 SEED = 42
 random.seed(SEED)
 torch.manual_seed(SEED)

@@ -10,6 +10,8 @@ import pytest
 import torch
 from pto_kernels import get_aic_cores, get_aiv_cores
 
+pytestmark = pytest.mark.npu
+
 
 @pytest.fixture(autouse=True)
 def npu_device_context():

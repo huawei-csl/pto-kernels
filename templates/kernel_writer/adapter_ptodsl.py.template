@@ -1,0 +1,19 @@
+from __future__ import annotations
+
+from pto_kernels.bench.adapter_utils import compile_pto_kernel, describe_pto
+
+
+KERNEL = "python/pto_kernels/ops/<category>/<kernel>/kernel.py"
+META = "python/pto_kernels/ops/<category>/<kernel>/meta.py"
+
+
+def describe(repo_root, spec):
+    return describe_pto(repo_root, KERNEL, META)
+
+
+def compile_kernel(repo_root, spec, artifacts_dir):
+    return compile_pto_kernel(repo_root, KERNEL, artifacts_dir)
+
+
+def benchmark(repo_root, spec, artifacts_dir):
+    raise NotImplementedError("Add PTO benchmark once runtime inputs are defined")

@@ -1,0 +1,13 @@
+name: matmul_reduce_scatter
+family: mc2
+wave: wave5
+inventory_ref: mc2/matmul_reduce_scatter
+status: planned
+baseline:
+  adapter: bench/adapters/ops_transformer/mc2/matmul_reduce_scatter.py
+pto:
+  adapter: bench/adapters/ptodsl/mc2/matmul_reduce_scatter.py
+  kernel: python/pto_kernels/ops/mc2/matmul_reduce_scatter/kernel.py
+  meta: python/pto_kernels/ops/mc2/matmul_reduce_scatter/meta.py
+notes:
+  - Seed kernel for 910B MC2 validation.

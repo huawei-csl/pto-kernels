@@ -4,6 +4,8 @@ import torch_npu  # noqa
 
 from pto_kernels import pto_swiglu
 
+pytestmark = pytest.mark.npu
+
 DTYPE = torch.float16
 TEST_SEEDS = [0, 1]
 TEST_BATCHES = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]

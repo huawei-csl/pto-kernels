@@ -1,0 +1,14 @@
+from pto_kernels.ops.common import planned_meta
+
+
+META = planned_meta(
+    family="<category>",
+    name="<kernel>",
+    wave="<wave-or-program>",
+    archetype="<short-archetype>",
+    ops_transformer_path="<category>/<kernel>",
+    blockers=[],
+)
+
+META["description"] = "<one sentence description>"
+META["configs"] = []

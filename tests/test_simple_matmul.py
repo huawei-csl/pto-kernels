@@ -10,6 +10,8 @@ import torch
 import pytest
 from pto_kernels import pto_simple_matmul
 
+pytestmark = pytest.mark.npu
+
 
 @pytest.mark.parametrize("matrix_size", [16, 32, 64, 96, 128])
 @pytest.mark.parametrize(

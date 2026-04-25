@@ -10,6 +10,8 @@ import torch
 from pto_kernels import pto_abs
 import pytest
 
+pytestmark = pytest.mark.npu
+
 
 @pytest.mark.parametrize("size0", [1, 2, 3, 10, 20, 64, 128])
 @pytest.mark.parametrize("size1", [1, 2, 3, 10, 20, 64, 128])

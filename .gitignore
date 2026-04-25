@@ -10,3 +10,5 @@ venv/
 kernel_meta/
 doxygen/documentation/
 benchmark_data/
+.work/
+external/src/

@@ -1,0 +1,13 @@
+name: all_gather_matmul
+family: mc2
+wave: wave5
+inventory_ref: mc2/all_gather_matmul
+status: prototype
+baseline:
+  adapter: bench/adapters/ops_transformer/mc2/all_gather_matmul.py
+pto:
+  adapter: bench/adapters/ptodsl/mc2/all_gather_matmul.py
+  kernel: python/pto_kernels/ops/mc2/all_gather_matmul/kernel.py
+  meta: python/pto_kernels/ops/mc2/all_gather_matmul/meta.py
+notes:
+  - Phase-2 MC2 seed for upstream-shaped all_gather_matmul traversal on 910B.

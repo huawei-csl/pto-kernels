@@ -14,6 +14,8 @@ import numpy as np
 import random
 from pto_kernels import pto_tri_inv_rec_unroll
 
+pytestmark = pytest.mark.npu
+
 random.seed(42)
 torch.manual_seed(42)
 np.random.seed(42)

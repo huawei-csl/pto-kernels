@@ -1,0 +1,13 @@
+name: <kernel>
+family: <category>
+wave: <wave-or-program>
+inventory_ref: <category>/<kernel>
+status: planned
+baseline:
+  adapter: bench/adapters/ops_transformer/<category>/<kernel>.py
+pto:
+  adapter: bench/adapters/ptodsl/<category>/<kernel>.py
+  kernel: python/pto_kernels/ops/<category>/<kernel>/kernel.py
+  meta: python/pto_kernels/ops/<category>/<kernel>/meta.py
+notes:
+  - Replace this with the supported shape, dtype, and runtime contract.

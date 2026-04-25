@@ -1,5 +1,10 @@
-# Import torch is required to avoid "libc10.so: cannot open shared object file: No such file or directory"
-# See https://github.com/facebookresearch/pytorch3d/issues/1531#issuecomment-1538198217
-import torch  # noqa
+# Import torch before the extension when available to avoid missing libc10
+# loader errors in built custom-op environments.
+try:
+    import torch  # noqa
 
-from .pto_kernels_ops import *  # noqa
+    from .pto_kernels_ops import *  # noqa
+except (ImportError, OSError) as exc:
+    EXTENSION_IMPORT_ERROR = exc
+else:
+    EXTENSION_IMPORT_ERROR = None

@@ -1,0 +1,21 @@
+name: inplace_matmul_all_reduce_add_rms_norm
+family: mc2
+wave: wave5
+inventory_ref: mc2/inplace_matmul_all_reduce_add_rms_norm
+status: prototype
+baseline:
+  adapter: bench/adapters/ops_transformer/mc2/inplace_matmul_all_reduce_add_rms_norm.py
+pto:
+  adapter: bench/adapters/ptodsl/mc2/inplace_matmul_all_reduce_add_rms_norm.py
+  kernel: python/pto_kernels/ops/mc2/inplace_matmul_all_reduce_add_rms_norm/kernel.py
+  meta: python/pto_kernels/ops/mc2/inplace_matmul_all_reduce_add_rms_norm/meta.py
+bench:
+  warmup: 20
+  repeat: 100
+correctness:
+  atol: 0.005
+  rtol: 0.005
+device:
+  id: 0
+notes:
+  - Phase-2 MC2 seed for upstream-shaped inplace_matmul_all_reduce_add_rms_norm traversal on 910B.

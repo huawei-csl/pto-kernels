@@ -1,0 +1,16 @@
+name: moe_distribute_combine
+family: mc2
+wave: wave5
+inventory_ref: mc2/moe_distribute_combine
+status: prototype
+baseline:
+  adapter: bench/adapters/ops_transformer/mc2/moe_distribute_combine.py
+pto:
+  adapter: bench/adapters/ptodsl/mc2/moe_distribute_combine.py
+  kernel: python/pto_kernels/ops/mc2/moe_distribute_combine/kernel.py
+  meta: python/pto_kernels/ops/mc2/moe_distribute_combine/meta.py
+correctness:
+  atol: 0.001
+  rtol: 0.0
+notes:
+  - Phase-2 MC2 seed for EP-only top-1 moe_distribute_combine on 910B.

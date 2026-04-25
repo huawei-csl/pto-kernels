@@ -12,6 +12,8 @@ import pytest
 import numpy as np
 import random
 
+pytestmark = pytest.mark.npu
+
 random.seed(42)
 torch.manual_seed(42)
 np.random.seed(42)

@@ -1,0 +1,13 @@
+name: ffn
+family: ffn
+wave: wave1
+inventory_ref: ffn/ffn
+status: planned
+baseline:
+  adapter: bench/adapters/ops_transformer/ffn/ffn.py
+pto:
+  adapter: bench/adapters/ptodsl/ffn/ffn.py
+  kernel: python/pto_kernels/ops/ffn/ffn/kernel.py
+  meta: python/pto_kernels/ops/ffn/ffn/meta.py
+notes:
+  - Seed kernel for feed-forward operator structure.

@@ -1,0 +1,5 @@
+repos:
+  cann-recipes-infer:
+    url: https://gitcode.com/cann/cann-recipes-infer.git
+    commit: 377f20f62d86b3da882b5084b46e02c735e619a3
+    workspace_path: external/src/cann-recipes-infer

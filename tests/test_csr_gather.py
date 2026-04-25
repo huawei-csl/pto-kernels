@@ -10,6 +10,8 @@ import torch
 from pto_kernels import pto_csr_gather
 import pytest
 
+pytestmark = pytest.mark.npu
+
 
 def ref_csr_gather(
     values: torch.Tensor, indices: torch.Tensor, x: torch.Tensor

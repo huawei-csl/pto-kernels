@@ -1,0 +1,13 @@
+name: moe_token_permute
+family: moe
+wave: wave2
+inventory_ref: moe/moe_token_permute
+status: planned
+baseline:
+  adapter: bench/adapters/ops_transformer/moe/moe_token_permute.py
+pto:
+  adapter: bench/adapters/ptodsl/moe/moe_token_permute.py
+  kernel: python/pto_kernels/ops/moe/moe_token_permute/kernel.py
+  meta: python/pto_kernels/ops/moe/moe_token_permute/meta.py
+notes:
+  - Seed kernel for routing and data movement in the MOE wave.

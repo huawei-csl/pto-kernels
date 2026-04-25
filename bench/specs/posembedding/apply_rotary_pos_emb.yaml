@@ -1,0 +1,13 @@
+name: apply_rotary_pos_emb
+family: posembedding
+wave: wave1
+inventory_ref: posembedding/apply_rotary_pos_emb
+status: planned
+baseline:
+  adapter: bench/adapters/ops_transformer/posembedding/apply_rotary_pos_emb.py
+pto:
+  adapter: bench/adapters/ptodsl/posembedding/apply_rotary_pos_emb.py
+  kernel: python/pto_kernels/ops/posembedding/apply_rotary_pos_emb/kernel.py
+  meta: python/pto_kernels/ops/posembedding/apply_rotary_pos_emb/meta.py
+notes:
+  - Seed kernel for rope/positional embedding archetype.

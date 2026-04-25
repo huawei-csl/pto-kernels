@@ -1,0 +1,12 @@
+"""PTO-DSL source for <category>/<kernel>."""
+
+from pathlib import Path
+
+
+def build_jit_wrapper(*, output_dir: str | Path):
+    """Return a buildable/callable wrapper for benchmark adapters.
+
+    Replace this stub with the kernel's PTO-DSL implementation. Keep source
+    synchronization-free unless an explicit barrier is semantically required.
+    """
+    raise NotImplementedError("Implement <category>/<kernel> PTO-DSL wrapper")
