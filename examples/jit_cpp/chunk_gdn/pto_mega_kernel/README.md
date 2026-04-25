@@ -53,22 +53,22 @@ Measured on Ascend C220, H=16, D=128, C=128, `block_dim=24`:
 
 | Sequence length | Mega-kernel | Per-stage PTO | Speedup |
 |-----------------|-------------|---------------|---------|
-| T = 128 | 1.10 ms | 2.60 ms | 2.37x |
-| T = 256 | 1.13 ms | 2.59 ms | 2.30x |
-| T = 512 | 1.19 ms | 2.62 ms | 2.21x |
-| T = 1024 | 1.29 ms | 2.52 ms | 1.95x |
-| T = 2048 | 1.39 ms | 2.60 ms | 1.87x |
-| T = 4096 | 1.81 ms | 2.84 ms | 1.57x |
-| T = 8192 | 2.65 ms | 3.47 ms | 1.31x |
-| T = 16384 | 4.56 ms | 5.33 ms | 1.17x |
-| T = 32768 | 8.11 ms | 8.90 ms | 1.10x |
-| T = 65536 | 15.71 ms | 16.75 ms | 1.07x |
-| T = 131072 | 30.43 ms | 31.84 ms | 1.05x |
-| varlen [256, 256] | 1.17 ms | 2.68 ms | 2.29x |
-| varlen long mix (T=2048) | 1.44 ms | 3.03 ms | 2.10x |
-| 16×16384 (T=262144) | 54.68 ms | 57.08 ms | 1.04x |
+| T = 128 | 0.86 ms | 1.78 ms | 2.07x |
+| T = 256 | 0.83 ms | 1.80 ms | 2.19x |
+| T = 512 | 0.83 ms | 1.82 ms | 2.20x |
+| T = 1024 | 0.86 ms | 1.88 ms | 2.19x |
+| T = 2048 | 1.01 ms | 1.92 ms | 1.91x |
+| T = 4096 | 1.43 ms | 2.14 ms | 1.50x |
+| T = 8192 | 2.25 ms | 2.89 ms | 1.28x |
+| T = 16384 | 4.09 ms | 4.77 ms | 1.17x |
+| T = 32768 | 7.78 ms | 8.52 ms | 1.09x |
+| T = 65536 | 15.64 ms | 16.27 ms | 1.04x |
+| T = 131072 | 30.71 ms | 32.00 ms | 1.04x |
+| varlen [256, 256] | 0.82 ms | 1.83 ms | 2.24x |
+| varlen long mix (T=2048) | 1.01 ms | 1.96 ms | 1.93x |
+| 16×16384 (T=262144) | 55.05 ms | 56.95 ms | 1.03x |
 
-Speedup is largest at short sequences (2.4x at T=128) where kernel-launch
+Speedup is largest at short sequences (about 2.2x at T=128) where kernel-launch
 overhead dominates, and converges toward 1x for very long sequences where
 compute time dwarfs launch cost. Even at T=262144 the mega-kernel is slightly
 faster due to eliminating the Python-side transpose and cast operations.

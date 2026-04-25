@@ -75,11 +75,11 @@ BSND with `T=262144`.
 | :-- | --: | --: | --: | --: |
 | chunk_cumsum | 0.34 | 1.02 | 3.00x | 0.012 |
 | chunk_scaled_dot_kkt | 4.67 | 4.84 | 1.04x | 14.7 |
-| solve_tril | 15.90 | — | — | 1.44 |
-| wy_fast | 6.82 | 15.63 | 2.29x | 20.1 |
-| chunk_h | 10.14 | 30.83 | 3.04x | 27.1 |
-| chunk_o | 11.52 | 16.15 | 1.40x | 29.8 |
-| **total (exclude solve_tril)** | **33.49** | **68.47** | **2.04x** | **24.6** |
+| solve_tril | 15.89 | — | — | 1.44 |
+| wy_fast | 6.37 | 15.63 | 2.45x | 21.6 |
+| chunk_h | 10.08 | 30.83 | 3.06x | 27.3 |
+| chunk_o | 10.71 | 16.15 | 1.51x | 32.1 |
+| **total (exclude solve_tril)** | **32.17** | **68.47** | **2.13x** | **25.6** |
 
 ## Design notes
 
@@ -89,11 +89,14 @@ BSND with `T=262144`.
 - **Variable-length sequences**: `cu_seqlens` (int32) provides cumulative
   sequence boundaries. When non-null, `batch_size` is the number of
   sequences and `seq_len` is ignored.
-- **Drop-in Triton replacement**: The Python wrapper functions (`run_*`)
-  accept the same argument list and memory layouts as Triton kernels.
-  G/beta are accepted as `[1, T, H]` and transposed internally to
-  `[H, T]` for efficient contiguous DMA loads per-head. PTO kernels can
-  be used as drop-in replacements in production inference.
+- **Drop-in Triton replacement**: The Python wrappers take a required
+  ``stream`` (ctypes handle from ``torch.npu.current_stream()._as_parameter_``;
+  obtain once per forward / benchmark loop and reuse). Stages after cumsum
+  take pre-built ``g_t`` / ``beta_t`` from ``_transpose_g`` / ``_transpose_beta``
+  (call once, then ``torch.npu.synchronize()`` before the first ctypes launch so
+  Ascend sees completed GM writes). Layouts otherwise match the Triton path.
+  G/beta remain `[1, T, H]` at the API boundary; ``g_t`` / ``beta_t`` are
+  ``[H, T]`` for contiguous per-head DMA inside the C++ kernels.
 - **Head-first G/beta layout**: `g_sum` and `beta` are transposed from
   `[1, T, H]` to `[H, T]` inside the Python `run_*` wrappers, enabling
   contiguous DMA loads per-head inside the C++ kernels. This eliminates

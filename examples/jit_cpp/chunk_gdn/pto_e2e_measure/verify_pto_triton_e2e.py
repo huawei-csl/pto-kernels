@@ -55,6 +55,8 @@ import torch.nn.functional as F
 
 from dynamic_kernel_libs import (
     BLOCK_DIM,
+    _transpose_beta,
+    _transpose_g,
     run_chunk_cumsum,
     run_chunk_h,
     run_chunk_o,
@@ -250,6 +252,7 @@ def run_pto_e2e(
     beta: torch.Tensor,
     cu_seqlens: torch.Tensor,
     *,
+    stream,
     tri_inv_func,
     scale: float,
 ) -> torch.Tensor:
@@ -267,10 +270,15 @@ def run_pto_e2e(
     run_chunk_cumsum(
         g_in,
         g_sum,
+        stream=stream,
         chunk_size=C_PTO,
         cu_seqlens=cu_seqlens,
         batch_size_override=N_seq,
     )
+
+    g_t = _transpose_g(g_sum)
+    beta_t = _transpose_beta(beta)
+    torch.npu.synchronize()
 
     A_out = torch.zeros(1, T, H_DEFAULT, C_PTO, device=dev, dtype=torch.float16)
     run_scaled_dot_kkt(
@@ -280,6 +288,9 @@ def run_pto_e2e(
         msk_lower,
         None,
         A_out,
+        stream=stream,
+        g_t=g_t,
+        beta_t=beta_t,
         chunk_size=C_PTO,
         cu_seqlens=cu_seqlens,
         batch_size_override=N_seq,
@@ -297,6 +308,9 @@ def run_pto_e2e(
         A_sol,
         w_out,
         u_out,
+        stream=stream,
+        g_t=g_t,
+        beta_t=beta_t,
         chunk_size=C_PTO,
         cu_seqlens=cu_seqlens,
         batch_size_override=N_seq,
@@ -314,6 +328,8 @@ def run_pto_e2e(
         s_out,
         v_new,
         fs_out,
+        stream=stream,
+        g_t=g_t,
         chunk_size=C_PTO,
         cu_seqlens=cu_seqlens,
         batch_size_override=N_seq,
@@ -328,6 +344,8 @@ def run_pto_e2e(
         g_sum,
         msk_full,
         o_out,
+        stream=stream,
+        g_t=g_t,
         chunk_size=C_PTO,
         cu_seqlens=cu_seqlens,
         batch_size_override=N_seq,
@@ -651,6 +669,7 @@ def main() -> int:
         )
 
         torch.npu.synchronize()
+        stream = torch.npu.current_stream()._as_parameter_
         o_pto = run_pto_e2e(
             q_fp,
             k_fp,
@@ -658,6 +677,7 @@ def main() -> int:
             g_fp,
             beta_fp,
             cu32,
+            stream=stream,
             tri_inv_func=tri_inv,
             scale=scale,
         )

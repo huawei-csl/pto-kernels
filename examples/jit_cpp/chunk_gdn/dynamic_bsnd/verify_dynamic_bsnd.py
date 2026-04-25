@@ -69,6 +69,8 @@ import torch.nn.functional as F
 
 from dynamic_kernel_libs import (
     BLOCK_DIM,
+    _transpose_beta,
+    _transpose_g,
     run_chunk_cumsum,
     run_chunk_o,
     run_chunk_h,
@@ -557,6 +559,7 @@ def run_single_case(
     g_in = F.logsigmoid(torch.randn(1, T, H, device=dev, dtype=torch.float32))
     beta = torch.rand(1, T, H, device=dev, dtype=torch.float16)
     cu_cpu = cu.cpu() if cu is not None else None
+    stream = torch.npu.current_stream()._as_parameter_
 
     def _chk(name, actual, expected):
         diff = (actual - expected).abs()
@@ -623,15 +626,27 @@ def run_single_case(
 
     # 1. cumsum
     g_sum = torch.empty(1, T, H, device=dev, dtype=torch.float32)
-    run_chunk_cumsum(g_in, g_sum, chunk_size=C, cu_seqlens=cu, batch_size_override=N_seq)
+    run_chunk_cumsum(
+        g_in, g_sum, stream=stream, chunk_size=C,
+        cu_seqlens=cu, batch_size_override=N_seq,
+    )
     torch.npu.synchronize()
     _chk("cumsum", g_sum.float().cpu(), ref_cumsum(g_in.cpu(), C, cu_cpu))
+
+    # Transpose g/beta once for all downstream kernels; drain PyTorch queue before
+    # ctypes launches (Ascend does not implicitly wait on pending eager ops).
+    g_t = _transpose_g(g_sum)
+    beta_t = _transpose_beta(beta)
+    torch.npu.synchronize()
 
     # 2. kkt
     msk = torch.tril(torch.ones(C, C, device=dev), diagonal=-1).float()
     A_out = torch.zeros(1, T, H, C, device=dev, dtype=torch.float16)
-    run_scaled_dot_kkt(k, beta, g_sum, msk, None, A_out,
-                       chunk_size=C, cu_seqlens=cu, batch_size_override=N_seq)
+    run_scaled_dot_kkt(
+        k, beta, g_sum, msk, None, A_out, stream=stream,
+        g_t=g_t, beta_t=beta_t,
+        chunk_size=C, cu_seqlens=cu, batch_size_override=N_seq,
+    )
     torch.npu.synchronize()
     _chk("kkt", A_out.float().cpu(), ref_kkt(k.cpu(), beta.cpu(), g_sum.cpu(), C, cu_cpu))
 
@@ -640,8 +655,11 @@ def run_single_case(
     #    ``pto_e2e_measure/verify_pto_triton_e2e.py`` and ``ref_solve_tril``.
     w_out = torch.empty(1, T, H, D, device=dev, dtype=torch.float16)
     u_out = torch.empty(1, T, H, D, device=dev, dtype=torch.float16)
-    run_wy_fast(k, v, beta, g_sum, A_out, w_out, u_out,
-                chunk_size=C, cu_seqlens=cu, batch_size_override=N_seq)
+    run_wy_fast(
+        k, v, beta, g_sum, A_out, w_out, u_out, stream=stream,
+        g_t=g_t, beta_t=beta_t,
+        chunk_size=C, cu_seqlens=cu, batch_size_override=N_seq,
+    )
     torch.npu.synchronize()
     w_ref, u_ref = ref_wy(k.cpu(), v.cpu(), beta.cpu(), A_out.cpu(), g_sum.cpu(), C, cu_cpu)
     _chk("wy_w", w_out.float().cpu(), w_ref.float())
@@ -652,8 +670,11 @@ def run_single_case(
     s_out = torch.zeros(tc_n * H, D, D, device=dev, dtype=torch.float16)
     v_out = torch.empty(1, T, H, D, device=dev, dtype=torch.float16)
     fs_out = torch.zeros(N_seq * H, D, D, device=dev, dtype=torch.float16)
-    run_chunk_h(k, w_out, u_out, g_sum, s_out, v_out, fs_out,
-                chunk_size=C, cu_seqlens=cu, batch_size_override=N_seq)
+    run_chunk_h(
+        k, w_out, u_out, g_sum, s_out, v_out, fs_out, stream=stream,
+        g_t=g_t,
+        chunk_size=C, cu_seqlens=cu, batch_size_override=N_seq,
+    )
     torch.npu.synchronize()
     _fin("h_states", s_out); _fin("h_vnew", v_out); _fin("h_fs", fs_out)
     h_ref, v_ref, fs_ref = ref_chunk_h(k.cpu(), w_out.cpu(), u_out.cpu(), g_sum.cpu(), C, cu_cpu)
@@ -664,8 +685,11 @@ def run_single_case(
     # 5. chunk_o
     msk2 = torch.tril(torch.ones(C, C, device=dev), diagonal=0).float()
     o_out = torch.empty(1, T, H, D, device=dev, dtype=torch.float16)
-    run_chunk_o(q, k, v_out, s_out, g_sum, msk2, o_out,
-                chunk_size=C, cu_seqlens=cu, batch_size_override=N_seq)
+    run_chunk_o(
+        q, k, v_out, s_out, g_sum, msk2, o_out, stream=stream,
+        g_t=g_t,
+        chunk_size=C, cu_seqlens=cu, batch_size_override=N_seq,
+    )
     torch.npu.synchronize()
     _fin("chunk_o", o_out)
     _chk(

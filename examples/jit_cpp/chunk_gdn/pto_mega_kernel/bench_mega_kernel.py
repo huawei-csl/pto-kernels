@@ -121,16 +121,20 @@ def main():
         q, k, v, g_in, beta, cu32 = _make_inputs(
             seed_i, T, H_DEFAULT, D_DEFAULT, cu_list, dev)
 
+        stream = torch.npu.current_stream()._as_parameter_
+
         def run_mega():
-            run_mega_kernel(q, k, v, g_in, beta, cu32,
-                            chunk_size=C_PTO, scale=scale)
+            run_mega_kernel(
+                q, k, v, g_in, beta, cu32,
+                stream=stream, chunk_size=C_PTO, scale=scale)
 
         t_mega = bench_fn(run_mega, warmup=args.warmup, iters=args.iters)
 
         if per_stage_ok:
             def run_ps():
-                run_pto_e2e(q, k, v, g_in, beta, cu32,
-                            tri_inv_func=tri_inv, scale=scale)
+                run_pto_e2e(
+                    q, k, v, g_in, beta, cu32,
+                    stream=stream, tri_inv_func=tri_inv, scale=scale)
 
             t_ps = bench_fn(run_ps, warmup=args.warmup, iters=args.iters)
             speedup = t_ps / t_mega if t_mega > 0 else float("inf")

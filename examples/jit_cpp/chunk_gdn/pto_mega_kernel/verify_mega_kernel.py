@@ -159,9 +159,10 @@ def main():
             seed_i, T, H_DEFAULT, D_DEFAULT, cu_list, dev)
 
         torch.npu.synchronize()
+        stream = torch.npu.current_stream()._as_parameter_
         o_mega = run_mega_kernel(
             q, k, v, g_in, beta, cu32,
-            chunk_size=C_PTO, scale=scale)
+            stream=stream, chunk_size=C_PTO, scale=scale)
         torch.npu.synchronize()
 
         mega_f = o_mega.float().cpu()
@@ -171,7 +172,7 @@ def main():
             torch.npu.synchronize()
             o_perstage = run_pto_e2e(
                 q, k, v, g_in, beta, cu32,
-                tri_inv_func=tri_inv, scale=scale)
+                stream=stream, tri_inv_func=tri_inv, scale=scale)
             torch.npu.synchronize()
             ps_f = o_perstage.float().cpu()
 

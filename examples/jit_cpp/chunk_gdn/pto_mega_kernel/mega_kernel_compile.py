@@ -155,11 +155,21 @@ def run_mega_kernel(
     beta: torch.Tensor,
     cu_seqlens: torch.Tensor,
     *,
+    stream,
     chunk_size: int = 128,
     scale: float = 1.0,
     block_dim: int | None = None,
-) -> torch.Tensor:
-    """Run the mega-kernel end-to-end.  Returns O * scale."""
+    return_final_state: bool = False,
+) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+    """Run the mega-kernel end-to-end.
+
+    ``stream`` must be the ctypes stream handle from
+    ``torch.npu.current_stream()._as_parameter_`` (obtain once outside hot loops).
+
+    Returns ``O * scale``. If ``return_final_state`` is True, returns
+    ``(O * scale, final_state)`` with ``final_state`` shaped
+    ``[num_seqs, H, D, D]`` (fp16), matching the per-stage PTO pipeline.
+    """
     dev = q.device
     H, D, C = q.shape[2], q.shape[3], chunk_size
     T = q.shape[1]
@@ -205,9 +215,6 @@ def run_mega_kernel(
     o_out = torch.empty_like(q)
 
     lib = load_mega_kernel(num_heads=H, hidden_size=D, chunk_size=C)
-    stream = torch.npu.current_stream()._as_parameter_
-
-    torch.npu.current_stream().synchronize()
     lib.call_kernel(
         bd, stream,
         _vp(q), _vp(k), _vp(v), _vp(g_in), _vp(beta),
@@ -220,6 +227,8 @@ def run_mega_kernel(
         _vp(o_ws_qk), _vp(o_ws_qs), _vp(o_ws_gated),
         N_seq, T, T, num_matrices,
     )
-    torch.npu.current_stream().synchronize()
 
-    return o_out * scale
+    o_scaled = o_out * scale
+    if return_final_state:
+        return o_scaled, fs.view(N_seq, H, D, D)
+    return o_scaled
