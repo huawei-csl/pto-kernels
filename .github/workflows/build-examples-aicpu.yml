@@ -10,7 +10,7 @@ on:
 
 jobs:
   build_aicpu_exmple:
-    name: Cmake build inside quay.io/ascend/cann (${{ matrix.npu_device }}, py${{ matrix.python_version }})
+    name: Build AICPU examples inside quay.io/ascend/cann (${{ matrix.npu_device }}, py${{ matrix.python_version }})
     runs-on: ubuntu-latest
     continue-on-error: true
 
