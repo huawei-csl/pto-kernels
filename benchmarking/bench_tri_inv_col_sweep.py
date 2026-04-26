@@ -3,7 +3,8 @@ import numpy as np
 import torch
 import csv
 from pathlib import Path
-from pto_kernels import pto_tri_inv, do_bench
+from pto_kernels import pto_tri_inv
+from utils import do_bench
 
 
 def rand_np_tril(batch_size: int, n: int, dtype: np.dtype):
@@ -35,6 +36,7 @@ def plot_csv(path):
     plt.xlabel("Matrix size")
     plt.ylabel("Bandwidth (GB/s)")
     plt.legend()
+    plt.grid(True)
     plt.tight_layout()
     plt.savefig(str(path).replace(".csv", ".png"))
 
