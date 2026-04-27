@@ -7,10 +7,10 @@ https://github.com/huawei-csl/pto-kernels/
 for the full License text.
 */
 
-#include <pto/pto-inst.hpp>
-#include <runtime/rt.h>
 #include <acl/acl.h>
+#include <runtime/rt.h>
 
+#include <pto/pto-inst.hpp>
 
 #include "inter_core_flag.hpp"
 #include "kernel_utils.h"
@@ -40,8 +40,9 @@ constexpr unsigned UB_SIZE = 0x30000;  // 192KB UB of A2A3
 template <typename InputT, typename OutputT, uint32_t tile_size>
 AICORE void runKernelScanMCSSA(__gm__ InputT* x, __gm__ InputT* o,
                                __gm__ InputT* u, __gm__ InputT* l,
-                               __gm__ OutputT* s, uint32_t scan_size, 
-                               __gm__ OutputT* scan_core_buf, __gm__ uint8_t* ffts_addr) {
+                               __gm__ OutputT* s, uint32_t scan_size,
+                               __gm__ OutputT* scan_core_buf,
+                               __gm__ uint8_t* ffts_addr) {
   set_ffts_base_addr((uint64_t)ffts_addr);
   // Type definitions for different memory levels
   // GM
@@ -89,8 +90,7 @@ AICORE void runKernelScanMCSSA(__gm__ InputT* x, __gm__ InputT* o,
   TileL1In lL1;
   TASSIGN(xL1, 0x0);
   const uint32_t tile_l1_in_byte_size = elePerTile * sizeof(InputT);
-  const uint32_t tile_l1_out_byte_size =
-      elePerTile * sizeof(OutputT);
+  const uint32_t tile_l1_out_byte_size = elePerTile * sizeof(OutputT);
   TASSIGN(oL1, 0x0 + tile_l1_in_byte_size);
   TASSIGN(uL1, 0x0 + 2 * tile_l1_in_byte_size);
   TASSIGN(c1L1, 0x0 + 3 * tile_l1_in_byte_size);
@@ -205,14 +205,14 @@ AICORE void runKernelScanMCSSA(__gm__ InputT* x, __gm__ InputT* o,
   set_vector_mask(-1, -1);
 
   SyncAllImpl<false>();
-  
+
   using TileDataOut = Tile<TileType::Vec, OutputT, 1, elePerTile,
                            BLayout::RowMajor, 1, elePerTile>;
   TileDataOut sVecTile;
 
   const uint32_t numberOfTiles = (scan_size + elePerTile - 1) / elePerTile;
   using TileScan = Tile<TileType::Vec, OutputT, 1, elePerTile,
-                           BLayout::RowMajor, 1, elePerTile>;
+                        BLayout::RowMajor, 1, elePerTile>;
   TileScan coreScanTile;
 
   GlobalDataOut coreScanGlobal(scan_core_buf);
@@ -224,14 +224,12 @@ AICORE void runKernelScanMCSSA(__gm__ InputT* x, __gm__ InputT* o,
   TASSIGN(coreScanTile, tile_ub_offset + tile_byte_size);
 
   if (get_block_idx() == 0 && get_subblockid() == 0) {
-    
     // Only one vector core does the scan
     OutputT carry = 0;
     for (uint32_t it = 0; it < numberOfTiles; ++it) {
-
       uint32_t offset = it * elePerTile;
       TASSIGN(sGlobal, s + offset);
-      
+
       // Load tile from GM to UB
       TLOAD(sVecTile, sGlobal);
       TLOAD(coreScanTile, coreScanGlobal);
@@ -246,7 +244,8 @@ AICORE void runKernelScanMCSSA(__gm__ InputT* x, __gm__ InputT* o,
       // Extract the last element of the tile as the carry-out for the next tile
       OutputT curr = sVecTile.GetValue(elePerTile - 1);
 
-      // Wait for scalar op to complete before storing the scan result back to GM
+      // Wait for scalar op to complete before storing the scan result back to
+      // GM
       set_flag(PIPE_S, PIPE_MTE3, EVENT_ID0);
       wait_flag(PIPE_S, PIPE_MTE3, EVENT_ID0);
 
@@ -270,7 +269,6 @@ AICORE void runKernelScanMCSSA(__gm__ InputT* x, __gm__ InputT* o,
       wait_flag(PIPE_S, PIPE_MTE2, EVENT_ID0);
     }
 
-    
     // Wait for store to complete before loading the scan result back to UB
     // set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID0);
     // wait_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID0);
@@ -278,7 +276,7 @@ AICORE void runKernelScanMCSSA(__gm__ InputT* x, __gm__ InputT* o,
     // All vectors cores need to wait
     // All vector cores do the addition
   }
-  
+
   SyncAllImpl<true>();
 
   // Cores, but only one vector each
@@ -297,10 +295,10 @@ AICORE void runKernelScanMCSSA(__gm__ InputT* x, __gm__ InputT* o,
     set_flag(PIPE_S, PIPE_V, EVENT_ID0);
     wait_flag(PIPE_S, PIPE_V, EVENT_ID0);
 
-    // LOAD the tile from GM to UB 
+    // LOAD the tile from GM to UB
     const uint32_t offset = get_block_idx() * elePerTile;
     TASSIGN(sGlobal, s + offset);
-    TLOAD(sVecTile, sGlobal);   
+    TLOAD(sVecTile, sGlobal);
 
     // Wait for load to complete before doing addition
     set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
@@ -315,33 +313,36 @@ AICORE void runKernelScanMCSSA(__gm__ InputT* x, __gm__ InputT* o,
     TSTORE(sGlobal, sVecTile);
   }
 
-
 #endif
 }
 
 template <typename T>
 AICORE void run_scan_mcssa(__gm__ T* x, __gm__ T* o, __gm__ T* u, __gm__ T* l,
                            __gm__ float* s, uint32_t scan_size,
-                           uint32_t tile_size, 
-                           __gm__ float* scan_core_buf,
+                           uint32_t tile_size, __gm__ float* scan_core_buf,
                            __gm__ uint8_t* ffts_addr) {
   static_assert(std::is_same_v<T, half> or std::is_same_v<T, float>,
                 "scan_mcssa supports only fp16/fp32.");
   switch (tile_size) {
     case 16:
-      runKernelScanMCSSA<T, float, 16>(x, o, u, l, s, scan_size, scan_core_buf, ffts_addr);
+      runKernelScanMCSSA<T, float, 16>(x, o, u, l, s, scan_size, scan_core_buf,
+                                       ffts_addr);
       break;
     case 32:
-      runKernelScanMCSSA<T, float, 32>(x, o, u, l, s, scan_size, scan_core_buf, ffts_addr);
+      runKernelScanMCSSA<T, float, 32>(x, o, u, l, s, scan_size, scan_core_buf,
+                                       ffts_addr);
       break;
     case 64:
-      runKernelScanMCSSA<T, float, 64>(x, o, u, l, s, scan_size, scan_core_buf, ffts_addr);
+      runKernelScanMCSSA<T, float, 64>(x, o, u, l, s, scan_size, scan_core_buf,
+                                       ffts_addr);
       break;
     case 96:
-      runKernelScanMCSSA<T, float, 96>(x, o, u, l, s, scan_size, scan_core_buf, ffts_addr);
+      runKernelScanMCSSA<T, float, 96>(x, o, u, l, s, scan_size, scan_core_buf,
+                                       ffts_addr);
       break;
     case 128:
-      runKernelScanMCSSA<T, float, 128>(x, o, u, l, s, scan_size, scan_core_buf, ffts_addr);
+      runKernelScanMCSSA<T, float, 128>(x, o, u, l, s, scan_size, scan_core_buf,
+                                        ffts_addr);
       break;
   }
 }
@@ -349,34 +350,32 @@ AICORE void run_scan_mcssa(__gm__ T* x, __gm__ T* o, __gm__ T* u, __gm__ T* l,
 extern "C" __global__ AICORE void scan_mcssa_fp16(
     __gm__ void* x, __gm__ void* o, __gm__ void* u, __gm__ void* l,
     __gm__ void* s, uint32_t scan_size, uint32_t tile_size,
-    __gm__ float* scan_core_buf,
-    __gm__ uint8_t* ffts_addr) {
+    __gm__ float* scan_core_buf, __gm__ uint8_t* ffts_addr) {
   run_scan_mcssa((__gm__ half*)x, (__gm__ half*)o, (__gm__ half*)u,
-                 (__gm__ half*)l, (__gm__ float*)s, scan_size, tile_size, scan_core_buf, ffts_addr);
+                 (__gm__ half*)l, (__gm__ float*)s, scan_size, tile_size,
+                 scan_core_buf, ffts_addr);
 }
 
 extern "C" __global__ AICORE void scan_mcssa_fp32(
     __gm__ float* x, __gm__ float* o, __gm__ float* u, __gm__ float* l,
     __gm__ float* s, uint32_t scan_size, uint32_t tile_size,
     __gm__ float* scan_core_buf, __gm__ uint8_t* ffts_addr) {
-  run_scan_mcssa(x, o, u,
-                 l, s, scan_size, tile_size, 
-                 scan_core_buf, ffts_addr);
+  run_scan_mcssa(x, o, u, l, s, scan_size, tile_size, scan_core_buf, ffts_addr);
 }
 
-extern "C" void scan_fp32(uint32_t blockDim, void* stream,
-                                            void* x, void* o, void* u, void* l,
-                                            void* s, uint32_t scan_size,
-                                            uint32_t tile_size) {
-  void *ffts_addr;
+extern "C" void scan_fp32(uint32_t blockDim, void* stream, void* x, void* o,
+                          void* u, void* l, void* s, uint32_t scan_size,
+                          uint32_t tile_size) {
+  void* ffts_addr;
   uint32_t ffts_len;
-  rtGetC2cCtrlAddr((uint64_t *)&ffts_addr, &ffts_len);                                              
+  rtGetC2cCtrlAddr((uint64_t*)&ffts_addr, &ffts_len);
 
   // Allocate buffer for inter-core scan
-  void *scan_core_buf;
+  void* scan_core_buf;
   const uint32_t ele_per_tile = tile_size * tile_size;
   const uint32_t buf_size = ele_per_tile * sizeof(float);
-  aclrtMalloc(&scan_core_buf, buf_size, aclrtMemMallocPolicy::ACL_MEM_MALLOC_HUGE_FIRST);
+  aclrtMalloc(&scan_core_buf, buf_size,
+              aclrtMemMallocPolicy::ACL_MEM_MALLOC_HUGE_FIRST);
 
   scan_mcssa_fp32<<<blockDim, nullptr, stream>>>(
       (float*)x, (float*)o, (float*)u, (float*)l, (float*)s, scan_size,

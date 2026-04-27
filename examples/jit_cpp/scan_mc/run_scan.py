@@ -29,14 +29,16 @@ def test_scan(tile_size=16, n_tiles=3):
     )
 
     scan_func(x, o, u, l, s, total_len, tile_size)
-    
+
     torch.npu.synchronize()
 
     print("Comparing results...")
     print("NPU scan result:\n", s.cpu())
     print("Expected:\n", expected_scan)
 
-    assert torch.allclose(s.cpu(), expected_scan, rtol=1e-3, atol=1e-3), "Scan results do not match expected values!"
+    assert torch.allclose(
+        s.cpu(), expected_scan, rtol=1e-3, atol=1e-3
+    ), "Scan results do not match expected values!"
 
     print("All results matched. Scan test passed successfully.\n")
 
