@@ -721,39 +721,43 @@ AICORE void run_tri_inv_rec_unroll(__gm__ OutputT* tensor_out,
 extern "C" __global__ AICORE void tri_inv_rec_unroll_fp16(
     __gm__ void* tensor_out, __gm__ void* tensor_in, uint32_t matrix_size,
     uint32_t num_matrices, uint32_t num_bsnd_heads, __gm__ void* cu_seqlens) {
+  __gm__ half* _tensor_out = (__gm__ half*)tensor_out;
+  __gm__ half* _tensor_in = (__gm__ half*)tensor_in;
+  __gm__ int32_t* _cu_seqlens = (__gm__ int32_t*)cu_seqlens;
+
   if (num_bsnd_heads == 0) {
     if (num_matrices <= get_block_num()) {
       run_tri_inv_rec_unroll<half, half, 1 /* NumTilesPerCubeIter */,
-                             false /* IsBSND */>(
-          (__gm__ half*)tensor_out, (__gm__ half*)tensor_in, matrix_size,
-          num_matrices, num_bsnd_heads);
+                             false /* IsBSND */>(_tensor_out, _tensor_in,
+                                                 matrix_size, num_matrices,
+                                                 num_bsnd_heads, _cu_seqlens);
     } else if (num_matrices <= 2 * get_block_num()) {
       run_tri_inv_rec_unroll<half, half, 2 /* NumTilesPerCubeIter */,
-                             false /* IsBSND */>(
-          (__gm__ half*)tensor_out, (__gm__ half*)tensor_in, matrix_size,
-          num_matrices, num_bsnd_heads);
+                             false /* IsBSND */>(_tensor_out, _tensor_in,
+                                                 matrix_size, num_matrices,
+                                                 num_bsnd_heads, _cu_seqlens);
     } else {
       run_tri_inv_rec_unroll<half, half, 4 /* NumTilesPerCubeIter */,
-                             false /* IsBSND */>(
-          (__gm__ half*)tensor_out, (__gm__ half*)tensor_in, matrix_size,
-          num_matrices, num_bsnd_heads);
+                             false /* IsBSND */>(_tensor_out, _tensor_in,
+                                                 matrix_size, num_matrices,
+                                                 num_bsnd_heads, _cu_seqlens);
     }
   } else {
     if (num_matrices <= get_block_num()) {
       run_tri_inv_rec_unroll<half, half, 1 /* NumTilesPerCubeIter */,
-                             true /* IsBSND */>(
-          (__gm__ half*)tensor_out, (__gm__ half*)tensor_in, matrix_size,
-          num_matrices, num_bsnd_heads);
+                             true /* IsBSND */>(_tensor_out, _tensor_in,
+                                                matrix_size, num_matrices,
+                                                num_bsnd_heads, _cu_seqlens);
     } else if (num_matrices <= 2 * get_block_num()) {
       run_tri_inv_rec_unroll<half, half, 2 /* NumTilesPerCubeIter */,
-                             true /* IsBSND */>(
-          (__gm__ half*)tensor_out, (__gm__ half*)tensor_in, matrix_size,
-          num_matrices, num_bsnd_heads);
+                             true /* IsBSND */>(_tensor_out, _tensor_in,
+                                                matrix_size, num_matrices,
+                                                num_bsnd_heads, _cu_seqlens);
     } else {
       run_tri_inv_rec_unroll<half, half, 4 /* NumTilesPerCubeIter */,
-                             true /* IsBSND */>(
-          (__gm__ half*)tensor_out, (__gm__ half*)tensor_in, matrix_size,
-          num_matrices, num_bsnd_heads);
+                             true /* IsBSND */>(_tensor_out, _tensor_in,
+                                                matrix_size, num_matrices,
+                                                num_bsnd_heads, _cu_seqlens);
     }
   }
 }
