@@ -50,6 +50,7 @@ def bench(path: str = "benchmark_data/tri_inv_rec_unroll.csv"):
             "block_dim_y",
             "time_ms",
             "bandwidth_gbps",
+            "giga_elements_per_sec",
         ]
     ]
     for dtype in (torch.float16,):
@@ -75,7 +76,7 @@ def bench(path: str = "benchmark_data/tri_inv_rec_unroll.csv"):
                     f"{dtype_name}, N={n}, bdx={block_dim_x}, bdy={block_dim_y}, "
                     f"{ms:.3f} ms, {gbps:.3f} GB/s, {gelems:.3f} Gelems/s"
                 )
-                rows.append([dtype_name, n, block_dim_x, block_dim_y, ms, gbps])
+                rows.append([dtype_name, n, block_dim_x, block_dim_y, ms, gbps, gelems])
 
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
