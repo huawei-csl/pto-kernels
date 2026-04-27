@@ -516,8 +516,7 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
   for (uint32_t buffer_num = 0; buffer_num < NumL0Buffers; ++buffer_num) {
     TASSIGN(a_l0_tile[buffer_num], 0x0 + buffer_num * TileLen * sizeof(InputT));
     TASSIGN(b_l0_tile[buffer_num], 0x0 + buffer_num * TileLen * sizeof(InputT));
-    TASSIGN(c_l0_tile[buffer_num],
-            0x0 + buffer_num * TileLen * sizeof(OutputT));
+    TASSIGN(c_l0_tile[buffer_num], 0x0 + buffer_num * TileLen * sizeof(float));
   }
   TLOAD(I_neg_l1_tile, I_neg_global_in);
   set_flag(PIPE_MTE2, PIPE_MTE1, static_cast<event_t>(0));
