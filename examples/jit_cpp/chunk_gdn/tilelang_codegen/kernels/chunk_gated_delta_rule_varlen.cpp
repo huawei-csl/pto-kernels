@@ -1,191 +1,209 @@
-#include "tl_templates/ascend/common.h"
+#include "tl_templates/pto/common.h"
+#include <pto/pto-inst.hpp>
 #include "acl/acl.h"
 #include <runtime/rt_ffts.h>
-using namespace Catlass;
-using uint = unsigned int;
-using uchar = unsigned char;
-using ushort = unsigned short;
+using namespace pto;
 
-extern "C" __global__ __aicore__ void main_kernel( GM_ADDR h_handle,  GM_ADDR k_handle,  GM_ADDR v_handle,  GM_ADDR w_handle,  GM_ADDR g_handle,  GM_ADDR v_new_handle,  GM_ADDR h0_handle,  GM_ADDR ht_handle,  GM_ADDR cu_seqlens_handle,  GM_ADDR ws_wh_handle,  GM_ADDR ws_vnew_handle,  GM_ADDR ws_hupd_handle,  GM_ADDR ws_h_handle, uint64_t fftsAddr) {
-  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2);
-  AscendC::TPipe pipe;
+AICORE void main_kernel(__gm__ half *h_handle, __gm__ half *k_handle, __gm__ half *v_handle, __gm__ half *w_handle, __gm__ float *g_handle, __gm__ half *v_new_handle, __gm__ half *h0_handle, __gm__ half *ht_handle, __gm__ int *cu_seqlens_handle, __gm__ float *ws_wh_handle, __gm__ half *ws_vnew_handle, __gm__ half *ws_hupd_handle, __gm__ half *ws_h_handle, uint64_t ffts_Addr) {
+  auto cid = get_block_idx();
+  set_ffts_base_addr(ffts_Addr);
 
-  AscendC::GlobalTensor<half> h;
-  h.SetGlobalBuffer((__gm__ half*)h_handle);
-  AscendC::GlobalTensor<half> k;
-  k.SetGlobalBuffer((__gm__ half*)k_handle);
-  AscendC::GlobalTensor<half> v;
-  v.SetGlobalBuffer((__gm__ half*)v_handle);
-  AscendC::GlobalTensor<half> w;
-  w.SetGlobalBuffer((__gm__ half*)w_handle);
-  AscendC::GlobalTensor<float> g;
-  g.SetGlobalBuffer((__gm__ float*)g_handle);
-  AscendC::GlobalTensor<half> v_new;
-  v_new.SetGlobalBuffer((__gm__ half*)v_new_handle);
-  AscendC::GlobalTensor<half> h0;
-  h0.SetGlobalBuffer((__gm__ half*)h0_handle);
-  AscendC::GlobalTensor<half> ht;
-  ht.SetGlobalBuffer((__gm__ half*)ht_handle);
-  AscendC::GlobalTensor<int> cu_seqlens;
-  cu_seqlens.SetGlobalBuffer((__gm__ int*)cu_seqlens_handle);
-  AscendC::GlobalTensor<float> ws_wh;
-  ws_wh.SetGlobalBuffer((__gm__ float*)ws_wh_handle);
-  AscendC::GlobalTensor<half> ws_vnew;
-  ws_vnew.SetGlobalBuffer((__gm__ half*)ws_vnew_handle);
-  AscendC::GlobalTensor<half> ws_hupd;
-  ws_hupd.SetGlobalBuffer((__gm__ half*)ws_hupd_handle);
-  AscendC::GlobalTensor<half> ws_h;
-  ws_h.SetGlobalBuffer((__gm__ half*)ws_h_handle);
+  tl::ascend_pto::TileMatL1<half, 128, 128, 128, 128> h_state_l1;
+  TASSIGN(h_state_l1, 0);
+  tl::ascend_pto::TileMatL1<half, 64, 128, 64, 128> w_chunk_l1;
+  TASSIGN(w_chunk_l1, 32768);
+  TileAcc<float, 64, 128, 64, 128> wh_frag;
+  TASSIGN(wh_frag, 0);
+  tl::ascend_pto::TileMatL1<half, 64, 128, 64, 128> v_new_l1;
+  TASSIGN(v_new_l1, 49152);
+  tl::ascend_pto::TileMatL1<half, 64, 128, 64, 128> k_chunk_l1;
+  TASSIGN(k_chunk_l1, 65536);
+  TileAcc<float, 128, 128, 128, 128> hupd_frag;
+  TASSIGN(hupd_frag, 32768);
+  tl::ascend_pto::TileUbDataND<half, 64, 128, 64, 128> h_state_ub;
+  TASSIGN(h_state_ub, 0);
+  tl::ascend_pto::TileUbDataND<float, 32, 128, 32, 128> wh_ub_float;
+  TASSIGN(wh_ub_float, 16384);
+  tl::ascend_pto::TileUbDataND<half, 32, 128, 32, 128> v_chunk_ub;
+  TASSIGN(v_chunk_ub, 32768);
+  tl::ascend_pto::TileUbDataND<float, 32, 128, 32, 128> v_chunk_ub_float;
+  TASSIGN(v_chunk_ub_float, 40960);
+  tl::ascend_pto::TileUbDataND<float, 32, 128, 32, 128> v_new_ub_float;
+  TASSIGN(v_new_ub_float, 57344);
+  tl::ascend_pto::TileUbDataND<float, 1, 64, 1, 64> g_chunk_ub_all;
+  TASSIGN(g_chunk_ub_all, 73728);
+  tl::ascend_pto::TileUbDataND<float, 1, 32, 1, 32> g_chunk_ub;
+  TASSIGN(g_chunk_ub, 73984);
+  tl::ascend_pto::TileUbDataND<float, 1, 8, 1, 1> g_last_scalar;
+  TASSIGN(g_last_scalar, 74112);
+  tl::ascend_pto::TileUbDataND<float, 1, 32, 1, 32> g_exp_ub;
+  TASSIGN(g_exp_ub, 74144);
+  tl::ascend_pto::TileUbDataND<float, 1, 64, 1, 64> g_exp_ub_pad;
+  TASSIGN(g_exp_ub_pad, 74272);
+  tl::ascend_pto::TileUbDataND<uint8_t, 1, 32, 1, 8> g_mask_ub_pad;
+  TASSIGN(g_mask_ub_pad, 74528);
+  tl::ascend_pto::TileUbDataND<float, 32, 128, 32, 128> g_exp_ub_broc;
+  TASSIGN(g_exp_ub_broc, 74560);
+  tl::ascend_pto::TileUbDataND<uint8_t, 1, 8192, 1, 8192> tmp_ub;
+  TASSIGN(tmp_ub, 90944);
+  tl::ascend_pto::TileUbDataND<float, 64, 128, 64, 128> h_state_ub_float;
+  TASSIGN(h_state_ub_float, 99136);
+  tl::ascend_pto::TileUbDataND<half, 32, 128, 32, 128> v_new_ub;
+  TASSIGN(v_new_ub, 131904);
+  tl::ascend_pto::TileUbDataND<half, 64, 128, 64, 128> hupd_ub;
+  TASSIGN(hupd_ub, 140096);
+  tl::ascend_pto::TileUbDataND<float, 64, 128, 64, 128> hupd_ub_float;
+  TASSIGN(hupd_ub_float, 156480);
+  auto vid = get_subblockid();
+#if defined(__DAV_C220_CUBE__)
+    pipe_barrier(PIPE_ALL);
+    int32_t bos = *(cu_seqlens_handle + 0);
+    pipe_barrier(PIPE_ALL);
+    int32_t eos = *(cu_seqlens_handle + 1);
 
-  AscendC::TBuf<AscendC::TPosition::A2> ascend_l0a;
-  pipe.InitBuffer(ascend_l0a, 65536);
-  AscendC::TBuf<AscendC::TPosition::B2> ascend_l0b;
-  pipe.InitBuffer(ascend_l0b, 65536);
-  AscendC::TBuf<AscendC::TPosition::A1> ascend_l1; pipe.InitBuffer(ascend_l1, 524032);
-  AscendC::TBuf<AscendC::TPosition::CO1> ascend_l0c; pipe.InitBuffer(ascend_l0c, 131072);
-  AscendC::TBuf<AscendC::TPosition::VECCALC> ascend_ub; pipe.InitBuffer(ascend_ub, 196352);
-  pipe.Destroy();
-  auto cid = AscendC::GetBlockIdx();
-  if ASCEND_IS_AIV {
-    cid = cid / 2;
-  }
-  auto h_state_l1 = ascend_l1.GetWithOffset<half>(16384, 0);
-  auto w_chunk_l1 = ascend_l1.GetWithOffset<half>(8192, 32768);
-  auto wh_frag = ascend_l0c.GetWithOffset<float>(8192, 0);
-  auto v_new_l1 = ascend_l1.GetWithOffset<half>(8192, 49152);
-  auto k_chunk_l1 = ascend_l1.GetWithOffset<half>(8192, 65536);
-  auto hupd_frag = ascend_l0c.GetWithOffset<float>(16384, 32768);
-  auto h_state_ub = ascend_ub.GetWithOffset<half>(8192, 0);
-  auto wh_ub_float = ascend_ub.GetWithOffset<float>(4096, 16384);
-  auto v_chunk_ub = ascend_ub.GetWithOffset<half>(4096, 32768);
-  auto v_chunk_ub_float = ascend_ub.GetWithOffset<float>(4096, 40960);
-  auto v_new_ub_float = ascend_ub.GetWithOffset<float>(4096, 57344);
-  auto g_chunk_ub_all = ascend_ub.GetWithOffset<float>(64, 73728);
-  auto g_chunk_ub = ascend_ub.GetWithOffset<float>(32, 73984);
-  auto g_last_scalar = ascend_ub.GetWithOffset<float>(1, 74112);
-  auto g_exp_ub = ascend_ub.GetWithOffset<float>(32, 74144);
-  auto g_exp_ub_pad = ascend_ub.GetWithOffset<float>(64, 74272);
-  auto g_mask_ub_pad = ascend_ub.GetWithOffset<uint8_t>(8, 74528);
-  auto g_exp_ub_broc = ascend_ub.GetWithOffset<float>(4096, 74560);
-  auto tmp_ub = ascend_ub.GetWithOffset<uint8_t>(4096, 90944);
-  auto h_state_ub_float = ascend_ub.GetWithOffset<float>(8192, 95040);
-  auto v_new_ub = ascend_ub.GetWithOffset<half>(4096, 127808);
-  auto hupd_ub = ascend_ub.GetWithOffset<half>(8192, 136000);
-  auto hupd_ub_float = ascend_ub.GetWithOffset<float>(8192, 152384);
-  auto vid = AscendC::GetSubBlockIdx();
-  if ASCEND_IS_AIC {
-    AscendC::PipeBarrier<PIPE_ALL>();
-    int32_t bos = cu_seqlens.GetValue(0);
-    AscendC::PipeBarrier<PIPE_ALL>();
-    int32_t eos = cu_seqlens.GetValue(1);
-    for (int32_t i = 0; i < 32; ++i) {
-      AscendC::PipeBarrier<PIPE_ALL>();
+  for (int32_t i = 0; i < 32; ++i) {
+      pipe_barrier(PIPE_ALL);
       if (i < (((eos + 63) - bos) / 64)) {
-        tl::ascend::copy_gm_to_l1<half, 128, 128>(h_state_l1[0], ws_h[(cid * 16384)], 128, 128, 128);
-        tl::ascend::copy_gm_to_l1<half, 64, 128>(w_chunk_l1[0], w[(((i * 65536) + (bos * 1024)) + (cid * 128))], 1024, ((-2048 <= ((0 - bos) - (i * 64))) ? 64 : ((-2112 < ((0 - bos) - (i * 64))) ? ((2112 - bos) - (i * 64)) : 0)), 128);
-        AscendC::SetFlag<AscendC::HardEvent::MTE2_M>(1);
-        AscendC::WaitFlag<AscendC::HardEvent::MTE2_M>(1);
-        tl::ascend::gemm_v0<half, float, 64, 128, 128, false, false>(w_chunk_l1[0], h_state_l1[0], wh_frag[0], ascend_l0a, ascend_l0b, (bool)1);
-        AscendC::SetFlag<AscendC::HardEvent::M_FIX>(2);
-        AscendC::WaitFlag<AscendC::HardEvent::M_FIX>(2);
-        tl::ascend::copy_l0c_to_gm<float, float, layout::RowMajor, 64, 128, 0>(ws_wh[(cid * 8192)], wh_frag[0], 128, 64, 128);
-        tl::ascend::copy_gm_to_l1<half, 64, 128>(v_new_l1[0], ws_vnew[(cid * 8192)], 128, 64, 128);
-        tl::ascend::copy_gm_to_l1<half, 64, 128>(k_chunk_l1[0], k[(((i * 32768) + (bos * 512)) + ((cid / 2) * 128))], 512, ((-2048 <= ((0 - bos) - (i * 64))) ? 64 : ((-2112 < ((0 - bos) - (i * 64))) ? ((2112 - bos) - (i * 64)) : 0)), 128);
-        AscendC::SetFlag<AscendC::HardEvent::MTE2_M>(3);
-        AscendC::WaitFlag<AscendC::HardEvent::MTE2_M>(3);
-        tl::ascend::gemm_v0<half, float, 128, 128, 64, true, false>(k_chunk_l1[0], v_new_l1[0], hupd_frag[0], ascend_l0a, ascend_l0b, (bool)1);
-        AscendC::SetFlag<AscendC::HardEvent::M_FIX>(4);
-        AscendC::WaitFlag<AscendC::HardEvent::M_FIX>(4);
-        tl::ascend::copy_l0c_to_gm<float, half, layout::RowMajor, 128, 128, 0>(ws_hupd[(cid * 16384)], hupd_frag[0], 128, 128, 128);
+        tl::ascend_pto::copy_gm_to_l1<half, half, 1, 1, 1, 128, 128, 131072, 131072, 16384, 128, 1, 128, 128>(ws_h_handle + (cid * 16384), 0, 0, 128, 128);
+        tl::ascend_pto::copy_gm_to_l1<half, half, 1, 1, 1, 64, 128, 1, 1, 2162688, 1024, 1, 64, 128>(w_handle + (((i * 65536) + (bos * 1024)) + (cid * 128)), 32768, 0, ((-2048 <= ((0 - bos) - (i * 64))) ? 64 : ((-2112 < ((0 - bos) - (i * 64))) ? ((2112 - bos) - (i * 64)) : 0)), 128);
+        set_flag(PIPE_MTE2, PIPE_M, EVENT_ID1);
+        wait_flag(PIPE_MTE2, PIPE_M, EVENT_ID1);
+        tl::ascend_pto::gemm_v0<half, float, 64, 128, 128, 64, 128, 128, 128, false, false>(w_chunk_l1, h_state_l1, wh_frag, (bool)1);
+        set_flag(PIPE_M, PIPE_FIX, EVENT_ID2);
+        wait_flag(PIPE_M, PIPE_FIX, EVENT_ID2);
+        tl::ascend_pto::copy_l0c_to_gm<float, float, 1, 1, 1, 64, 128, 65536, 65536, 8192, 128, 1, 64, 128>(ws_wh_handle + (cid * 8192), 0, 0, 64, 128);
+        tl::ascend_pto::copy_gm_to_l1<half, half, 1, 1, 1, 64, 128, 65536, 65536, 8192, 128, 1, 64, 128>(ws_vnew_handle + (cid * 8192), 49152, 0, 64, 128);
+        tl::ascend_pto::copy_gm_to_l1<half, half, 1, 1, 1, 64, 128, 1, 1, 1081344, 512, 1, 64, 128>(k_handle + (((i * 32768) + (bos * 512)) + ((cid / 2) * 128)), 65536, 0, ((-2048 <= ((0 - bos) - (i * 64))) ? 64 : ((-2112 < ((0 - bos) - (i * 64))) ? ((2112 - bos) - (i * 64)) : 0)), 128);
+        set_flag(PIPE_MTE2, PIPE_M, EVENT_ID3);
+        wait_flag(PIPE_MTE2, PIPE_M, EVENT_ID3);
+        tl::ascend_pto::gemm_v0<half, float, 128, 128, 64, 128, 128, 64, 64, true, false>(k_chunk_l1, v_new_l1, hupd_frag, (bool)1);
+        set_flag(PIPE_M, PIPE_FIX, EVENT_ID4);
+        wait_flag(PIPE_M, PIPE_FIX, EVENT_ID4);
+        tl::ascend_pto::copy_l0c_to_gm<half, float, 1, 1, 1, 128, 128, 131072, 131072, 16384, 128, 1, 128, 128>(ws_hupd_handle + (cid * 16384), 32768, 0, 128, 128);
       }
-      AscendC::PipeBarrier<PIPE_ALL>();
-      AscendC::PipeBarrier<PIPE_ALL>();
+      pipe_barrier(PIPE_ALL);
+      pipe_barrier(PIPE_ALL);
     }
-  }
-  if ASCEND_IS_AIV {
-    AscendC::PipeBarrier<PIPE_ALL>();
-    int32_t bos_1 = cu_seqlens.GetValue(0);
-    AscendC::PipeBarrier<PIPE_ALL>();
-    int32_t eos_1 = cu_seqlens.GetValue(1);
-    tl::ascend::copy_gm_to_ub<half, 128, 64>(h_state_ub[0], h0[((cid * 16384) + (vid * 8192))], 128, 64, 128, half(0.000000e+00f));
-    for (int32_t i_1 = 0; i_1 < 32; ++i_1) {
-      AscendC::PipeBarrier<PIPE_ALL>();
+#endif
+#if defined(__DAV_C220_VEC__)
+    set_mask_norm();
+    set_vector_mask(-1, -1);
+    pipe_barrier(PIPE_ALL);
+    int32_t bos_1 = *(cu_seqlens_handle + 0);
+    pipe_barrier(PIPE_ALL);
+    int32_t eos_1 = *(cu_seqlens_handle + 1);
+    tl::ascend_pto::copy_gm_to_ub<half, half, 1, 1, 1, 64, 128, 131072, 131072, 16384, 128, 1, 64, 128, pto::PadValue::Zero>(h0_handle + ((cid * 16384) + (vid * 8192)), 0, 0, 64, 128);
+
+  for (int32_t i_1 = 0; i_1 < 32; ++i_1) {
+      pipe_barrier(PIPE_ALL);
       if (i_1 < (((eos_1 + 63) - bos_1) / 64)) {
-        tl::ascend::copy_ub_to_gm<half, 128, 64>(ws_h[((cid * 16384) + (vid * 8192))], h_state_ub[0], 131072, 1, 128);
-        tl::ascend::copy_gm_to_ub<float, 128, 32>(wh_ub_float[0], ws_wh[((cid * 8192) + (vid * 4096))], 128, 32, 128, 0.000000e+00f);
-        tl::ascend::copy_gm_to_ub<half, 128, 32>(v_chunk_ub[0], v[((((i_1 * 65536) + (vid * 32768)) + (bos_1 * 1024)) + (cid * 128))], 1024, ((-2080 <= (((0 - bos_1) - (vid * 32)) - (i_1 * 64))) ? 32 : ((-2112 < (((0 - bos_1) - (vid * 32)) - (i_1 * 64))) ? (((2112 - bos_1) - (vid * 32)) - (i_1 * 64)) : 0)), 128, half(0.000000e+00f));
-        AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(1);
-        AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(1);
-        tl::ascend::copy_ub_to_ub<float, half, 4096>(v_chunk_ub_float[0], v_chunk_ub[0]);
-        AscendC::PipeBarrier<PIPE_V>();
-        AscendC::Sub(v_new_ub_float[0], v_chunk_ub_float[0], wh_ub_float[0], 4096);
-        tl::ascend::copy_gm_to_ub<float, 64>(g_chunk_ub_all[0], g[(((i_1 * 512) + (bos_1 * 8)) + cid)], 8, ((-2048 <= ((0 - bos_1) - (i_1 * 64))) ? 64 : ((-2112 < ((0 - bos_1) - (i_1 * 64))) ? ((2112 - bos_1) - (i_1 * 64)) : 0)), 1, 0.000000e+00f);
-        AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(2);
-        AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(2);
-        tl::ascend::copy_ub_to_ub<float, float, 32>(g_chunk_ub[0], g_chunk_ub_all[(vid * 32)]);
-        AscendC::PipeBarrier<PIPE_ALL>();
+        tl::ascend_pto::copy_ub_to_gm<half, half, 1, 1, 1, 64, 128, 1, 1, 131072, 131072, 1, 64, 128>(ws_h_handle + ((cid * 16384) + (vid * 8192)), 0, 0, 1, 128);
+        tl::ascend_pto::copy_gm_to_ub<float, float, 1, 1, 1, 32, 128, 65536, 65536, 8192, 128, 1, 32, 128, pto::PadValue::Zero>(ws_wh_handle + ((cid * 8192) + (vid * 4096)), 16384, 0, 32, 128);
+        tl::ascend_pto::copy_gm_to_ub<half, half, 1, 1, 1, 32, 128, 1, 1, 2162688, 1024, 1, 32, 128, pto::PadValue::Zero>(v_handle + ((((i_1 * 65536) + (vid * 32768)) + (bos_1 * 1024)) + (cid * 128)), 32768, 0, ((-2080 <= (((0 - bos_1) - (vid * 32)) - (i_1 * 64))) ? 32 : ((-2112 < (((0 - bos_1) - (vid * 32)) - (i_1 * 64))) ? (((2112 - bos_1) - (vid * 32)) - (i_1 * 64)) : 0)), 128);
+        set_flag(PIPE_MTE2, PIPE_V, EVENT_ID1);
+        wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID1);
+        TCVT(v_chunk_ub_float, v_chunk_ub, pto::RoundMode::CAST_NONE);
+        pipe_barrier(PIPE_V);
+        TSUB(v_new_ub_float, v_chunk_ub_float, wh_ub_float);
+        tl::ascend_pto::copy_gm_to_ub<float, float, 1, 1, 1, 1, 64, 1, 1, 16896, 8, 1, 1, 64, pto::PadValue::Zero>(g_handle + (((i_1 * 512) + (bos_1 * 8)) + cid), 73728, 0, ((-2048 <= ((0 - bos_1) - (i_1 * 64))) ? 64 : ((-2112 < ((0 - bos_1) - (i_1 * 64))) ? ((2112 - bos_1) - (i_1 * 64)) : 0)), 1);
+        set_flag(PIPE_MTE2, PIPE_V, EVENT_ID2);
+        wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID2);
+        tl::ascend_pto::TileUbDataND<float, 1, 32, 1, 32> g_chunk_ub_all_temp_0;
+        TASSIGN(g_chunk_ub_all_temp_0, 73728 + (vid * 32) * 4);
+        TMOV(g_chunk_ub, g_chunk_ub_all_temp_0);
+        pipe_barrier(PIPE_ALL);
         if (((i_1 * 64) + 64) <= (eos_1 - bos_1)) {
           g_last_scalar.SetValue(0, g_chunk_ub_all.GetValue(63));
         } else {
           g_last_scalar.SetValue(0, g_chunk_ub_all.GetValue((((((int64_t)eos_1) - ((int64_t)bos_1)) - (((int64_t)i_1) * (int64_t)64)) - (int64_t)1)));
         }
-        AscendC::PipeBarrier<PIPE_ALL>();
-        tl::ascend::Fill<float>(g_exp_ub[0], g_last_scalar.GetValue(0), 32);
-        AscendC::PipeBarrier<PIPE_V>();
-        AscendC::Sub(g_exp_ub[0], g_exp_ub[0], g_chunk_ub[0], 32);
-        AscendC::PipeBarrier<PIPE_V>();
-        tl::ascend::copy_ub_to_ub<float, float, 32>(g_exp_ub_pad[0], g_exp_ub[0]);
-        AscendC::PipeBarrier<PIPE_V>();
-        AscendC::CompareScalar(g_mask_ub_pad[0], g_exp_ub_pad[0], 0.000000e+00f, AscendC::CMPMODE::LE, 64);
-        AscendC::PipeBarrier<PIPE_V>();
-AscendC::Select<float, uint8_t>(g_exp_ub_pad[0], g_mask_ub_pad[0], g_exp_ub_pad[0], static_cast<float>(-CUDART_INF_F), AscendC::SELMODE::VSEL_TENSOR_SCALAR_MODE, 64);
-        AscendC::PipeBarrier<PIPE_V>();
-        tl::ascend::copy_ub_to_ub<float, float, 32>(g_exp_ub[0], g_exp_ub_pad[0]);
-        AscendC::PipeBarrier<PIPE_V>();
-        AscendC::Exp(g_exp_ub[0], g_exp_ub[0], 32);
-        AscendC::PipeBarrier<PIPE_V>();
-        tl::ascend::Broadcast<float, 2, 1, false>(g_exp_ub_broc[0],g_exp_ub[0],tmp_ub,(uint32_t[]){32, 128}, (uint32_t[]){32, 1});
-        AscendC::PipeBarrier<PIPE_V>();
-        AscendC::Mul(v_new_ub_float[0], v_new_ub_float[0], g_exp_ub_broc[0], 4096);
-        AscendC::Exp(g_last_scalar[0], g_last_scalar[0], 1);
-        tl::ascend::copy_ub_to_ub<float, half, 8192>(h_state_ub_float[0], h_state_ub[0]);
-        AscendC::PipeBarrier<PIPE_V>();
-        {
-        AscendC::PipeBarrier<PIPE_ALL>();
-        auto g_last_scalar_scalar = g_last_scalar.GetValue(0);
-        AscendC::Muls(h_state_ub_float[0], h_state_ub_float[0], g_last_scalar_scalar, 8192);
-        }
-        tl::ascend::copy_ub_to_ub<half, float, 4096>(v_new_ub[0], v_new_ub_float[0]);
-        AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(3);
-        AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(3);
-        tl::ascend::copy_ub_to_gm<half, 128, 32>(v_new[((((i_1 * 65536) + (vid * 32768)) + (bos_1 * 1024)) + (cid * 128))], v_new_ub[0], 1024, ((-2080 <= (((0 - bos_1) - (vid * 32)) - (i_1 * 64))) ? 32 : ((-2112 < (((0 - bos_1) - (vid * 32)) - (i_1 * 64))) ? (((2112 - bos_1) - (vid * 32)) - (i_1 * 64)) : 0)), 128);
-        tl::ascend::copy_ub_to_gm<half, 128, 32>(ws_vnew[((cid * 8192) + (vid * 4096))], v_new_ub[0], 65536, 1, 128);
-        tl::ascend::copy_gm_to_ub<half, 128, 64>(hupd_ub[0], ws_hupd[((cid * 16384) + (vid * 8192))], 128, 64, 128, half(0.000000e+00f));
-        AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(4);
-        AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(4);
-        tl::ascend::copy_ub_to_ub<float, half, 8192>(hupd_ub_float[0], hupd_ub[0]);
-        AscendC::PipeBarrier<PIPE_V>();
-        AscendC::Add(h_state_ub_float[0], h_state_ub_float[0], hupd_ub_float[0], 8192);
-        AscendC::PipeBarrier<PIPE_V>();
-        tl::ascend::copy_ub_to_ub<half, float, 8192>(h_state_ub[0], h_state_ub_float[0]);
-        AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(5);
-        AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(5);
-        tl::ascend::copy_ub_to_gm<half, 128, 64>(h[(((i_1 * 131072) + (cid * 16384)) + (vid * 8192))], h_state_ub[0], 128, 64, 128);
+        pipe_barrier(PIPE_ALL);
+        set_flag(PIPE_V, PIPE_S, EVENT_ID0);
+        wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
+        TEXPANDS(g_exp_ub, g_last_scalar.GetValue(0));
+        pipe_barrier(PIPE_V);
+        TSUB(g_exp_ub, g_exp_ub, g_chunk_ub);
+        pipe_barrier(PIPE_V);
+        tl::ascend_pto::TileUbDataND<float, 1, 32, 1, 32> g_exp_ub_pad_temp_0;
+        TASSIGN(g_exp_ub_pad_temp_0, 74272 + 0 * 4);
+        TMOV(g_exp_ub_pad_temp_0, g_exp_ub);
+        pipe_barrier(PIPE_V);
+        tl::ascend_pto::TileUbDataND<float, 1, 64, 1, 64> g_exp_ub_pad_temp_1;
+        TASSIGN(g_exp_ub_pad_temp_1, 74272 + 0 * 4);
+        tl::ascend_pto::TileUbDataND<uint8_t, 1, 32, 1, 8> g_mask_ub_pad_temp_0;
+        TASSIGN(g_mask_ub_pad_temp_0, 74528 + 0 * 1);
+        tl::ascend_pto::compare_scalar(g_mask_ub_pad_temp_0, g_exp_ub_pad_temp_1, 0.000000e+00f, CmpMode::LE);
+        pipe_barrier(PIPE_V);
+        TSELS(g_exp_ub_pad, g_mask_ub_pad, g_exp_ub_pad, -CUDART_INF_F);
+        pipe_barrier(PIPE_V);
+        tl::ascend_pto::TileUbDataND<float, 1, 32, 1, 32> g_exp_ub_pad_temp_2;
+        TASSIGN(g_exp_ub_pad_temp_2, 74272 + 0 * 4);
+        TMOV(g_exp_ub, g_exp_ub_pad_temp_2);
+        pipe_barrier(PIPE_V);
+        TEXP(g_exp_ub, g_exp_ub);
+        pipe_barrier(PIPE_V);
+        tl::ascend_pto::TileUbDataDN<float, 32, 1, 32, 1> g_exp_ub_temp_0;
+        TASSIGN(g_exp_ub_temp_0, 74144 + 0 * 4);
+        TROWEXPAND(g_exp_ub_broc, g_exp_ub_temp_0);
+        pipe_barrier(PIPE_V);
+        TMUL(v_new_ub_float, v_new_ub_float, g_exp_ub_broc);
+        tl::ascend_pto::TileUbDataND<float, 1, 8, 1, 1> g_last_scalar_temp_0;
+        TASSIGN(g_last_scalar_temp_0, 74112 + 0 * 4);
+        tl::ascend_pto::TileUbDataND<float, 1, 8, 1, 1> g_last_scalar_temp_1;
+        TASSIGN(g_last_scalar_temp_1, 74112 + 0 * 4);
+        TEXP(g_last_scalar_temp_1, g_last_scalar_temp_0);
+        TCVT(h_state_ub_float, h_state_ub, pto::RoundMode::CAST_NONE);
+        pipe_barrier(PIPE_V);
+        set_flag(PIPE_V, PIPE_S, EVENT_ID0);
+        wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
+        auto g_last_scalar_scalar_temp_0 = g_last_scalar.GetValue(0);
+        TMULS(h_state_ub_float, h_state_ub_float, g_last_scalar_scalar_temp_0);
+        TCVT(v_new_ub, v_new_ub_float, pto::RoundMode::CAST_NONE);
+        set_flag(PIPE_V, PIPE_MTE3, EVENT_ID3);
+        wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID3);
+        tl::ascend_pto::copy_ub_to_gm<half, half, 1, 1, 1, 32, 128, 1, 1, 2162688, 1024, 1, 32, 128>(v_new_handle + ((((i_1 * 65536) + (vid * 32768)) + (bos_1 * 1024)) + (cid * 128)), 131904, 0, ((-2080 <= (((0 - bos_1) - (vid * 32)) - (i_1 * 64))) ? 32 : ((-2112 < (((0 - bos_1) - (vid * 32)) - (i_1 * 64))) ? (((2112 - bos_1) - (vid * 32)) - (i_1 * 64)) : 0)), 128);
+        tl::ascend_pto::copy_ub_to_gm<half, half, 1, 1, 1, 32, 128, 1, 1, 65536, 65536, 1, 32, 128>(ws_vnew_handle + ((cid * 8192) + (vid * 4096)), 131904, 0, 1, 128);
+        tl::ascend_pto::copy_gm_to_ub<half, half, 1, 1, 1, 64, 128, 131072, 131072, 16384, 128, 1, 64, 128, pto::PadValue::Zero>(ws_hupd_handle + ((cid * 16384) + (vid * 8192)), 140096, 0, 64, 128);
+        set_flag(PIPE_MTE2, PIPE_V, EVENT_ID4);
+        wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID4);
+        TCVT(hupd_ub_float, hupd_ub, pto::RoundMode::CAST_NONE);
+        pipe_barrier(PIPE_V);
+        TADD(h_state_ub_float, h_state_ub_float, hupd_ub_float);
+        pipe_barrier(PIPE_V);
+        TCVT(h_state_ub, h_state_ub_float, pto::RoundMode::CAST_NONE);
+        set_flag(PIPE_V, PIPE_MTE3, EVENT_ID5);
+        wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID5);
+        tl::ascend_pto::copy_ub_to_gm<half, half, 1, 1, 1, 64, 128, 4194304, 131072, 16384, 128, 1, 64, 128>(h_handle + (((i_1 * 131072) + (cid * 16384)) + (vid * 8192)), 0, 0, 64, 128);
       }
-      AscendC::PipeBarrier<PIPE_ALL>();
-      AscendC::PipeBarrier<PIPE_ALL>();
+      pipe_barrier(PIPE_ALL);
+      pipe_barrier(PIPE_ALL);
     }
-    tl::ascend::copy_ub_to_gm<half, 128, 64>(ht[((cid * 16384) + (vid * 8192))], h_state_ub[0], 128, 64, 128);
-  }
+    tl::ascend_pto::copy_ub_to_gm<half, half, 1, 1, 1, 64, 128, 131072, 131072, 16384, 128, 1, 64, 128>(ht_handle + ((cid * 16384) + (vid * 8192)), 0, 0, 64, 128);
+#endif
 }
 
-void main_kernel_tiling() {
+extern "C" __global__ AICORE void launch_kernel(__gm__ uint8_t *h_handle, __gm__ uint8_t *k_handle, __gm__ uint8_t *v_handle, __gm__ uint8_t *w_handle, __gm__ uint8_t *g_handle, __gm__ uint8_t *v_new_handle, __gm__ uint8_t *h0_handle, __gm__ uint8_t *ht_handle, __gm__ uint8_t *cu_seqlens_handle, __gm__ uint8_t *ws_wh_handle, __gm__ uint8_t *ws_vnew_handle, __gm__ uint8_t *ws_hupd_handle, __gm__ uint8_t *ws_h_handle, uint64_t fftsAddr)
+{
+    main_kernel(reinterpret_cast<__gm__ half *>(h_handle),
+     reinterpret_cast<__gm__ half *>(k_handle),
+     reinterpret_cast<__gm__ half *>(v_handle),
+     reinterpret_cast<__gm__ half *>(w_handle),
+     reinterpret_cast<__gm__ float *>(g_handle),
+     reinterpret_cast<__gm__ half *>(v_new_handle),
+     reinterpret_cast<__gm__ half *>(h0_handle),
+     reinterpret_cast<__gm__ half *>(ht_handle),
+     reinterpret_cast<__gm__ int *>(cu_seqlens_handle),
+     reinterpret_cast<__gm__ float *>(ws_wh_handle),
+     reinterpret_cast<__gm__ half *>(ws_vnew_handle),
+     reinterpret_cast<__gm__ half *>(ws_hupd_handle),
+     reinterpret_cast<__gm__ half *>(ws_h_handle),
+     reinterpret_cast<uint64_t>(fftsAddr));
 }
 
-extern "C" void call(uint8_t* h_handle, uint8_t* k_handle, uint8_t* v_handle, uint8_t* w_handle, uint8_t* g_handle, uint8_t* v_new_handle, uint8_t* h0_handle, uint8_t* ht_handle, uint8_t* cu_seqlens_handle, uint8_t* ws_wh_handle, uint8_t* ws_vnew_handle, uint8_t* ws_hupd_handle, uint8_t* ws_h_handle, aclrtStream stream) {
-  uint32_t fftsLen{0};
-  uint64_t fftsAddr{0};
-  rtGetC2cCtrlAddr(&fftsAddr, &fftsLen);
-  main_kernel_tiling();
-  main_kernel<<<8, nullptr, stream>>>(h_handle, k_handle, v_handle, w_handle, g_handle, v_new_handle, h0_handle, ht_handle, cu_seqlens_handle, ws_wh_handle, ws_vnew_handle, ws_hupd_handle, ws_h_handle, fftsAddr);
+extern "C" void call(uint8_t *h_handle, uint8_t *k_handle, uint8_t *v_handle, uint8_t *w_handle, uint8_t *g_handle, uint8_t *v_new_handle, uint8_t *h0_handle, uint8_t *ht_handle, uint8_t *cu_seqlens_handle, uint8_t *ws_wh_handle, uint8_t *ws_vnew_handle, uint8_t *ws_hupd_handle, uint8_t *ws_h_handle, void *stream)
+{
+    uint32_t fftsLen{0};
+    uint64_t fftsAddr{0};
+    rtGetC2cCtrlAddr(&fftsAddr, &fftsLen);
+    launch_kernel<<<8, nullptr, stream>>>(h_handle, k_handle, v_handle, w_handle, g_handle, v_new_handle, h0_handle, ht_handle, cu_seqlens_handle, ws_wh_handle, ws_vnew_handle, ws_hupd_handle, ws_h_handle, fftsAddr);
 }
