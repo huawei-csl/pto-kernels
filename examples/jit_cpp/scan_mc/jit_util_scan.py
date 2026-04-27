@@ -12,9 +12,7 @@ def _get_lib_path(kernel_cpp: str) -> str:
     return f"{basename}_jit.so"
 
 
-def compile_cpp(
-    kernel_cpp: str, verbose: bool = False, timeout: int = 120
-) -> str:
+def compile_cpp(kernel_cpp: str, verbose: bool = False, timeout: int = 120) -> str:
     lib_path = _get_lib_path(kernel_cpp)
 
     flags = [
@@ -86,7 +84,9 @@ def load_lib(lib_path, check_type=True):
             stream_ptr = torch.npu.current_stream()._as_parameter_  # noqa
 
         num_ele_tile = tile_size * tile_size
-        print(f"scan_size={scan_size}, tile_size={tile_size}, num_ele_tile={num_ele_tile}")
+        print(
+            f"scan_size={scan_size}, tile_size={tile_size}, num_ele_tile={num_ele_tile}"
+        )
         block_dim = (scan_size + num_ele_tile - 1) // (num_ele_tile)
         print(f"Launching scan kernel with block_dim={block_dim}, stream={stream_ptr}")
 
