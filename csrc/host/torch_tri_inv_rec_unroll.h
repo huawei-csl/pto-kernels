@@ -17,7 +17,9 @@ for the full License text.
 namespace pto_isa_ops {
 
 /**
- * @brief Triangular inverse using the "recursive unroll" method
+ * @brief Triangular inverse using the "recursive unroll" method.
+ *
+ * Note: supports fp16 and bf16 input dtypes. Output is always fp16.
  *
  * @param M Input tensor containing square matrices on the last two dimensions.
  * @param is_bsnd_format A boolean flag indicating if the matrix is in BSND
@@ -68,7 +70,8 @@ at::Tensor run_tri_inv_rec_unroll(
     block_dim = total_tiles;
   }
 
-  const at::Tensor M_inv = at::zeros_like(M);
+  const at::Tensor M_inv =
+      at::zeros_like(M, at::TensorOptions().dtype(at::kHalf).device(device));
 
   void* cu_seqlens_ptr = nullptr;
   if (cu_seqlens.numel() != 1) {
