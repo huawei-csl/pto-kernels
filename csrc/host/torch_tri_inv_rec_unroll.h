@@ -77,12 +77,15 @@ at::Tensor run_tri_inv_rec_unroll(
     cu_seqlens_ptr = ConvertType(cu_seqlens);
   }
 
+  constexpr uint32_t is_lower = 0;  // only upper triangular for now
+
   if (dtype == at::kBFloat16) {
     EXEC_KERNEL_CMD(tri_inv_rec_unroll_fp16, block_dim, M_inv, M_half,
-                    matrix_size, total_tiles, num_bsnd_heads, cu_seqlens_ptr);
+                    matrix_size, total_tiles, num_bsnd_heads, is_lower,
+                    cu_seqlens_ptr);
   } else if (dtype == at::kHalf) {
     EXEC_KERNEL_CMD(tri_inv_rec_unroll_fp16, block_dim, M_inv, M, matrix_size,
-                    total_tiles, num_bsnd_heads, cu_seqlens_ptr);
+                    total_tiles, num_bsnd_heads, is_lower, cu_seqlens_ptr);
   }
 
   return M_inv;
