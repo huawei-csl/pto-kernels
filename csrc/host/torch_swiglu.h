@@ -29,34 +29,27 @@ namespace pto_isa_ops {
  * @return at::Tensor Contiguous fp16 output tensor with shape [batch, N].
  */
 at::Tensor run_swiglu(const at::Tensor& x, int64_t dim = -1) {
-  if (x.dim() != 2) {
-    throw std::runtime_error("`pto_swiglu` expects a 2D input tensor.");
-  }
+  TORCH_CHECK(x.dim() == 2, "swiglu: expects a 2D input tensor, got ", x.dim(),
+              "D");
   if (dim < 0) {
     dim += x.dim();
   }
-  if (dim != 1) {
-    throw std::runtime_error("`pto_swiglu` currently supports only dim=-1.");
-  }
-  if (x.scalar_type() != at::kHalf) {
-    throw std::runtime_error("`pto_swiglu` supports only fp16 input.");
-  }
-  if (!x.is_contiguous()) {
-    throw std::runtime_error("`pto_swiglu` expects a contiguous input tensor.");
-  }
+  TORCH_CHECK(dim == 1, "swiglu: currently supports only dim=-1");
+  TORCH_CHECK(x.scalar_type() == at::kHalf, "swiglu: dtype must be fp16, got ",
+              x.scalar_type());
+  TORCH_CHECK(x.is_contiguous(), "swiglu: expects a contiguous input tensor");
 
   const auto batch_i64 = x.size(0);
   const auto input_n_i64 = x.size(1);
-  if (batch_i64 <= 0 || input_n_i64 <= 0 || (input_n_i64 & 1) != 0) {
-    throw std::runtime_error(
-        "`pto_swiglu` input shape must be [batch, 2 * N] with positive N.");
-  }
+  TORCH_CHECK(
+      batch_i64 > 0 && input_n_i64 > 0 && (input_n_i64 & 1) == 0,
+      "swiglu: input shape must be [batch, 2 * N] with positive N, got [",
+      batch_i64, ", ", input_n_i64, "]");
 
   const auto output_n_i64 = input_n_i64 / 2;
-  if (batch_i64 > std::numeric_limits<uint32_t>::max() ||
-      input_n_i64 > std::numeric_limits<uint32_t>::max()) {
-    throw std::runtime_error("`pto_swiglu` dimensions exceed uint32_t range.");
-  }
+  TORCH_CHECK(batch_i64 <= std::numeric_limits<uint32_t>::max() &&
+                  input_n_i64 <= std::numeric_limits<uint32_t>::max(),
+              "swiglu: dimensions exceed uint32_t range");
 
   const uint32_t batch = static_cast<uint32_t>(batch_i64);
   const uint32_t input_n = static_cast<uint32_t>(input_n_i64);

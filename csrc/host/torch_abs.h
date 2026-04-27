@@ -40,14 +40,12 @@ at::Tensor run_abs(const at::Tensor& x) {
     block_dim = total_tiles;
   }
 
+  TORCH_CHECK(dtype == at::kHalf || dtype == at::kFloat,
+              "pto_abs: dtype must be fp16 or float32, got ", dtype);
   if (dtype == at::kHalf) {
     EXEC_KERNEL_CMD(vabs_fp16, block_dim, x, z, total_size);
-
-  } else if (dtype == at::kFloat) {
-    EXEC_KERNEL_CMD(vabs_fp32, block_dim, x, z, total_size);
-
   } else {
-    throw std::runtime_error("Unsupported dtype for `pto_abs` kernel");
+    EXEC_KERNEL_CMD(vabs_fp32, block_dim, x, z, total_size);
   }
 
   return z;

@@ -40,11 +40,8 @@ at::Tensor run_tri_inv_rec_unroll(
   if (dtype == at::kBFloat16) {
     M_half = M.to(at::kHalf);
   }
-  if ((dtype != at::kHalf) and (dtype != at::kBFloat16)) {
-    throw std::runtime_error(
-        "Unsupported dtype for tri_inv_rec_unroll kernel. Supports only "
-        "fp16 and bf16.");
-  }
+  TORCH_CHECK(dtype == at::kHalf || dtype == at::kBFloat16,
+              "tri_inv_rec_unroll: dtype must be fp16 or bf16, got ", dtype);
 
   const uint32_t matrix_size = static_cast<uint32_t>(M.size(-1));
   const uint32_t num_bsnd_heads =

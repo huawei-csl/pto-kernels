@@ -29,16 +29,13 @@ at::Tensor run_batch_matrix_square(const at::Tensor& x) {
   const auto dtype = x.options().dtype();
   const auto dtype_out = at::kFloat;
 
-  if (!(dtype == at::kHalf or dtype == at::kFloat)) {
-    throw std::runtime_error(
-        "Unsupported dtype for batch_matrix_square kernel. Supports only "
-        "fp16/fp32");
-  }
+  TORCH_CHECK(dtype == at::kHalf || dtype == at::kFloat,
+              "batch_matrix_square: dtype must be fp16 or float32, got ",
+              dtype);
 
   const uint32_t matrix_size = static_cast<uint32_t>(x.size(-1));
-  if (matrix_size != x.size(-2)) {
-    throw std::runtime_error("Only square matrices are supported.\n");
-  }
+  TORCH_CHECK(matrix_size == static_cast<uint32_t>(x.size(-2)),
+              "batch_matrix_square: only square matrices are supported");
 
   const uint32_t block_dim = x.size(0);
 

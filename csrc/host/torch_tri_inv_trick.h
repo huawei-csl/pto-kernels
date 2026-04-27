@@ -28,15 +28,12 @@ at::Tensor run_tri_inv_trick(const at::Tensor& M) {
   const auto dtype = M.options().dtype();
   const auto dtype_out = at::kFloat;
   const uint32_t max_block_size = 16;
-  if (!(dtype == at::kHalf)) {
-    throw std::runtime_error(
-        "Unsupported dtype for tri_inv_trick kernel. Supports only fp16");
-  }
+  TORCH_CHECK(dtype == at::kHalf, "tri_inv_trick: dtype must be fp16, got ",
+              dtype);
 
   const uint32_t matrix_size = static_cast<uint32_t>(M.size(-1));
-  if (matrix_size != M.size(-2)) {
-    throw std::runtime_error("Only square matrices are supported.\n");
-  }
+  TORCH_CHECK(matrix_size == static_cast<uint32_t>(M.size(-2)),
+              "tri_inv_trick: only square matrices are supported");
   const uint32_t num_elems = static_cast<uint32_t>(M.numel());
   const uint32_t block_dim =
       static_cast<uint32_t>(num_elems / (matrix_size * matrix_size));

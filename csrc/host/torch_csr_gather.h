@@ -34,10 +34,10 @@ at::Tensor run_csr_gather(const at::Tensor& values, const at::Tensor& indices,
 
   // FIXME: expand to support bigger sizes
   const uint32_t x_size = x.numel();
-  if (x_size > 40960) {
-    throw std::runtime_error(
-        "Input x size exceeds the maximum supported size of 40960 elements");
-  }
+  TORCH_CHECK(x_size <= 40960,
+              "csr_gather: input x size exceeds the maximum supported size of "
+              "40960 elements, got ",
+              x_size);
 
   // Define the number of blocks of vector core
   const uint32_t indices_size = indices.numel();
@@ -52,16 +52,14 @@ at::Tensor run_csr_gather(const at::Tensor& values, const at::Tensor& indices,
     block_dim = total_tiles;
   }
 
+  TORCH_CHECK(dtype == at::kHalf || dtype == at::kFloat,
+              "csr_gather: dtype must be fp16 or float32, got ", dtype);
   if (dtype == at::kHalf) {
     EXEC_KERNEL_CMD(csr_gather_fp16, block_dim, values, indices, x, z, x_size,
                     indices_size);
-
-  } else if (dtype == at::kFloat) {
+  } else {
     EXEC_KERNEL_CMD(csr_gather_fp32, block_dim, values, indices, x, z, x_size,
                     indices_size);
-
-  } else {
-    throw std::runtime_error("Unsupported dtype for `pto_csr_gather` kernel");
   }
 
   return z;
