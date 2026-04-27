@@ -5,7 +5,7 @@ from jit_util_scan import jit_compile, clean_up
 
 def test_scan(tile_size=16, n_tiles=3):
     total_len = tile_size * tile_size * n_tiles
-    device = "npu:1"
+    device = "npu:0"
     dtype = torch.float32
     torch.npu.set_device(device)
 
@@ -35,6 +35,8 @@ def test_scan(tile_size=16, n_tiles=3):
     print("Comparing results...")
     print("NPU scan result:\n", s.cpu())
     print("Expected:\n", expected_scan)
+
+    assert torch.allclose(s.cpu(), expected_scan, rtol=1e-3, atol=1e-3), "Scan results do not match expected values!"
 
     print("All results matched. Scan test passed successfully.\n")
 
