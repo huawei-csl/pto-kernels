@@ -30,29 +30,28 @@ namespace pto_isa_ops {
  * in memory, and thus we define num_bsnd_heads=0. If true, then the matrices
  * are stored in "strided mode". In this case we define:
  * num_bsnd_heads=M.size(-2), which is used to do strided load / store ops.
- * @param use_fp32_output A boolean flag indicating whether the output should be
- * in fp32. If false, output is in fp16. Default is false (fp16 output).
+ * @param dtype_out Output dtype, either fp16 or fp32.
  * @return at::Tensor Tensor containing inverses of input matrices (dtype is
  * fp16/fp32).
  */
-at::Tensor run_tri_inv_rec_unroll(const at::Tensor& M,
-                                  const at::Tensor& cu_seqlens = at::zeros({1}),
-                                  const bool is_bsnd_format = false,
-                                  const bool use_fp32_output = false) {
+at::Tensor run_tri_inv_rec_unroll(
+    const at::Tensor& M, const at::Tensor& cu_seqlens = at::zeros({1}),
+    const bool is_bsnd_format = false,
+    const at::ScalarType dtype_out = at::ScalarType::Half) {
   const at::Device device = M.options().device();
   const auto dtype = M.options().dtype();
-  const auto dtype_out = use_fp32_output ? at::kFloat : at::kHalf;
+
+  TORCH_CHECK(dtype_out == at::kHalf || dtype_out == at::kFloat,
+              "tri_inv_rec_unroll: dtype_out must be fp16 or float32, got ",
+              dtype_out);
+  TORCH_CHECK(dtype == at::kHalf || dtype == at::kBFloat16,
+              "tri_inv_rec_unroll: input dtype must be fp16 or bfloat16, got ",
+              dtype);
 
   at::Tensor M_half;
   if (dtype == at::kBFloat16) {
     M_half = M.to(at::kHalf);
   }
-  if ((dtype != at::kHalf) and (dtype != at::kBFloat16)) {
-    throw std::runtime_error(
-        "Unsupported dtype for tri_inv_rec_unroll kernel. Supports only "
-        "fp16 and bf16.");
-  }
-
   const uint32_t matrix_size = static_cast<uint32_t>(M.size(-1));
   const uint32_t num_bsnd_heads =
       is_bsnd_format ? static_cast<uint32_t>(M.size(-2)) : 0;

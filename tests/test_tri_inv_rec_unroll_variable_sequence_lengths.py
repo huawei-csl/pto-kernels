@@ -189,7 +189,7 @@ def _test_inverse_accuracy(
 ):
 
     ref = _reference_inverse(A, cu_seqlens, chunk_size)
-    tri = pto_tri_inv_rec_unroll(A, cu_seqlens, True, True)
+    tri = pto_tri_inv_rec_unroll(A, cu_seqlens, True, torch.float32)
     torch.npu.synchronize()
     tri = tri.cpu().to(torch.float64)
     torch.npu.synchronize()
