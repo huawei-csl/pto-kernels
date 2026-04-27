@@ -11,7 +11,8 @@ for the full License text.
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
-#include "aclrtlaunch_tri_inv_rec_unroll_fp16.h"
+#include "aclrtlaunch_tri_inv_rec_unroll_fp16fp16.h"
+#include "aclrtlaunch_tri_inv_rec_unroll_fp16fp32.h"
 #include "utils.h"
 
 namespace pto_isa_ops {
@@ -22,20 +23,25 @@ namespace pto_isa_ops {
  * Note: supports fp16 and bf16 input dtypes. Output is always fp16.
  *
  * @param M Input tensor containing square matrices on the last two dimensions.
+ * @param cu_seqlens A 1-dimensional torch tensor that contains the lengths
+ * of each input sequence (it is the cummulative sum of the lengths)
  * @param is_bsnd_format A boolean flag indicating if the matrix is in BSND
  * format. If false, then each matrix / tile is stored in consecutive positions
  * in memory, and thus we define num_bsnd_heads=0. If true, then the matrices
  * are stored in "strided mode". In this case we define:
  * num_bsnd_heads=M.size(-2), which is used to do strided load / store ops.
- * @param cu_seqlens A 1-dimensional torch tensor that contains the lengths
- * of each input sequence (it is the cummulative sum of the lengths)
- * @return at::Tensor Tensor containing inverses of input matrices.
+ * @param use_fp32_output A boolean flag indicating whether the output should be
+ * in fp32. If false, output is in fp16. Default is false (fp16 output).
+ * @return at::Tensor Tensor containing inverses of input matrices (dtype is
+ * fp16/fp32).
  */
-at::Tensor run_tri_inv_rec_unroll(
-    const at::Tensor& M, const bool is_bsnd_format = false,
-    const at::Tensor& cu_seqlens = at::zeros({1})) {
+at::Tensor run_tri_inv_rec_unroll(const at::Tensor& M,
+                                  const at::Tensor& cu_seqlens = at::zeros({1}),
+                                  const bool is_bsnd_format = false,
+                                  const bool use_fp32_output = false) {
   const at::Device device = M.options().device();
   const auto dtype = M.options().dtype();
+  const auto dtype_out = use_fp32_output ? at::kFloat : at::kHalf;
 
   at::Tensor M_half;
   if (dtype == at::kBFloat16) {
@@ -71,19 +77,20 @@ at::Tensor run_tri_inv_rec_unroll(
   }
 
   const at::Tensor M_inv =
-      at::zeros_like(M, at::TensorOptions().dtype(at::kHalf).device(device));
+      at::zeros_like(M, at::TensorOptions().dtype(dtype_out).device(device));
 
   void* cu_seqlens_ptr = nullptr;
   if (cu_seqlens.numel() != 1) {
     cu_seqlens_ptr = ConvertType(cu_seqlens);
   }
 
-  if (dtype == at::kBFloat16) {
-    EXEC_KERNEL_CMD(tri_inv_rec_unroll_fp16, block_dim, M_inv, M_half,
+  const at::Tensor M_input = (dtype == at::kBFloat16) ? M_half : M;
+  if (dtype_out == at::kHalf) {
+    EXEC_KERNEL_CMD(tri_inv_rec_unroll_fp16fp16, block_dim, M_inv, M_input,
                     matrix_size, total_tiles, num_bsnd_heads, cu_seqlens_ptr);
-  } else if (dtype == at::kHalf) {
-    EXEC_KERNEL_CMD(tri_inv_rec_unroll_fp16, block_dim, M_inv, M, matrix_size,
-                    total_tiles, num_bsnd_heads, cu_seqlens_ptr);
+  } else if (dtype_out == at::kFloat) {
+    EXEC_KERNEL_CMD(tri_inv_rec_unroll_fp16fp32, block_dim, M_inv, M_input,
+                    matrix_size, total_tiles, num_bsnd_heads, cu_seqlens_ptr);
   }
 
   return M_inv;
