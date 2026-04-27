@@ -224,12 +224,6 @@ AICORE void runKernelScanMCSSA(__gm__ InputT* x, __gm__ InputT* o,
   TASSIGN(sVecTile, tile_ub_offset);
   TASSIGN(coreScanTile, tile_ub_offset + tile_byte_size);
 
-  using TileCarry =
-      Tile<TileType::Vec, OutputT, 1, elePerTile, BLayout::RowMajor, 1, 1>;
-
-  TileCarry carryTile;
-  TASSIGN(carryTile, tile_ub_offset + 2 * tile_byte_size);
-
   if (get_block_idx() == 0 && get_subblockid() == 0) {
     // Only one vector core does the scan
     OutputT carry = 0;
