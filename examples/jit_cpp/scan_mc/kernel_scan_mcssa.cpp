@@ -200,6 +200,7 @@ AICORE void runKernelScanMCSSA(__gm__ InputT* x, __gm__ InputT* o,
 #endif
 #if (__CHECK_FEATURE_AT_PRECOMPILE) || \
     (__CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__))
+
   // Vec unit code path
   set_mask_norm();
   set_vector_mask(-1, -1);
@@ -223,6 +224,12 @@ AICORE void runKernelScanMCSSA(__gm__ InputT* x, __gm__ InputT* o,
   TASSIGN(sVecTile, tile_ub_offset);
   TASSIGN(coreScanTile, tile_ub_offset + tile_byte_size);
 
+  using TileCarry =
+      Tile<TileType::Vec, OutputT, 1, elePerTile, BLayout::RowMajor, 1, 1>;
+
+  TileCarry carryTile;
+  TASSIGN(carryTile, tile_ub_offset + 2 * tile_byte_size);
+
   if (get_block_idx() == 0 && get_subblockid() == 0) {
     // Only one vector core does the scan
     OutputT carry = 0;
@@ -241,40 +248,25 @@ AICORE void runKernelScanMCSSA(__gm__ InputT* x, __gm__ InputT* o,
       // Store the carry-in to the first element of the scan tile
       coreScanTile.SetValue(it, carry);
 
-      // Extract the last element of the tile as the carry-out for the next tile
-      OutputT curr = sVecTile.GetValue(elePerTile - 1);
-
-      // Wait for scalar op to complete before storing the scan result back to
-      // GM
       set_flag(PIPE_S, PIPE_MTE3, EVENT_ID0);
       wait_flag(PIPE_S, PIPE_MTE3, EVENT_ID0);
 
-      // // Wait for scalar op before loading next tile
-      // set_flag(PIPE_S, PIPE_MTE2, EVENT_ID0);
-      // wait_flag(PIPE_S, PIPE_MTE2, EVENT_ID0);
-
       TSTORE(coreScanGlobal, coreScanTile);
+
+      set_flag(PIPE_MTE3, PIPE_S, EVENT_ID0);
+      wait_flag(PIPE_MTE3, PIPE_S, EVENT_ID0);
 
       // Wait for store to complete before loading the next tile
       set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID0);
       wait_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID0);
 
-      set_flag(PIPE_MTE3, PIPE_S, EVENT_ID0);
-      wait_flag(PIPE_MTE3, PIPE_S, EVENT_ID0);
-
-      carry += curr;
+      // Extract the last element of the tile as the carry-out for the next tile
+      carry += sVecTile.GetValue(elePerTile - 1);
 
       // Wait for scalar op to complete before next iteration
       set_flag(PIPE_S, PIPE_MTE2, EVENT_ID0);
       wait_flag(PIPE_S, PIPE_MTE2, EVENT_ID0);
     }
-
-    // Wait for store to complete before loading the scan result back to UB
-    // set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID0);
-    // wait_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID0);
-    // Wait for the scan to be done
-    // All vectors cores need to wait
-    // All vector cores do the addition
   }
 
   SyncAllImpl<true>();
