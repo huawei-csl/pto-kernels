@@ -20,7 +20,7 @@ namespace pto_isa_ops {
 /**
  * @brief Triangular inverse using the "recursive unroll" method.
  *
- * Note: supports fp16 and bf16 input dtypes. Output is always fp16.
+ * Note: supports fp16 and bf16 input dtypes. Output is fp16 or fp32.
  *
  * @param M Input tensor containing square matrices on the last two dimensions.
  * @param cu_seqlens A 1-dimensional torch tensor that contains the lengths
