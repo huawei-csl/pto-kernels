@@ -137,6 +137,9 @@ AICORE void scanULOne(__gm__ InputT* x, __gm__ InputT* o, __gm__ InputT* u,
   set_flag(PIPE_FIX, PIPE_MTE1, EVENT_ID0);
   wait_flag(PIPE_FIX, PIPE_MTE1, EVENT_ID0);
 
+  set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+  wait_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
+
   // Load Us from L1 to L0
   TileL0B uL0;
   TASSIGN(uL0, 0x0);
@@ -218,6 +221,10 @@ AICORE void singleVecBlockScan(__gm__ OutputT* s, uint32_t scan_size,
   set_vector_mask(-1, -1);
   set_atomic_none();
 
+  if (get_block_idx() != 0 || get_subblockid() != 0) {
+    return;  // Only one vector core does the scan
+  }
+
   using Shape = pto::Shape<1, 1, 1, tile_size, tile_size>;
   using Stride = pto::Stride<1, 1, 1, tile_size, 1>;
   using GlobalDataOut = pto::GlobalTensor<OutputT, Shape, Stride, Layout::ND>;
@@ -241,42 +248,38 @@ AICORE void singleVecBlockScan(__gm__ OutputT* s, uint32_t scan_size,
   TASSIGN(sVecTile, tile_ub_offset);
   TASSIGN(coreScanTile, tile_ub_offset + tile_byte_size);
 
-  if (get_block_idx() == 0 && get_subblockid() == 0) {
-    // Only one vector core does the scan
-    OutputT carry = 0;
-    for (uint32_t it = 0; it < numberOfTiles; ++it) {
-      uint32_t offset = it * elePerTile;
-      TASSIGN(sGlobal, s + offset);
+  OutputT carry = 0;
+  for (uint32_t it = 0; it < numberOfTiles; ++it) {
+    uint32_t offset = it * elePerTile;
+    TASSIGN(sGlobal, s + offset);
 
-      // Load tile from GM to UB
-      TLOAD(sVecTile, sGlobal);
-      TLOAD(coreScanTile, coreScanGlobal);
+    // Load tile from GM to UB
+    TLOAD(sVecTile, sGlobal);
+    TLOAD(coreScanTile, coreScanGlobal);
 
-      // Wait for load to complete
-      set_flag(PIPE_MTE2, PIPE_S, EVENT_ID0);
-      wait_flag(PIPE_MTE2, PIPE_S, EVENT_ID0);
+    // Wait for load to complete
+    set_flag(PIPE_MTE2, PIPE_S, EVENT_ID0);
+    wait_flag(PIPE_MTE2, PIPE_S, EVENT_ID0);
 
-      // Store the carry-in to the first element of the scan tile
-      coreScanTile.SetValue(it, carry);
+    // Store the carry-in to the first element of the scan tile
+    coreScanTile.SetValue(it, carry);
 
-      pipe_barrier(PIPE_ALL);
-      // Extract the last element of the tile as the carry-out for the next tile
-      carry += sVecTile.GetValue(elePerTile - 1);
+    // Extract the last element of the tile as the carry-out for the next tile
+    carry += sVecTile.GetValue(elePerTile - 1);
 
-      set_flag(PIPE_S, PIPE_MTE3, EVENT_ID0);
-      wait_flag(PIPE_S, PIPE_MTE3, EVENT_ID0);
+    set_flag(PIPE_S, PIPE_MTE3, EVENT_ID0);
+    wait_flag(PIPE_S, PIPE_MTE3, EVENT_ID0);
 
-      set_flag(PIPE_S, PIPE_MTE2, EVENT_ID0);
-      wait_flag(PIPE_S, PIPE_MTE2, EVENT_ID0);
+    set_flag(PIPE_S, PIPE_MTE2, EVENT_ID0);
+    wait_flag(PIPE_S, PIPE_MTE2, EVENT_ID0);
 
-      TSTORE(coreScanGlobal, coreScanTile);
+    TSTORE(coreScanGlobal, coreScanTile);
 
-      set_flag(PIPE_MTE3, PIPE_S, EVENT_ID0);
-      wait_flag(PIPE_MTE3, PIPE_S, EVENT_ID0);
+    set_flag(PIPE_MTE3, PIPE_S, EVENT_ID0);
+    wait_flag(PIPE_MTE3, PIPE_S, EVENT_ID0);
 
-      set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID0);
-      wait_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID0);
-    }
+    set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID0);
+    wait_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID0);
   }
 
 #endif
@@ -298,6 +301,10 @@ AICORE void addAllBlockScan(__gm__ OutputT* s, uint32_t scan_size,
                             __gm__ OutputT* scan_core_buf) {
 #if (__CHECK_FEATURE_AT_PRECOMPILE) || \
     (__CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__))
+
+  if (get_subblockid() != 0) {
+    return;  // Only one vector core does the scan
+  }
 
   // Vec unit code path
   set_mask_norm();
@@ -327,39 +334,36 @@ AICORE void addAllBlockScan(__gm__ OutputT* s, uint32_t scan_size,
   TASSIGN(sVecTile, tile_ub_offset);
   TASSIGN(coreScanTile, tile_ub_offset + tile_byte_size);
 
-  // Cores, but only one vector each
-  if (get_subblockid() == 0) {
-    // Load the scan result from GM to UB
-    TLOAD(coreScanTile, coreScanGlobal);
+  // Load the scan result from GM to UB
+  TLOAD(coreScanTile, coreScanGlobal);
 
-    // Wait for load to complete before doing addition
-    set_flag(PIPE_MTE2, PIPE_S, EVENT_ID0);
-    wait_flag(PIPE_MTE2, PIPE_S, EVENT_ID0);
+  // Wait for load to complete before doing addition
+  set_flag(PIPE_MTE2, PIPE_S, EVENT_ID0);
+  wait_flag(PIPE_MTE2, PIPE_S, EVENT_ID0);
 
-    // Extract the carry for this tile
-    OutputT carry = coreScanTile.GetValue(get_block_idx());
+  // Extract the carry for this tile
+  OutputT carry = coreScanTile.GetValue(get_block_idx());
 
-    // Wait for the carry to be ready before doing addition
-    set_flag(PIPE_S, PIPE_V, EVENT_ID0);
-    wait_flag(PIPE_S, PIPE_V, EVENT_ID0);
+  // Wait for the carry to be ready before doing addition
+  set_flag(PIPE_S, PIPE_V, EVENT_ID0);
+  wait_flag(PIPE_S, PIPE_V, EVENT_ID0);
 
-    // LOAD the tile from GM to UB
-    const uint32_t offset = get_block_idx() * elePerTile;
-    TASSIGN(sGlobal, s + offset);
-    TLOAD(sVecTile, sGlobal);
+  // LOAD the tile from GM to UB
+  const uint32_t offset = get_block_idx() * elePerTile;
+  TASSIGN(sGlobal, s + offset);
+  TLOAD(sVecTile, sGlobal);
 
-    // Wait for load to complete before doing addition
-    set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
-    wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+  // Wait for load to complete before doing addition
+  set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+  wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
-    TADDS(sVecTile, sVecTile, carry);
+  TADDS(sVecTile, sVecTile, carry);
 
-    // Wait for addition to complete before storing result back to GM
-    set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
-    wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+  // Wait for addition to complete before storing result back to GM
+  set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+  wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
 
-    TSTORE(sGlobal, sVecTile);
-  }
+  TSTORE(sGlobal, sVecTile);
 
 #endif
 }
