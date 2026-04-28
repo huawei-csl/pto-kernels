@@ -22,14 +22,14 @@ constexpr unsigned UB_SIZE = 0x30000;  // 192KB UB of A2A3
 /**
  * @brief Kernel implementation for scan operation on a single cube.
  *
- * The implemetation follows the ScanMCSSA algorithm described in [1]
+ * The implemetation follows the ScanUL1 algorithm described in [1]
  *
  * [1] Parallel Scan on Ascend AI Accelerators
  * (https://arxiv.org/abs/2505.15112v1).
  *
  * @tparam InputT Input data type. Supports `fp16` or `fp32`
  * @tparam OutputT Output data type 'fp32`
- * @tparam tile_size Size of the square matrix
+ * @tparam matrix_size Size of the square matrix
  *
  * @param x Input matrix in GM
  * @param o Ones matrix in GM
@@ -38,12 +38,11 @@ constexpr unsigned UB_SIZE = 0x30000;  // 192KB UB of A2A3
  * @param s Output matrix in GM, also used as intermediate buffer for C1
  */
 template <typename InputT, typename OutputT, uint32_t tile_size>
-AICORE void runKernelScanMCSSA(__gm__ InputT* x, __gm__ InputT* o,
-                               __gm__ InputT* u, __gm__ InputT* l,
-                               __gm__ OutputT* s, uint32_t scan_size,
-                               __gm__ OutputT* scan_core_buf,
-                               __gm__ uint8_t* ffts_addr) {
-  set_ffts_base_addr((uint64_t)ffts_addr);
+AICORE void scanULOne(__gm__ InputT* x, __gm__ InputT* o, __gm__ InputT* u,
+                      __gm__ InputT* l, __gm__ OutputT* s, uint32_t scan_size) {
+#if (__CHECK_FEATURE_AT_PRECOMPILE) || \
+    (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))
+
   // Type definitions for different memory levels
   // GM
   using Shape = pto::Shape<1, 1, 1, tile_size, tile_size>;
@@ -52,10 +51,6 @@ AICORE void runKernelScanMCSSA(__gm__ InputT* x, __gm__ InputT* o,
   using GlobalDataOut = pto::GlobalTensor<OutputT, Shape, Stride, Layout::ND>;
 
   const uint32_t elePerTile = tile_size * tile_size;
-
-#if (__CHECK_FEATURE_AT_PRECOMPILE) || \
-    (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))
-  // Cube unit code path
 
   // L1
   using TileL1In =
@@ -194,10 +189,27 @@ AICORE void runKernelScanMCSSA(__gm__ InputT* x, __gm__ InputT* o,
   wait_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
 
   TSTORE(sGlobal, sL0);
-
-  SyncAllImpl<false>();
-
 #endif
+}
+
+/**
+ * @brief Naive block level scan implementation
+ *
+ * @tparam OutputT Output data type
+ * @tparam tile_size Size of the square tile, should be the same as the one used
+ *in scanULOne
+ *
+ * @param s Input and output matrix in GM. Should be the same buffer used for C1
+ *in scanULOne
+ * @param scan_size Total number of elements to scan, should be the same as the
+ *one used in runKernelScanMCSSA
+ * @param scan_core_buf Buffer in GM for storing intermediate scan results from
+ *each tile, used for carry propagation between tiles
+ *
+ **/
+template <typename OutputT, uint32_t tile_size>
+AICORE void singleVecBlockScan(__gm__ OutputT* s, uint32_t scan_size,
+                               __gm__ OutputT* scan_core_buf) {
 #if (__CHECK_FEATURE_AT_PRECOMPILE) || \
     (__CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__))
 
@@ -205,7 +217,11 @@ AICORE void runKernelScanMCSSA(__gm__ InputT* x, __gm__ InputT* o,
   set_mask_norm();
   set_vector_mask(-1, -1);
 
-  SyncAllImpl<false>();
+  using Shape = pto::Shape<1, 1, 1, tile_size, tile_size>;
+  using Stride = pto::Stride<1, 1, 1, tile_size, 1>;
+  using GlobalDataOut = pto::GlobalTensor<OutputT, Shape, Stride, Layout::ND>;
+
+  const uint32_t elePerTile = tile_size * tile_size;
 
   using TileDataOut = Tile<TileType::Vec, OutputT, 1, elePerTile,
                            BLayout::RowMajor, 1, elePerTile>;
@@ -263,7 +279,41 @@ AICORE void runKernelScanMCSSA(__gm__ InputT* x, __gm__ InputT* o,
     }
   }
 
-  SyncAllImpl<true>();
+#endif
+}
+
+template <typename OutputT, uint32_t tile_size>
+AICORE void addAllBlockScan(__gm__ OutputT* s, uint32_t scan_size,
+                            __gm__ OutputT* scan_core_buf) {
+#if (__CHECK_FEATURE_AT_PRECOMPILE) || \
+    (__CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__))
+
+  // Vec unit code path
+  set_mask_norm();
+  set_vector_mask(-1, -1);
+
+  using Shape = pto::Shape<1, 1, 1, tile_size, tile_size>;
+  using Stride = pto::Stride<1, 1, 1, tile_size, 1>;
+  using GlobalDataOut = pto::GlobalTensor<OutputT, Shape, Stride, Layout::ND>;
+
+  const uint32_t elePerTile = tile_size * tile_size;
+
+  using TileDataOut = Tile<TileType::Vec, OutputT, 1, elePerTile,
+                           BLayout::RowMajor, 1, elePerTile>;
+  TileDataOut sVecTile;
+
+  const uint32_t numberOfTiles = (scan_size + elePerTile - 1) / elePerTile;
+  using TileScan = Tile<TileType::Vec, OutputT, 1, elePerTile,
+                        BLayout::RowMajor, 1, elePerTile>;
+  TileScan coreScanTile;
+
+  GlobalDataOut coreScanGlobal(scan_core_buf);
+  GlobalDataOut sGlobal(s);
+
+  const uint32_t tile_ub_offset = 0x0;
+  const uint32_t tile_byte_size = elePerTile * sizeof(OutputT);
+  TASSIGN(sVecTile, tile_ub_offset);
+  TASSIGN(coreScanTile, tile_ub_offset + tile_byte_size);
 
   // Cores, but only one vector each
   if (get_subblockid() == 0) {
@@ -300,6 +350,43 @@ AICORE void runKernelScanMCSSA(__gm__ InputT* x, __gm__ InputT* o,
   }
 
 #endif
+}
+
+/**
+ * @brief Kernel implementation for scan operation on a single cube.
+ *
+ * The implemetation follows the ScanMCSSA algorithm described in [1]
+ *
+ * [1] Parallel Scan on Ascend AI Accelerators
+ * (https://arxiv.org/abs/2505.15112v1).
+ *
+ * @tparam InputT Input data type. Supports `fp16` or `fp32`
+ * @tparam OutputT Output data type 'fp32`
+ * @tparam tile_size Size of the square matrix
+ *
+ * @param x Input matrix in GM
+ * @param o Ones matrix in GM
+ * @param u Upper triangular matrix in GM
+ * @param l Lower triangular matrix in GM
+ * @param s Output matrix in GM, also used as intermediate buffer for C1
+ */
+template <typename InputT, typename OutputT, uint32_t tile_size>
+AICORE void runKernelScanMCSSA(__gm__ InputT* x, __gm__ InputT* o,
+                               __gm__ InputT* u, __gm__ InputT* l,
+                               __gm__ OutputT* s, uint32_t scan_size,
+                               __gm__ OutputT* scan_core_buf,
+                               __gm__ uint8_t* ffts_addr) {
+  set_ffts_base_addr((uint64_t)ffts_addr);
+
+  scanULOne<InputT, OutputT, tile_size>(x, o, u, l, s, scan_size);
+
+  SyncAllImpl<false>();
+
+  singleVecBlockScan<OutputT, tile_size>(s, scan_size, scan_core_buf);
+
+  SyncAllImpl<true>();
+
+  addAllBlockScan<OutputT, tile_size>(s, scan_size, scan_core_buf);
 }
 
 template <typename T>
