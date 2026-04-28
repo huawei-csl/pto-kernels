@@ -45,7 +45,16 @@ There is **no** unified **`qkv_offset`** once **`H ≠ Hg`**: **`K`** cannot sha
 Math unchanged: **`U = (A ⊙ β₂d) @ V`**, **`W = (A ⊙ (eᵍβ)₂d) @ K`** with **`β`,`g`,`A`** per **value** head.
 
 - **Cube GM loads**: **`K`** uses **`k_off`** + **`BSND_QK_STRIDE`**; **`V`**, and **`W`/`U` stores**, use **`v_off`** + **`BSND_V_STRIDE`** (same **`v_off`** pattern as **`chunk_h`** outputs).
-- **Vec** loads **`A`**, **`β`**, **`g`** unchanged vs **`H == Hg`** — those tensors remain **[batch, seq, H, …]** for **value** heads **`H`** (template **`NumHeads`**).
+- **Vec** loads **`β`**, **`g`**, stores **`A`** unchanged vs **`H == Hg`** — **[batch, seq, H, …]** / **`[H,T]`** transposed for **value** heads **`H`** (template **`NumHeads`**).
+
+## `scaled_dot_kkt`-specific notes
+
+Same split as **`chunk_o`** / **`wy_fast`** on the Cube **`K`** path only:
+
+- **Cube `TLOAD` / `GlobalTensor` for `K`**: token offset **`(bos + chunk_start) * Hg + head_g`** with **`head_g = head_idx / GROUP`**; stride **`BSND_QK_STRIDE = Hg * D`** (not **`H * D`**).
+- **Vec `β` / `g` loads**, **`A` GM store**, and **`pid → head_idx`** over **`H`** value heads — unchanged from the **`H == Hg`** kernel (**`Stride … NumHeads * ChunkSize`** along sequence for **`A`**).
+
+Reference: FLA **`chunk_scaled_dot_kkt`** / Triton indexing **`k + (bos * Hg + i_h // GROUP) * K`**.
 
 ## Python / verification
 
@@ -57,12 +66,14 @@ Scripts:
 
 | Script | What it checks |
 |--------|----------------|
+| **`verify_scaled_dot_kkt_groupvalue.py`** | **`scaled_dot_kkt`** |
 | **`verify_dynamic_bsnd_groupvalue.py`** | **`chunk_h`** |
 | **`verify_chunk_o_groupvalue.py`** | **`chunk_h` → `chunk_o`** |
 | **`verify_wy_fast_groupvalue.py`** | **`wy_fast`** alone (synthetic **`A`**, same case list spirit) |
 
 ## Benchmarking
 
-- Compare **PTO vs Triton** with **matching tensor layouts** (`k`/`q` `[B,T,Hg,D]`, `v`/`w`/`u`/`o` `[B,T,H,D]`).
-- Original **`dynamic_bsnd`** bench remains valid when **`H == Hg`**; group-value timings live here: **`bench_dynamic_bsnd_groupvalue.py`**, **`bench_chunk_o_groupvalue.py`**, **`bench_wy_fast_groupvalue.py`**.
+- Compare **PTO vs Triton** with **matching tensor layouts** (`k`/`q` `[B,T,Hg,D]`, `v`/`w`/`u`/`o` `[B,T,H,D]`). For **`scaled_dot_kkt`**, **`bench_scaled_dot_kkt_groupvalue.py`** uses Triton **`BT=64`** by default ( **`GDN_TRITON_KKT_CHUNK`** ) and optionally **`BT=128`** when it compiles; ratios **`ms_triton/ms_pto`** (**``>1`` ⇒ PTO faster**).
+- Original **`dynamic_bsnd`** bench remains valid when **`H == Hg`**; group-value timings live here: **`bench_scaled_dot_kkt_groupvalue.py`**, **`bench_dynamic_bsnd_groupvalue.py`**, **`bench_chunk_o_groupvalue.py`**, **`bench_wy_fast_groupvalue.py`** — see **`README.md`** for measured latencies (`npu:7`, **2026-04-28** run).
+
 - Parent **`dynamic_bsnd/README.md`** documents **PTO `GDN_C=128` vs Triton default tile `64`** — apply when quoting cross-backend latency.

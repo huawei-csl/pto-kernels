@@ -310,3 +310,81 @@ def run_chunk_o(
         q.shape[1],
         T,
     )
+
+
+# ---------- scaled_dot_kkt (GQA: K rows Hg; β,g,A rows H) ----------
+def load_scaled_dot_kkt(
+    num_heads: int,
+    hidden_size: int = 128,
+    chunk_size: int = 128,
+    *,
+    key_heads: int | None = None,
+):
+    kh = key_heads if key_heads is not None else num_heads
+    lib = _load(
+        "scaled_dot_kkt_kernel.cpp",
+        "scaled_dot_kkt_bsnd_groupvalue",
+        num_heads=num_heads,
+        hidden_size=hidden_size,
+        chunk_size=chunk_size,
+        key_heads=key_heads,
+    )
+    lib.call_kernel.argtypes = [
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+    ] + [ctypes.c_void_p] * 7 + [ctypes.c_int64, ctypes.c_int64, ctypes.c_int64]
+    lib.call_kernel.restype = None
+    return lib
+
+
+def run_scaled_dot_kkt(
+    k,
+    beta,
+    g_sum,
+    mask,
+    workspace,
+    A_out,
+    *,
+    stream,
+    g_t,
+    beta_t,
+    chunk_size=128,
+    cu_seqlens=None,
+    batch_size_override=None,
+    block_dim=None,
+    key_heads: int | None = None,
+):
+    """``k``: ``[B, T, Hg, D]``; ``beta``, ``g_sum``: ``[B, T, H]``; ``A_out``: ``[B, T, H, C]``."""
+    assert k.ndim == 4 and beta.ndim == 3 and g_sum.ndim == 3 and A_out.ndim == 4
+    hg = k.shape[2]
+    kh = key_heads if key_heads is not None else hg
+    assert hg == kh, f"k head dim {hg} must match key_heads {kh}"
+    H = beta.shape[2]
+    assert H == g_sum.shape[2] == A_out.shape[2], "beta/g_sum/A_out must agree on H"
+    assert H % kh == 0, f"H={H} must be divisible by Hg={kh}"
+    D = k.shape[3]
+    batch = k.shape[0] if batch_size_override is None else batch_size_override
+    bd = block_dim or BLOCK_DIM
+    lib = load_scaled_dot_kkt(H, D, chunk_size, key_heads=kh)
+    if cu_seqlens is not None and cu_seqlens.dtype != torch.int32:
+        cu_seqlens = cu_seqlens.to(torch.int32)
+    workspace = torch.zeros(
+        (bd * 2, chunk_size, chunk_size),
+        device=k.device,
+        dtype=torch.float16,
+    )
+    T = g_sum.shape[1]
+    lib.call_kernel(
+        bd,
+        stream,
+        _vp(k),
+        _vp(beta_t),
+        _vp(g_t),
+        _vp(mask),
+        _vp(workspace),
+        _vp(A_out),
+        _vp(cu_seqlens),
+        batch,
+        k.shape[1],
+        T,
+    )
