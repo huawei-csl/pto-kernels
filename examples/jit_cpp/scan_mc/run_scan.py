@@ -13,9 +13,9 @@ def test_scan(tile_size=16, n_tiles=4):
     x = torch.ones(size=(total_len,), device="npu", dtype=dtype).contiguous()
     s = torch.zeros_like(x)
 
-    o = torch.ones((tile_size, tile_size), device="npu", dtype=dtype).contiguous()
-    u = torch.triu(o).contiguous()
-    l = torch.tril(o, -1).contiguous()
+    ones = torch.ones((tile_size, tile_size), device="npu", dtype=dtype).contiguous()
+    utri = torch.triu(ones).contiguous()
+    ltri = torch.tril(ones, -1).contiguous()
 
     # Expected PyTorch computation
     expected_scan = torch.cumsum(x.cpu(), dim=0)
@@ -28,7 +28,7 @@ def test_scan(tile_size=16, n_tiles=4):
         f"Testing NPU scan kernel: tile_size={tile_size}x{tile_size}, total_len={total_len} ({n_tiles} tiles)"
     )
 
-    scan_func(x, o, u, l, s, total_len, tile_size)
+    scan_func(x, ones, utri, ltri, s, total_len, tile_size)
 
     torch.npu.synchronize()
 
