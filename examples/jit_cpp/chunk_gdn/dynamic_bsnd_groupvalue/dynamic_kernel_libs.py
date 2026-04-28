@@ -1,16 +1,28 @@
 from __future__ import annotations
 
 import ctypes
+import importlib.util
 import os
 from functools import lru_cache
 
 import torch
 
-from pto_dynamic_common import (
-    BLOCK_DIM,
-    compile_pto_kernel,
-    optional_torch_to_ctypes,
-)
+
+def _load_pto_dynamic_common():
+    """Load sibling ``pto_dynamic_common`` so imports never resolve to ``../dynamic_bsnd``."""
+    _here = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(_here, "pto_dynamic_common.py")
+    spec = importlib.util.spec_from_file_location("pto_dynamic_common_groupvalue", path)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+_pto_dyn = _load_pto_dynamic_common()
+BLOCK_DIM = _pto_dyn.BLOCK_DIM
+compile_pto_kernel = _pto_dyn.compile_pto_kernel
+optional_torch_to_ctypes = _pto_dyn.optional_torch_to_ctypes
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
