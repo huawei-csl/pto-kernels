@@ -30,6 +30,10 @@ at::Tensor run_simple_matmul(const at::Tensor& a, const at::Tensor& b) {
   const auto dtype = a.options().dtype();
   const auto dtype_out = at::kFloat;
 
+  TORCH_CHECK(device.type() == DEVICE_TYPE,
+              "simple_matmul: tensor must be on NPU, got ", device);
+  TORCH_CHECK(b.device().type() == DEVICE_TYPE,
+              "simple_matmul: tensor must be on NPU, got ", b.device());
   TORCH_CHECK(
       dtype == at::kHalf || dtype == at::kFloat || dtype == at::kBFloat16,
       "simple_matmul: dtype must be fp16, bf16, or float32, got ", dtype);

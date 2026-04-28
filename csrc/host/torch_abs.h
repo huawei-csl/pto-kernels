@@ -40,6 +40,8 @@ at::Tensor run_abs(const at::Tensor& x) {
     block_dim = total_tiles;
   }
 
+  TORCH_CHECK(x.device().type() == DEVICE_TYPE,
+              "pto_abs: tensor must be on NPU, got ", x.device());
   TORCH_CHECK(dtype == at::kHalf || dtype == at::kFloat,
               "pto_abs: dtype must be fp16 or float32, got ", dtype);
   if (dtype == at::kHalf) {

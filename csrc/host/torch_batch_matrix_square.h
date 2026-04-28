@@ -29,6 +29,8 @@ at::Tensor run_batch_matrix_square(const at::Tensor& x) {
   const auto dtype = x.options().dtype();
   const auto dtype_out = at::kFloat;
 
+  TORCH_CHECK(device.type() == DEVICE_TYPE,
+              "batch_matrix_square: tensor must be on NPU, got ", device);
   TORCH_CHECK(dtype == at::kHalf || dtype == at::kFloat,
               "batch_matrix_square: dtype must be fp16 or float32, got ",
               dtype);

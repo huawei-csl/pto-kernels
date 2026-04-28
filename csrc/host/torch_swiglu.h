@@ -35,6 +35,8 @@ at::Tensor run_swiglu(const at::Tensor& x, int64_t dim = -1) {
     dim += x.dim();
   }
   TORCH_CHECK(dim == 1, "swiglu: currently supports only dim=-1");
+  TORCH_CHECK(x.device().type() == DEVICE_TYPE,
+              "swiglu: tensor must be on NPU, got ", x.device());
   TORCH_CHECK(x.scalar_type() == at::kHalf, "swiglu: dtype must be fp16, got ",
               x.scalar_type());
   TORCH_CHECK(x.is_contiguous(), "swiglu: expects a contiguous input tensor");

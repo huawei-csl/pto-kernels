@@ -40,6 +40,8 @@ at::Tensor run_tri_inv_rec_unroll(
   if (dtype == at::kBFloat16) {
     M_half = M.to(at::kHalf);
   }
+  TORCH_CHECK(device.type() == DEVICE_TYPE,
+              "tri_inv_ns: tensor must be on NPU, got ", device);
   TORCH_CHECK(dtype == at::kHalf || dtype == at::kBFloat16,
               "tri_inv_rec_unroll: dtype must be fp16 or bf16, got ", dtype);
 

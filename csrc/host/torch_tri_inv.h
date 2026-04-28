@@ -28,6 +28,8 @@ namespace pto_isa_ops {
 at::Tensor run_tri_inv(const at::Tensor& x) {
   const at::Device device = x.options().device();
   const auto dtype = x.options().dtype();
+  TORCH_CHECK(device.type() == DEVICE_TYPE,
+              "tri_inv: tensor must be on NPU, got ", device);
   TORCH_CHECK(x.dim() >= 2,
               "tri_inv: input tensor must have at least 2 dimensions, got ",
               x.dim());

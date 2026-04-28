@@ -52,6 +52,12 @@ at::Tensor run_csr_gather(const at::Tensor& values, const at::Tensor& indices,
     block_dim = total_tiles;
   }
 
+  TORCH_CHECK(values.device().type() == DEVICE_TYPE,
+              "csr_gather: tensor must be on NPU, got ", values.device());
+  TORCH_CHECK(indices.device().type() == DEVICE_TYPE,
+              "csr_gather: tensor must be on NPU, got ", indices.device());
+  TORCH_CHECK(x.device().type() == DEVICE_TYPE,
+              "csr_gather: tensor must be on NPU, got ", x.device());
   TORCH_CHECK(dtype == at::kHalf || dtype == at::kFloat,
               "csr_gather: dtype must be fp16 or float32, got ", dtype);
   if (dtype == at::kHalf) {
