@@ -3,7 +3,7 @@ import torch_npu  # noqa
 from jit_util_scan import jit_compile, clean_up
 
 
-def test_scan(tile_size=16, n_tiles=3):
+def test_scan(tile_size=16, n_tiles=4):
     total_len = tile_size * tile_size * n_tiles
     device = "npu:0"
     dtype = torch.float32
@@ -33,8 +33,8 @@ def test_scan(tile_size=16, n_tiles=3):
     torch.npu.synchronize()
 
     print("Comparing results...")
-    print("NPU scan result:\n", s.cpu())
-    print("Expected:\n", expected_scan)
+    print("NPU scan result:\n", s.cpu()[::128])
+    print("Expected:\n", expected_scan[::128])
 
     assert torch.allclose(
         s.cpu(), expected_scan, rtol=1e-3, atol=1e-3

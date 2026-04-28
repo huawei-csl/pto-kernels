@@ -282,6 +282,17 @@ AICORE void singleVecBlockScan(__gm__ OutputT* s, uint32_t scan_size,
 #endif
 }
 
+/**
+ * @brief Adds the carry-in to the scan results from each tile
+ *
+ * @tparam OutputT Output data type
+ * @tparam tile_size Size of the square tile
+ *
+ * @param s Input and output matrix in GM
+ * @param scan_size Total number of elements to scan
+ * @param scan_core_buf Buffer in GM for storing intermediate scan results from
+ *each tile
+ */
 template <typename OutputT, uint32_t tile_size>
 AICORE void addAllBlockScan(__gm__ OutputT* s, uint32_t scan_size,
                             __gm__ OutputT* scan_core_buf) {
