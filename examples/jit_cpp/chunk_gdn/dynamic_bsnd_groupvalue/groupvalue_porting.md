@@ -62,18 +62,14 @@ Reference: FLA **`chunk_scaled_dot_kkt`** / Triton indexing **`k + (bos * Hg + i
 - **Normalize `Q`,`K`** like upstream (`F.normalize(..., dim=-1, p=2)`) when comparing to pipeline-style tests.
 - Import **`pto_dynamic_common`** only from **this directory** when loading ctypes libs (`sys.modules['pto_dynamic_common'] = …`) so **`key_heads`** reaches **`compile_pto_kernel`** (otherwise an older module shadowing breaks `-DGDN_HG=`).
 
-Scripts:
+Scripts (single entry points):
 
-| Script | What it checks |
-|--------|----------------|
-| **`verify_scaled_dot_kkt_groupvalue.py`** | **`scaled_dot_kkt`** |
-| **`verify_dynamic_bsnd_groupvalue.py`** | **`chunk_h`** |
-| **`verify_chunk_o_groupvalue.py`** | **`chunk_h` → `chunk_o`** |
-| **`verify_wy_fast_groupvalue.py`** | **`wy_fast`** alone (synthetic **`A`**, same case list spirit) |
+| Script | Role |
+|--------|------|
+| **`verify_dynamic_bsnd_groupvalue.py`** | **`--stage`** among **`kkt`**, **`chunk_h`**, **`wy_fast`**, **`chunk_o`** (same packed-varlen case list as **`dynamic_bsnd/verify_dynamic_bsnd.py`**) |
+| **`bench_dynamic_bsnd_groupvalue.py`** | Times each stage vs FLA Triton; **`--stage`** filter; **`GDN_TRITON_KKT_CHUNK`** / **`GDN_TRITON_CHUNK_O_CHUNK`** |
 
 ## Benchmarking
 
-- Compare **PTO vs Triton** with **matching tensor layouts** (`k`/`q` `[B,T,Hg,D]`, `v`/`w`/`u`/`o` `[B,T,H,D]`). For **`scaled_dot_kkt`**, **`bench_scaled_dot_kkt_groupvalue.py`** uses Triton **`BT=64`** by default ( **`GDN_TRITON_KKT_CHUNK`** ) and optionally **`BT=128`** when it compiles; ratios **`ms_triton/ms_pto`** (**``>1`` ⇒ PTO faster**).
-- Original **`dynamic_bsnd`** bench remains valid when **`H == Hg`**; group-value timings live here: **`bench_scaled_dot_kkt_groupvalue.py`**, **`bench_dynamic_bsnd_groupvalue.py`**, **`bench_chunk_o_groupvalue.py`**, **`bench_wy_fast_groupvalue.py`** — see **`README.md`** for measured latencies (`npu:7`, **2026-04-28** run).
-
-- Parent **`dynamic_bsnd/README.md`** documents **PTO `GDN_C=128` vs Triton default tile `64`** — apply when quoting cross-backend latency.
+- Compare **PTO vs Triton** with **matching tensor layouts**. **`bench_dynamic_bsnd_groupvalue.py`** benchmarks **`scaled_dot_kkt`** with Triton **`BT=64`** by default and optionally **`BT=128`** when it compiles; ratios **`ms_triton/ms_pto`** (**``>1`` ⇒ PTO faster**).
+- **`dynamic_bsnd/bench_dynamic_bsnd.py`** remains the **`H == Hg`** pipeline bench; group-value numbers are in **`README.md`** here.

@@ -97,54 +97,11 @@ BSND with `T=262144`.
 | chunk_o | 10.71 | 16.15 | 1.51x | 32.1 |
 | **total (exclude solve_tril)** | **32.17** | **68.47** | **2.13x** | **25.6** |
 
-### chunk_h group-value (`Hg ≠ H`)
+### GQA group-value (`H ≠ Hg`)
 
-PTO-only extension in ``dynamic_bsnd_groupvalue/`` (same packed ``T``, ``D``, ``C``). Timings below are ``chunk_h`` only vs FLA Triton ``chunk_gated_delta_rule_fwd_h`` (``C=128``), measured by ``dynamic_bsnd_groupvalue/bench_dynamic_bsnd_groupvalue.py``.
+When **value heads `H`** and **shared key heads `Hg`** differ, use the sibling directory **`dynamic_bsnd_groupvalue/`**:
 
-**Reproduce:** ``cd chunk_gdn/dynamic_bsnd_groupvalue && export ASCEND_TOOLKIT_HOME=... && export GDN_NPU_DEVICE=npu:7 && GDN_BENCH_H=<H> GDN_BENCH_HG=16 python3 bench_dynamic_bsnd_groupvalue.py`` (Ascend 910B2, ``cube_core_num=24``).
-
-| ``H`` (value heads) | ``Hg`` (key heads) | PTO chunk_h (ms) | Triton chunk_h (ms) | Speedup vs Triton |
-| :-- | --: | --: | --: | --: |
-| 16 | 16 | 9.47 | 15.55 | **1.64x** |
-| 32 | 16 | 17.81 | 30.57 | **1.72x** |
-| 48 | 16 | 26.41 | 45.50 | **1.72x** |
-| 64 | 16 | 35.37 | 60.62 | **1.71x** |
-
-### wy_fast group-value (`Hg ≠ H`)
-
-``wy_fast_kernel.cpp`` in ``dynamic_bsnd_groupvalue/`` loads **`K`** with key stride ``Hg·D`` and **`V` / `W` / `U`** with value stride ``H·D``. FLA ``recompute_w_u_fwd`` matches (`wy_fast.py`: ``ptr_k = k + (bos * Hg + i_h // (H // Hg)) * K + …``).
-
-**Reproduce:** ``cd chunk_gdn/dynamic_bsnd_groupvalue && export ASCEND_TOOLKIT_HOME=... && export GDN_NPU_DEVICE=npu:7 && GDN_BENCH_H=<H> GDN_BENCH_HG=16 python3 bench_wy_fast_groupvalue.py``
-
-Measured on Ascend **910B2**, ``npu:7``, ``cube_core_num=24``, ``T=262144``, **both PTO and Triton at ``C=128``**.
-
-| ``H`` | ``Hg`` | PTO wy_fast (ms) | Triton wy_fast (ms) | Triton vs PTO × |
-| :-- | --: | --: | --: | --: |
-| 16 | 16 | 6.04 | 11.93 | **1.98** |
-| 32 | 16 | 11.37 | 23.39 | **2.06** |
-| 48 | 16 | 18.02 | 34.83 | **1.93** |
-| 64 | 16 | 22.37 | 46.33 | **2.07** |
-
-### chunk_o group-value (`Hg ≠ H`)
-
-``chunk_o_kernel.cpp`` in ``dynamic_bsnd_groupvalue/`` uses shared Q/K strides ``Hg·D`` and value strides ``H·D``. FLA’s Triton kernel ``chunk_fwd_o`` uses the same GQA indexing (`chunk_o.py`: ``q += (bos * Hg + i_h // (H // Hg)) * K``).
-
-Follow **[PTO vs Triton chunk tile](#pto-vs-triton-chunk-tile)** above: here **PTO is timed at ``C=128``** and the **Triton baseline at ``BT=64``** (Ascend often fails to compile or run FLA ``chunk_fwd_o`` at ``BT=128``—UB overflow); optional ``BT=128`` column only when it works.
-
-**Reproduce:** ``cd chunk_gdn/dynamic_bsnd_groupvalue && export ASCEND_TOOLKIT_HOME=... && export GDN_NPU_DEVICE=npu:7 && GDN_BENCH_H=<H> GDN_BENCH_HG=16 python3 bench_chunk_o_groupvalue.py``
-
-Measured on Ascend **910B2**, ``npu:7``, ``cube_core_num=24``, ``T=262144``.
-
-| ``H`` | ``Hg`` | PTO chunk_o ``C=128`` (ms) | Triton ``chunk_fwd_o`` ``BT=64`` (ms) | Triton vs PTO × |
-| :-- | --: | --: | --: | --: |
-| 16 | 16 | 10.59 | 16.10 | **1.52** |
-| 32 | 16 | 19.59 | 31.60 | **1.61** |
-| 48 | 16 | 30.87 | 46.63 | **1.51** |
-| 64 | 16 | 39.25 | — | — |
-
-At ``H=64``, Triton ``chunk_fwd_o`` (``BT=64``) repeatedly ended with **AICore exception / error 507015** on this host while PTO ``chunk_o`` completed; ``chunk_h`` Triton at the same ``H`` still ran—see ``bench_dynamic_bsnd_groupvalue.py``. Leave Triton blank until the Ascend backend issue is understood.
-
-Set ``GDN_BENCH_H`` / ``GDN_BENCH_HG`` when running the benchmark scripts.
+→ **[`../dynamic_bsnd_groupvalue/README.md`](../dynamic_bsnd_groupvalue/README.md)** — single **`verify_dynamic_bsnd_groupvalue.py`** and **`bench_dynamic_bsnd_groupvalue.py`**, reproducible commands, and measured PTO vs Triton tables (including **`BT=64`** / optional **`BT=128`** notes for `scaled_dot_kkt`).
 
 ## Design notes
 
