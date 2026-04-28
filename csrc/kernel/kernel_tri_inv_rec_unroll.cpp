@@ -615,7 +615,7 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
         if (valid_size < MatrixSize) {
           TileL0CDynamic c_l0_tail_tile(valid_size, valid_size);
           TASSIGN(c_l0_tail_tile,
-                  0x0 + final_c_buffer_index * TileLen * sizeof(OutputT));
+                  0x0 + final_c_buffer_index * TileLen * sizeof(float));
           GlobalTileDynamicOut M_inv_global_out_dyn(
               M_inv + bsnd_offset,
               {1, 1, 1, static_cast<int>(valid_size),
