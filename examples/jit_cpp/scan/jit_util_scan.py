@@ -68,23 +68,20 @@ def load_lib(lib_path, check_type=True):
     lib_path = os.path.abspath(lib_path)
     lib = ctypes.CDLL(lib_path)
 
-    default_block_dim = 2
+    default_block_dim = 1  # single core scan
 
     if check_type:
         lib.scan_fp32.argtypes = [
             ctypes.c_uint32,  # blockDim
             ctypes.c_void_p,  # stream
             ctypes.c_void_p,  # x
-            ctypes.c_void_p,  # o
+            ctypes.c_void_p,  # y
             ctypes.c_void_p,  # u
-            ctypes.c_void_p,  # l
-            ctypes.c_void_p,  # s
-            ctypes.c_uint32,  # scan_size
-            ctypes.c_uint32,  # total_len
+            ctypes.c_uint,  # total_len
         ]
         lib.scan_fp32.restype = None
 
-    def scan_func(x, o, u, l, s, scan_size, total_len, block_dim=default_block_dim, stream_ptr=None):
+    def scan_func(x, y, u, total_len, block_dim=default_block_dim, stream_ptr=None):
         if stream_ptr is None:
             stream_ptr = torch.npu.current_stream()._as_parameter_  # noqa
 
@@ -92,11 +89,8 @@ def load_lib(lib_path, check_type=True):
             block_dim,
             stream_ptr,
             torch_to_ctypes(x),
-            torch_to_ctypes(o),
+            torch_to_ctypes(y),
             torch_to_ctypes(u),
-            torch_to_ctypes(l),
-            torch_to_ctypes(s),
-            scan_size,
             total_len,
         )
 
