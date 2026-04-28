@@ -41,6 +41,8 @@ at::Tensor run_tri_inv_rec_unroll(
   const at::Device device = M.options().device();
   const auto dtype = M.options().dtype();
 
+  TORCH_CHECK(device.type() == DEVICE_TYPE,
+              "tri_inv_ns: tensor must be on NPU, got ", device);
   TORCH_CHECK(dtype_out == at::kHalf || dtype_out == at::kFloat,
               "tri_inv_rec_unroll: dtype_out must be fp16 or float32, got ",
               dtype_out);
@@ -52,6 +54,7 @@ at::Tensor run_tri_inv_rec_unroll(
   if (dtype == at::kBFloat16) {
     M_half = M.to(at::kHalf);
   }
+
   const uint32_t matrix_size = static_cast<uint32_t>(M.size(-1));
   const uint32_t num_bsnd_heads =
       is_bsnd_format ? static_cast<uint32_t>(M.size(-2)) : 0;

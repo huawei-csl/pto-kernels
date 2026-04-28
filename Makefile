@@ -5,7 +5,7 @@
 # https://github.com/huawei-csl/pto-kernels/
 # for the full License text.
 # --------------------------------------------------------------------------------
-.PHONY: clean setup_once build_wheel install test
+.PHONY: clean setup_once build_cmake build_wheel install docs test test_tri_inv
 
 clean:
 	rm -rf build/ dist/ extra-info/ *.egg-info/ kernel_meta/ pto_kernels*.whl
@@ -23,9 +23,11 @@ build_wheel:
 install:
 	python3 -m pip install --force-reinstall pto_kernels-*.whl
 
-
 docs:
 	doxygen doxygen/Doxyfile
 
 test:
-	pytest -v tests/
+	pytest tests/
+
+test_tri_inv:
+	pytest tests/test_tri_inv_*.py
