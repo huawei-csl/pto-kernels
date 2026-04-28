@@ -81,6 +81,17 @@ BSND with `T=262144`.
 | chunk_o | 10.71 | 16.15 | 1.51x | 32.1 |
 | **total (exclude solve_tril)** | **32.17** | **68.47** | **2.13x** | **25.6** |
 
+### chunk_h group-value (`Hg ≠ H`)
+
+PTO-only extension in ``dynamic_bsnd_groupvalue/`` (same packed ``T``, ``D``, ``C``). Timings below are ``chunk_h`` only vs FLA Triton ``chunk_gated_delta_rule_fwd_h`` (``C=128``), measured by ``dynamic_bsnd_groupvalue/bench_dynamic_bsnd_groupvalue.py``.
+
+| ``H`` (value heads) | ``Hg`` (key heads) | PTO chunk_h (ms) | Triton chunk_h (ms) | Speedup vs Triton |
+| :-- | --: | --: | --: | --: |
+| 16 | 16 | 8.33 | 15.50 | **1.86x** |
+| 32 | 16 | 16.89 | 30.69 | **1.82x** |
+
+Set ``GDN_BENCH_H`` / ``GDN_BENCH_HG`` when running the benchmark script.
+
 ## Design notes
 
 - **BSND layout**: All tensors use `[B=1, T, H, D]` contiguous layout.
