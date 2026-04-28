@@ -38,8 +38,9 @@ Triton references: `chunk_delta_h.py` / `chunk_o.py` (`stride_k = Hg * K`, `stri
 - Avoid **`torch.randn` gates** alone for recurrence-heavy ops — match **`verify_dynamic_bsnd`**: **`logsigmoid`** then **chunk-local `cumsum`** per sequence.
 - **Normalize `Q`,`K`** like upstream (`F.normalize(..., dim=-1, p=2)`) so numerical checks align with the full pipeline tests.
 - Import **`pto_dynamic_common`** only from **this directory** when loading ctypes libs (`sys.modules['pto_dynamic_common'] = …`) so **`key_heads`** reaches **`compile_pto_kernel`** (otherwise an older module shadowing breaks `-DGDN_HG=`).
+- Scripts: **`verify_dynamic_bsnd_groupvalue.py`** (chunk_h), **`verify_chunk_o_groupvalue.py`** (chunk_h → chunk_o chain), **`bench_dynamic_bsnd_groupvalue.py`** (chunk_h), **`bench_chunk_o_groupvalue.py`** (chunk_o).
 
 ## Benchmarking
 
 - Compare **PTO vs Triton** with **matching tensor layouts** (`k`/`q` `[B,T,Hg,D]`, `v`/`o` `[B,T,H,D]`).
-- Original **`dynamic_bsnd`** bench remains valid when **`H == Hg`**; group-value timings live beside it or in a dedicated **`bench_*_groupvalue.py`**.
+- Original **`dynamic_bsnd`** bench remains valid when **`H == Hg`**; group-value timings live beside it or in a dedicated **`bench_*_groupvalue.py`** / **`bench_chunk_o_groupvalue.py`**.

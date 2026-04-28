@@ -68,6 +68,22 @@ Re-run the same script several times on NPU if you see flakiness; asynchronous e
 
 ## Benchmark results
 
+### PTO vs Triton chunk tile
+
+Chunk GDN implementations pick a **chunk size** (sequence tile / `BT`): it is an **internal algorithm parameter**. **Different chunk sizes are directly comparable** as separate reported configurations—you are comparing two valid implementations at their respective settings, not requiring an identical tile for a meaningful perf line item.
+
+| | **PTO** | **FLA / Triton baseline** |
+| :-- | :-- | :-- |
+| **Default in this repo** | **`GDN_C=128`** (`-DGDN_C=128`) | Often **`chunk_size=64`**; in Triton JIT this is commonly the sequence tile **`BT`**. |
+
+**Default rule for future benchmarks:** when you compare latency to the **Triton baseline**, **assume Triton uses chunk size 64** unless the table explicitly states another value.
+
+**Optional extra line item:** If the Triton kernel **also compiles and runs** at chunk **128**, you may **add** that configuration to the comparison (nice when PTO is at 128).
+
+**If Triton fails at 128:** **omit** that data point and **note the failure** (e.g. Ascend UB overflow at compile time, AICore exception at runtime). Do not silently substitute numbers.
+
+Tables below follow these conventions where both backends appear.
+
 Shape: `(N_seq=16, L_seg=16384, H=16, DK=DV=128, C=128)`, packed varlen
 BSND with `T=262144`.
 
@@ -85,12 +101,35 @@ BSND with `T=262144`.
 
 PTO-only extension in ``dynamic_bsnd_groupvalue/`` (same packed ``T``, ``D``, ``C``). Timings below are ``chunk_h`` only vs FLA Triton ``chunk_gated_delta_rule_fwd_h`` (``C=128``), measured by ``dynamic_bsnd_groupvalue/bench_dynamic_bsnd_groupvalue.py``.
 
+**Reproduce:** ``cd chunk_gdn/dynamic_bsnd_groupvalue && export ASCEND_TOOLKIT_HOME=... && export GDN_NPU_DEVICE=npu:7 && GDN_BENCH_H=<H> GDN_BENCH_HG=16 python3 bench_dynamic_bsnd_groupvalue.py`` (Ascend 910B2, ``cube_core_num=24``).
+
 | ``H`` (value heads) | ``Hg`` (key heads) | PTO chunk_h (ms) | Triton chunk_h (ms) | Speedup vs Triton |
 | :-- | --: | --: | --: | --: |
-| 16 | 16 | 8.33 | 15.50 | **1.86x** |
-| 32 | 16 | 16.89 | 30.69 | **1.82x** |
+| 16 | 16 | 9.47 | 15.55 | **1.64x** |
+| 32 | 16 | 17.81 | 30.57 | **1.72x** |
+| 48 | 16 | 26.41 | 45.50 | **1.72x** |
+| 64 | 16 | 35.37 | 60.62 | **1.71x** |
 
-Set ``GDN_BENCH_H`` / ``GDN_BENCH_HG`` when running the benchmark script.
+### chunk_o group-value (`Hg ≠ H`)
+
+``chunk_o_kernel.cpp`` in ``dynamic_bsnd_groupvalue/`` uses shared Q/K strides ``Hg·D`` and value strides ``H·D``. FLA’s Triton kernel ``chunk_fwd_o`` uses the same GQA indexing (`chunk_o.py`: ``q += (bos * Hg + i_h // (H // Hg)) * K``).
+
+Follow **[PTO vs Triton chunk tile](#pto-vs-triton-chunk-tile)** above: here **PTO is timed at ``C=128``** and the **Triton baseline at ``BT=64``** (Ascend often fails to compile or run FLA ``chunk_fwd_o`` at ``BT=128``—UB overflow); optional ``BT=128`` column only when it works.
+
+**Reproduce:** ``cd chunk_gdn/dynamic_bsnd_groupvalue && export ASCEND_TOOLKIT_HOME=... && export GDN_NPU_DEVICE=npu:7 && GDN_BENCH_H=<H> GDN_BENCH_HG=16 python3 bench_chunk_o_groupvalue.py``
+
+Measured on Ascend **910B2**, ``npu:7``, ``cube_core_num=24``, ``T=262144``.
+
+| ``H`` | ``Hg`` | PTO chunk_o ``C=128`` (ms) | Triton ``chunk_fwd_o`` ``BT=64`` (ms) | Triton vs PTO × |
+| :-- | --: | --: | --: | --: |
+| 16 | 16 | 10.59 | 16.10 | **1.52** |
+| 32 | 16 | 19.59 | 31.60 | **1.61** |
+| 48 | 16 | 30.87 | 46.63 | **1.51** |
+| 64 | 16 | 39.25 | — | — |
+
+At ``H=64``, Triton ``chunk_fwd_o`` (``BT=64``) repeatedly ended with **AICore exception / error 507015** on this host while PTO ``chunk_o`` completed; ``chunk_h`` Triton at the same ``H`` still ran—see ``bench_dynamic_bsnd_groupvalue.py``. Leave Triton blank until the Ascend backend issue is understood.
+
+Set ``GDN_BENCH_H`` / ``GDN_BENCH_HG`` when running the benchmark scripts.
 
 ## Design notes
 
