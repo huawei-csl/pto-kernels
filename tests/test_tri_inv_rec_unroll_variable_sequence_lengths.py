@@ -199,6 +199,7 @@ def _test_inverse_accuracy(
     frob_error = torch.sqrt(torch.sum((ref - tri) ** 2) / torch.sum(ref**2)).item()
     assert frob_error <= ftol
 
+
 @pytest.mark.parametrize("output_dtype", [torch.float16, torch.float32])
 @pytest.mark.parametrize("B", [1, 2, 7, 17, 32, 93])
 @pytest.mark.parametrize("N", [4])
@@ -240,4 +241,6 @@ def test_tri_inv_rec_unroll_variable_length(
         feature_dim=default_feature_dim,
         matrix_type=matrix_type,
     )
-    _test_inverse_accuracy(packed_input, cu_seqlens, chunk_size, atol, rtol, ftol, output_dtype)
+    _test_inverse_accuracy(
+        packed_input, cu_seqlens, chunk_size, atol, rtol, ftol, output_dtype
+    )

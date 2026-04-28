@@ -214,4 +214,6 @@ def test_tri_inv_rec_unroll_bsnd(
     if S % D != 0:
         pytest.skip("Sequence length must be a multiple of chunk size D.")
     U = matrix_gen(D, B * S // D, N)
-    _test_tri_inv_rec_unroll_bsnd(U, B, S, N, D, atol, rtol, ftol, input_dtype, output_dtype)
+    _test_tri_inv_rec_unroll_bsnd(
+        U, B, S, N, D, atol, rtol, ftol, input_dtype, output_dtype
+    )
