@@ -8,7 +8,7 @@
 .PHONY: clean setup_once build_cmake build_wheel install docs test test_tri_inv
 
 clean:
-	rm -rf build/ dist/ extra-info/ *.egg-info/ kernel_meta/
+	rm -rf build/ dist/ extra-info/ *.egg-info/ kernel_meta/ pto_kernels-*.whl
 
 setup_once:
 	pip3 install -r requirements.txt
