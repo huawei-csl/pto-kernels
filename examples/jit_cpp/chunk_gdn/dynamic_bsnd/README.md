@@ -110,6 +110,21 @@ PTO-only extension in ``dynamic_bsnd_groupvalue/`` (same packed ``T``, ``D``, ``
 | 48 | 16 | 26.41 | 45.50 | **1.72x** |
 | 64 | 16 | 35.37 | 60.62 | **1.71x** |
 
+### wy_fast group-value (`Hg ≠ H`)
+
+``wy_fast_kernel.cpp`` in ``dynamic_bsnd_groupvalue/`` loads **`K`** with key stride ``Hg·D`` and **`V` / `W` / `U`** with value stride ``H·D``. FLA ``recompute_w_u_fwd`` matches (`wy_fast.py`: ``ptr_k = k + (bos * Hg + i_h // (H // Hg)) * K + …``).
+
+**Reproduce:** ``cd chunk_gdn/dynamic_bsnd_groupvalue && export ASCEND_TOOLKIT_HOME=... && export GDN_NPU_DEVICE=npu:7 && GDN_BENCH_H=<H> GDN_BENCH_HG=16 python3 bench_wy_fast_groupvalue.py``
+
+Measured on Ascend **910B2**, ``npu:7``, ``cube_core_num=24``, ``T=262144``, **both PTO and Triton at ``C=128``**.
+
+| ``H`` | ``Hg`` | PTO wy_fast (ms) | Triton wy_fast (ms) | Triton vs PTO × |
+| :-- | --: | --: | --: | --: |
+| 16 | 16 | 6.04 | 11.93 | **1.98** |
+| 32 | 16 | 11.37 | 23.39 | **2.06** |
+| 48 | 16 | 18.02 | 34.83 | **1.93** |
+| 64 | 16 | 22.37 | 46.33 | **2.07** |
+
 ### chunk_o group-value (`Hg ≠ H`)
 
 ``chunk_o_kernel.cpp`` in ``dynamic_bsnd_groupvalue/`` uses shared Q/K strides ``Hg·D`` and value strides ``H·D``. FLA’s Triton kernel ``chunk_fwd_o`` uses the same GQA indexing (`chunk_o.py`: ``q += (bos * Hg + i_h // (H // Hg)) * K``).

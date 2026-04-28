@@ -9,8 +9,9 @@ This documents what changed when extending **dynamic BSND** PTO kernels so **val
 | Keys `K`, queries `Q` | `[total_tokens, Hg, D]` | `Hg * D` elements |
 | Values `V`, gates `G`, wy outputs `W`,`U`, chunk_o output `O`, chunk_h state over value heads | `[total_tokens, H, D]` or `[H, T]` for `G` | `H * D` or `H` |
 | Hidden state `S` snapshots | `[chunks, H, D, D]` | Indexed per **value** head |
+| Attention blocks `A` (from scaled-dot / KKT stage) | `[batch, seq, H, C]` | Stride `H * C` along seq (per **value** head) |
 
-Triton references: `chunk_delta_h.py` / `chunk_o.py` (`stride_k = Hg * K`, `stride_v = H * V`, shared key row for grouped heads).
+Triton references: `chunk_delta_h.py` / `chunk_o.py` / `wy_fast.py` (`stride_k = Hg * K`, `stride_v = H * V`, shared key row for grouped heads).
 
 ## C++ indexing pattern
 
@@ -21,6 +22,8 @@ Triton references: `chunk_delta_h.py` / `chunk_o.py` (`stride_k = Hg * K`, `stri
    - **V / outputs tied to value heads**: `(t * H + head) * D` with stride **`H * D`** (`BSND_V_STRIDE`).
 4. **Gates `G`** stay **`[H, total_tokens]`** per **value** head — unchanged.
 
+Launcher macros: **`GDN_H`** = value heads, **`GDN_HG`** = key heads (default **`GDN_H`**). Wrapper invokes **`kernel<GDN_H, GDN_HG, GDN_D, GDN_C>`**.
+
 ## `chunk_h`-specific notes
 
 - Cube loads **only `W`,`V`** from value stride; Vec loads **`K`** from key stride — split offsets accordingly.
@@ -28,19 +31,38 @@ Triton references: `chunk_delta_h.py` / `chunk_o.py` (`stride_k = Hg * K`, `stri
 
 ## `chunk_o`-specific notes
 
-- **GEMM 1 & 2** use **`Q`,`K`** from the shared key head → **`qk_off`** + **`BSND_QK_STRIDE`** on `GlobalTensor` strides.
-- **GEMM 3** uses **`V`** → **`v_off`** + **`BSND_V_STRIDE`**.
-- **`S`** (chunk_h states) stays **`(chunk_idx * H + head) * D²`** — state is per **value** head.
-- **Vec writes `O`** with value-head stride (`NumHeads * HiddenSize` in the original equals **`BSND_V_STRIDE`**).
+Porting mirrored **`chunk_h`**: introduce **`qk_off`** / **`v_off`**, **`head_g`**, and explicit **`BSND_QK_STRIDE`** vs **`BSND_V_STRIDE`** anywhere **`GlobalTensor`** touches **`Q`,`K`** vs **`V`** (dense **and** **`cu_seqlens`** Cube paths).
+
+- **GEMM 1 & 2** (`Q @ Kᵀ`, `Q @ S`): load **`Q`** and **`K`** via **`qk_off`** + **`BSND_QK_STRIDE`**.
+- **GEMM 3** (`QK_gated @ V`): load **`V`** via **`v_off`** + **`BSND_V_STRIDE`**.
+- **`S`** chunk states: **`(chunk_global_idx * H + head_idx) * D²`** — still **value** heads (**`NumHeads`** in template = **`H`**).
+- **Vec stores `O`**: row offset **`(chunk_token_start * H + head_idx) * D`** + half-chunk **`vid`** skew; **`Stride`** uses **`BSND_V_STRIDE`** (same numeric size as **`H * HiddenSize`**).
+
+There is **no** unified **`qkv_offset`** once **`H ≠ Hg`**: **`K`** cannot share the same leading dimension stride as **`V`**.
+
+## `wy_fast`-specific notes
+
+Math unchanged: **`U = (A ⊙ β₂d) @ V`**, **`W = (A ⊙ (eᵍβ)₂d) @ K`** with **`β`,`g`,`A`** per **value** head.
+
+- **Cube GM loads**: **`K`** uses **`k_off`** + **`BSND_QK_STRIDE`**; **`V`**, and **`W`/`U` stores**, use **`v_off`** + **`BSND_V_STRIDE`** (same **`v_off`** pattern as **`chunk_h`** outputs).
+- **Vec** loads **`A`**, **`β`**, **`g`** unchanged vs **`H == Hg`** — those tensors remain **[batch, seq, H, …]** for **value** heads **`H`** (template **`NumHeads`**).
 
 ## Python / verification
 
-- Avoid **`torch.randn` gates** alone for recurrence-heavy ops — match **`verify_dynamic_bsnd`**: **`logsigmoid`** then **chunk-local `cumsum`** per sequence.
-- **Normalize `Q`,`K`** like upstream (`F.normalize(..., dim=-1, p=2)`) so numerical checks align with the full pipeline tests.
+- Avoid **`torch.randn` gates** alone for recurrence-heavy ops — match **`verify_dynamic_bsnd`**: **`logsigmoid`** then **chunk-local `cumsum`** per sequence where applicable.
+- **Normalize `Q`,`K`** like upstream (`F.normalize(..., dim=-1, p=2)`) when comparing to pipeline-style tests.
 - Import **`pto_dynamic_common`** only from **this directory** when loading ctypes libs (`sys.modules['pto_dynamic_common'] = …`) so **`key_heads`** reaches **`compile_pto_kernel`** (otherwise an older module shadowing breaks `-DGDN_HG=`).
-- Scripts: **`verify_dynamic_bsnd_groupvalue.py`** (chunk_h), **`verify_chunk_o_groupvalue.py`** (chunk_h → chunk_o chain), **`bench_dynamic_bsnd_groupvalue.py`** (chunk_h), **`bench_chunk_o_groupvalue.py`** (chunk_o).
+
+Scripts:
+
+| Script | What it checks |
+|--------|----------------|
+| **`verify_dynamic_bsnd_groupvalue.py`** | **`chunk_h`** |
+| **`verify_chunk_o_groupvalue.py`** | **`chunk_h` → `chunk_o`** |
+| **`verify_wy_fast_groupvalue.py`** | **`wy_fast`** alone (synthetic **`A`**, same case list spirit) |
 
 ## Benchmarking
 
-- Compare **PTO vs Triton** with **matching tensor layouts** (`k`/`q` `[B,T,Hg,D]`, `v`/`o` `[B,T,H,D]`).
-- Original **`dynamic_bsnd`** bench remains valid when **`H == Hg`**; group-value timings live beside it or in a dedicated **`bench_*_groupvalue.py`** / **`bench_chunk_o_groupvalue.py`**.
+- Compare **PTO vs Triton** with **matching tensor layouts** (`k`/`q` `[B,T,Hg,D]`, `v`/`w`/`u`/`o` `[B,T,H,D]`).
+- Original **`dynamic_bsnd`** bench remains valid when **`H == Hg`**; group-value timings live here: **`bench_dynamic_bsnd_groupvalue.py`**, **`bench_chunk_o_groupvalue.py`**, **`bench_wy_fast_groupvalue.py`**.
+- Parent **`dynamic_bsnd/README.md`** documents **PTO `GDN_C=128` vs Triton default tile `64`** — apply when quoting cross-backend latency.

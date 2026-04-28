@@ -5,6 +5,7 @@ PTO kernels for GQA-style layouts where **value/query heads `H`** exceed **share
 | Kernel | C++ | Role |
 |--------|-----|------|
 | `chunk_h` | `chunk_h_kernel.cpp` | Recurrent hidden-state update (`K`/`W`/`U` strides split) |
+| `wy_fast` | `wy_fast_kernel.cpp` | WY recompute `W`,`U` from `A`,`β`,`g` (`K` vs `V` strides split) |
 | `chunk_o` | `chunk_o_kernel.cpp` | Chunk output `O = (QK_gated @ V) + exp(g)·(Q @ S)` |
 
 Same batch / packed-varlen semantics as ``dynamic_bsnd/``; see parent ``dynamic_bsnd/README.md``.
@@ -20,6 +21,7 @@ Uses ``bisheng`` via ``pto_dynamic_common.compile_pto_kernel``. Macros:
 Cached shared objects:
 
 - ``compiled_lib/chunk_h_bsnd_groupvalue_H{H}_Hg{Hg}_D{D}_C{C}.so``
+- ``compiled_lib/wy_fast_bsnd_groupvalue_H{H}_Hg{Hg}_D{D}_C{C}.so``
 - ``compiled_lib/chunk_o_bsnd_groupvalue_H{H}_Hg{Hg}_D{D}_C{C}.so``
 
 ## Verification (NPU)
@@ -36,12 +38,16 @@ python3 verify_dynamic_bsnd_groupvalue.py --device npu:7 --quick
 
 python3 verify_chunk_o_groupvalue.py --device npu:7 --H-list 16,32,48,64
 python3 verify_chunk_o_groupvalue.py --device npu:7 --quick
+
+python3 verify_wy_fast_groupvalue.py --device npu:7 --H-list 16,32,48,64
+python3 verify_wy_fast_groupvalue.py --device npu:7 --quick
 ```
 
 Expectations:
 
 - ``verify_dynamic_bsnd_groupvalue.py``: **same case list** as ``dynamic_bsnd/verify_dynamic_bsnd.py`` lines 222–280; checks ``h_states`` and ``v_new``.
 - ``verify_chunk_o_groupvalue.py``: runs ``chunk_h`` then ``chunk_o``; compares ``chunk_o`` to a CPU fp32 reference (PTO ``exp(min(Δg,0))`` gating).
+- ``verify_wy_fast_groupvalue.py``: **``wy_fast`` only** with synthetic ``A`` tiles; compares ``w`` and ``u`` to a CPU fp32 reference (FLA-style ``hg`` for ``K``).
 
 ## Benchmark
 
@@ -54,6 +60,7 @@ export ASCEND_TOOLKIT_HOME=...
 export GDN_NPU_DEVICE=npu:7
 GDN_BENCH_H=32 GDN_BENCH_HG=16 python3 bench_dynamic_bsnd_groupvalue.py
 GDN_BENCH_H=32 GDN_BENCH_HG=16 python3 bench_chunk_o_groupvalue.py
+GDN_BENCH_H=32 GDN_BENCH_HG=16 python3 bench_wy_fast_groupvalue.py
 ```
 
 ### Measured latency (910B2, ``npu:7``, ``cube_core_num=24``)
@@ -69,7 +76,16 @@ Shape: ``N_seq=16``, ``L_seg=16384``, ``T=262144``, ``D=128``, ``Hg=16``. **PTO*
 
 ``—``: Triton ``chunk_fwd_o`` failed at ``H=64`` (AICore error 507015) on the measurement host; PTO paths succeeded.
 
+**``wy_fast``** (same shape; PTO vs Triton ``recompute_w_u_fwd``, both at ``C=128``):
+
+| ``H`` | PTO wy_fast (ms) | Triton wy_fast (ms) |
+| --: | --: | --: |
+| 16 | 6.04 | 11.93 |
+| 32 | 11.37 | 23.39 |
+| 48 | 18.02 | 34.83 |
+| 64 | 22.37 | 46.33 |
+
 ## Implementation notes
 
-- Vec-stage GM loads for ``K`` (and ``chunk_o`` ``Q``) use ``(token·Hg + head_g)·D`` row indexing with stride ``Hg·D`` (see ``chunk_h_kernel.cpp`` / ``chunk_o_kernel.cpp``).
+- Vec-stage GM loads for ``K`` (and ``chunk_o`` ``Q``) use ``(token·Hg + head_g)·D`` row indexing with stride ``Hg·D`` (see ``chunk_h_kernel.cpp`` / ``chunk_o_kernel.cpp`` / ``wy_fast_kernel.cpp`` Cube loads).
 - UB packing in ``chunk_h`` uses a fixed leading slack matching the legacy ``GDN_H=16`` kernel so large compile-time ``H`` does not exceed the vector UB budget (~192 KiB on 910B2).
