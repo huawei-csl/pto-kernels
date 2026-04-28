@@ -46,9 +46,11 @@ at::Tensor run_abs(const at::Tensor& x) {
 
   auto acl_stream = c10_npu::getCurrentNPUStream().stream(true);
   if (dtype == at::kHalf) {
-    EXEC_KERNEL_CMD(vabs_fp16, block_dim, x, z, total_size);
+    call_vabs_fp16(block_dim, acl_stream, ConvertType(x), ConvertType(z),
+                   total_size);
   } else if (dtype == at::kFloat) {
-    EXEC_KERNEL_CMD(vabs_fp32, block_dim, x, z, total_size);
+    call_vabs_fp32(block_dim, acl_stream, ConvertType(x), ConvertType(z),
+                   total_size);
   } else {
     throw std::runtime_error("Unsupported dtype for `pto_abs` kernel");
   }

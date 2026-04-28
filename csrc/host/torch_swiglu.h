@@ -13,8 +13,9 @@ for the full License text.
 
 #include <limits>
 
-extern "C" uint32_t swiglu_fp16(void* x, void* y, uint32_t batch,
-                                uint32_t input_n);
+extern "C" uint32_t call_swiglu_fp16(uint32_t blockDim, aclrtStream stream,
+                                     void* x, void* y, uint32_t batch,
+                                     uint32_t input_n);
 #include "utils.h"
 
 namespace pto_isa_ops {
@@ -63,8 +64,10 @@ at::Tensor run_swiglu(const at::Tensor& x, int64_t dim = -1) {
   const uint32_t input_n = static_cast<uint32_t>(input_n_i64);
   const uint32_t block_dim = GetNumCubeCores();
 
+  auto acl_stream = c10_npu::getCurrentNPUStream().stream(true);
   at::Tensor y = at::empty({batch_i64, output_n_i64}, x.options());
-  EXEC_KERNEL_CMD(swiglu_fp16, block_dim, x, y, batch, input_n);
+  call_swiglu_fp16(block_dim, acl_stream, ConvertType(x), ConvertType(y), batch,
+                   input_n);
   return y;
 }
 

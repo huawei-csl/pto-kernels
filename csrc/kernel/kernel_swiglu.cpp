@@ -400,9 +400,8 @@ AICORE void runTSwiGLU(__gm__ T* x, __gm__ T* y, uint32_t batch,
 
 #endif
 
-extern "C" __global__ AICORE void swiglu_fp16(GM_ADDR x, GM_ADDR y,
-                                              uint32_t batch,
-                                              uint32_t input_n) {
+__global__ AICORE void swiglu_fp16(GM_ADDR x, GM_ADDR y, uint32_t batch,
+                                   uint32_t input_n) {
 #if defined(__DAV_VEC__)
   const uint32_t num_cores = get_block_num() * get_subblockdim();
   const uint32_t vid = get_block_idx() * get_subblockdim() + get_subblockid();
@@ -414,4 +413,9 @@ extern "C" __global__ AICORE void swiglu_fp16(GM_ADDR x, GM_ADDR y,
   (void)batch;
   (void)input_n;
 #endif
+}
+
+extern "C" void call_swiglu_fp16(uint32_t block_dim, void* stream, GM_ADDR x,
+                                 GM_ADDR y, uint32_t batch, uint32_t input_n) {
+  swiglu_fp16<<<block_dim, nullptr, stream>>>(x, y, batch, input_n);
 }
