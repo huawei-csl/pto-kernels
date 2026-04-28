@@ -32,8 +32,12 @@ python chunk_gated_delta_rule_varlen.py --B 4 --T 2048 --H 8 --Hg 8 --K 64 --V 6
 # (2, 512, 2, 8, 64, 1, 0.1, 0, True, torch.float16),
 # (2, 1024, 4, 8, 128, 0.1, 1, 0, False, torch.float16),
 
-# python chunk_gated_delta_rule_varlen.py --B 2 --T 256 --H 2 --Hg 4 --K 64 --V 64 # FAIL(compile): InternalError: Check failed: pb->value != 0 (0 vs. 0) : Divide by zero
-# python chunk_gated_delta_rule_varlen.py --B 2 --T 512 --H 2 --Hg 8 --K 64 --V 64 # FAIL(compile): InternalError: Check failed: pb->value != 0 (0 vs. 0) : Divide by zero
-# python chunk_gated_delta_rule_varlen.py --B 2 --T 1024 --H 4 --Hg 8 --K 128 --V 128 # FAIL(compile): InternalError: Check failed: pb->value != 0 (0 vs. 0) : Divide by zero
+# Qwen3.6-27B shape https://huggingface.co/Qwen/Qwen3.6-27B/blob/main/config.json#L88-L91
+python chunk_gated_delta_rule_varlen.py --varlen true --seqlens 7,32,159,256,50 --H 48 --Hg 16 --K 128 --V 128 # PASS -- dumps to `chunk_gated_delta_rule_varlen_H32.cpp`
+python chunk_gated_delta_rule_varlen.py --varlen true --seqlens 512,512 --H 48 --Hg 16 --K 128 --V 128 #  1.8% mismatch, due to accumulating error by too many steps?
+python chunk_gated_delta_rule_varlen.py --varlen true --seqlens 2048,2048 --H 48 --Hg 16 --K 128 --V 128 # 27.2% mismatch
 
-
+# Qwen3.5-9B shape https://huggingface.co/Qwen/Qwen3.5-9B/blob/main/config.json#L54-L57
+python chunk_gated_delta_rule_varlen.py --varlen true --seqlens 7,32,159,256,50 --H 32 --Hg 16 --K 128 --V 128 # PASS -- dumps to `chunk_gated_delta_rule_varlen_H48.cpp`
+python chunk_gated_delta_rule_varlen.py --varlen true --seqlens 512,512 --H 32 --Hg 16 --K 128 --V 128 # 1.6% mismatch, due to accumulating error by too many steps?
+python chunk_gated_delta_rule_varlen.py --varlen true --seqlens 1024,1024 --H 32 --Hg 16 --K 128 --V 128  # 1.8 mismatch
