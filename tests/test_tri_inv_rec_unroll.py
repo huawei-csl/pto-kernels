@@ -72,16 +72,17 @@ def _test_tri_inv_rec_unroll(
     atol: float,
     rtol: float,
     ftol: float,
-    dtype: torch.dtype = torch.float16,
+    input_dtype: torch.dtype = torch.float16,
+    output_dtype: torch.dtype = torch.float16,
 ):
 
-    U = U.to(dtype)
+    U = U.to(input_dtype)
     golden_cpu = linalg_inv(U)
 
     U_npu = U.npu()
 
     torch.npu.synchronize()
-    actual = pto_tri_inv_rec_unroll(U_npu, is_bsnd_format=False)
+    actual = pto_tri_inv_rec_unroll(U_npu, is_bsnd_format=False, dtype_out=output_dtype)
     torch.npu.synchronize()
     actual_cpu = actual.cpu()
     torch.npu.synchronize()
@@ -108,10 +109,11 @@ def _test_tri_inv_rec_unroll_bsnd(
     atol: float,
     rtol: float,
     ftol: float,
-    dtype: torch.dtype = torch.float16,
+    input_dtype: torch.dtype = torch.float16,
+    output_dtype: torch.dtype = torch.float16,
 ):
 
-    U = U.to(dtype)
+    U = U.to(input_dtype)
     golden_cpu = linalg_inv(U)
 
     # Transform to bsnd layout
@@ -122,7 +124,7 @@ def _test_tri_inv_rec_unroll_bsnd(
     U_npu = U.npu()
 
     torch.npu.synchronize()
-    actual = pto_tri_inv_rec_unroll(U_npu, is_bsnd_format=True)
+    actual = pto_tri_inv_rec_unroll(U_npu, is_bsnd_format=True, dtype_out=output_dtype)
     torch.npu.synchronize()
     actual_cpu = actual.cpu()
     torch.npu.synchronize()
@@ -144,16 +146,20 @@ def _test_tri_inv_rec_unroll_bsnd(
 @pytest.mark.parametrize("block_dim_x", [1, 2, 3, 4])
 @pytest.mark.parametrize("block_dim_y", [2, 4, 8])
 @pytest.mark.parametrize(
-    "matrix_gen,atol,rtol,ftol,dtype",
+    "matrix_gen,atol,rtol,ftol,input_dtype,output_dtype",
     [
-        (block_ones_triu_matrix, 0, 0, 0, torch.float16),
-        (ones_triu_matrix, 0, 0, 0, torch.float16),
-        (block_random_triu_matrix, 5e-5, 0.1, 1e-4, torch.float16),
-        (random_triu_matrix, 5e-5, 0.1, 1e-4, torch.float16),
-        (block_ones_triu_matrix, 0, 0, 0, torch.bfloat16),
-        (ones_triu_matrix, 0, 0, 0, torch.bfloat16),
-        (block_random_triu_matrix, 5e-5, 0.1, 1e-3, torch.bfloat16),
-        (random_triu_matrix, 5e-5, 0.1, 1e-3, torch.bfloat16),
+        (block_ones_triu_matrix, 0, 0, 0, torch.float16, torch.float16),
+        (ones_triu_matrix, 0, 0, 0, torch.float16, torch.float16),
+        (block_random_triu_matrix, 5e-5, 0.1, 1e-4, torch.float16, torch.float16),
+        (random_triu_matrix, 5e-5, 0.1, 1e-4, torch.float16, torch.float16),
+        (block_ones_triu_matrix, 0, 0, 0, torch.float16, torch.float32),
+        (ones_triu_matrix, 0, 0, 0, torch.float16, torch.float32),
+        (block_random_triu_matrix, 5e-5, 0.1, 1e-4, torch.float16, torch.float32),
+        (random_triu_matrix, 5e-5, 0.1, 1e-4, torch.float16, torch.float32),
+        (block_ones_triu_matrix, 0, 0, 0, torch.bfloat16, torch.float32),
+        (ones_triu_matrix, 0, 0, 0, torch.bfloat16, torch.float32),
+        (block_random_triu_matrix, 5e-5, 0.1, 1e-3, torch.bfloat16, torch.float32),
+        (random_triu_matrix, 5e-5, 0.1, 1e-3, torch.bfloat16, torch.float32),
     ],
 )
 def test_tri_inv_rec_unroll(
@@ -164,10 +170,11 @@ def test_tri_inv_rec_unroll(
     atol: float,
     rtol: float,
     ftol: float,
-    dtype: torch.dtype,
+    input_dtype: torch.dtype,
+    output_dtype: torch.dtype,
 ):
     U = matrix_gen(n, block_dim_x, block_dim_y)
-    _test_tri_inv_rec_unroll(U, atol, rtol, ftol, dtype)
+    _test_tri_inv_rec_unroll(U, atol, rtol, ftol, input_dtype, output_dtype)
 
 
 @pytest.mark.parametrize("B", [1, 4])
@@ -175,16 +182,20 @@ def test_tri_inv_rec_unroll(
 @pytest.mark.parametrize("N", [4, 8])
 @pytest.mark.parametrize("D", [16, 32, 64, 128])
 @pytest.mark.parametrize(
-    "matrix_gen,atol,rtol,ftol,dtype",
+    "matrix_gen,atol,rtol,ftol,input_dtype,output_dtype",
     [
-        (block_ones_triu_matrix, 0, 0, 0, torch.float16),
-        (ones_triu_matrix, 0, 0, 0, torch.float16),
-        (block_random_triu_matrix, 5e-5, 0.1, 1e-4, torch.float16),
-        (random_triu_matrix, 5e-5, 0.1, 1e-4, torch.float16),
-        (block_ones_triu_matrix, 0, 0, 0, torch.bfloat16),
-        (ones_triu_matrix, 0, 0, 0, torch.bfloat16),
-        (block_random_triu_matrix, 5e-5, 0.1, 1e-3, torch.bfloat16),
-        (random_triu_matrix, 5e-5, 0.1, 1e-3, torch.bfloat16),
+        (block_ones_triu_matrix, 0, 0, 0, torch.float16, torch.float16),
+        (ones_triu_matrix, 0, 0, 0, torch.float16, torch.float16),
+        (block_random_triu_matrix, 5e-5, 0.1, 1e-4, torch.float16, torch.float16),
+        (random_triu_matrix, 5e-5, 0.1, 1e-4, torch.float16, torch.float16),
+        (block_ones_triu_matrix, 0, 0, 0, torch.float16, torch.float32),
+        (ones_triu_matrix, 0, 0, 0, torch.float16, torch.float32),
+        (block_random_triu_matrix, 5e-5, 0.1, 1e-4, torch.float16, torch.float32),
+        (random_triu_matrix, 5e-5, 0.1, 1e-4, torch.float16, torch.float32),
+        (block_ones_triu_matrix, 0, 0, 0, torch.bfloat16, torch.float32),
+        (ones_triu_matrix, 0, 0, 0, torch.bfloat16, torch.float32),
+        (block_random_triu_matrix, 5e-5, 0.1, 1e-3, torch.bfloat16, torch.float32),
+        (random_triu_matrix, 5e-5, 0.1, 1e-3, torch.bfloat16, torch.float32),
     ],
 )
 def test_tri_inv_rec_unroll_bsnd(
@@ -196,10 +207,13 @@ def test_tri_inv_rec_unroll_bsnd(
     atol: float,
     rtol: float,
     ftol: float,
-    dtype: torch.dtype,
+    input_dtype: torch.dtype,
+    output_dtype: torch.dtype,
 ):
     # only test cases where the sequence length is a multiple of the chunk size are accepted
     if S % D != 0:
         pytest.skip("Sequence length must be a multiple of chunk size D.")
     U = matrix_gen(D, B * S // D, N)
-    _test_tri_inv_rec_unroll_bsnd(U, B, S, N, D, atol, rtol, ftol, dtype)
+    _test_tri_inv_rec_unroll_bsnd(
+        U, B, S, N, D, atol, rtol, ftol, input_dtype, output_dtype
+    )

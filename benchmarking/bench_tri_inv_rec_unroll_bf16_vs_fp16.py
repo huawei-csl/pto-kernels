@@ -61,8 +61,8 @@ def bench(path: str = "benchmark_data/tri_inv_rec_unroll_bf16_vs_fp16.csv"):
                     unit="ms",
                 )
                 n_el = U.numel()
-                # I/O: Input has 16 bits and output is fp32, so (2 + 4) bytes per element
-                gbps = (2 + 4) * n_el / (ms / 1e3) / 1e9
+                # I/O: Input and output have 16 bits, so (2 + 2) bytes per element
+                gbps = (2 + 2) * n_el / (ms / 1e3) / 1e9
                 dtype_name = "fp16" if dtype == torch.float16 else "bf16"
                 print(
                     f"{dtype_name}, N={n}, bdx={block_dim_x}, bdy={block_dim_y}, "

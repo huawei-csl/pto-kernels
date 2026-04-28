@@ -513,9 +513,9 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
   // L0 Memory
   using TileL0A = TileLeft<InputT, MatrixSize, MatrixSize>;
   using TileL0B = TileRight<InputT, MatrixSize, MatrixSize>;
-  using TileL0C = TileAcc<OutputT, MatrixSize, MatrixSize>;
+  using TileL0C = TileAcc<float, MatrixSize, MatrixSize>;
   using TileL0CDynamic =
-      TileAcc<OutputT, MatrixSize, MatrixSize, DYNAMIC, DYNAMIC>;
+      TileAcc<float, MatrixSize, MatrixSize, DYNAMIC, DYNAMIC>;
 
   GlobalTileINeg I_neg_global_in(I_neg);
 
@@ -542,8 +542,7 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
   for (uint32_t buffer_num = 0; buffer_num < NumL0Buffers; ++buffer_num) {
     TASSIGN(a_l0_tile[buffer_num], 0x0 + buffer_num * TileLen * sizeof(InputT));
     TASSIGN(b_l0_tile[buffer_num], 0x0 + buffer_num * TileLen * sizeof(InputT));
-    TASSIGN(c_l0_tile[buffer_num],
-            0x0 + buffer_num * TileLen * sizeof(OutputT));
+    TASSIGN(c_l0_tile[buffer_num], 0x0 + buffer_num * TileLen * sizeof(float));
   }
   TLOAD(I_neg_l1_tile, I_neg_global_in);
   set_flag(PIPE_MTE2, PIPE_MTE1, static_cast<event_t>(0));
@@ -643,7 +642,7 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
         if (valid_size < MatrixSize) {
           TileL0CDynamic c_l0_tail_tile(valid_size, valid_size);
           TASSIGN(c_l0_tail_tile,
-                  0x0 + final_c_buffer_index * TileLen * sizeof(OutputT));
+                  0x0 + final_c_buffer_index * TileLen * sizeof(float));
           GlobalTileDynamicOut M_inv_global_out_dyn(
               M_inv + bsnd_offset,
               {1, 1, 1, static_cast<int>(valid_size),
@@ -694,8 +693,9 @@ AICORE void runKernelTriInvRecUnroll(__gm__ OutputT* M_inv, __gm__ InputT* M,
 #endif
 }
 
-template <typename InputT, uint32_t NumTilesPerCubeIter, bool IsBSND>
-AICORE void run_tri_inv_rec_unroll(__gm__ float* tensor_out,
+template <typename InputT, typename OutputT, uint32_t NumTilesPerCubeIter,
+          bool IsBSND>
+AICORE void run_tri_inv_rec_unroll(__gm__ OutputT* tensor_out,
                                    __gm__ InputT* tensor_in,
                                    uint32_t matrix_size, uint32_t num_matrices,
                                    uint32_t num_bsnd_heads,
@@ -703,24 +703,30 @@ AICORE void run_tri_inv_rec_unroll(__gm__ float* tensor_out,
                                    __gm__ int32_t* cu_seqlens = nullptr) {
   static_assert(std::is_same_v<InputT, half>,
                 "tri_inv_rec_unroll supports only fp16.");
+  static_assert(std::is_same_v<OutputT, half> or std::is_same_v<OutputT, float>,
+                "tri_inv_rec_unroll supports only fp16 or float32.");
   switch (matrix_size) {
     case 16:
-      runKernelTriInvRecUnroll<InputT, float, 16, NumTilesPerCubeIter, IsBSND>(
+      runKernelTriInvRecUnroll<InputT, OutputT, 16, NumTilesPerCubeIter,
+                               IsBSND>(
           tensor_out, tensor_in, load_minus_eye_fp16_matrix(16), num_matrices,
           num_bsnd_heads, is_lower, cu_seqlens);
       break;
     case 32:
-      runKernelTriInvRecUnroll<InputT, float, 32, NumTilesPerCubeIter, IsBSND>(
+      runKernelTriInvRecUnroll<InputT, OutputT, 32, NumTilesPerCubeIter,
+                               IsBSND>(
           tensor_out, tensor_in, load_minus_eye_fp16_matrix(32), num_matrices,
           num_bsnd_heads, is_lower, cu_seqlens);
       break;
     case 64:
-      runKernelTriInvRecUnroll<InputT, float, 64, NumTilesPerCubeIter, IsBSND>(
+      runKernelTriInvRecUnroll<InputT, OutputT, 64, NumTilesPerCubeIter,
+                               IsBSND>(
           tensor_out, tensor_in, load_minus_eye_fp16_matrix(64), num_matrices,
           num_bsnd_heads, is_lower, cu_seqlens);
       break;
     case 128:
-      runKernelTriInvRecUnroll<InputT, float, 128, NumTilesPerCubeIter, IsBSND>(
+      runKernelTriInvRecUnroll<InputT, OutputT, 128, NumTilesPerCubeIter,
+                               IsBSND>(
           tensor_out, tensor_in, load_minus_eye_fp16_matrix(128), num_matrices,
           num_bsnd_heads, is_lower, cu_seqlens);
       break;
@@ -728,7 +734,8 @@ AICORE void run_tri_inv_rec_unroll(__gm__ float* tensor_out,
 }
 
 /*
- * @brief: Wrapper for the kernel, "half" type (fp16).
+ * @brief Wrapper over number of matrices to select the right template
+ * instantiation of the kernel.
  *
  * @param tensor_out pointer to the global memory to store the final inverse.
  * @param tensor_in Pointer to the global tensor matrix in global memory.
@@ -741,43 +748,81 @@ AICORE void run_tri_inv_rec_unroll(__gm__ float* tensor_out,
  * strided accesses. If each tile is stored consecutively (and row-wise) in
  * memory, then num_bsnd_heads=0.
  */
-extern "C" __global__ AICORE void tri_inv_rec_unroll_fp16(
-    __gm__ void* tensor_out, __gm__ void* tensor_in, uint32_t matrix_size,
-    uint32_t num_matrices, uint32_t num_bsnd_heads, uint32_t is_lower,
-    __gm__ void* cu_seqlens) {
+template <typename InputT, typename OutputT, uint32_t NumTilesPerCubeIter,
+          bool IsBSND>
+AICORE void run_tri_inv_rec_unroll_per_num_matrices(
+    __gm__ OutputT* tensor_out, __gm__ InputT* tensor_in, uint32_t matrix_size,
+    uint32_t num_matrices, uint32_t num_bsnd_heads, uint32_t is_lower = 0,
+    __gm__ int32_t* cu_seqlens = nullptr) {
   if (num_bsnd_heads == 0) {
     if (num_matrices <= get_block_num()) {
-      run_tri_inv_rec_unroll<half, 1 /* NumTilesPerCubeIter */,
+      run_tri_inv_rec_unroll<half, OutputT, 1 /* NumTilesPerCubeIter */,
                              false /* IsBSND */>(
-          (__gm__ float*)tensor_out, (__gm__ half*)tensor_in, matrix_size,
-          num_matrices, num_bsnd_heads, is_lower, (__gm__ int32_t*)cu_seqlens);
+          tensor_out, tensor_in, matrix_size, num_matrices, num_bsnd_heads,
+          is_lower, cu_seqlens);
     } else if (num_matrices <= 2 * get_block_num()) {
-      run_tri_inv_rec_unroll<half, 2 /* NumTilesPerCubeIter */,
+      run_tri_inv_rec_unroll<half, OutputT, 2 /* NumTilesPerCubeIter */,
                              false /* IsBSND */>(
-          (__gm__ float*)tensor_out, (__gm__ half*)tensor_in, matrix_size,
-          num_matrices, num_bsnd_heads, is_lower, (__gm__ int32_t*)cu_seqlens);
+          tensor_out, tensor_in, matrix_size, num_matrices, num_bsnd_heads,
+          is_lower, cu_seqlens);
     } else {
-      run_tri_inv_rec_unroll<half, 4 /* NumTilesPerCubeIter */,
+      run_tri_inv_rec_unroll<half, OutputT, 4 /* NumTilesPerCubeIter */,
                              false /* IsBSND */>(
-          (__gm__ float*)tensor_out, (__gm__ half*)tensor_in, matrix_size,
-          num_matrices, num_bsnd_heads, is_lower, (__gm__ int32_t*)cu_seqlens);
+          tensor_out, tensor_in, matrix_size, num_matrices, num_bsnd_heads,
+          is_lower, cu_seqlens);
     }
   } else {
     if (num_matrices <= get_block_num()) {
-      run_tri_inv_rec_unroll<half, 1 /* NumTilesPerCubeIter */,
+      run_tri_inv_rec_unroll<half, OutputT, 1 /* NumTilesPerCubeIter */,
                              true /* IsBSND */>(
-          (__gm__ float*)tensor_out, (__gm__ half*)tensor_in, matrix_size,
-          num_matrices, num_bsnd_heads, is_lower, (__gm__ int32_t*)cu_seqlens);
+          tensor_out, tensor_in, matrix_size, num_matrices, num_bsnd_heads,
+          is_lower, cu_seqlens);
     } else if (num_matrices <= 2 * get_block_num()) {
-      run_tri_inv_rec_unroll<half, 2 /* NumTilesPerCubeIter */,
+      run_tri_inv_rec_unroll<half, OutputT, 2 /* NumTilesPerCubeIter */,
                              true /* IsBSND */>(
-          (__gm__ float*)tensor_out, (__gm__ half*)tensor_in, matrix_size,
-          num_matrices, num_bsnd_heads, is_lower, (__gm__ int32_t*)cu_seqlens);
+          tensor_out, tensor_in, matrix_size, num_matrices, num_bsnd_heads,
+          is_lower, cu_seqlens);
     } else {
-      run_tri_inv_rec_unroll<half, 4 /* NumTilesPerCubeIter */,
+      run_tri_inv_rec_unroll<half, OutputT, 4 /* NumTilesPerCubeIter */,
                              true /* IsBSND */>(
-          (__gm__ float*)tensor_out, (__gm__ half*)tensor_in, matrix_size,
-          num_matrices, num_bsnd_heads, is_lower, (__gm__ int32_t*)cu_seqlens);
+          tensor_out, tensor_in, matrix_size, num_matrices, num_bsnd_heads,
+          is_lower, cu_seqlens);
     }
   }
+}
+
+/*
+ * @brief: Wrapper of kernel for input and output fp16.
+ *
+ */
+extern "C" __global__ AICORE void tri_inv_rec_unroll_fp16fp16(
+    __gm__ void* tensor_out, __gm__ void* tensor_in, uint32_t matrix_size,
+    uint32_t num_matrices, uint32_t num_bsnd_heads, uint32_t is_lower,
+    __gm__ void* cu_seqlens) {
+  __gm__ half* _tensor_out = (__gm__ half*)tensor_out;
+  __gm__ half* _tensor_in = (__gm__ half*)tensor_in;
+  __gm__ int32_t* _cu_seqlens = (__gm__ int32_t*)cu_seqlens;
+
+  run_tri_inv_rec_unroll_per_num_matrices<
+      half, half, 1 /* NumTilesPerCubeIter */, false /* IsBSND */>(
+      _tensor_out, _tensor_in, matrix_size, num_matrices, num_bsnd_heads,
+      is_lower, _cu_seqlens);
+}
+
+/*
+ * @brief: Wrapper of kernel for input dtype fp16 and output dtype fp32.
+ *
+ */
+extern "C" __global__ AICORE void tri_inv_rec_unroll_fp16fp32(
+    __gm__ void* tensor_out, __gm__ void* tensor_in, uint32_t matrix_size,
+    uint32_t num_matrices, uint32_t num_bsnd_heads, uint32_t is_lower,
+    __gm__ void* cu_seqlens) {
+  __gm__ float* _tensor_out = (__gm__ float*)tensor_out;
+  __gm__ half* _tensor_in = (__gm__ half*)tensor_in;
+  __gm__ int32_t* _cu_seqlens = (__gm__ int32_t*)cu_seqlens;
+
+  run_tri_inv_rec_unroll_per_num_matrices<
+      half, float, 1 /* NumTilesPerCubeIter */, false /* IsBSND */>(
+      _tensor_out, _tensor_in, matrix_size, num_matrices, num_bsnd_heads,
+      is_lower, _cu_seqlens);
 }
