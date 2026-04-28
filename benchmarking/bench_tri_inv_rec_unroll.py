@@ -50,6 +50,7 @@ def bench(path: str = "benchmark_data/tri_inv_rec_unroll.csv"):
             "block_dim_y",
             "time_ms",
             "bandwidth_gbps",
+            "giga_elements_per_sec",
         ]
     ]
     for dtype in (torch.float16,):
@@ -67,14 +68,15 @@ def bench(path: str = "benchmark_data/tri_inv_rec_unroll.csv"):
                     unit="ms",
                 )
                 n_el = U.numel()
-                # I/O: Input has 16 bits and output is fp32, so (2 + 4) bytes per element
-                gbps = (2 + 4) * n_el / (ms / 1e3) / 1e9
+                # I/O: Input and output have 16 bits, so (2 + 2) bytes per element
+                gbps = (2 + 2) * n_el / (ms / 1e3) / 1e9
+                gelems = n_el / (ms / 1e3) / 1e9
                 dtype_name = "fp16" if dtype == torch.float16 else "bf16"
                 print(
                     f"{dtype_name}, N={n}, bdx={block_dim_x}, bdy={block_dim_y}, "
-                    f"{ms:.3f} ms, {gbps:.3f} GB/s"
+                    f"{ms:.3f} ms, {gbps:.3f} GB/s, {gelems:.3f} Gelems/s"
                 )
-                rows.append([dtype_name, n, block_dim_x, block_dim_y, ms, gbps])
+                rows.append([dtype_name, n, block_dim_x, block_dim_y, ms, gbps, gelems])
 
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
