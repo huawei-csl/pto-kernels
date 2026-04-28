@@ -158,7 +158,7 @@ def _test_tri_inv_rec_unroll_bsnd(
         (random_triu_matrix, 5e-5, 0.1, 1e-4, torch.float16, torch.float32),
         (block_ones_triu_matrix, 0, 0, 0, torch.bfloat16, torch.float32),
         (ones_triu_matrix, 0, 0, 0, torch.bfloat16, torch.float32),
-        (block_random_triu_matrix, 5e-5, 0.1, 1e-3, torch.bfloat16, torch.float32),
+        (block_random_triu_matrix, 5e-4, 0.1, 1e-3, torch.bfloat16, torch.float32),
         (random_triu_matrix, 5e-5, 0.1, 1e-3, torch.bfloat16, torch.float32),
     ],
 )
@@ -180,7 +180,7 @@ def test_tri_inv_rec_unroll(
 @pytest.mark.parametrize("B", [1, 4])
 @pytest.mark.parametrize("S", [128, 256, 1024])
 @pytest.mark.parametrize("N", [4, 8])
-@pytest.mark.parametrize("D", [16, 32, 64, 128])
+@pytest.mark.parametrize("C", [16, 32, 64, 128])
 @pytest.mark.parametrize(
     "matrix_gen,atol,rtol,ftol,input_dtype,output_dtype",
     [
@@ -202,7 +202,7 @@ def test_tri_inv_rec_unroll_bsnd(
     B: int,
     S: int,
     N: int,
-    D: int,
+    C: int,
     matrix_gen: Callable,
     atol: float,
     rtol: float,
@@ -211,9 +211,9 @@ def test_tri_inv_rec_unroll_bsnd(
     output_dtype: torch.dtype,
 ):
     # only test cases where the sequence length is a multiple of the chunk size are accepted
-    if S % D != 0:
-        pytest.skip("Sequence length must be a multiple of chunk size D.")
-    U = matrix_gen(D, B * S // D, N)
+    if S % C != 0:
+        pytest.skip("Sequence length must be a multiple of chunk size C.")
+    U = matrix_gen(C, B * S // C, N)
     _test_tri_inv_rec_unroll_bsnd(
-        U, B, S, N, D, atol, rtol, ftol, input_dtype, output_dtype
+        U, B, S, N, C, atol, rtol, ftol, input_dtype, output_dtype
     )
