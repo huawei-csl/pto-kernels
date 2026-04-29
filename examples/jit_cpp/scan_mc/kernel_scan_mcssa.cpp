@@ -151,7 +151,6 @@ AICORE void scanULOne(__gm__ InputT* x, __gm__ InputT* o, __gm__ InputT* u,
 
   // Int the paper notation C2 = A @ U
   // row-wise inclusive scan for the A tile
-  pipe_barrier(PIPE_M);
   TMATMUL(sL0, xL0, uL0);
 
   // Wait for store to complete before loading C1
