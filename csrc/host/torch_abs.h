@@ -55,6 +55,8 @@ at::Tensor run_abs(const at::Tensor& x) {
     throw std::runtime_error("Unsupported dtype for `pto_abs` kernel");
   }
 
+  aclrtSynchronizeStream(acl_stream);
+
   return z;
 }
 }  // namespace pto_isa_ops

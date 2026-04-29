@@ -16,9 +16,6 @@ using namespace pto;
 
 template <typename InputT, typename OutputT, uint32_t MatrixSize>
 AICORE void runKernelBatchMatrixSquare(__gm__ OutputT* z, __gm__ InputT* x) {
-#if (__CHECK_FEATURE_AT_PRECOMPILE) || \
-    (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))  // Cube compilation
-
   constexpr uint32_t TileLen = MatrixSize * MatrixSize;
   const uint32_t global_index = get_block_idx() * TileLen;
 
@@ -79,9 +76,6 @@ AICORE void runKernelBatchMatrixSquare(__gm__ OutputT* z, __gm__ InputT* x) {
   wait_flag(PIPE_M, PIPE_FIX,
             EVENT_ID0);  // FIX pipe waits for M pipe to set flag
   TSTORE(z_global_out, c_l0_tile);
-#else
-// Nothing to do on AIV
-#endif
 }
 
 template <typename InputT>
@@ -110,13 +104,20 @@ AICORE void run_batch_matrix_square(__gm__ float* z, __gm__ InputT* x,
 
 __global__ AICORE void batch_matrix_square_fp16(__gm__ void* z, __gm__ void* x,
                                                 uint32_t matrix_size) {
+#if (__CHECK_FEATURE_AT_PRECOMPILE) || \
+    (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))  // Cube compilation
   run_batch_matrix_square<half>((__gm__ float*)z, (__gm__ half*)x, matrix_size);
+#endif
 }
 
 __global__ AICORE void batch_matrix_square_fp32(__gm__ void* z, __gm__ void* x,
                                                 uint32_t matrix_size) {
+#if (__CHECK_FEATURE_AT_PRECOMPILE) || \
+    (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))  // Cube compilation
+
   run_batch_matrix_square<float>((__gm__ float*)z, (__gm__ float*)x,
                                  matrix_size);
+#endif
 }
 
 extern "C" void call_batch_matrix_square_fp16(uint32_t block_dim, void* stream,
