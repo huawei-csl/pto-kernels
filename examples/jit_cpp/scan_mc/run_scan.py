@@ -1,11 +1,13 @@
 import torch
 import torch_npu  # noqa
 from jit_util_scan import jit_compile, clean_up
+import os
 
+# get npu device from NPU_DEVICE env variable, default to npu:1 if not set
+device = os.getenv("NPU_DEVICE", "npu:1")
 
 def test_scan(tile_size=16, n_tiles=6):
     total_len = tile_size * tile_size * n_tiles
-    device = "npu:5"
     dtype = torch.float32
     torch.npu.set_device(device)
 
