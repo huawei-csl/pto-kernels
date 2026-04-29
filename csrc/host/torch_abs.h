@@ -30,7 +30,7 @@ namespace pto_isa_ops {
 
 at::Tensor run_abs(const at::Tensor& x) {
   const auto dtype = x.options().dtype();
-  at::Tensor z = at::empty_like(x);
+  const at::Tensor z = at::empty_like(x);
   // Define the number of blocks of vector core
   const uint32_t total_size = x.numel();
   // FIXME: tile length is fixed to 128 for now
@@ -44,7 +44,7 @@ at::Tensor run_abs(const at::Tensor& x) {
     block_dim = total_tiles;
   }
 
-  auto acl_stream = c10_npu::getCurrentNPUStream().stream(true);
+  auto acl_stream = c10_npu::getCurrentNPUStream().stream(false);
   if (dtype == at::kHalf) {
     call_vabs_fp16(block_dim, acl_stream, ConvertType(x), ConvertType(z),
                    total_size);
@@ -54,8 +54,6 @@ at::Tensor run_abs(const at::Tensor& x) {
   } else {
     throw std::runtime_error("Unsupported dtype for `pto_abs` kernel");
   }
-
-  aclrtSynchronizeStream(acl_stream);
 
   return z;
 }
