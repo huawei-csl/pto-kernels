@@ -228,10 +228,6 @@ AICORE void singleVecBlockScan(__gm__ OutputT* s, uint32_t scan_size,
     scan_core_buf[it] = carry;
     carry += s[offset + elePerTile - 1];
   }
-  __asm__ __volatile__("");
-  dcci(scan_core_buf, ENTIRE_DATA_CACHE);
-  __asm__ __volatile__("");
-
 #endif
 }
 
@@ -260,23 +256,23 @@ AICORE void addAllBlockScan(__gm__ OutputT* s, uint32_t scan_size,
   set_mask_norm();
   set_vector_mask(-1, -1);
 
-  using Shape = pto::Shape<1, 1, 1, tile_size, tile_size>;
-  using Stride = pto::Stride<1, 1, 1, tile_size, 1>;
-  using GlobalDataOut = pto::GlobalTensor<OutputT, Shape, Stride, Layout::ND>;
-
   const uint32_t elePerTile = tile_size * tile_size;
 
+  using Shape = pto::Shape<1, 1, 1, 1, elePerTile>;
+  using Stride = pto::Stride<1, 1, 1, 1, 1>;
+  using GlobalDataOut = pto::GlobalTensor<OutputT, Shape, Stride, Layout::ND>;
+  
+  GlobalDataOut sGlobal(s);
+  GlobalDataOut coreScanGlobal(scan_core_buf);
+
   using TileDataOut = Tile<TileType::Vec, OutputT, 1, elePerTile,
-                           BLayout::RowMajor, 1, elePerTile>;
+                           BLayout::RowMajor>;
   TileDataOut sVecTile;
 
-  const uint32_t numberOfTiles = (scan_size + elePerTile - 1) / elePerTile;
   using TileScan = Tile<TileType::Vec, OutputT, 1, elePerTile,
-                        BLayout::RowMajor, 1, elePerTile>;
+                        BLayout::RowMajor>;
   TileScan coreScanTile;
 
-  GlobalDataOut coreScanGlobal(scan_core_buf);
-  GlobalDataOut sGlobal(s);
 
   const uint32_t tile_ub_offset = 0x0;
   const uint32_t tile_byte_size = elePerTile * sizeof(OutputT);
@@ -312,8 +308,12 @@ AICORE void addAllBlockScan(__gm__ OutputT* s, uint32_t scan_size,
   set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
   wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
 
+  set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+  wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+
   TSTORE(sGlobal, sVecTile);
 
+  pipe_barrier(PIPE_MTE3);
 #endif
 }
 
@@ -419,3 +419,4 @@ extern "C" void scan_fp32(uint32_t blockDim, void* stream, void* x, void* o,
       (float*)x, (float*)o, (float*)u, (float*)l, (float*)s, scan_size,
       tile_size, (float*)scan_core_buf, (uint8_t*)ffts_addr);
 }
+
