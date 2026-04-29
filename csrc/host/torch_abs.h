@@ -44,13 +44,10 @@ at::Tensor run_abs(const at::Tensor& x) {
     block_dim = total_tiles;
   }
 
-  auto acl_stream = c10_npu::getCurrentNPUStream().stream(false);
   if (dtype == at::kHalf) {
-    call_vabs_fp16(block_dim, acl_stream, ConvertType(x), ConvertType(z),
-                   total_size);
+    EXEC_KERNEL_CMD(call_vabs_fp16, block_dim, x, z, total_size);
   } else if (dtype == at::kFloat) {
-    call_vabs_fp32(block_dim, acl_stream, ConvertType(x), ConvertType(z),
-                   total_size);
+    EXEC_KERNEL_CMD(call_vabs_fp32, block_dim, x, z, total_size);
   } else {
     throw std::runtime_error("Unsupported dtype for `pto_abs` kernel");
   }
