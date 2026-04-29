@@ -6,7 +6,7 @@ import os
 # get npu device from NPU_DEVICE env variable, default to npu:1 if not set
 device = os.getenv("NPU_DEVICE", "npu:1")
 
-def test_scan(tile_size=16, n_tiles=6):
+def test_scan(tile_size=16, n_tiles=20):
     total_len = tile_size * tile_size * n_tiles
     dtype = torch.float32
     torch.npu.set_device(device)
@@ -35,8 +35,8 @@ def test_scan(tile_size=16, n_tiles=6):
     torch.npu.synchronize()
 
     print("Comparing results...")
-    print("NPU scan result:\n", s.cpu()[::128])
-    print("Expected:\n", expected_scan[::128])
+    print("NPU scan result:\n", s.cpu()[::256])
+    print("Expected:\n", expected_scan[::256])
 
     assert torch.allclose(
         s.cpu(), expected_scan, rtol=1e-3, atol=1e-2
