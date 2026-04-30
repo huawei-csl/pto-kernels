@@ -97,9 +97,8 @@ set(KERNEL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/csrc/kernel/kernel_batch_matrix_square.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/csrc/kernel/kernel_tri_inv_rec_unroll.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/csrc/kernel/kernel_tri_inv_trick.cpp
-#    ${CMAKE_CURRENT_SOURCE_DIR}/csrc/kernel/kernel_csr_gather.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/csrc/kernel/kernel_swiglu.cpp
-)
+    # ${CMAKE_CURRENT_SOURCE_DIR}/csrc/kernel/kernel_csr_gather.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/csrc/kernel/kernel_swiglu.cpp)
 
 set(NO_WORKSPACE_KERNEL_LIB
     ${CMAKE_CURRENT_BINARY_DIR}/libno_workspace_kernel.so)
@@ -107,7 +106,7 @@ set(NO_WORKSPACE_KERNEL_LIB
 add_custom_command(
   OUTPUT ${NO_WORKSPACE_KERNEL_LIB}
   COMMAND
-    bisheng -fPIC -shared -xcce -O2 -std=c++17 --npu-arch=dav-2201
+    bisheng -fPIC -shared -xcce -O0 -g -std=c++17 --npu-arch=dav-2201
     -I${libpto_isa_headers_SOURCE_DIR}/include ${KERNEL_SOURCES} -o
     ${NO_WORKSPACE_KERNEL_LIB}
   DEPENDS ${KERNEL_SOURCES}

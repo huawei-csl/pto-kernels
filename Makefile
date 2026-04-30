@@ -27,7 +27,7 @@ build_wheel:
 # 'make compile_abs' compiles 'kernel_abs.cpp' into 'libkernel_abs.so' without building the whole wheel package.
 # This is useful for development and debugging of individual kernels.
 compile_%:
-	bisheng -fPIC -shared -xcce -DMEMORY_BASE -O2 -std=c++17 \
+	bisheng -fPIC -shared -xcce -DMEMORY_BASE -O0 -std=c++17 \
 		-I$(CSRC_KERNEL_DIR) \
 		-I$(PTO_LIB_PATH)/include \
 		--npu-arch=dav-2201 \
