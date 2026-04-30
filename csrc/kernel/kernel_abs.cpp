@@ -6,11 +6,13 @@ See LICENSE in the root of the software repository:
 https://github.com/huawei-csl/pto-kernels/
 for the full License text.
 */
-#define MEMORY_BASE
 
-#include <pto/pto-inst.hpp>
+#include "kernel_utils.h"
 
+// clang-format off: so it does not get wrongfully flagged by linter
+#ifndef GM_ADDR
 #define GM_ADDR __gm__ uint8_t*  // To avoid #include "kernel_operator.h"
+#endif
 
 using namespace pto;
 
@@ -23,7 +25,7 @@ using namespace pto;
  * @param z Output tensor
  * @param total_size Number of elements
  */
-template <typename T, unsigned TILE_SIZE>
+template <typename T, uint32_t TILE_SIZE>
 AICORE void runTAbs(__gm__ T* x, __gm__ T* z, uint32_t total_size) {
   // Define GM tile type
   using ShapeDim5 = pto::Shape<1, 1, 1, 1, DYNAMIC>;
@@ -102,32 +104,38 @@ AICORE void runTAbs(__gm__ T* x, __gm__ T* z, uint32_t total_size) {
     // Signal end of MTE3 (current store) to vector core
     set_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
   }
+
+  // Cleanup flags
+  wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+  wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
 }
 
 extern "C" __global__ AICORE void vabs_fp16(GM_ADDR x, GM_ADDR z,
                                             uint32_t in_length) {
-#if (__CHECK_FEATURE_AT_PRECOMPILE) || \
-    __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
-  constexpr unsigned TILE_LEN = 128;
+#if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
+  constexpr uint32_t TILE_LEN = 128;
   runTAbs<half, TILE_LEN>((__gm__ half*)x, (__gm__ half*)z, in_length);
+#else
+  (void)x;
+  (void)z;
+  (void)in_length;
 #endif
 }
 
 extern "C" __global__ AICORE void vabs_fp32(GM_ADDR x, GM_ADDR z,
                                             uint32_t in_length) {
-#if (__CHECK_FEATURE_AT_PRECOMPILE) || \
-    __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
-  constexpr unsigned TILE_LEN = 128;
+#if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
+
+  constexpr uint32_t TILE_LEN = 128;
   runTAbs<float, TILE_LEN>((__gm__ float*)x, (__gm__ float*)z, in_length);
+#else
+  (void)x;
+  (void)z;
+  (void)in_length;
 #endif
 }
 
-extern "C" void call_vabs_fp16(uint32_t block_dim, void* stream, GM_ADDR x,
-                               GM_ADDR z, uint32_t num_elements) {
-  vabs_fp16<<<block_dim * 2, nullptr, stream>>>(x, z, num_elements);
-}
-
-extern "C" void call_vabs_fp32(uint32_t block_dim, void* stream, GM_ADDR x,
-                               GM_ADDR z, uint32_t num_elements) {
-  vabs_fp32<<<block_dim * 2, nullptr, stream>>>(x, z, num_elements);
+extern "C" void call_vabs_fp16(uint32_t blockDim, void* stream, GM_ADDR x,
+                               GM_ADDR y, uint32_t in_length) {
+  vabs_fp16<<<blockDim * 2, nullptr, stream>>>(x, y, in_length);
 }
