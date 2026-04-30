@@ -26,7 +26,9 @@ for s in [16, 32, 64, 128]:
  */
 #pragma once
 
+#ifndef MEMORY_BASE
 #define MEMORY_BASE
+#endif
 #include <pto/pto-inst.hpp>
 
 #define CONST_HALF_TO_GM(x) \
