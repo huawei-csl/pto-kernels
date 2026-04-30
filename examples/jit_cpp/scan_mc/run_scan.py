@@ -6,6 +6,7 @@ import os
 # get npu device from NPU_DEVICE env variable, default to npu:1 if not set
 device = os.getenv("NPU_DEVICE", "npu:1")
 
+
 def test_scan(tile_size=16, n_tiles=20):
     total_len = tile_size * tile_size * n_tiles
     dtype = torch.float32
