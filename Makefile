@@ -31,7 +31,7 @@ compile_%:
 		-I$(CSRC_KERNEL_DIR) \
 		-I$(PTO_LIB_PATH)/include \
 		--npu-arch=dav-2201 \
-	        -Wno-ignored-attributes \
+	    -Wno-ignored-attributes \
 		$(CSRC_KERNEL_DIR)/kernel_$*.cpp \
 		-o libkernel_$*.so
 
