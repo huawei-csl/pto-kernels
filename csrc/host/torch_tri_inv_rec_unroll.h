@@ -30,13 +30,15 @@ namespace pto_isa_ops {
  * in memory, and thus we define num_bsnd_heads=0. If true, then the matrices
  * are stored in "strided mode". In this case we define:
  * num_bsnd_heads=M.size(-2), which is used to do strided load / store ops.
+ * @param is_lower If input matrices are lower-triangular (is_lower == true) or
+ * upper-triangular (is_lower == false). Default is upper triangular.
  * @param dtype_out Output dtype, either fp16 or fp32.
  * @return at::Tensor Tensor containing inverses of input matrices (dtype is
  * fp16/fp32).
  */
 at::Tensor run_tri_inv_rec_unroll(
     const at::Tensor& M, const at::Tensor& cu_seqlens = at::zeros({1}),
-    const bool is_bsnd_format = false,
+    const bool is_bsnd_format = false, const bool is_lower = false,
     const at::ScalarType dtype_out = at::ScalarType::Half) {
   const at::Device device = M.options().device();
   const auto dtype = M.options().dtype();
@@ -86,7 +88,6 @@ at::Tensor run_tri_inv_rec_unroll(
     cu_seqlens_ptr = ConvertType(cu_seqlens);
   }
 
-  constexpr uint32_t is_lower = 0;  // only upper triangular for now
   const at::Tensor M_input = (dtype == at::kBFloat16) ? M_half : M;
   if (dtype_out == at::kHalf) {
     EXEC_KERNEL_CMD(tri_inv_rec_unroll_fp16fp16, block_dim, M_inv, M_input,
