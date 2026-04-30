@@ -28,6 +28,7 @@ def compile_cpp(kernel_cpp: str, verbose: bool = False, timeout: int = 120) -> s
         f"-I{ASCEND_TOOLKIT_HOME}/pkg_inc",
         f"-I{ASCEND_TOOLKIT_HOME}/pkg_inc/runtime",
         f"-I{ASCEND_TOOLKIT_HOME}/pkg_inc/profiling",
+        f"-I../../../csrc/kernel",
     ]
 
     command = ["bisheng", *flags, kernel_cpp, "-o", lib_path]
@@ -67,7 +68,6 @@ def load_lib(lib_path, check_type=True):
 
     if check_type:
         lib.scan_fp32.argtypes = [
-            ctypes.c_uint32,  # blockDim
             ctypes.c_void_p,  # stream
             ctypes.c_void_p,  # x
             ctypes.c_void_p,  # ones
@@ -79,6 +79,18 @@ def load_lib(lib_path, check_type=True):
         ]
         lib.scan_fp32.restype = None
 
+        lib.scan_fp16.argtypes = [
+            ctypes.c_void_p,  # stream
+            ctypes.c_void_p,  # x
+            ctypes.c_void_p,  # ones
+            ctypes.c_void_p,  # utri
+            ctypes.c_void_p,  # ltri
+            ctypes.c_void_p,  # s
+            ctypes.c_uint32,  # scan_size
+            ctypes.c_uint32,  # tile_size
+        ]
+        lib.scan_fp16.restype = None
+
     def scan_func(x, ones, utri, ltri, s, scan_size, tile_size=16, stream_ptr=None):
         if stream_ptr is None:
             stream_ptr = torch.npu.current_stream()._as_parameter_  # noqa
@@ -87,20 +99,37 @@ def load_lib(lib_path, check_type=True):
         print(
             f"scan_size={scan_size}, tile_size={tile_size}, num_ele_tile={num_ele_tile}"
         )
-        block_dim = (scan_size + num_ele_tile - 1) // (num_ele_tile)
-        print(f"Launching scan kernel with block_dim={block_dim}, stream={stream_ptr}")
 
-        lib.scan_fp32(
-            block_dim,
-            stream_ptr,
-            torch_to_ctypes(x),
-            torch_to_ctypes(ones),
-            torch_to_ctypes(utri),
-            torch_to_ctypes(ltri),
-            torch_to_ctypes(s),
-            scan_size,
-            tile_size,
-        )
+        if scan_size % num_ele_tile != 0:
+            raise ValueError(
+                f"scan_size must be a multiple of tile_size^2={num_ele_tile}, got {scan_size}"
+            )
+
+        if x.dtype == torch.float32:
+            lib.scan_fp32(
+                stream_ptr,
+                torch_to_ctypes(x),
+                torch_to_ctypes(ones),
+                torch_to_ctypes(utri),
+                torch_to_ctypes(ltri),
+                torch_to_ctypes(s),
+                scan_size,
+                tile_size,
+            )
+
+        elif x.dtype == torch.float16:
+            lib.scan_fp16(
+                stream_ptr,
+                torch_to_ctypes(x),
+                torch_to_ctypes(ones),
+                torch_to_ctypes(utri),
+                torch_to_ctypes(ltri),
+                torch_to_ctypes(s),
+                scan_size,
+                tile_size,
+            )
+        else:
+            raise TypeError(f"Unsupported dtype {x.dtype} for scan kernel")
 
     return scan_func
 

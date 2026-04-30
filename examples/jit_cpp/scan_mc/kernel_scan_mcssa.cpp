@@ -12,7 +12,6 @@ for the full License text.
 
 #include <pto/pto-inst.hpp>
 
-#include "inter_core_flag.hpp"
 #include "kernel_utils.h"
 
 using namespace pto;
@@ -65,7 +64,7 @@ AICORE void scanULOne(__gm__ InputT* x, __gm__ InputT* o, __gm__ InputT* u,
   using TileL0AOut = TileLeft<OutputT, tile_size, tile_size>;
   using TileL0B = TileRight<InputT, tile_size, tile_size>;
   using TileL0BOut = TileRight<OutputT, tile_size, tile_size>;
-  using TileL0C = TileAcc<OutputT, tile_size, tile_size>;
+  using TileL0COut = TileAcc<OutputT, tile_size, tile_size>;
 
   // GM Data
   uint32_t tile_shift = elePerTile * get_block_idx();
@@ -103,7 +102,7 @@ AICORE void scanULOne(__gm__ InputT* x, __gm__ InputT* o, __gm__ InputT* u,
   // Load data from L1 to L0
   TileL0A xL0;
   TileL0B oL0;
-  TileL0C sL0;
+  TileL0COut sL0;
 
   // L0A/L0B/L0C are distinct scratchpads
   TASSIGN(xL0, 0x0);
@@ -344,11 +343,11 @@ AICORE void runKernelScanMCSSA(__gm__ InputT* x, __gm__ InputT* o,
 
   scanULOne<InputT, OutputT, tile_size>(x, o, u, l, s, scan_size);
 
-  SyncAllImpl<false>();
+  kernel_utils::SyncAllImpl<false>();
 
   singleVecBlockScan<OutputT, tile_size>(s, scan_size, scan_core_buf);
 
-  SyncAllImpl<true>();
+  kernel_utils::SyncAllImpl<true>();
 
   addAllBlockScan<OutputT, tile_size>(s, scan_size, scan_core_buf);
 }
@@ -398,16 +397,39 @@ extern "C" __global__ AICORE void scan_mcssa_fp32(
   run_scan_mcssa(x, o, u, l, s, scan_size, tile_size, scan_core_buf, ffts_addr);
 }
 
-extern "C" void scan_fp32(uint32_t blockDim, void* stream, void* x, void* o,
-                          void* u, void* l, void* s, uint32_t scan_size,
-                          uint32_t tile_size) {
+extern "C" void scan_fp16(void* stream, void* x, void* o, void* u, void* l,
+                          void* s, uint32_t scan_size, uint32_t tile_size) {
   void* ffts_addr;
   uint32_t ffts_len;
   rtGetC2cCtrlAddr((uint64_t*)&ffts_addr, &ffts_len);
 
+  // FIXME: generalize to support arbitrary number of tiles
+  const uint32_t ele_per_tile = tile_size * tile_size;
+  uint32_t blockDim = (scan_size + ele_per_tile - 1) / ele_per_tile;
+
   // Allocate buffer for inter-core scan
   void* scan_core_buf;
+  const uint32_t buf_size = ele_per_tile * sizeof(float);
+  aclrtMalloc(&scan_core_buf, buf_size,
+              aclrtMemMallocPolicy::ACL_MEM_MALLOC_HUGE_FIRST);
+
+  scan_mcssa_fp16<<<blockDim, nullptr, stream>>>(
+      (half*)x, (half*)o, (half*)u, (half*)l, (float*)s, scan_size, tile_size,
+      (float*)scan_core_buf, (uint8_t*)ffts_addr);
+}
+
+extern "C" void scan_fp32(void* stream, void* x, void* o, void* u, void* l,
+                          void* s, uint32_t scan_size, uint32_t tile_size) {
+  void* ffts_addr;
+  uint32_t ffts_len;
+  rtGetC2cCtrlAddr((uint64_t*)&ffts_addr, &ffts_len);
+
+  // FIXME: generalize to support arbitrary number of tiles
   const uint32_t ele_per_tile = tile_size * tile_size;
+  uint32_t blockDim = (scan_size + ele_per_tile - 1) / ele_per_tile;
+
+  // Allocate buffer for inter-core scan
+  void* scan_core_buf;
   const uint32_t buf_size = ele_per_tile * sizeof(float);
   aclrtMalloc(&scan_core_buf, buf_size,
               aclrtMemMallocPolicy::ACL_MEM_MALLOC_HUGE_FIRST);
