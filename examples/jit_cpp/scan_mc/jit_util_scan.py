@@ -91,7 +91,7 @@ def load_lib(lib_path, check_type=True):
         ]
         lib.scan_fp16.restype = None
 
-    def scan_func(x, ones, utri, ltri, s, scan_size, tile_size=16, stream_ptr=None):
+    def scan_func(x, ones, utri, ltri, s, scan_size, tile_size, stream_ptr=None):
         if stream_ptr is None:
             stream_ptr = torch.npu.current_stream()._as_parameter_  # noqa
 
