@@ -1,6 +1,6 @@
 import torch
 import torch_npu  # noqa
-from jit_util_scan import jit_compile, clean_up
+from jit_util_scan_mc import jit_compile, clean_up
 import pytest
 import os
 
@@ -34,8 +34,7 @@ def test_scan(tile_size: int, n_tiles: int, dtype: torch.dtype):
         f"Testing NPU scan kernel: tile_size={tile_size}x{tile_size}, total_len={total_len} ({n_tiles} tiles)"
     )
 
-    scan_func(x, ones, utri, ltri, s, total_len, tile_size=tile_size)
-
+    scan_func(x, ones, utri, ltri, s, total_len, tile_size)
     torch.npu.synchronize()
 
     # print("Comparing results...")
