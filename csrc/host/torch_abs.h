@@ -38,16 +38,19 @@ at::Tensor run_abs(const at::Tensor& x) {
 
   // Persistent kernel launch parameter
   uint32_t total_tiles = (total_size + TILE_SIZE - 1) / TILE_SIZE;
-  uint32_t block_dim = GetNumVectorCores();
+  uint32_t block_dim = GetNumCubeCores();
 
   if (total_tiles < block_dim) {
     block_dim = total_tiles;
   }
 
+  auto acl_stream = c10_npu::getCurrentNPUStream().stream(true);
   if (dtype == at::kHalf) {
-    EXEC_KERNEL_CMD(call_vabs_fp16, block_dim, x, z, total_size);
+    call_vabs_fp16(block_dim, acl_stream, ConvertType(x), ConvertType(z),
+                   total_size);
   } else if (dtype == at::kFloat) {
-    EXEC_KERNEL_CMD(call_vabs_fp32, block_dim, x, z, total_size);
+    call_vabs_fp32(block_dim, acl_stream, ConvertType(x), ConvertType(z),
+                   total_size);
   } else {
     throw std::runtime_error("Unsupported dtype for `pto_abs` kernel");
   }

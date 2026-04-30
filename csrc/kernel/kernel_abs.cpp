@@ -124,10 +124,10 @@ extern "C" __global__ AICORE void vabs_fp32(GM_ADDR x, GM_ADDR z,
 
 extern "C" void call_vabs_fp16(uint32_t block_dim, void* stream, GM_ADDR x,
                                GM_ADDR z, uint32_t num_elements) {
-  vabs_fp16<<<block_dim, nullptr, stream>>>(x, z, num_elements);
+  vabs_fp16<<<block_dim * 2, nullptr, stream>>>(x, z, num_elements);
 }
 
 extern "C" void call_vabs_fp32(uint32_t block_dim, void* stream, GM_ADDR x,
                                GM_ADDR z, uint32_t num_elements) {
-  vabs_fp32<<<block_dim, nullptr, stream>>>(x, z, num_elements);
+  vabs_fp32<<<block_dim * 2, nullptr, stream>>>(x, z, num_elements);
 }
