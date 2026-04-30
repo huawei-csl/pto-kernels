@@ -24,15 +24,19 @@ build_wheel:
 	export CMAKE_GENERATOR="Unix Makefiles" && pip wheel -v  . --extra-index-url https://download.pytorch.org/whl/cpu
 
 
-# 'make compile_abs' will quickly compile 'kernel_abs.cpp' into 'libkernel_abs.so' without
-# building the whole wheel package. This is useful for development and debugging of individual kernels.
-compile_%:
+# 'make compile_abs' compiles 'kernel_abs.cpp' into 'libkernel_abs.so' without building the whole wheel package.
+# This is useful for development and debugging of individual kernels.
+compile_aiv_%:
 	bisheng -fPIC -shared -xcce -DMEMORY_BASE -O2 -std=c++17 \
 		-I$(CSRC_KERNEL_DIR) \
 		-I$(PTO_LIB_PATH)/include \
+		-isystem \
 		--npu-arch=dav-2201 \
+	        --cce-aicore-arch=dav-c220-vec \
+	        -Wno-ignored-attributes \
 		$(CSRC_KERNEL_DIR)/kernel_$*.cpp \
 		-o libkernel_$*.so
+
 
 install:
 	python3 -m pip install --force-reinstall pto_kernels-*.whl
