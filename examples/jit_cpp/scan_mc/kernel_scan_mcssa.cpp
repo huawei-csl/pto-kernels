@@ -261,18 +261,17 @@ AICORE void addAllBlockScan(__gm__ OutputT* s, uint32_t scan_size,
   using Shape = pto::Shape<1, 1, 1, 1, elePerTile>;
   using Stride = pto::Stride<1, 1, 1, 1, 1>;
   using GlobalDataOut = pto::GlobalTensor<OutputT, Shape, Stride, Layout::ND>;
-  
+
   GlobalDataOut sGlobal(s);
   GlobalDataOut coreScanGlobal(scan_core_buf);
 
-  using TileDataOut = Tile<TileType::Vec, OutputT, 1, elePerTile,
-                           BLayout::RowMajor>;
+  using TileDataOut =
+      Tile<TileType::Vec, OutputT, 1, elePerTile, BLayout::RowMajor>;
   TileDataOut sVecTile;
 
-  using TileScan = Tile<TileType::Vec, OutputT, 1, elePerTile,
-                        BLayout::RowMajor>;
+  using TileScan =
+      Tile<TileType::Vec, OutputT, 1, elePerTile, BLayout::RowMajor>;
   TileScan coreScanTile;
-
 
   const uint32_t tile_ub_offset = 0x0;
   const uint32_t tile_byte_size = elePerTile * sizeof(OutputT);
@@ -419,4 +418,3 @@ extern "C" void scan_fp32(uint32_t blockDim, void* stream, void* x, void* o,
       (float*)x, (float*)o, (float*)u, (float*)l, (float*)s, scan_size,
       tile_size, (float*)scan_core_buf, (uint8_t*)ffts_addr);
 }
-
