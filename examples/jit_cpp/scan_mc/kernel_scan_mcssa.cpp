@@ -384,14 +384,12 @@ AICORE void run_scan_mcssa(__gm__ T* x, __gm__ T* o, __gm__ T* u, __gm__ T* l,
   }
 }
 
-// extern "C" __global__ AICORE void scan_mcssa_fp16(
-//     __gm__ void* x, __gm__ void* o, __gm__ void* u, __gm__ void* l,
-//     __gm__ void* s, uint32_t scan_size, uint32_t tile_size,
-//     __gm__ float* scan_core_buf, __gm__ uint8_t* ffts_addr) {
-//   run_scan_mcssa((__gm__ half*)x, (__gm__ half*)o, (__gm__ half*)u,
-//                  (__gm__ half*)l, (__gm__ float*)s, scan_size, tile_size,
-//                  scan_core_buf, ffts_addr);
-// }
+extern "C" __global__ AICORE void scan_mcssa_fp16(
+    __gm__ half* x, __gm__ half* o, __gm__ half* u, __gm__ half* l,
+    __gm__ float* s, uint32_t scan_size, uint32_t tile_size,
+    __gm__ float* scan_core_buf, __gm__ uint8_t* ffts_addr) {
+  run_scan_mcssa(x, o, u, l, s, scan_size, tile_size, scan_core_buf, ffts_addr);
+}
 
 extern "C" __global__ AICORE void scan_mcssa_fp32(
     __gm__ float* x, __gm__ float* o, __gm__ float* u, __gm__ float* l,
