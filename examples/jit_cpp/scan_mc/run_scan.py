@@ -1,15 +1,18 @@
 import torch
 import torch_npu  # noqa
 from jit_util_scan import jit_compile, clean_up
+import pytest
 import os
 
 # get npu device from NPU_DEVICE env variable, default to npu:1 if not set
 device = os.getenv("NPU_DEVICE", "npu:1")
 
 
-def test_scan(tile_size=16, n_tiles=20):
+@pytest.mark.parametrize("tile_size", [16, 32, 64, 128])
+@pytest.mark.parametrize("n_tiles", [10, 20])
+@pytest.mark.parametrize("dtype", [torch.float32], ids=str)
+def test_scan(tile_size: int, n_tiles: int, dtype: torch.dtype):
     total_len = tile_size * tile_size * n_tiles
-    dtype = torch.float32
     torch.npu.set_device(device)
 
     # Prepare Inputs
@@ -43,10 +46,10 @@ def test_scan(tile_size=16, n_tiles=20):
         s.cpu(), expected_scan, rtol=1e-3, atol=1e-2
     ), "Scan results do not match expected values!"
 
-    print("All results matched. Scan test passed successfully.\n")
+    # print("All results matched. Scan test passed successfully.\n")
 
     clean_up(file)
 
 
 if __name__ == "__main__":
-    test_scan()
+    test_scan(32, 1, torch.float32)
