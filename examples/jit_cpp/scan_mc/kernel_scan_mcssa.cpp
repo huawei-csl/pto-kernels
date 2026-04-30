@@ -306,12 +306,8 @@ AICORE void addAllBlockScan(__gm__ OutputT* s, uint32_t scan_size,
   set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
   wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
 
-  set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
-  wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
-
   TSTORE(sGlobal, sVecTile);
 
-  pipe_barrier(PIPE_MTE3);
 #endif
 }
 

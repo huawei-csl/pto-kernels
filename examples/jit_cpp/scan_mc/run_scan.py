@@ -37,15 +37,9 @@ def test_scan(tile_size: int, n_tiles: int, dtype: torch.dtype):
     scan_func(x, ones, utri, ltri, s, total_len, tile_size)
     torch.npu.synchronize()
 
-    # print("Comparing results...")
-    # print("NPU scan result:\n", s.cpu())
-    # print("Expected:\n", expected_scan)
-
     assert torch.allclose(
         s.cpu(), expected_scan, rtol=1e-3, atol=1e-2
     ), "Scan results do not match expected values!"
-
-    # print("All results matched. Scan test passed successfully.\n")
 
     clean_up(file)
 
