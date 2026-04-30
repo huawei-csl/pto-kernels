@@ -10,21 +10,21 @@ device = os.getenv("NPU_DEVICE", "npu:1")
 
 @pytest.mark.parametrize("tile_size", [16, 32, 64, 128])
 @pytest.mark.parametrize("n_tiles", [10, 20])
-@pytest.mark.parametrize("dtype", [torch.float32], ids=str)
+@pytest.mark.parametrize("dtype", [torch.float16, torch.float32], ids=str)
 def test_scan(tile_size: int, n_tiles: int, dtype: torch.dtype):
     total_len = tile_size * tile_size * n_tiles
     torch.npu.set_device(device)
 
     # Prepare Inputs
     x = torch.ones(size=(total_len,), device="npu", dtype=dtype).contiguous()
-    s = torch.zeros_like(x)
+    s = torch.zeros(size=(total_len,), device="npu", dtype=torch.float32).contiguous()
 
     ones = torch.ones((tile_size, tile_size), device="npu", dtype=dtype).contiguous()
-    utri = torch.triu(ones).contiguous()
-    ltri = torch.tril(ones, -1).contiguous()
+    utri = torch.triu(ones)
+    ltri = torch.tril(ones, -1)
 
     # Expected PyTorch computation
-    expected_scan = torch.cumsum(x.cpu(), dim=0)
+    expected_scan = torch.cumsum(x.cpu().to(torch.float32), dim=0)
 
     # NPU JIT Kernel compilation
     file = "kernel_scan_mcssa.cpp"
@@ -38,9 +38,9 @@ def test_scan(tile_size: int, n_tiles: int, dtype: torch.dtype):
 
     torch.npu.synchronize()
 
-    print("Comparing results...")
-    print("NPU scan result:\n", s.cpu()[::256])
-    print("Expected:\n", expected_scan[::256])
+    # print("Comparing results...")
+    # print("NPU scan result:\n", s.cpu())
+    # print("Expected:\n", expected_scan)
 
     assert torch.allclose(
         s.cpu(), expected_scan, rtol=1e-3, atol=1e-2
@@ -52,4 +52,4 @@ def test_scan(tile_size: int, n_tiles: int, dtype: torch.dtype):
 
 
 if __name__ == "__main__":
-    test_scan(32, 1, torch.float32)
+    test_scan(16, 14, torch.float32)
