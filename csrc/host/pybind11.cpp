@@ -41,7 +41,6 @@ PYBIND11_MODULE(pto_kernels_ops, m) {
   m.def("pto_batch_matrix_square", &pto_isa_ops::run_batch_matrix_square);
   m.def("pto_csr_gather", &pto_isa_ops::run_csr_gather);
   m.def("pto_scan_ul1", &pto_isa_ops::run_scan_ul1);
-  m.def("pto_scan_mcssa", &pto_isa_ops::run_scan_mcssa);
   m.def("pto_simple_matmul", &pto_isa_ops::run_simple_matmul);
   m.def("pto_swiglu", &pto_isa_ops::run_swiglu, py::arg("x"),
         py::arg("dim") = -1);

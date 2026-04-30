@@ -28,7 +28,7 @@ def compile_cpp(kernel_cpp: str, verbose: bool = False, timeout: int = 120) -> s
         f"-I{ASCEND_TOOLKIT_HOME}/pkg_inc",
         f"-I{ASCEND_TOOLKIT_HOME}/pkg_inc/runtime",
         f"-I{ASCEND_TOOLKIT_HOME}/pkg_inc/profiling",
-        f"-I../../../csrc/kernel",
+        "-I../../../csrc/kernel",
     ]
 
     command = ["bisheng", *flags, kernel_cpp, "-o", lib_path]
