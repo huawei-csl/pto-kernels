@@ -20,6 +20,21 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(PIP_INSTALL "True if building via pip" OFF)
 
+set(BASE_MODE
+    "MEMORY"
+    CACHE STRING "Base addressing mode: MEMORY or REGISTER")
+set_property(CACHE BASE_MODE PROPERTY STRINGS "MEMORY" "REGISTER")
+
+if(BASE_MODE STREQUAL "MEMORY")
+  # TODO: add option to target
+  add_compile_options(-DMEMORY_BASE)
+elseif(BASE_MODE STREQUAL "REGISTER")
+  # TODO: add option to target
+  add_compile_options(-DREGISTER_BASE)
+else()
+  message(FATAL_ERROR "BASE_MODE must be MEMORY or REGISTER, got: ${BASE_MODE}")
+endif()
+
 find_program(CCACHE_PROGRAM ccache)
 if(CCACHE_PROGRAM)
   set(CMAKE_C_COMPILER_LAUNCHER ${CCACHE_PROGRAM})
@@ -131,6 +146,16 @@ ascendc_library(
 ascendc_include_directories(
   no_workspace_kernel PRIVATE ${libpto_isa_headers_SOURCE_DIR}/include
   ${libpto_isa_headers_SOURCE_DIR}/include/pto/common)
+
+if(BASE_MODE STREQUAL "MEMORY")
+  message(STATUS "BASE_MODE is MEMORY")
+  ascendc_compile_definitions(no_workspace_kernel PRIVATE -DMEMORY_BASE)
+elseif(BASE_MODE STREQUAL "REGISTER")
+  message(STATUS "BASE_MODE is REGISTER")
+  ascendc_compile_definitions(no_workspace_kernel PRIVATE -DREGISTER_BASE)
+else()
+  message(FATAL_ERROR "BASE_MODE must be MEMORY or REGISTER, got: ${BASE_MODE}")
+endif()
 
 pybind11_add_module(pto_kernels_ops csrc/host/pybind11.cpp)
 
