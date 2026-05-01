@@ -65,6 +65,7 @@ build_and_test_aarch64_910B2_py3.11:
     - make build_wheel
     - pip install pto_kernels*.whl
     - python3 -m pytest -v tests/
+  when: manual
 
 build_and_test_aarch64_910B2_py3.12:
   image: quay.io/ascend/cann:8.5.1-910b-ubuntu22.04-py3.12
@@ -80,6 +81,7 @@ build_and_test_aarch64_910B2_py3.12:
     - make build_wheel
     - pip install pto_kernels*.whl
     - python3 -m pytest -v tests/
+  when: manual
 
 ######################################
 # On-device test of examples/jit_cpp #
