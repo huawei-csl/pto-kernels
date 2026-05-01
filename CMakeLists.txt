@@ -25,16 +25,6 @@ set(BASE_MODE
     CACHE STRING "Base addressing mode: MEMORY or REGISTER")
 set_property(CACHE BASE_MODE PROPERTY STRINGS "MEMORY" "REGISTER")
 
-if(BASE_MODE STREQUAL "MEMORY")
-  # TODO: add option to target
-  add_compile_options(-DMEMORY_BASE)
-elseif(BASE_MODE STREQUAL "REGISTER")
-  # TODO: add option to target
-  add_compile_options(-DREGISTER_BASE)
-else()
-  message(FATAL_ERROR "BASE_MODE must be MEMORY or REGISTER, got: ${BASE_MODE}")
-endif()
-
 find_program(CCACHE_PROGRAM ccache)
 if(CCACHE_PROGRAM)
   set(CMAKE_C_COMPILER_LAUNCHER ${CCACHE_PROGRAM})
