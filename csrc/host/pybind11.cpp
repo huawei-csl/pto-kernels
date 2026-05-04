@@ -47,7 +47,7 @@ PYBIND11_MODULE(pto_kernels_ops, m) {
   m.def("pto_tri_inv_trick", &pto_isa_ops::run_tri_inv_trick);
   m.def("pto_tri_inv_rec_unroll", &pto_isa_ops::run_tri_inv_rec_unroll,
         py::arg("M"), py::arg("cu_seqlens") = at::zeros({1}),
-        py::arg("is_bsnd_format") = false,
+        py::arg("is_bsnd_format") = false, py::arg("is_lower") = false,
         py::arg("dtype_out") = at::ScalarType::Half);
   m.def("pto_tri_inv_ns", &pto_isa_ops::run_tri_inv_ns, py::arg("M"),
         py::arg("num_iters") = 0, py::arg("scale_value") = 0.0f);
