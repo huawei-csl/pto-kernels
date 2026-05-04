@@ -129,3 +129,8 @@ extern "C" __global__ AICORE void vabs_fp32(GM_ADDR x, GM_ADDR z,
   (void)in_length;
 #endif
 }
+
+extern "C" void call_vabs_fp16(uint32_t blockDim, void* stream, uint8_t* x,
+                               uint8_t* y, uint32_t in_length) {
+  vabs_fp16<<<blockDim * 2, nullptr, stream>>>(x, y, in_length);
+}

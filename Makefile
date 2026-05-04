@@ -5,6 +5,9 @@
 # https://github.com/huawei-csl/pto-kernels/
 # for the full License text.
 # --------------------------------------------------------------------------------
+PTO_LIB_PATH    ?= $(ASCEND_TOOLKIT_HOME)
+CSRC_KERNEL_DIR := csrc/kernel
+
 .PHONY: clean setup_once build_cmake build_wheel install docs test test_tri_inv
 
 clean:
@@ -19,6 +22,19 @@ build_cmake: clean
 
 build_wheel:
 	export CMAKE_GENERATOR="Unix Makefiles" && pip wheel -v  . --extra-index-url https://download.pytorch.org/whl/cpu
+
+
+# 'make compile_abs' compiles 'kernel_abs.cpp' into 'libkernel_abs.so' without building the whole wheel package.
+# This is useful for development and debugging of individual kernels.
+compile_%:
+	bisheng -fPIC -shared -xcce -DMEMORY_BASE -O2 -std=c++17 \
+		-I$(CSRC_KERNEL_DIR) \
+		-I$(PTO_LIB_PATH)/include \
+		--npu-arch=dav-2201 \
+	    -Wno-ignored-attributes \
+		$(CSRC_KERNEL_DIR)/kernel_$*.cpp \
+		-o libkernel_$*.so
+
 
 install:
 	python3 -m pip install --force-reinstall pto_kernels-*.whl
