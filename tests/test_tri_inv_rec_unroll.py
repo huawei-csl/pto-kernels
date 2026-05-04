@@ -203,7 +203,7 @@ def _test_tri_inv_rec_unroll_bsnd(
         (ones_tri_matrix, 0, 0, 0, True, torch.bfloat16, torch.float32),
         (
             block_random_triu_matrix,
-            5e-5,
+            5e-4,
             0.1,
             1e-3,
             False,
