@@ -124,6 +124,7 @@ ascendc_library(
   SHARED
   csrc/kernel/kernel_tri_inv_col_sweep.cpp
   csrc/kernel/kernel_abs.cpp
+  csrc/kernel/kernel_chunk_cumsum.cpp
   csrc/kernel/kernel_csr_gather.cpp
   csrc/kernel/kernel_scan_ul1.cpp
   csrc/kernel/kernel_simple_matmul.cpp
