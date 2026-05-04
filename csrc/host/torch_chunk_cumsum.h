@@ -50,10 +50,12 @@ at::Tensor run_chunk_cumsum(const at::Tensor& g, int64_t batch_size,
   TORCH_CHECK(batch_size > 0,
               "pto_chunk_cumsum: batch_size must be positive, got ",
               batch_size);
-  TORCH_CHECK(seq_len > 0, "pto_chunk_cumsum: seq_len must be positive, got ",
+  TORCH_CHECK(cu_seqlens.numel() > 1 || seq_len > 0,
+              "pto_chunk_cumsum: seq_len must be positive if no cu_seqlens "
+              "provided, got ",
               seq_len);
 
-  at::Tensor g_sum = at::empty_like(g);
+  const at::Tensor g_sum = at::empty_like(g);
 
   const uint32_t block_dim = GetNumVectorCores();
 

@@ -29,11 +29,6 @@ random.seed(42)
 torch.manual_seed(42)
 
 
-# ---------------------------------------------------------------------------
-# CPU float32 reference
-# ---------------------------------------------------------------------------
-
-
 def ref_chunk_cumsum(
     g: torch.Tensor,
     chunk_size: int,
@@ -99,8 +94,6 @@ def _rand_cu_aligned(n_seq: int, total: int, chunk_size: int) -> list[int]:
 # Fixed-length sequence tests
 # (reference: TestCase with cu_seqlens_list=None, T in [128,256,385,512,1024])
 # ---------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("T", [128, 256, 385, 512, 1024])
 @pytest.mark.parametrize("H", [GDN_H])
 def test_chunk_cumsum_fixed_length(T: int, H: int):
@@ -120,7 +113,6 @@ def test_chunk_cumsum_fixed_length(T: int, H: int):
 # Variable-length (varlen) sequence tests
 # (reference: seqlens lists from build_test_cases())
 # ---------------------------------------------------------------------------
-
 _VARLEN_SEQLENS = [
     [128],
     [256],
