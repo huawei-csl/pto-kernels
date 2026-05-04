@@ -19,14 +19,22 @@ torch.manual_seed(42)
 np.random.seed(42)
 
 
-def random_triu_matrix(n, block_dim_x, block_dim_y, scale=0.1):
-    U = scale * torch.triu(torch.rand((block_dim_x, block_dim_y, n, n)), diagonal=1)
-    return U
+def random_tri_matrix(n, block_dim_x, block_dim_y, scale=0.1, is_lower=False):
+    if is_lower:
+        return scale * torch.tril(
+            torch.rand((block_dim_x, block_dim_y, n, n)), diagonal=-1
+        )
+    else:
+        return scale * torch.triu(
+            torch.rand((block_dim_x, block_dim_y, n, n)), diagonal=1
+        )
 
 
-def ones_triu_matrix(n, block_dim_x, block_dim_y):
-    U = torch.triu(torch.ones((block_dim_x, block_dim_y, n, n)), diagonal=1)
-    return U
+def ones_tri_matrix(n, block_dim_x, block_dim_y, is_lower=False):
+    if is_lower:
+        return torch.tril(torch.ones((block_dim_x, block_dim_y, n, n)), diagonal=-1)
+    else:
+        return torch.triu(torch.ones((block_dim_x, block_dim_y, n, n)), diagonal=1)
 
 
 def block_ones_triu_matrix(n, block_dim_x, block_dim_y):
@@ -53,11 +61,9 @@ def block_random_triu_matrix(n, block_dim_x, block_dim_y, scale=0.2):
     return torch.from_numpy(U)
 
 
-def linalg_inv(U: torch.tensor) -> torch.tensor:
+def linalg_inv(U: torch.tensor, is_lower: bool) -> torch.tensor:
     n = U.shape[-1]
-    Identity = np.ones((n, n), dtype=np.double)
-    Identity = np.triu(Identity)
-    Identity = np.tril(Identity)
+    Identity = np.eye(n, dtype=np.double)
     golden_numpy = np.zeros((U.shape))
     for x in range(U.shape[0]):
         for y in range(U.shape[1]):
@@ -104,7 +110,7 @@ def _test_tri_inv_rec_unroll(
 
 
 def _test_tri_inv_rec_unroll_bsnd(
-    U: torch.tensor,
+    A: torch.tensor,
     B: int,
     S: int,
     N: int,
@@ -117,19 +123,23 @@ def _test_tri_inv_rec_unroll_bsnd(
     output_dtype: torch.dtype = torch.float16,
 ):
 
-    U = U.to(input_dtype)
-    golden_cpu = linalg_inv(U)
+    A = A.to(input_dtype)
+    golden_cpu = linalg_inv(A)
 
     # Transform to bsnd layout
-    U = U.transpose(1, 2).contiguous().reshape(B, S, N, D)
+    if is_lower:
+        A_bsnd = A.contiguous().reshape(B, S, N, D)
+        golden_cpu = golden_cpu.contiguous().reshape(B, S, N, D)
+    else:
+        A_bsnd = A.transpose(1, 2).contiguous().reshape(B, S, N, D)
+        golden_cpu = golden_cpu.transpose(1, 2).contiguous().reshape(B, S, N, D)
     torch.npu.synchronize()
-    golden_cpu = golden_cpu.transpose(1, 2).contiguous().reshape(B, S, N, D)
 
-    U_npu = U.npu()
+    A_bsnd_npu = A_bsnd.npu()
 
     torch.npu.synchronize()
     actual = pto_tri_inv_rec_unroll(
-        U_npu, is_bsnd_format=True, is_lower=is_lower, dtype_out=output_dtype
+        A_bsnd_npu, is_bsnd_format=True, is_lower=is_lower, dtype_out=output_dtype
     )
     torch.npu.synchronize()
     actual_cpu = actual.cpu()
@@ -144,7 +154,7 @@ def _test_tri_inv_rec_unroll_bsnd(
 
     assert np.allclose(
         actual_numpy, golden_numpy, atol=atol, rtol=rtol
-    ), f"Error at allclose - tensor shape: {U.shape} - rtol: {rtol}."
+    ), f"Error at allclose - tensor shape: {A.shape} - rtol: {rtol}."
     assert frob_error <= ftol, f"frob_error: {frob_error}"
 
 
@@ -155,7 +165,8 @@ def _test_tri_inv_rec_unroll_bsnd(
     "matrix_gen,atol,rtol,ftol,is_lower,input_dtype,output_dtype",
     [
         (block_ones_triu_matrix, 0, 0, 0, False, torch.float16, torch.float16),
-        (ones_triu_matrix, 0, 0, 0, False, torch.float16, torch.float16),
+        (ones_tri_matrix, 0, 0, 0, False, torch.float16, torch.float16),
+        (ones_tri_matrix, 0, 0, 0, True, torch.float16, torch.float16),
         (
             block_random_triu_matrix,
             5e-5,
@@ -165,9 +176,11 @@ def _test_tri_inv_rec_unroll_bsnd(
             torch.float16,
             torch.float16,
         ),
-        (random_triu_matrix, 5e-5, 0.1, 1e-4, False, torch.float16, torch.float16),
+        (random_tri_matrix, 5e-5, 0.1, 1e-4, False, torch.float16, torch.float16),
+        (random_tri_matrix, 5e-5, 0.1, 1e-4, True, torch.float16, torch.float16),
         (block_ones_triu_matrix, 0, 0, 0, False, torch.float16, torch.float32),
-        (ones_triu_matrix, 0, 0, 0, False, torch.float16, torch.float32),
+        (ones_tri_matrix, 0, 0, 0, False, torch.float16, torch.float32),
+        (ones_tri_matrix, 0, 0, 0, True, torch.float16, torch.float32),
         (
             block_random_triu_matrix,
             5e-5,
@@ -177,9 +190,11 @@ def _test_tri_inv_rec_unroll_bsnd(
             torch.float16,
             torch.float32,
         ),
-        (random_triu_matrix, 5e-5, 0.1, 1e-4, False, torch.float16, torch.float32),
+        (random_tri_matrix, 5e-5, 0.1, 1e-4, False, torch.float16, torch.float32),
+        (random_tri_matrix, 5e-5, 0.1, 1e-4, True, torch.float16, torch.float32),
         (block_ones_triu_matrix, 0, 0, 0, False, torch.bfloat16, torch.float32),
-        (ones_triu_matrix, 0, 0, 0, False, torch.bfloat16, torch.float32),
+        (ones_tri_matrix, 0, 0, 0, False, torch.bfloat16, torch.float32),
+        (ones_tri_matrix, 0, 0, 0, True, torch.bfloat16, torch.float32),
         (
             block_random_triu_matrix,
             5e-5,
@@ -189,7 +204,8 @@ def _test_tri_inv_rec_unroll_bsnd(
             torch.bfloat16,
             torch.float32,
         ),
-        (random_triu_matrix, 5e-5, 0.1, 1e-3, False, torch.bfloat16, torch.float32),
+        (random_tri_matrix, 5e-5, 0.1, 1e-3, False, torch.bfloat16, torch.float32),
+        (random_tri_matrix, 5e-5, 0.1, 1e-3, True, torch.bfloat16, torch.float32),
     ],
 )
 def test_tri_inv_rec_unroll(
@@ -216,7 +232,8 @@ def test_tri_inv_rec_unroll(
     "matrix_gen,atol,rtol,ftol,is_lower,input_dtype,output_dtype",
     [
         (block_ones_triu_matrix, 0, 0, 0, False, torch.float16, torch.float16),
-        (ones_triu_matrix, 0, 0, 0, False, torch.float16, torch.float16),
+        (ones_tri_matrix, 0, 0, 0, False, torch.float16, torch.float16),
+        (ones_tri_matrix, 0, 0, 0, True, torch.float16, torch.float16),
         (
             block_random_triu_matrix,
             5e-5,
@@ -226,9 +243,11 @@ def test_tri_inv_rec_unroll(
             torch.float16,
             torch.float16,
         ),
-        (random_triu_matrix, 5e-5, 0.1, 1e-4, False, torch.float16, torch.float16),
+        (random_tri_matrix, 5e-5, 0.1, 1e-4, False, torch.float16, torch.float16),
+        (random_tri_matrix, 5e-5, 0.1, 1e-4, True, torch.float16, torch.float16),
         (block_ones_triu_matrix, 0, 0, 0, False, torch.float16, torch.float32),
-        (ones_triu_matrix, 0, 0, 0, False, torch.float16, torch.float32),
+        (ones_tri_matrix, 0, 0, 0, False, torch.float16, torch.float32),
+        (ones_tri_matrix, 0, 0, 0, True, torch.float16, torch.float32),
         (
             block_random_triu_matrix,
             5e-5,
@@ -238,9 +257,11 @@ def test_tri_inv_rec_unroll(
             torch.float16,
             torch.float32,
         ),
-        (random_triu_matrix, 5e-5, 0.1, 1e-4, False, torch.float16, torch.float32),
+        (random_tri_matrix, 5e-5, 0.1, 1e-4, False, torch.float16, torch.float32),
+        (random_tri_matrix, 5e-5, 0.1, 1e-4, True, torch.float16, torch.float32),
         (block_ones_triu_matrix, 0, 0, 0, False, torch.bfloat16, torch.float32),
-        (ones_triu_matrix, 0, 0, 0, False, torch.bfloat16, torch.float32),
+        (ones_tri_matrix, 0, 0, 0, False, torch.bfloat16, torch.float32),
+        (ones_tri_matrix, 0, 0, 0, True, torch.bfloat16, torch.float32),
         (
             block_random_triu_matrix,
             5e-5,
@@ -250,7 +271,8 @@ def test_tri_inv_rec_unroll(
             torch.bfloat16,
             torch.float32,
         ),
-        (random_triu_matrix, 5e-5, 0.1, 1e-3, False, torch.bfloat16, torch.float32),
+        (random_tri_matrix, 5e-5, 0.1, 1e-3, False, torch.bfloat16, torch.float32),
+        (random_tri_matrix, 5e-5, 0.1, 1e-3, True, torch.bfloat16, torch.float32),
     ],
 )
 def test_tri_inv_rec_unroll_bsnd(
