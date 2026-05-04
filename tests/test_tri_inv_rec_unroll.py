@@ -6,7 +6,6 @@
 # for the full License text.
 # --------------------------------------------------------------------------------
 
-
 import torch
 import pytest
 import numpy as np
@@ -114,6 +113,7 @@ def _test_tri_inv_rec_unroll(
     assert frob_error <= ftol, f"frob_error: {frob_error}"
 
 
+# pylint: disable=too-many-function-args,too-many-positional-arguments
 def _test_tri_inv_rec_unroll_bsnd(
     A: torch.tensor,
     B: int,
@@ -281,6 +281,7 @@ def test_tri_inv_rec_unroll(
         (random_tri_matrix, 5e-5, 0.1, 1e-3, True, torch.bfloat16, torch.float32),
     ],
 )
+# pylint: disable=too-many-positional-arguments
 def test_tri_inv_rec_unroll_bsnd(
     B: int,
     S: int,
