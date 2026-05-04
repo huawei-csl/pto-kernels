@@ -1,4 +1,3 @@
-#define MEMORY_BASE
 #include <pto/pto-inst.hpp>
 
 using namespace pto;
