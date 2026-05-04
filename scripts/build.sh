@@ -57,6 +57,7 @@ mkdir -p build
 cmake -S "${PARENT_DIR}" \
       -B build \
       -DSOC_VERSION="${SOC_VERSION}" \
+      -DBASE_MODE=MEMORY \
       -DCMAKE_PREFIX_PATH="${CMAKE_PREFIX_PATH}" \
       -DASCEND_CANN_PACKAGE_PATH="${_ASCEND_INSTALL_PATH}"
 

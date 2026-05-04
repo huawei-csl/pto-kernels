@@ -8,10 +8,6 @@ for the full License text.
 */
 #pragma once
 
-// FIXME(zouzias): Current development is based on A2/A3 architectures.
-#if !defined(MEMORY_BASE) && !defined(REGISTER_BASE)
-#define MEMORY_BASE
-#endif
 #include <pto/pto-inst.hpp>
 #include <type_traits>
 
