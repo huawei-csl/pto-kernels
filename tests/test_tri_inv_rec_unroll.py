@@ -61,7 +61,7 @@ def block_random_triu_matrix(n, block_dim_x, block_dim_y, scale=0.2):
     return torch.from_numpy(U)
 
 
-def linalg_inv(U: torch.tensor, is_lower: bool) -> torch.tensor:
+def linalg_inv(U: torch.tensor) -> torch.tensor:
     n = U.shape[-1]
     Identity = np.eye(n, dtype=np.double)
     golden_numpy = np.zeros((U.shape))
@@ -74,7 +74,7 @@ def linalg_inv(U: torch.tensor, is_lower: bool) -> torch.tensor:
 
 
 def _test_tri_inv_rec_unroll(
-    U: torch.tensor,
+    A: torch.tensor,
     atol: float,
     rtol: float,
     ftol: float,
@@ -83,14 +83,19 @@ def _test_tri_inv_rec_unroll(
     output_dtype: torch.dtype = torch.float16,
 ):
 
-    U = U.to(input_dtype)
-    golden_cpu = linalg_inv(U)
+    # Make sure A is lower triangular and contiguous in memory.
+    if is_lower:
+        A = A.transpose(-1, -2).contiguous().to(input_dtype)
+    else:
+        A = A.contiguous().to(input_dtype)
 
-    U_npu = U.npu()
+    golden_cpu = linalg_inv(A)
+
+    A_npu = A.npu()
 
     torch.npu.synchronize()
     actual = pto_tri_inv_rec_unroll(
-        U_npu, is_bsnd_format=False, dtype_out=output_dtype, is_lower=is_lower
+        A_npu, is_bsnd_format=False, dtype_out=output_dtype, is_lower=is_lower
     )
     torch.npu.synchronize()
     actual_cpu = actual.cpu()
@@ -105,7 +110,7 @@ def _test_tri_inv_rec_unroll(
 
     assert np.allclose(
         actual_numpy, golden_numpy, atol=atol, rtol=rtol
-    ), f"Error at allclose - tensor shape: {U.shape} - rtol: {rtol}."
+    ), f"Error at allclose - tensor shape: {A.shape} - rtol: {rtol}."
     assert frob_error <= ftol, f"frob_error: {frob_error}"
 
 
@@ -123,16 +128,17 @@ def _test_tri_inv_rec_unroll_bsnd(
     output_dtype: torch.dtype = torch.float16,
 ):
 
-    A = A.to(input_dtype)
+    # Make sure U is lower triangular and contiguous in memory.
+    if is_lower:
+        A = A.transpose(-1, -2).contiguous().to(input_dtype)
+    else:
+        A = A.contiguous().to(input_dtype)
+
     golden_cpu = linalg_inv(A)
 
     # Transform to bsnd layout
-    if is_lower:
-        A_bsnd = A.contiguous().reshape(B, S, N, D)
-        golden_cpu = golden_cpu.contiguous().reshape(B, S, N, D)
-    else:
-        A_bsnd = A.transpose(1, 2).contiguous().reshape(B, S, N, D)
-        golden_cpu = golden_cpu.transpose(1, 2).contiguous().reshape(B, S, N, D)
+    A_bsnd = A.transpose(1, 2).contiguous().reshape(B, S, N, D)
+    golden_cpu = golden_cpu.transpose(1, 2).contiguous().reshape(B, S, N, D)
     torch.npu.synchronize()
 
     A_bsnd_npu = A_bsnd.npu()
