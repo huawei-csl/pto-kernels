@@ -15,6 +15,7 @@ build-backend = "scikit_build_core.build"
 [tool.scikit-build.cmake.define]
 PIP_INSTALL="ON"
 SOC_VERSION = {env="SOC_VERSION", default="Ascend910B4"}
+BASE_MODE="MEMORY"
 ASCEND_CANN_PACKAGE_PATH = {env="ASCEND_CANN_PACKAGE_PATH", default="/usr/local/Ascend/cann"}
 
 
