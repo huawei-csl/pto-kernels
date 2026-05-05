@@ -12,6 +12,7 @@ for the full License text.
 #include "torch_abs.h"
 #include "torch_batch_matrix_square.h"
 #include "torch_csr_gather.h"
+#include "torch_gdn_wy_fast.h"
 #include "torch_scan_ul1.h"
 #include "torch_simple_matmul.h"
 #include "torch_swiglu.h"
@@ -52,4 +53,8 @@ PYBIND11_MODULE(pto_kernels_ops, m) {
   m.def("pto_tri_inv_ns", &pto_isa_ops::run_tri_inv_ns, py::arg("M"),
         py::arg("num_iters") = 0, py::arg("scale_value") = 0.0f);
   m.def("pto_tri_inv", &pto_isa_ops::run_tri_inv);
+  m.def("pto_gdn_wy_fast", &pto_isa_ops::run_gdn_wy_fast, py::arg("K"),
+        py::arg("V"), py::arg("Beta"), py::arg("G"), py::arg("A"),
+        py::arg("batch_size"), py::arg("seq_len"),
+        py::arg("cu_seqlens") = at::zeros({1}));
 }
