@@ -54,11 +54,6 @@ def _chunk_cumsum(g: torch.Tensor, cu_seqlens=None) -> torch.Tensor:
     return out
 
 
-# ---------------------------------------------------------------------------
-# CPU fp32 reference
-# ---------------------------------------------------------------------------
-
-
 def ref_wy_fast(
     k: torch.Tensor,  # [T, Hg, D]
     v: torch.Tensor,  # [T, H, D]
@@ -109,11 +104,6 @@ def ref_wy_fast(
     return w_out, u_out
 
 
-# ---------------------------------------------------------------------------
-# Statistical accuracy check
-# ---------------------------------------------------------------------------
-
-
 def _r2(y_ref: torch.Tensor, y_pred: torch.Tensor) -> float:
     ref = y_ref.detach().cpu().numpy().ravel().astype(np.float64)
     pred = y_pred.detach().cpu().numpy().ravel().astype(np.float64)
@@ -135,11 +125,6 @@ def stats_ok(actual: torch.Tensor, expected: torch.Tensor) -> bool:
     if mean_abs < 1e-9:
         return rmse < 5e-4
     return ratio <= MAX_RMSE_RATIO and np.isfinite(r2) and r2 >= MIN_R2
-
-
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("seq_len", [128, 256, 384, 512])
