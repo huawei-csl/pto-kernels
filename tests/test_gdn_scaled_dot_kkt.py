@@ -59,11 +59,6 @@ def _safe_exp(x: torch.Tensor) -> torch.Tensor:
     return torch.where(x <= 0, torch.exp(x), torch.zeros_like(x))
 
 
-# ---------------------------------------------------------------------------
-# CPU fp32 reference
-# ---------------------------------------------------------------------------
-
-
 def ref_scaled_dot_kkt(
     k: torch.Tensor,  # [T, Hg, D]
     beta: torch.Tensor,  # [T, H]
@@ -130,11 +125,6 @@ def stats_ok(actual: torch.Tensor, expected: torch.Tensor) -> bool:
     if mean_abs < 1e-9:
         return rmse < 5e-4
     return ratio <= MAX_RMSE_RATIO and np.isfinite(r2) and r2 >= MIN_R2
-
-
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("seq_len", [128, 256, 384, 512])
