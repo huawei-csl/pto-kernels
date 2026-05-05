@@ -51,7 +51,7 @@ def _chunk_cumsum(g: torch.Tensor, cu_seqlens=None) -> torch.Tensor:
     g: [T, H] float32
     Returns [T, H] float32.
     """
-    T, H_local = g.shape
+    T, _ = g.shape
     out = torch.zeros_like(g, dtype=torch.float32)
     for bos, eos in _seq_ranges(T, cu_seqlens):
         for j in range(bos, eos, C):
