@@ -11,6 +11,7 @@ for the full License text.
 
 #include "torch_abs.h"
 #include "torch_batch_matrix_square.h"
+#include "torch_chunk_cumsum.h"
 #include "torch_csr_gather.h"
 #include "torch_scan_ul1.h"
 #include "torch_simple_matmul.h"
@@ -38,6 +39,9 @@ PYBIND11_MODULE(pto_kernels_ops, m) {
       },
       pybind11::arg("device_id") = 0);
   m.def("pto_abs", &pto_isa_ops::run_abs);
+  m.def("pto_chunk_cumsum", &pto_isa_ops::run_chunk_cumsum, py::arg("g"),
+        py::arg("batch_size"), py::arg("seq_len"),
+        py::arg("cu_seqlens") = at::zeros({1}));
   m.def("pto_batch_matrix_square", &pto_isa_ops::run_batch_matrix_square);
   m.def("pto_csr_gather", &pto_isa_ops::run_csr_gather);
   m.def("pto_scan_ul1", &pto_isa_ops::run_scan_ul1);
