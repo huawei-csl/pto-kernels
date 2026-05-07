@@ -116,15 +116,13 @@ using L1MatZN =
 
 template <int32_t NumHeads, int32_t NumKeyHeads, int32_t HiddenSize,
           int32_t ChunkSize>
-AICORE void chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
-                           __gm__ half* V_handle, __gm__ half* S_handle,
-                           __gm__ float* G_handle, __gm__ float* Msk_handle,
-                           __gm__ half* workspace_qk_handle,
-                           __gm__ half* workspace_qs_qkv_handle,
-                           __gm__ half* workspace_qk_gated_handle,
-                           __gm__ half* O_handle, __gm__ int32_t* cu_seqlens,
-                           int64_t batch_size, int64_t seq_len,
-                           int64_t total_tokens) {
+static AICORE void chunk_o_kernel(
+    __gm__ half* Q_handle, __gm__ half* K_handle, __gm__ half* V_handle,
+    __gm__ half* S_handle, __gm__ float* G_handle, __gm__ float* Msk_handle,
+    __gm__ half* workspace_qk_handle, __gm__ half* workspace_qs_qkv_handle,
+    __gm__ half* workspace_qk_gated_handle, __gm__ half* O_handle,
+    __gm__ int32_t* cu_seqlens, int64_t batch_size, int64_t seq_len,
+    int64_t total_tokens) {
   constexpr int32_t HalfChunk = ChunkSize / 2;
   constexpr uint32_t KTail = (HiddenSize % 128 == 0) ? 128 : (HiddenSize % 128);
   constexpr uint32_t CTail = (ChunkSize % 128 == 0) ? 128 : (ChunkSize % 128);
