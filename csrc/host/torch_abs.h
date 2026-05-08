@@ -11,9 +11,14 @@ for the full License text.
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
+#ifdef __CPU_SIM
+#include "../kernel/kernel_abs.h"
+#include "utils_cpu.h"
+#else
 #include "aclrtlaunch_vabs_fp16.h"
 #include "aclrtlaunch_vabs_fp32.h"
 #include "utils.h"
+#endif
 
 namespace pto_isa_ops {
 
@@ -40,8 +45,10 @@ at::Tensor run_abs(const at::Tensor& x) {
     block_dim = total_tiles;
   }
 
+#ifndef __CPU_SIM
   TORCH_CHECK(x.device().type() == DEVICE_TYPE,
               "pto_abs: tensor must be on NPU, got ", x.device());
+#endif
   TORCH_CHECK(dtype == at::kHalf || dtype == at::kFloat,
               "pto_abs: dtype must be fp16 or float32, got ", dtype);
   if (dtype == at::kHalf) {

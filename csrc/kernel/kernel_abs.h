@@ -1,0 +1,24 @@
+/**
+Copyright (c) 2026 Huawei Technologies Co., Ltd.
+All rights reserved.
+
+See LICENSE in the root of the software repository:
+https://github.com/huawei-csl/pto-kernels/
+for the full License text.
+*/
+
+#ifndef CSRC_KERNEL_KERNEL_ABS_H
+#define CSRC_KERNEL_KERNEL_ABS_H
+
+#include <stdint.h>
+
+#include "kernel_utils.h"
+
+#ifdef __CPU_SIM
+extern "C" __global__ AICORE void vabs_fp16(GM_ADDR x, GM_ADDR z,
+                                            uint32_t in_length);
+extern "C" __global__ AICORE void vabs_fp32(GM_ADDR x, GM_ADDR z,
+                                            uint32_t in_length);
+#endif
+
+#endif  // CSRC_KERNEL_KERNEL_ABS_H

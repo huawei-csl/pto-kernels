@@ -7,7 +7,7 @@ https://github.com/huawei-csl/pto-kernels/
 for the full License text.
 */
 
-#include "kernel_utils.h"
+#include "kernel_swiglu.h"
 
 using namespace pto;
 
@@ -59,7 +59,7 @@ static_assert(UB_SLOT_BYTES * 6 == UB_USABLE_BYTES,
 static_assert(Y_PONG + Y_BUFFER_BYTES <= UB_USABLE_BYTES,
               "SwiGLU UB layout exceeds usable UB.");
 
-#if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
+#if defined(__DAV_C220_VEC__)
 
 namespace {
 
@@ -256,7 +256,7 @@ template <uint32_t kTileCols, typename T>
 AICORE void runTSwiGLUTiled(__gm__ T* x, __gm__ T* y, uint32_t batch,
                             uint32_t input_n, uint32_t num_cores, uint32_t vid,
                             uint32_t row_tile_len) {
-#if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
+#if defined(__DAV_C220_VEC__)
   constexpr uint32_t kTileRows = ELEMENTS_PER_TILE / kTileCols;
   static_assert(kTileRows * kTileCols == ELEMENTS_PER_TILE,
                 "2D tile shape must match the UB vector tile capacity.");
@@ -338,7 +338,7 @@ template <typename T>
 AICORE void runTSwiGLUMainTiled(__gm__ T* x, __gm__ T* y, uint32_t batch,
                                 uint32_t input_n, uint32_t num_cores,
                                 uint32_t vid) {
-#if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
+#if defined(__DAV_C220_VEC__)
   const uint32_t output_n = input_n >> 1;
   const TileConfig cfg = chooseTileConfig(batch, output_n, num_cores);
 
@@ -368,7 +368,7 @@ AICORE void runTSwiGLUMainTiled(__gm__ T* x, __gm__ T* y, uint32_t batch,
 template <typename T>
 AICORE void runTSwiGLU(__gm__ T* x, __gm__ T* y, uint32_t batch,
                        uint32_t input_n, uint32_t num_cores, uint32_t vid) {
-#if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
+#if defined(__DAV_C220_VEC__)
   set_mask_norm();
   set_vector_mask(-1, -1);
 
@@ -397,7 +397,7 @@ AICORE void runTSwiGLU(__gm__ T* x, __gm__ T* y, uint32_t batch,
 extern "C" __global__ AICORE void swiglu_fp16(GM_ADDR x, GM_ADDR y,
                                               uint32_t batch,
                                               uint32_t input_n) {
-#if defined(__DAV_VEC__)
+#if defined(__DAV_C220_VEC__)
   const uint32_t num_cores = get_block_num() * get_subblockdim();
   const uint32_t vid = get_block_idx() * get_subblockdim() + get_subblockid();
   runTSwiGLU<half>((__gm__ half*)x, (__gm__ half*)y, batch, input_n, num_cores,
@@ -410,8 +410,10 @@ extern "C" __global__ AICORE void swiglu_fp16(GM_ADDR x, GM_ADDR y,
 #endif
 }
 
+#ifndef __CPU_SIM
 extern "C" void call_swiglu_kernel(uint32_t blockDim, void* stream, uint8_t* x,
                                    uint8_t* y, uint32_t batch,
                                    uint32_t input_n) {
   swiglu_fp16<<<blockDim * 2, nullptr, stream>>>(x, y, batch, input_n);
 }
+#endif

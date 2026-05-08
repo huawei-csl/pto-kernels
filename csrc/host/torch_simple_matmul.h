@@ -11,10 +11,15 @@ for the full License text.
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
+#ifdef __CPU_SIM
+#include "../kernel/kernel_simple_matmul.h"
+#include "utils_cpu.h"
+#else
 #include "aclrtlaunch_simple_matmul_bf16.h"
 #include "aclrtlaunch_simple_matmul_fp16.h"
 #include "aclrtlaunch_simple_matmul_fp32.h"
 #include "utils.h"
+#endif
 
 namespace pto_isa_ops {
 
@@ -30,10 +35,12 @@ at::Tensor run_simple_matmul(const at::Tensor& a, const at::Tensor& b) {
   const auto dtype = a.options().dtype();
   const auto dtype_out = at::kFloat;
 
+#ifndef __CPU_SIM
   TORCH_CHECK(device.type() == DEVICE_TYPE,
               "simple_matmul: tensor must be on NPU, got ", device);
   TORCH_CHECK(b.device().type() == DEVICE_TYPE,
               "simple_matmul: tensor must be on NPU, got ", b.device());
+#endif
   TORCH_CHECK(
       dtype == at::kHalf || dtype == at::kFloat || dtype == at::kBFloat16,
       "simple_matmul: dtype must be fp16, bf16, or float32, got ", dtype);

@@ -13,8 +13,13 @@ for the full License text.
 
 #include <limits>
 
+#ifdef __CPU_SIM
+#include "../kernel/kernel_swiglu.h"
+#include "utils_cpu.h"
+#else
 #include "aclrtlaunch_swiglu_fp16.h"
 #include "utils.h"
+#endif
 
 namespace pto_isa_ops {
 
@@ -35,8 +40,10 @@ at::Tensor run_swiglu(const at::Tensor& x, int64_t dim = -1) {
     dim += x.dim();
   }
   TORCH_CHECK(dim == 1, "swiglu: currently supports only dim=-1");
+#ifndef __CPU_SIM
   TORCH_CHECK(x.device().type() == DEVICE_TYPE,
               "swiglu: tensor must be on NPU, got ", x.device());
+#endif
   TORCH_CHECK(x.scalar_type() == at::kHalf, "swiglu: dtype must be fp16, got ",
               x.scalar_type());
   TORCH_CHECK(x.is_contiguous(), "swiglu: expects a contiguous input tensor");

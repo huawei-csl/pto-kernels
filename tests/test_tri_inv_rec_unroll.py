@@ -68,6 +68,7 @@ def linalg_inv(U: torch.tensor) -> torch.tensor:
 
 
 def _test_tri_inv_rec_unroll(
+    npu_device: str,
     U: torch.tensor,
     atol: float,
     rtol: float,
@@ -79,13 +80,10 @@ def _test_tri_inv_rec_unroll(
     U = U.to(input_dtype)
     golden_cpu = linalg_inv(U)
 
-    U_npu = U.npu()
+    U_npu = U.to(npu_device)
 
-    torch.npu.synchronize()
     actual = pto_tri_inv_rec_unroll(U_npu, is_bsnd_format=False, dtype_out=output_dtype)
-    torch.npu.synchronize()
     actual_cpu = actual.cpu()
-    torch.npu.synchronize()
     actual_cpu = actual_cpu.to(torch.float64)
     frob_error = torch.sqrt(
         torch.sum((golden_cpu - actual_cpu) * (golden_cpu - actual_cpu))
@@ -101,6 +99,7 @@ def _test_tri_inv_rec_unroll(
 
 
 def _test_tri_inv_rec_unroll_bsnd(
+    npu_device: str,
     U: torch.tensor,
     B: int,
     S: int,
@@ -118,16 +117,12 @@ def _test_tri_inv_rec_unroll_bsnd(
 
     # Transform to bsnd layout
     U = U.transpose(1, 2).contiguous().reshape(B, S, N, D)
-    torch.npu.synchronize()
     golden_cpu = golden_cpu.transpose(1, 2).contiguous().reshape(B, S, N, D)
 
-    U_npu = U.npu()
+    U_npu = U.to(npu_device)
 
-    torch.npu.synchronize()
     actual = pto_tri_inv_rec_unroll(U_npu, is_bsnd_format=True, dtype_out=output_dtype)
-    torch.npu.synchronize()
     actual_cpu = actual.cpu()
-    torch.npu.synchronize()
     actual_cpu = actual_cpu.to(torch.float64)
     frob_error = torch.sqrt(
         torch.sum((golden_cpu - actual_cpu) * (golden_cpu - actual_cpu))
@@ -163,6 +158,7 @@ def _test_tri_inv_rec_unroll_bsnd(
     ],
 )
 def test_tri_inv_rec_unroll(
+    npu_device,
     n: int,
     block_dim_x: int,
     block_dim_y: int,
@@ -174,7 +170,7 @@ def test_tri_inv_rec_unroll(
     output_dtype: torch.dtype,
 ):
     U = matrix_gen(n, block_dim_x, block_dim_y)
-    _test_tri_inv_rec_unroll(U, atol, rtol, ftol, input_dtype, output_dtype)
+    _test_tri_inv_rec_unroll(npu_device, U, atol, rtol, ftol, input_dtype, output_dtype)
 
 
 @pytest.mark.parametrize("B", [1, 4])
@@ -199,6 +195,7 @@ def test_tri_inv_rec_unroll(
     ],
 )
 def test_tri_inv_rec_unroll_bsnd(
+    npu_device: str,
     B: int,
     S: int,
     N: int,
@@ -215,5 +212,5 @@ def test_tri_inv_rec_unroll_bsnd(
         pytest.skip("Sequence length must be a multiple of chunk size C.")
     U = matrix_gen(C, B * S // C, N)
     _test_tri_inv_rec_unroll_bsnd(
-        U, B, S, N, C, atol, rtol, ftol, input_dtype, output_dtype
+        npu_device, U, B, S, N, C, atol, rtol, ftol, input_dtype, output_dtype
     )

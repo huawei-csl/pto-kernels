@@ -77,6 +77,7 @@ def default_num_iters(n: int) -> int:
 
 
 def _test_tri_inv_ns(
+    npu_device: str,
     U: torch.Tensor,
     atol: float,
     rtol: float,
@@ -85,13 +86,11 @@ def _test_tri_inv_ns(
     U = U.to(torch.half)
     golden_cpu = linalg_inv(U)
 
-    U_npu = U.npu()
+    U_npu = U.to(npu_device)
 
-    torch.npu.synchronize()
     num_iters = max([int(2.0 * math.ceil(math.log2(U.shape[-1]))), 12])
     # num_iters = 1
     actual = pto_tri_inv_ns(U_npu, num_iters=num_iters)
-    torch.npu.synchronize()
 
     actual_cpu = actual.cpu().to(torch.float64)
 
@@ -123,6 +122,7 @@ def _test_tri_inv_ns(
     ],
 )
 def test_tri_inv_ns(
+    npu_device: str,
     n: int,
     block_dim_x: int,
     block_dim_y: int,
@@ -132,4 +132,4 @@ def test_tri_inv_ns(
     ftol: float,
 ):
     U = matrix_gen(n, block_dim_x, block_dim_y)
-    _test_tri_inv_ns(U, atol, rtol, ftol)
+    _test_tri_inv_ns(npu_device, U, atol, rtol, ftol)

@@ -17,15 +17,25 @@ for the full License text.
 #include "torch_swiglu.h"
 #include "torch_tri_inv.h"
 #include "torch_tri_inv_ns.h"
-#include "torch_tri_inv_rec_unroll.h"
 #include "torch_tri_inv_trick.h"
+#ifndef __CPU_SIM
+#include "torch_tri_inv_rec_unroll.h"
+#endif
 
 using namespace pto_isa_ops;
+
+// Not really needed, but to ensure different modules in PyTorch and avoid any
+// potential name clashing. This way, both can coexist in a single runtime.
+#ifdef __CPU_SIM
+#define MODULE_NAME pto_kernels_cpu
+#else
+#define MODULE_NAME pto_kernels_ops
+#endif
 
 /**
  * @brief Pybind11 module.
  */
-PYBIND11_MODULE(pto_kernels_ops, m) {
+PYBIND11_MODULE(MODULE_NAME, m) {
   m.doc() = "PTO-ISA Kernels";
   m.def(
       "get_aic_cores",
@@ -45,11 +55,13 @@ PYBIND11_MODULE(pto_kernels_ops, m) {
   m.def("pto_swiglu", &pto_isa_ops::run_swiglu, py::arg("x"),
         py::arg("dim") = -1);
   m.def("pto_tri_inv_trick", &pto_isa_ops::run_tri_inv_trick);
+  m.def("pto_tri_inv_ns", &pto_isa_ops::run_tri_inv_ns, py::arg("M"),
+        py::arg("num_iters") = 0, py::arg("scale_value") = 0.0f);
+  m.def("pto_tri_inv", &pto_isa_ops::run_tri_inv);
+#ifndef __CPU_SIM
   m.def("pto_tri_inv_rec_unroll", &pto_isa_ops::run_tri_inv_rec_unroll,
         py::arg("M"), py::arg("cu_seqlens") = at::zeros({1}),
         py::arg("is_bsnd_format") = false,
         py::arg("dtype_out") = at::ScalarType::Half);
-  m.def("pto_tri_inv_ns", &pto_isa_ops::run_tri_inv_ns, py::arg("M"),
-        py::arg("num_iters") = 0, py::arg("scale_value") = 0.0f);
-  m.def("pto_tri_inv", &pto_isa_ops::run_tri_inv);
+#endif
 }

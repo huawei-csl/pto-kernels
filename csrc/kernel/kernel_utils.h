@@ -17,6 +17,20 @@ for the full License text.
 #endif
 // clang-format on
 
+#ifdef __CPU_SIM
+#define EVENT_ID1 1
+#define EVENT_ID2 2
+#define EVENT_ID3 3
+#define EVENT_ID4 4
+#define EVENT_ID5 5
+#define EVENT_ID6 6
+#define EVENT_ID7 7
+#define __DAV_C220_VEC__
+#define __DAV_C220_CUBE__
+
+extern "C" uint32_t get_block_num();
+#endif
+
 namespace kernel_utils {
 /**
  * @brief Do a sync step (set-wait flag) between two pipes.

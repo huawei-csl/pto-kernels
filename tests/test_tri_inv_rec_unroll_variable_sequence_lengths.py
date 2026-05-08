@@ -60,6 +60,7 @@ def transpose_valid_chunks(
 
 
 def chunk_scaled_dot_kkt_fwd_emulated(
+    npu_device: str,
     k: torch.Tensor,
     beta: torch.Tensor,
     cu_seqlens: torch.Tensor,
@@ -78,18 +79,25 @@ def chunk_scaled_dot_kkt_fwd_emulated(
             chunk_end = min(chunk_start + chunk_size, seq_end)
             actual_size = chunk_end - chunk_start
             k_chunk = (
-                k[:, chunk_start:chunk_end].transpose(1, 2).to(torch.float32).npu()
+                k[:, chunk_start:chunk_end]
+                .transpose(1, 2)
+                .to(torch.float32)
+                .to(npu_device)
             )
             beta_chunk = (
                 beta[:, chunk_start:chunk_end]
                 .transpose(1, 2)
                 .unsqueeze(-1)
                 .to(torch.float32)
-                .npu()
+                .to(npu_device)
             )
             scores = torch.matmul(k_chunk, k_chunk.transpose(-1, -2))
             scores = torch.tril(scores * beta_chunk, diagonal=-1)  # .to(k.dtype)
-            scores = torch.tril(torch.ones(scores.shape), diagonal=-1).to(k.dtype).npu()
+            scores = (
+                torch.tril(torch.ones(scores.shape), diagonal=-1)
+                .to(k.dtype)
+                .to(npu_device)
+            )
             A[:, chunk_start:chunk_end, :, :actual_size] = scores.transpose(1, 2)
 
     return A
@@ -121,6 +129,7 @@ def all_ones_varlen_triangular_tensor(
 
 
 def build_variable_len_input(
+    npu_device: str,
     seq_lens: list[int],
     num_heads: int,
     chunk_size: int,
@@ -148,13 +157,15 @@ def build_variable_len_input(
         )
         beta = torch.randn((1, total_tokens, num_heads), dtype=torch.float16).sigmoid()
         packed_input = transpose_valid_chunks(
-            chunk_scaled_dot_kkt_fwd_emulated(k, beta, cu_seqlens_tensor, chunk_size),
+            chunk_scaled_dot_kkt_fwd_emulated(
+                npu_device, k, beta, cu_seqlens_tensor, chunk_size
+            ),
             cu_seqlens_tensor,
             chunk_size,
         )
     else:
         raise RuntimeError(f"unknown matrix type to test: {matrix_type}")
-    return packed_input.contiguous().npu(), cu_seqlens_tensor.npu()
+    return packed_input.contiguous().to(npu_device), cu_seqlens_tensor.to(npu_device)
 
 
 def _reference_inverse(
@@ -191,9 +202,7 @@ def _test_inverse_accuracy(
 
     ref = _reference_inverse(A, cu_seqlens, chunk_size)
     tri = pto_tri_inv_rec_unroll(A, cu_seqlens, True, output_dtype)
-    torch.npu.synchronize()
     tri = tri.to(torch.float32).cpu().to(torch.float64)
-    torch.npu.synchronize()
 
     assert torch.allclose(tri, ref, atol=atol, rtol=rtol)
     frob_error = torch.sqrt(torch.sum((ref - tri) ** 2) / torch.sum(ref**2)).item()
@@ -211,6 +220,7 @@ def _test_inverse_accuracy(
     "matrix_type,atol,rtol,ftol", [("ones", 0, 0, 0), ("random", 1e-5, 5e-2, 1e-2)]
 )
 def test_tri_inv_rec_unroll_variable_length(
+    npu_device: str,
     B: int,
     N: int,
     chunk_size: int,
@@ -235,6 +245,7 @@ def test_tri_inv_rec_unroll_variable_length(
     default_feature_dim = 64
     seq_lens = generate_random_sequence_lengths(B, total_tokens)
     packed_input, cu_seqlens = build_variable_len_input(
+        npu_device,
         seq_lens=seq_lens,
         num_heads=N,
         chunk_size=chunk_size,

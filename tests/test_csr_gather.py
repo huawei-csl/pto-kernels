@@ -25,15 +25,15 @@ sweep_sizes = [(x, v) for x in x_size for v in v_size]
 
 @pytest.mark.parametrize("x_size, v_size", sweep_sizes)
 @pytest.mark.parametrize("dtype", [torch.float16, torch.float32], ids=str)
-def test_pto_csr_gather(x_size: int, v_size: int, dtype: torch.dtype):
+def test_pto_csr_gather(npu_device: str, x_size: int, v_size: int, dtype: torch.dtype):
     # Create random input tensors on CPU
     x = torch.rand((x_size,), device="cpu", dtype=dtype)
     values = torch.rand((v_size,), device="cpu", dtype=dtype)
     indices = torch.randint(0, x_size, (v_size,), device="cpu", dtype=torch.int32)
     # Copy the input tensors to NPU
-    x_npu = x.npu()
-    values_npu = values.npu()
-    indices_npu = indices.npu()
+    x_npu = x.to(npu_device)
+    values_npu = values.to(npu_device)
+    indices_npu = indices.to(npu_device)
     # Call the custom csr_gather operator
     output = pto_csr_gather(values_npu, indices_npu, x_npu).cpu()
     # Compute the expected result using a reference implementation on CPU

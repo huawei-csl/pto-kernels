@@ -11,9 +11,14 @@ for the full License text.
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
+#ifdef __CPU_SIM
+#include "../kernel/kernel_scan_ul1.h"
+#include "utils_cpu.h"
+#else
 #include "aclrtlaunch_scan_ul1_fp16.h"
 #include "aclrtlaunch_scan_ul1_fp32.h"
 #include "utils.h"
+#endif
 
 namespace pto_isa_ops {
 
@@ -28,8 +33,10 @@ at::Tensor run_scan_ul1(const at::Tensor& x) {
   const auto dtype = x.options().dtype();
   const auto dtype_out = at::kFloat;
 
+#ifndef __CPU_SIM
   TORCH_CHECK(device.type() == DEVICE_TYPE,
               "scan_ul1: tensor must be on NPU, got ", device);
+#endif
   TORCH_CHECK(dtype == at::kHalf || dtype == at::kFloat,
               "scan_ul1: dtype must be fp16 or float32, got ", dtype);
 

@@ -1,6 +1,5 @@
 import pytest
 import torch
-import torch_npu  # noqa
 
 from pto_kernels import pto_swiglu
 
@@ -37,13 +36,17 @@ def test_pto_swiglu_matches_reference_and_torch_npu(
 
     actual = pto_swiglu(x)
     expected = swiglu_ref(x.cpu())
-    torch_npu_expected = torch_npu.npu_swiglu(x, dim=-1)
 
     torch.testing.assert_close(actual.cpu(), expected, rtol=1e-2, atol=1e-5)
-    torch.testing.assert_close(actual, torch_npu_expected, rtol=1e-2, atol=1e-5)
+
+    if npu_device.startswith("npu:"):
+        import torch_npu  # noqa
+
+        torch_npu_expected = torch_npu.npu_swiglu(x, dim=-1)
+        torch.testing.assert_close(actual, torch_npu_expected, rtol=1e-2, atol=1e-5)
 
 
-def test_pto_swiglu_rejects_non_last_dim(npu_device):
+def test_pto_swiglu_rejects_non_last_dim(npu_device: str):
     x = torch.randn(2, 256, device=npu_device, dtype=DTYPE)
 
     with pytest.raises(RuntimeError, match="dim=-1"):

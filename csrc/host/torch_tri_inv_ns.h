@@ -13,8 +13,13 @@ for the full License text.
 
 #include <cmath>
 
+#ifdef __CPU_SIM
+#include "../kernel/kernel_tri_inv_ns.h"
+#include "utils_cpu.h"
+#else
 #include "aclrtlaunch_tri_inv_ns_fp16.h"
 #include "utils.h"
+#endif
 
 namespace pto_isa_ops {
 
@@ -43,8 +48,10 @@ at::Tensor run_tri_inv_ns(const at::Tensor& M, uint32_t num_iters = 0,
   const auto dtype = M.options().dtype();
   const auto dtype_out = at::kFloat;
 
+#ifndef __CPU_SIM
   TORCH_CHECK(device.type() == DEVICE_TYPE,
               "tri_inv_ns: tensor must be on NPU, got ", device);
+#endif
   TORCH_CHECK(dtype == at::kHalf, "tri_inv_ns: dtype must be fp16, got ",
               dtype);
   const uint32_t n = static_cast<uint32_t>(M.size(-1));
