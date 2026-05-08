@@ -2,7 +2,7 @@ import os
 import sys
 
 # importing Torch is required for the importlib to subsequently import custom ops
-import torch  # no-qa
+import torch  # noqa: F401
 import importlib
 
 # Get the directory of the current script
@@ -25,7 +25,7 @@ sys.modules["pto_kernels"] = module
 os.environ["NPU_DEVICE"] = "cpu"
 
 # Run the actual tests
-import pytest
+import pytest  # noqa
 
 test_dir = os.path.join(root_path, "tests")
 pytest.main(

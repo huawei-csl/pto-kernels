@@ -51,7 +51,7 @@ sys.modules["pto_kernels"] = module
 # Sanity tests, import declared functions
 print("Test if the module contains custom ops...")
 
-from pto_kernels import (
+from pto_kernels import (  # noqa
     pto_abs,
     pto_batch_matrix_square,
     pto_csr_gather,
