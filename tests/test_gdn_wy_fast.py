@@ -163,11 +163,13 @@ def test_pto_gdn_wy_fast_fixed(npu_device, seq_len: int):
 @pytest.mark.parametrize(
     "seqlens",
     [
+        [127],
         [128],
         [256],
         [128, 256],
         [256, 128],
         [128, 128, 128],
+        [131, 156, 255],
         [256, 128, 384],
     ],
 )
