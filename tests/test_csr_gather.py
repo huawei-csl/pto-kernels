@@ -43,4 +43,4 @@ def test_pto_csr_gather(npu_device: str, x_size: int, v_size: int, dtype: torch.
 
 
 if __name__ == "__main__":
-    test_pto_csr_gather(32768, 131072, torch.float16)
+    test_pto_csr_gather("npu:1", 32768, 131072, torch.float16)

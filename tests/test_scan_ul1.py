@@ -28,4 +28,4 @@ def test_pto_scan_ul1(npu_device: str, scan_size: int, dtype: torch.dtype):
 
 
 if __name__ == "__main__":
-    test_pto_scan_ul1(128 * 128, torch.float32)
+    test_pto_scan_ul1("npu:1", 128 * 128, torch.float32)
