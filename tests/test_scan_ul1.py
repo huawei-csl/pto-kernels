@@ -16,10 +16,10 @@ matrix_size = [s * s for s in size]
 
 @pytest.mark.parametrize("scan_size", matrix_size)
 @pytest.mark.parametrize("dtype", [torch.float16, torch.float32], ids=str)
-def test_pto_scan_ul1(scan_size: int, dtype: torch.dtype):
+def test_pto_scan_ul1(npu_device: str, scan_size: int, dtype: torch.dtype):
     a = torch.ones(scan_size, dtype=dtype)
 
-    a_npu = a.npu()
+    a_npu = a.to(npu_device)
     scan_npu = pto_scan_ul1(a_npu)
 
     ref = torch.cumsum(a.to(torch.float32), dim=0)
@@ -28,4 +28,4 @@ def test_pto_scan_ul1(scan_size: int, dtype: torch.dtype):
 
 
 if __name__ == "__main__":
-    test_pto_scan_ul1(128 * 128, torch.float32)
+    test_pto_scan_ul1("npu:1", 128 * 128, torch.float32)

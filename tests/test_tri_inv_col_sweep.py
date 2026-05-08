@@ -73,6 +73,7 @@ def ones_np_tril(batch_size: int, n: int, dtype: np.dtype):
     (rand_np_tril, ones_np_tril),
 )
 def test_tri_inv_col_sweep(
+    npu_device: str,
     batch_size: int,
     matrix_size: int,
     data_type: np.dtype,
@@ -84,15 +85,12 @@ def test_tri_inv_col_sweep(
 
     # Convert input matrices from row-major order to column-major order
     input_x_cpu = input_x_cpu.transpose(0, 2, 1)
-    input_x = torch.from_numpy(input_x_cpu).npu()
-    expected = torch.from_numpy(expected_cpu).npu()
+    input_x = torch.from_numpy(input_x_cpu).to(npu_device)
+    expected = torch.from_numpy(expected_cpu).to(npu_device)
 
-    torch.npu.synchronize()
     actual = pto_tri_inv(input_x)
-    torch.npu.synchronize()
     # Transpose matrices back to row-major order
     actual = actual.transpose(2, 1)
-    torch.npu.synchronize()
 
     assert actual.shape == expected.shape, "Output shape does not match expected shape."
     assert torch.equal(actual, expected)
@@ -106,6 +104,7 @@ def test_tri_inv_col_sweep(
     [(rand_np_tril, 1e-5, 1e-5), (ones_np_tril, 0, 0)],
 )
 def test_tri_inv_col_sweep_np_linalg_inv(
+    npu_device: str,
     batch_size: int,
     matrix_size: int,
     data_type: np.dtype,
@@ -119,12 +118,10 @@ def test_tri_inv_col_sweep_np_linalg_inv(
 
     # Convert input matrices from row-major order to column-major order
     input_x_cpu = input_x_cpu.transpose(0, 2, 1)
-    input_x = torch.from_numpy(input_x_cpu).npu()
-    golden_numpy_as_torch = torch.from_numpy(golden_numpy_cpu).npu()
+    input_x = torch.from_numpy(input_x_cpu).to(npu_device)
+    golden_numpy_as_torch = torch.from_numpy(golden_numpy_cpu).to(npu_device)
 
-    torch.npu.synchronize()
     actual = pto_tri_inv(input_x)
-    torch.npu.synchronize()
 
     # rtol must be scaled w.r.t to the input size, see Higham's paper, Eq. (2.3)
     # https://nhigham.com/wp-content/uploads/2023/08/high89t.pdf

@@ -11,8 +11,13 @@ for the full License text.
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
+#ifdef __CPU_SIM
+#include "../kernel/kernel_tri_inv_trick.h"
+#include "utils_cpu.h"
+#else
 #include "aclrtlaunch_tri_inv_trick_fp16.h"
 #include "utils.h"
+#endif
 
 namespace pto_isa_ops {
 
@@ -30,8 +35,10 @@ at::Tensor run_tri_inv_trick(const at::Tensor& M) {
   const uint32_t max_block_size = 16;
   const uint32_t matrix_size = static_cast<uint32_t>(M.size(-1));
 
+#ifndef __CPU_SIM
   TORCH_CHECK(device.type() == DEVICE_TYPE,
               "tri_inv_ns: tensor must be on NPU, got ", device);
+#endif
   TORCH_CHECK(dtype == at::kHalf, "tri_inv_trick: dtype must be fp16, got ",
               dtype);
   TORCH_CHECK(matrix_size == static_cast<uint32_t>(M.size(-2)),

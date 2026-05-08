@@ -11,9 +11,14 @@ for the full License text.
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
+#ifdef __CPU_SIM
+#include "../kernel/kernel_tri_inv_rec_unroll.h"
+#include "utils_cpu.h"
+#else
 #include "aclrtlaunch_tri_inv_rec_unroll_fp16fp16.h"
 #include "aclrtlaunch_tri_inv_rec_unroll_fp16fp32.h"
 #include "utils.h"
+#endif
 
 namespace pto_isa_ops {
 
@@ -41,8 +46,10 @@ at::Tensor run_tri_inv_rec_unroll(
   const at::Device device = M.options().device();
   const auto dtype = M.options().dtype();
 
+#ifndef __CPU_SIM
   TORCH_CHECK(device.type() == DEVICE_TYPE,
               "tri_inv_ns: tensor must be on NPU, got ", device);
+#endif
   TORCH_CHECK(dtype_out == at::kHalf || dtype_out == at::kFloat,
               "tri_inv_rec_unroll: dtype_out must be fp16 or float32, got ",
               dtype_out);

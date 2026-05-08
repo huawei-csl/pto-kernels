@@ -23,6 +23,8 @@ build_cmake: clean
 build_wheel:
 	export CMAKE_GENERATOR="Unix Makefiles" && pip wheel -v  . --extra-index-url https://download.pytorch.org/whl/cpu
 
+build_cpu:
+	python scripts/build_cpu.py
 
 # 'make compile_abs' compiles 'kernel_abs.cpp' into 'libkernel_abs.so' without building the whole wheel package.
 # This is useful for development and debugging of individual kernels.
@@ -47,3 +49,6 @@ test:
 
 test_tri_inv:
 	pytest tests/test_tri_inv_*.py
+
+test_cpu:
+	python scripts/test_cpu.py

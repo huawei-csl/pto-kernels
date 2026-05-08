@@ -11,9 +11,14 @@ for the full License text.
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
+#ifdef __CPU_SIM
+#include "../kernel/kernel_tri_inv_col_sweep.h"
+#include "utils_cpu.h"
+#else
 #include "aclrtlaunch_triv_inv_col_sweep_fp16.h"
 #include "aclrtlaunch_triv_inv_col_sweep_fp32.h"
 #include "utils.h"
+#endif
 
 namespace pto_isa_ops {
 
@@ -28,8 +33,10 @@ namespace pto_isa_ops {
 at::Tensor run_tri_inv(const at::Tensor& x) {
   const at::Device device = x.options().device();
   const auto dtype = x.options().dtype();
+#ifndef __CPU_SIM
   TORCH_CHECK(device.type() == DEVICE_TYPE,
               "tri_inv: tensor must be on NPU, got ", device);
+#endif
   TORCH_CHECK(x.dim() >= 2,
               "tri_inv: input tensor must have at least 2 dimensions, got ",
               x.dim());

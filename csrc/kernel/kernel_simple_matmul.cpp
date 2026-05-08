@@ -7,7 +7,7 @@ https://github.com/huawei-csl/pto-kernels/
 for the full License text.
 */
 
-#include "kernel_utils.h"
+#include "kernel_simple_matmul.h"
 
 using namespace pto;
 
@@ -129,8 +129,7 @@ extern "C" __global__ AICORE void simple_matmul_fp16(__gm__ void* a,
                                                      __gm__ void* b,
                                                      __gm__ void* c,
                                                      uint32_t matrix_size) {
-#if (__CHECK_FEATURE_AT_PRECOMPILE) || \
-    (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))
+#if defined(__DAV_C220_CUBE__)
   run_simple_matmul<half>((__gm__ half*)a, (__gm__ half*)b, (__gm__ float*)c,
                           matrix_size);
 #endif
@@ -140,8 +139,7 @@ extern "C" __global__ AICORE void simple_matmul_bf16(__gm__ void* a,
                                                      __gm__ void* b,
                                                      __gm__ void* c,
                                                      uint32_t matrix_size) {
-#if (__CHECK_FEATURE_AT_PRECOMPILE) || \
-    (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))
+#if defined(__DAV_C220_CUBE__)
   run_simple_matmul<bfloat16_t>((__gm__ bfloat16_t*)a, (__gm__ bfloat16_t*)b,
                                 (__gm__ float*)c, matrix_size);
 #endif
@@ -151,8 +149,7 @@ extern "C" __global__ AICORE void simple_matmul_fp32(__gm__ void* a,
                                                      __gm__ void* b,
                                                      __gm__ void* c,
                                                      uint32_t matrix_size) {
-#if (__CHECK_FEATURE_AT_PRECOMPILE) || \
-    (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))
+#if defined(__DAV_C220_CUBE__)
   run_simple_matmul<float>((__gm__ float*)a, (__gm__ float*)b, (__gm__ float*)c,
                            matrix_size);
 #endif

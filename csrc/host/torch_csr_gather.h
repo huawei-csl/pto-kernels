@@ -11,9 +11,14 @@ for the full License text.
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
+#ifdef __CPU_SIM
+#include "../kernel/kernel_csr_gather.h"
+#include "utils_cpu.h"
+#else
 #include "aclrtlaunch_csr_gather_fp16.h"
 #include "aclrtlaunch_csr_gather_fp32.h"
 #include "utils.h"
+#endif
 
 namespace pto_isa_ops {
 
@@ -52,12 +57,14 @@ at::Tensor run_csr_gather(const at::Tensor& values, const at::Tensor& indices,
     block_dim = total_tiles;
   }
 
+#ifndef __CPU_SIM
   TORCH_CHECK(values.device().type() == DEVICE_TYPE,
               "csr_gather: tensor must be on NPU, got ", values.device());
   TORCH_CHECK(indices.device().type() == DEVICE_TYPE,
               "csr_gather: tensor must be on NPU, got ", indices.device());
   TORCH_CHECK(x.device().type() == DEVICE_TYPE,
               "csr_gather: tensor must be on NPU, got ", x.device());
+#endif
   TORCH_CHECK(dtype == at::kHalf || dtype == at::kFloat,
               "csr_gather: dtype must be fp16 or float32, got ", dtype);
   if (dtype == at::kHalf) {

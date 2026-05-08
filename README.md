@@ -58,6 +58,21 @@ make test
 
 ---
 
+## CPU Simulation
+
+Subset of the kernels supports CPU simulation. Kernels can be built with
+
+```bash
+make build_cpu
+```
+and tested with
+
+```bash
+make test_cpu
+```
+
+---
+
 ## Repository Structure
 
 ```

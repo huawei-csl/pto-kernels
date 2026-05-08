@@ -47,12 +47,13 @@ def block_random_matrix(n, block_dim_x, block_dim_y, scale=0.2):
     return torch.from_numpy(U)
 
 
-def _test_tri_inv_trick(U: torch.tensor, atol: float, rtol: float, ftol: float):
+def _test_tri_inv_trick(
+    npu_device: str, U: torch.tensor, atol: float, rtol: float, ftol: float
+):
 
     n = U.shape[-1]
     U = U.to(torch.half)
-    U_npu = U.npu()
-    torch.npu.synchronize()
+    U_npu = U.to(npu_device)
 
     Identity = np.ones((n, n), dtype=np.double)
     Identity = np.triu(Identity)
@@ -65,11 +66,8 @@ def _test_tri_inv_trick(U: torch.tensor, atol: float, rtol: float, ftol: float):
             )
     golden_cpu = torch.from_numpy(golden_numpy)
 
-    torch.npu.synchronize()
     actual = pto_tri_inv_trick(U_npu)
-    torch.npu.synchronize()
     actual_cpu = actual.cpu()
-    torch.npu.synchronize()
     actual_cpu = actual_cpu.to(torch.float64)
     frob_error = torch.sqrt(
         torch.sum((golden_cpu - actual_cpu) * (golden_cpu - actual_cpu))
@@ -95,6 +93,7 @@ def _test_tri_inv_trick(U: torch.tensor, atol: float, rtol: float, ftol: float):
     ],
 )
 def test_tri_inv_trick_ones(
+    npu_device: str,
     n: int,
     block_dim_x: int,
     block_dim_y: int,
@@ -104,4 +103,4 @@ def test_tri_inv_trick_ones(
     ftol: float,
 ):
     U = matrix_gen(n, block_dim_x, block_dim_y)
-    _test_tri_inv_trick(U, atol, rtol, ftol)
+    _test_tri_inv_trick(npu_device, U, atol, rtol, ftol)

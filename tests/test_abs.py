@@ -14,12 +14,12 @@ import pytest
 @pytest.mark.parametrize("size0", [1, 2, 3, 10, 20, 64, 128])
 @pytest.mark.parametrize("size1", [1, 2, 3, 10, 20, 64, 128])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.float32], ids=str)
-def test_pto_abs(size0: int, size1: int, dtype: torch.dtype):
+def test_pto_abs(npu_device: str, size0: int, size1: int, dtype: torch.dtype):
     size = [size0, size1]
     # Create random input tensors on CPU
     x = 2 * torch.rand(size, device="cpu", dtype=dtype) - 1
     # Copy the input tensor to NPU
-    x_npu = x.npu()
+    x_npu = x.to(npu_device)
     # breakpoint()
     # Call the custom abs operator
     output = pto_abs(x_npu).cpu()

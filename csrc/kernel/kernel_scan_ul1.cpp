@@ -7,13 +7,9 @@ https://github.com/huawei-csl/pto-kernels/
 for the full License text.
 */
 
-#include <pto/pto-inst.hpp>
-
-#include "kernel_utils.h"
+#include "kernel_scan_ul1.h"
 
 using namespace pto;
-
-constexpr unsigned UB_SIZE = 0x30000;  // 192KB UB of A2A3
 
 /**
  * @brief Kernel implementation for scan operation on a single cube.
@@ -37,8 +33,7 @@ template <typename InputT, typename OutputT, uint32_t matrix_size>
 AICORE void runKernelScanUl1(__gm__ InputT* x, __gm__ InputT* o,
                              __gm__ InputT* u, __gm__ InputT* l,
                              __gm__ OutputT* s) {
-#if (__CHECK_FEATURE_AT_PRECOMPILE) || \
-    (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))
+#if defined(__DAV_C220_CUBE__)
 
   // Type definitions for different memory levels
   // GM
@@ -46,6 +41,7 @@ AICORE void runKernelScanUl1(__gm__ InputT* x, __gm__ InputT* o,
   using Stride = pto::Stride<1, 1, 1, matrix_size, 1>;
   using GlobalDataIn = pto::GlobalTensor<InputT, Shape, Stride, Layout::ND>;
   using GlobalDataOut = pto::GlobalTensor<OutputT, Shape, Stride, Layout::ND>;
+  using GlobalDataInFp32 = GlobalDataOut;  // Used for temporary casting
 
   // L1
   using TileL1In =
@@ -69,7 +65,9 @@ AICORE void runKernelScanUl1(__gm__ InputT* x, __gm__ InputT* o,
   GlobalDataIn lGlobal(l);
   GlobalDataOut sGlobal(s);
   // Reuse output buffer for intermediate result C1
-  GlobalDataIn c1GM(reinterpret_cast<__gm__ InputT*>(s));
+  GlobalDataIn c1GMi(reinterpret_cast<__gm__ InputT*>(s));
+  GlobalDataInFp32 c1GMi_fp32(s);
+  GlobalDataOut c1GMo(s);
 
   // Load data from GM to L1
   TileL1In xL1;
@@ -122,12 +120,15 @@ AICORE void runKernelScanUl1(__gm__ InputT* x, __gm__ InputT* o,
   wait_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
 
   // Move C1 from L0C to L1
-  // TMOV_FLOAT(c1L1, sL0);
+  if constexpr (!std::is_same_v<InputT, float>) {
+    // TMOV directly from L0C to L1 handles downcasting automatically
+    TMOV(c1L1, sL0);
+  }
 
   // Move C1 from L0C to GM, in the float case,
   // we cannot move to L1 directly
-  // because of downcasting
-  TSTORE(c1GM, sL0);
+  // because of downcasting (TMOV doesn't support float->float from Acc to Mat)
+  TSTORE(c1GMo, sL0);
 
   // Wait for FP
   set_flag(PIPE_FIX, PIPE_MTE1, EVENT_ID0);
@@ -152,11 +153,17 @@ AICORE void runKernelScanUl1(__gm__ InputT* x, __gm__ InputT* o,
   wait_flag(PIPE_FIX, PIPE_MTE2, EVENT_ID0);
 
   // Load C1 from GM to L1
-  TLOAD(c1L1, c1GM);
-
-  // Wait for load to be complete before moving C1 to L0
-  set_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID1);
-  wait_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID1);
+  if constexpr (std::is_same_v<InputT, float>) {
+    TLOAD(c1L1, c1GMi);
+    // Wait for load to be complete before moving C1 to L0
+    set_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID1);
+    wait_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID1);
+  } else {
+    // c1L1 was already moved directly from L0C to L1 via TMOV earlier
+    // Just sync the fixpipe (TMOV) with MTE1
+    set_flag(PIPE_FIX, PIPE_MTE1, EVENT_ID1);
+    wait_flag(PIPE_FIX, PIPE_MTE1, EVENT_ID1);
+  }
 
   // Wait for matmul to complet before loading Ls and C1
   set_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);
