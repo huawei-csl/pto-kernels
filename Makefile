@@ -43,7 +43,7 @@ docs:
 	doxygen doxygen/Doxyfile
 
 test:
-	pytest tests/
+	pytest -v tests/
 
 test_tri_inv:
 	pytest tests/test_tri_inv_*.py

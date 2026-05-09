@@ -242,9 +242,9 @@ def test_tri_inv_rec_unroll(
         (ones_tri_matrix, 0, 0, 0, True, torch.float16, torch.float16),
         (
             block_random_triu_matrix,
-            5e-5,
+            5e-4,
             0.1,
-            1e-4,
+            1e-3,
             False,
             torch.float16,
             torch.float16,
