@@ -116,10 +116,13 @@ AICORE void runTCsrGather(__gm__ T* values, __gm__ int32_t* indices,
     TileDataVal wTiles(remaining_elements);
     TileDataVal zTiles(remaining_elements);
     TileDataIdx idxTiles(remaining_elements);
+    TileDataIdx tmpTiles(remaining_elements);
 
     // Assign the UB address for each tile
     TASSIGN(valTiles, V_T_ADDR + stage * TILE_SIZE_IN_BYTES);
     TASSIGN(wTiles, W_T_ADDR + stage * 2 * TILE_SIZE_IDX_IN_BYTES);
+    TASSIGN(tmpTiles, W_T_ADDR + stage * 2 * TILE_SIZE_IDX_IN_BYTES +
+                          TILE_SIZE_IDX_IN_BYTES);
     TASSIGN(zTiles, Z_T_ADDR + stage * TILE_SIZE_IN_BYTES);
     TASSIGN(idxTiles, IDX_T_ADDR + stage * TILE_SIZE_IDX_IN_BYTES);
 
@@ -147,7 +150,7 @@ AICORE void runTCsrGather(__gm__ T* values, __gm__ int32_t* indices,
     pipe_barrier(PIPE_V);
 
     // Gather
-    TGATHER(wTiles, xTiles, idxTiles);
+    TGATHER(wTiles, xTiles, idxTiles, tmpTiles);
 
     // Signal end of gather to MTE2 (next load)
     set_flag(PIPE_V, PIPE_MTE2, ev1);
