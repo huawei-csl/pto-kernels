@@ -7,15 +7,7 @@ https://github.com/huawei-csl/pto-kernels/
 for the full License text.
 */
 
-#if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
-
-#define MEMORY_BASE
-
-#include <pto/pto-inst.hpp>
-
 #include "kernel_utils.h"
-
-#define GM_ADDR __gm__ uint8_t*  // To avoid #include "kernel_operator.h"
 
 using namespace pto;
 
@@ -164,6 +156,8 @@ AICORE void runTTriInv(__gm__ T* vec_in, __gm__ T* vec_out,
 
 extern "C" __global__ AICORE void triv_inv_col_sweep_fp16(
     GM_ADDR x, GM_ADDR z, uint32_t in_length, uint32_t matrix_size) {
+#if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
+
   if (matrix_size == 16) {
     runTTriInv<half, 16>((__gm__ half*)x, (__gm__ half*)z, in_length);
   } else if (matrix_size == 32) {
@@ -173,10 +167,13 @@ extern "C" __global__ AICORE void triv_inv_col_sweep_fp16(
   } else if (matrix_size == 128) {
     runTTriInv<half, 128>((__gm__ half*)x, (__gm__ half*)z, in_length);
   }
+#endif
 }
 
 extern "C" __global__ AICORE void triv_inv_col_sweep_fp32(
     GM_ADDR x, GM_ADDR z, uint32_t in_length, uint32_t matrix_size) {
+#if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
+
   if (matrix_size == 16) {
     runTTriInv<float, 16>((__gm__ float*)x, (__gm__ float*)z, in_length);
   } else if (matrix_size == 32) {
@@ -186,6 +183,5 @@ extern "C" __global__ AICORE void triv_inv_col_sweep_fp32(
   } else if (matrix_size == 128) {
     runTTriInv<float, 128>((__gm__ float*)x, (__gm__ float*)z, in_length);
   }
-}
-
 #endif
+}

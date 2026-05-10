@@ -43,14 +43,13 @@ at::Tensor run_tri_inv_ns(const at::Tensor& M, uint32_t num_iters = 0,
   const auto dtype = M.options().dtype();
   const auto dtype_out = at::kFloat;
 
-  if (!(dtype == at::kHalf)) {
-    throw std::runtime_error(
-        "Unsupported dtype for tri_inv_ns kernel. Supports only fp16");
-  }
+  TORCH_CHECK(device.type() == DEVICE_TYPE,
+              "tri_inv_ns: tensor must be on NPU, got ", device);
+  TORCH_CHECK(dtype == at::kHalf, "tri_inv_ns: dtype must be fp16, got ",
+              dtype);
   const uint32_t n = static_cast<uint32_t>(M.size(-1));
-  if (n != static_cast<uint32_t>(M.size(-2))) {
-    throw std::runtime_error("Only square matrices are supported.\n");
-  }
+  TORCH_CHECK(n == static_cast<uint32_t>(M.size(-2)),
+              "tri_inv_ns: only square matrices are supported");
 
   if (scale_value == 0) {
     scale_value = 2 * n;
@@ -60,17 +59,20 @@ at::Tensor run_tri_inv_ns(const at::Tensor& M, uint32_t num_iters = 0,
 
   if (num_iters == 0) {
     num_iters = static_cast<uint32_t>(std::ceil(2.0f * std::log2(n)));
-    num_iters = std::max<uint32_t>(num_iters, 8);
+    num_iters = std::max<uint32_t>(num_iters, 12);
   }
-
-  const at::Tensor I_neg = -at::eye(n, M.options());
+  uint32_t block_dim = GetNumCubeCores();
+  if (num_matrices < block_dim) {
+    block_dim = num_matrices;
+  }
+  const at::Tensor I_neg = -1 * at::eye(n, M.options());
   const at::Tensor I_scaled = I_neg / (-scale_value);
 
   const at::Tensor M_inv =
       at::zeros_like(M, at::TensorOptions().dtype(dtype_out).device(device));
 
-  EXEC_KERNEL_CMD(tri_inv_ns_fp16, num_matrices, M_inv, M, I_neg, I_scaled, n,
-                  num_iters);
+  EXEC_KERNEL_CMD(tri_inv_ns_fp16, block_dim, M_inv, M, I_neg, I_scaled, n,
+                  num_iters, num_matrices);
 
   return M_inv;
 }

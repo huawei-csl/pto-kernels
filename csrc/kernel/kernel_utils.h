@@ -8,9 +8,14 @@ for the full License text.
 */
 #pragma once
 
-#define MEMORY_BASE
 #include <pto/pto-inst.hpp>
 #include <type_traits>
+
+// clang-format off: so it does not get wrongfully flagged by linter
+#ifndef GM_ADDR
+#define GM_ADDR __gm__ uint8_t*  // To avoid #include "kernel_operator.h"
+#endif
+// clang-format on
 
 namespace kernel_utils {
 /**

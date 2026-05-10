@@ -7,13 +7,7 @@ https://github.com/huawei-csl/pto-kernels/
 for the full License text.
 */
 
-#if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
-
-#define MEMORY_BASE
-
-#include <pto/pto-inst.hpp>
-
-#define GM_ADDR __gm__ uint8_t*  // To avoid #include "kernel_operator.h"
+#include "kernel_utils.h"
 
 using namespace pto;
 
@@ -212,22 +206,26 @@ extern "C" __global__ AICORE void csr_gather_fp16(GM_ADDR values,
                                                   GM_ADDR indices, GM_ADDR x,
                                                   GM_ADDR z, uint32_t x_size,
                                                   uint32_t indices_size) {
+#if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
+
   constexpr uint32_t TILE_SIZE = 512;
   constexpr uint32_t TILE_SIZE_X = 40960;
   runTCsrGather<half, TILE_SIZE, TILE_SIZE_X>(
       (__gm__ half*)values, (__gm__ int32_t*)indices, (__gm__ half*)x,
       (__gm__ half*)z, x_size, indices_size);
+#endif
 }
 
 extern "C" __global__ AICORE void csr_gather_fp32(GM_ADDR values,
                                                   GM_ADDR indices, GM_ADDR x,
                                                   GM_ADDR z, uint32_t x_size,
                                                   uint32_t indices_size) {
+#if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
+
   constexpr uint32_t TILE_SIZE = 512;
   constexpr uint32_t TILE_SIZE_X = 40960;
   runTCsrGather<float, TILE_SIZE, TILE_SIZE_X>(
       (__gm__ float*)values, (__gm__ int32_t*)indices, (__gm__ float*)x,
       (__gm__ float*)z, x_size, indices_size);
-}
-
 #endif
+}
