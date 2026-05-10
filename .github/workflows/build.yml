@@ -69,7 +69,7 @@ jobs:
             npu_device: 910b
           - arch: x86_64
             python_version: 3.11
-            npu_device: a3
+            npu_device: 950
 
     container:
       image: quay.io/ascend/cann:9.0.0-${{ matrix.npu_device }}-ubuntu22.04-py${{ matrix.python_version }}
@@ -106,7 +106,7 @@ jobs:
             npu_device: 910b
           - arch: x86_64
             python_version: 3.11
-            npu_device: a3
+            npu_device: 950
     container:
       image: quay.io/ascend/cann:9.0.0-${{ matrix.npu_device }}-ubuntu22.04-py${{ matrix.python_version }}
     steps:
