@@ -104,13 +104,12 @@ def run_v2c(kernel) -> None:
     print("-" * len(header))
 
     wave_rows = BLOCK_DIM * TILE_SIZE
-    B  = torch.randn(TILE_SIZE, TILE_SIZE, **KW)
     ws = torch.empty(wave_rows, TILE_SIZE, **KW)
 
     # Smoke check
     A_smoke = torch.randn(4 * wave_rows, TILE_SIZE, **KW)
     D_smoke = torch.randn(4 * wave_rows, TILE_SIZE, **KW)
-    kernel(A_smoke, D_smoke, B, ws, 4)
+    kernel(A_smoke, D_smoke, ws, 4)
     torch.npu.synchronize()
     print(f"  smoke (num_iters=4): OK")
     print()
@@ -122,10 +121,10 @@ def run_v2c(kernel) -> None:
         D = torch.randn(total_rows, TILE_SIZE, **KW)
 
         for _ in range(WARMUP):
-            kernel(A, D, B, ws, num_iters)
+            kernel(A, D, ws, num_iters)
         torch.npu.synchronize()
 
-        dur_us = _time_kernel(kernel, A, D, B, ws, num_iters=num_iters)
+        dur_us = _time_kernel(kernel, A, D, ws, num_iters=num_iters)
         bw_gbs = workspace_roundtrip_bytes(num_iters) / dur_us * 1e-3
 
         print(f"{num_iters:>10d}  {dur_us:>10.2f}  {bw_gbs:>10.1f}")

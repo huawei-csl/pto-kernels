@@ -80,14 +80,13 @@ def load_stream_v2c(verbose: bool = True) -> "StreamV2CKernel":
     lib_path = _compile("stream_v2c.cpp", "stream_v2c.so", verbose=verbose)
     lib = ctypes.CDLL(os.path.abspath(lib_path))
     # void call_stream_v2c(uint32_t block_dim, void *stream,
-    #                       uint8_t *A, uint8_t *D, uint8_t *B,
+    #                       uint8_t *A, uint8_t *D,
     #                       uint8_t *workspace, int32_t num_iters)
     lib.call_stream_v2c.argtypes = [
         ctypes.c_uint32,  # block_dim
         ctypes.c_void_p,  # stream
         ctypes.c_void_p,  # A
         ctypes.c_void_p,  # D
-        ctypes.c_void_p,  # B
         ctypes.c_void_p,  # workspace
         ctypes.c_int32,   # num_iters
     ]
@@ -119,15 +118,13 @@ class StreamV2CKernel:
         self._block_dim = block_dim
 
     def __call__(self, A: torch.Tensor, D: torch.Tensor,
-                 B: torch.Tensor, workspace: torch.Tensor,
-                 num_iters: int) -> None:
-        """A, D: [num_iters*num_cores*T, T], B: [T, T], workspace: [num_cores*T, T]."""
+                 workspace: torch.Tensor, num_iters: int) -> None:
+        """A, D: [num_iters*num_cores*T, T], workspace: [num_cores*T, T]."""
         stream_ptr = ctypes.c_void_p(torch.npu.current_stream().npu_stream)
         self._lib.call_stream_v2c(
             self._block_dim, stream_ptr,
             ctypes.c_void_p(A.data_ptr()),
             ctypes.c_void_p(D.data_ptr()),
-            ctypes.c_void_p(B.data_ptr()),
             ctypes.c_void_p(workspace.data_ptr()),
             ctypes.c_int32(num_iters),
         )

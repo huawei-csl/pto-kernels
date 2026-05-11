@@ -8,10 +8,12 @@ workspace bytes.
 
 ## Kernels
 
-| Kernel | Path | Operation |
-|--------|------|-----------|
-| `stream_c2v` | Cube L0C → workspace → Vec UB | Cube spills GEMM result repeatedly |
-| `stream_v2c` | Vec UB → workspace → Cube L1  | Vec writes A+D sum; Cube loads + GEMMs (result discarded) |
+| Kernel | Path | Cube work | Vec work |
+|--------|------|-----------|----------|
+| `stream_c2v` | Cube L0C → workspace → Vec UB | Initial GEMM fills L0C once; spills it every iter | Load workspace slice into UB |
+| `stream_v2c` | Vec UB → workspace → Cube L1  | Load workspace into L1, discard | Load A+D, add, write to workspace |
+
+Note: Removing the GEMM has negligible effect on throughput because the M pipe was never on the critical path.
 
 **Effective bandwidth** (both kernels use the same formula):
 ```
@@ -24,7 +26,7 @@ bw_eff = 2 × num_cores × T² × sizeof(fp16) × num_iters / time
 | File | Purpose |
 |------|---------|
 | `stream_c2v.cpp` | C2V kernel — runtime `num_iters` arg |
-| `stream_v2c.cpp` | V2C kernel — runtime `num_iters` arg |
+| `stream_v2c.cpp` | V2C kernel — runtime `num_iters` arg, no GEMM on Cube side |
 | `jit_util_stream.py` | JIT compile + ctypes loaders for both |
 | `run_stream_c2v_v2c.py` | Smoke check + bandwidth sweep |
 
@@ -44,20 +46,22 @@ NPU_DEVICE=npu:5 python run_stream_c2v_v2c.py
 ```
 stream_c2v  (Cube L0C → workspace → Vec UB)
  num_iters      dur_us     bw_GB/s
-        32       53.38        942.8
-        64       94.23       1068.3
-       256      348.69       1154.8
-      1024     1366.12       1179.0
-Peak: 1179.0 GB/s
+        32       53.75        936.4
+        64       95.55       1053.6
+       256      355.84       1131.6
+      1024     1395.43       1154.2
+Peak: 1154.2 GB/s
 
-stream_v2c  (Vec UB → workspace → Cube L1)
+stream_v2c  (Vec UB → workspace → Cube L1)  [no Cube GEMM]
  num_iters      dur_us     bw_GB/s
-        32       53.51        940.6
-        64       94.28       1067.7
-       128      181.66       1108.3
-      1024     1484.46       1085.0
-Peak: 1108.3 GB/s
+        32       53.56        939.7
+        64       94.63       1063.8
+       128      182.56       1102.8
+      1024     1467.76       1097.3
+Peak: 1102.8 GB/s
 ```
 
-C2V peak ~1179 GB/s (79% of HBM roofline); V2C peak ~1108 GB/s (74%).
-V2C is slightly lower because each iteration also runs a GEMM on the loaded data.
+C2V peak ~1154 GB/s (77% of HBM roofline); V2C peak ~1103 GB/s (74%).
+V2C is slightly lower because Vec must also load A and D from HBM before it can
+write to workspace — this external HBM traffic sits on the critical path even
+though it is not counted in the bandwidth formula.
