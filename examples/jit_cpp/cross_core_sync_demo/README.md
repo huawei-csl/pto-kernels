@@ -1,10 +1,10 @@
 Demonstrate different API abstractions for Cube-Vector data exchange and synchronization
 
 There are currently 4 API sets that can express cross-core data passing:
-- `ffts_cross_core_sync` & `wait_flag_dev`
-- `TSYNC`
-- `TPUSH` & `TPOP`
-- `TPUSH` & `TPOP` & `TFREE` & `TALLOC`
+1. `ffts_cross_core_sync` & `wait_flag_dev`
+2. `TSYNC`
+3. `TPUSH` & `TPOP`
+4. `TPUSH` & `TPOP` & `TFREE` & `TALLOC`
 
 Purpose of this demo directory: Use *clear, minimum code* to demonstrate the *syntax and performance* differences between those API styles.
 
