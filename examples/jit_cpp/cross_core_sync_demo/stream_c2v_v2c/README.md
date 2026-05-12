@@ -1,67 +1,57 @@
-# stream_c2v_v2c — Cube↔Vector bandwidth microbenchmarks
+# stream_c2v_v2c — Three Cube↔Vector synchronization API styles
 
-Measures the **internal** throughput of the Cube↔Vector workspace handshake
-(`ffts_cross_core_sync` / `wait_flag_dev`).  Unlike the `matmul_add` kernels,
-which measure external HBM traffic (large input tensors), these kernels loop
-over the **same small workspace** many times and count only the round-trip
-workspace bytes.
+Bandwidth microbenchmarks for the Cube↔Vector workspace handshake, implemented
+in three API styles for direct comparison.
 
-## Kernels
+## Three API Variants
 
-| Kernel | Path | Cube work | Vec work |
-|--------|------|-----------|----------|
-| `stream_c2v` | Cube L0C → workspace → Vec UB | Initial GEMM fills L0C once; spills it every iter | Load workspace slice into UB |
-| `stream_v2c` | Vec UB → workspace → Cube L1  | Load workspace into L1, discard | Load A+D, add, write to workspace |
+| Variant | Sync API | Data API | C2V slot | V2C slot |
+|---------|----------|----------|----------|----------|
+| `raw_flag` | `ffts_cross_core_sync` + `wait_flag_dev` (direct) | `TSTORE`/`TLOAD` on fixed workspace | half 32 KB | half 32 KB |
+| `pushpop` | `TPipe` TileData — sync + data-move in one call | built into `TPUSH`/`TPOP` | **float 64 KB** | half 32 KB |
+| `gm_pipe` | `TPipe` GlobalData — `TPUSH`/`TPOP` handle sync only | explicit `TALLOC`+`TSTORE`+`TPUSH` / `TPOP`+`TLOAD`+`TFREE` | half 32 KB | half 32 KB |
 
-Note: Removing the GEMM has negligible effect on throughput because the M pipe was never on the critical path.
-
-**Effective bandwidth** (both kernels use the same formula):
-```
-bw_eff = 2 × num_cores × T² × sizeof(fp16) × num_iters / time
-         ↑ workspace write + workspace read (round-trip)
-```
+Key differences:
+- **raw_flag**: programmer writes `ffts_cross_core_sync`/`wait_flag_dev` directly + manages workspace manually.
+- **pushpop**: one `TPUSH`/`TPOP` call handles both sync and data-move (`TPipe` calls `ffts_cross_core_sync`/`wait_flag_dev` internally). C2V slot stores `AccTile::DType=float` (no implicit fp32→fp16).
+- **gm_pipe**: `TPUSH`/`TPOP` with GlobalData overloads handle sync only (`TPipe` manages flags internally); data-move (`TSTORE`/`TLOAD`) is explicit between `TALLOC`+`TPUSH` and `TPOP`+`TFREE`. This allows `TSTORE(slot_half, c_l0)` to perform fp32→fp16 via hardware, matching raw_flag slot size.
 
 ## Files
 
-| File | Purpose |
-|------|---------|
-| `stream_c2v.cpp` | C2V kernel — runtime `num_iters` arg |
-| `stream_v2c.cpp` | V2C kernel — runtime `num_iters` arg, no GEMM on Cube side |
-| `jit_util_stream.py` | JIT compile + ctypes loaders for both |
-| `run_stream_c2v_v2c.py` | Smoke check + bandwidth sweep |
+| Subdirectory | Files |
+|---|---|
+| `raw_flag/` | `stream_c2v.cpp`, `stream_v2c.cpp`, `jit_util_stream.py`, `run_stream_c2v_v2c.py` |
+| `pushpop/` | same names |
+| `gm_pipe/` | same names (compiled with pto-isa-master headers) |
 
 ## Reproduce
 
 ```bash
-cd /workdir/pto-kernels-fork/examples/jit_cpp/cross_core_sync_demo/stream_c2v_v2c
+BASE=examples/jit_cpp/cross_core_sync_demo/stream_c2v_v2c
 
-python run_stream_c2v_v2c.py
+python $BASE/raw_flag/run_stream_c2v_v2c.py
+python $BASE/pushpop/run_stream_c2v_v2c.py
+python $BASE/gm_pipe/run_stream_c2v_v2c.py
 
-# Choose a different NPU (default: npu:7)
-NPU_DEVICE=npu:5 python run_stream_c2v_v2c.py
+NPU_DEVICE=npu:5 python $BASE/raw_flag/run_stream_c2v_v2c.py  # choose NPU
 ```
 
-## Expected output (910B2, 24 Cube cores)
+## Results (910B2, 24 Cube cores)
 
-```
-stream_c2v  (Cube L0C → workspace → Vec UB)
- num_iters      dur_us     bw_GB/s
-        32       53.75        936.4
-        64       95.55       1053.6
-       256      355.84       1131.6
-      1024     1395.43       1154.2
-Peak: 1154.2 GB/s
+**stream_c2v** — `Cube L0C → workspace → Vec UB`:
 
-stream_v2c  (Vec UB → workspace → Cube L1)  [no Cube GEMM]
- num_iters      dur_us     bw_GB/s
-        32       53.56        939.7
-        64       94.63       1063.8
-       128      182.56       1102.8
-      1024     1467.76       1097.3
-Peak: 1102.8 GB/s
-```
+| Variant | Slot | Peak (GB/s) | at num_iters |
+|---------|------|-------------|--------------|
+| raw_flag | half 32 KB | 1179 | 1024 |
+| pushpop | **float 64 KB** | **2192** | 1024 (2× slot → 2× bw) |
+| gm_pipe | half 32 KB | 1669 | 1024 |
 
-C2V peak ~1154 GB/s (77% of HBM roofline); V2C peak ~1103 GB/s (74%).
-V2C is slightly lower because Vec must also load A and D from HBM before it can
-write to workspace — this external HBM traffic sits on the critical path even
-though it is not counted in the bandwidth formula.
+**stream_v2c** — `Vec UB → workspace → Cube L1`:
+
+| Variant | Slot | Peak (GB/s) | at num_iters |
+|---------|------|-------------|--------------|
+| raw_flag | half 32 KB | 1103 | 128 |
+| pushpop | half 32 KB | 1067 | 128 |
+| gm_pipe | half 32 KB | 1236 | 128 |
+
+Note: `pushpop` C2V uses a float32 slot (64 KB) so its bandwidth is naturally 2× the half-slot variants. For a like-for-like comparison, divide the `pushpop` C2V bandwidth by 2 (~1096 GB/s), which is comparable to raw_flag (1179 GB/s).
