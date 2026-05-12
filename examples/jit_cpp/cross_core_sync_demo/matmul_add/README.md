@@ -77,9 +77,9 @@ Peak effective external bandwidth (read A+B+D, write C; workspace not counted):
 
 | Variant | matmul_add_c2v peak | add_matmul_v2c peak | Notes |
 |---------|--------------------|--------------------|-------|
-| `raw_flag` | **1357 GB/s** | **1543 GB/s** | Reference pipelined |
-| `pushpop` | similar to raw_flag | similar | num_rounds=1 |
-| `gm_pipe` | similar to raw_flag | similar | |
+| `raw_flag` | **1357 GB/s** | **1543 GB/s** | Reference pipelined, 64 rounds |
+| `pushpop` | ~50 GB/s | ~30 GB/s | rounds=1 scope only (batch=3072); limited by small-batch overhead, not algorithm |
+| `gm_pipe` | **1784 GB/s** | **1478 GB/s** | 64 rounds; requires pto-isa-master headers |
 | `naive_separate` | 1174 GB/s | 1211 GB/s | No pipeline — **15–30% lower** |
 | `torch.mm + torch.add` | ~2000 GB/s\* | ~2100 GB/s\* | Two separate launches |
 

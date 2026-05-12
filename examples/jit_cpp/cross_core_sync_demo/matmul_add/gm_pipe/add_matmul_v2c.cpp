@@ -159,6 +159,11 @@ AICORE void run_add_matmul_v2c(
 
             // Wait for both Vec sub-blocks to write their half-tiles.
             wait_flag_dev(FLAG_V2C_DATA);
+            // Flush all pipes (including FIX) before the next TMATMUL.
+            // Without this, the previous round's TSTORE (FIX reading c_l0) can
+            // race with the next round's TMATMUL (M writing c_l0) — same ordering
+            // that raw_flag provides via pipe_barrier after WaitCrossFlag.
+            pipe_barrier(PIPE_ALL);
 
             // Compute the current slot view (explicit GlobalTensor — the gm_pipe pattern).
             const uint32_t slot_offset = static_cast<uint32_t>(r % FIFO_DEPTH) * V2C_SLOT_SIZE;
