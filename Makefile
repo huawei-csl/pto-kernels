@@ -15,7 +15,7 @@ clean:
 
 setup_once:
 	pip3 install -r requirements.txt
-	pip3 install torch-npu==2.8.0.post2 --extra-index-url https://download.pytorch.org/whl/cpu
+	pip3 install torch-npu==2.8.0.post4 --extra-index-url https://download.pytorch.org/whl/cpu
 
 build_cmake: clean
 	bash scripts/build.sh
