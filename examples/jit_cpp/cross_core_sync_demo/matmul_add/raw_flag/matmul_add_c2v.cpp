@@ -189,21 +189,20 @@ AICORE void run_matmul_add_c2v(
 
         // GEMM: c_l0 = A @ B  (initialises c_l0 — no prior accumulation)
         TMATMUL(c_l0, a_l0, b_l0);
-        pipe_barrier(PIPE_ALL);
+        SetFlag<PIPE_M, PIPE_FIX>(0);
+        WaitFlag<PIPE_M, PIPE_FIX>(0);  // M→FIX: c_l0 ready for TSTORE
 
         // Wait for both Vec sub-blocks to finish reading the workspace slot
         // from the *previous* round before overwriting it. Skip on round 0.
         if (r > 0) {
             WaitCrossFlag(FLAG_V2C);
-            pipe_barrier(PIPE_ALL);
+            pipe_barrier(PIPE_ALL);  // flush all pipes before issuing TSTORE
         }
 
         // Write GEMM result to workspace (fp32 → fp16 conversion via FIX pipe).
         TileGlobal ws_out(workspace + cid * TILE_SIZE * TILE_SIZE);
         TSTORE(ws_out, c_l0);
-        pipe_barrier(PIPE_ALL);
-
-        // Signal both Vec sub-blocks: workspace slot is ready to read.
+        pipe_barrier(PIPE_ALL);  // FIX: TSTORE complete before SetCrossFlag fires
         SetCrossFlag<PIPE_FIX>(FLAG_C2V);
     }
 
@@ -232,19 +231,19 @@ AICORE void run_matmul_add_c2v(
         HalfTileGlobal d_global(D + row_v * TILE_SIZE);
         TLOAD(d_ub, d_global);
 
-        pipe_barrier(PIPE_ALL);  // wait for both TLOAD (MTE2) to complete
+        pipe_barrier(PIPE_ALL);  // MTE2→V+MTE3: both TLOADs done before signal and TADD
 
         // Signal Cube: workspace slot is consumed — safe to overwrite next round.
         SetCrossFlag<PIPE_MTE3>(FLAG_V2C);
 
         // C = GEMM_result + D  (Vec engine, element-wise)
         TADD(c_ub, c_ub, d_ub);
-        pipe_barrier(PIPE_ALL);
+        pipe_barrier(PIPE_ALL);  // V→MTE3: TADD done before TSTORE
 
         // Store result to global memory C.
         HalfTileGlobal c_out(C + row_v * TILE_SIZE);
         TSTORE(c_out, c_ub);
-        pipe_barrier(PIPE_ALL);
+        pipe_barrier(PIPE_ALL);  // MTE3: TSTORE complete before next round
     }
 
 #endif  // __DAV_C220_VEC__

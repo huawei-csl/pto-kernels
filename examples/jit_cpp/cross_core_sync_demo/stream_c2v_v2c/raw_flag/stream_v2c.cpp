@@ -85,6 +85,11 @@ AICORE inline void SetCrossFlag(int32_t flag) {
 }
 AICORE inline void WaitCrossFlag(int32_t flag) { wait_flag_dev(flag); }
 
+template <pipe_t Src, pipe_t Dst>
+AICORE inline void SetFlag(uint32_t id) { set_flag(Src, Dst, static_cast<event_t>(id)); }
+template <pipe_t Src, pipe_t Dst>
+AICORE inline void WaitFlag(uint32_t id) { wait_flag(Src, Dst, static_cast<event_t>(id)); }
+
 AICORE void run_stream_v2c(
     __gm__ half  *A,          // [num_iters * num_cores * T, T]  Vec input 1
     __gm__ half  *D,          // [num_iters * num_cores * T, T]  Vec input 2
@@ -147,21 +152,21 @@ AICORE void run_stream_v2c(
         HalfTileGlobal d_global(D + row_v * TILE_SIZE);
         TLOAD(b_ub, d_global);
 
-        pipe_barrier(PIPE_ALL);
+        SetFlag<PIPE_MTE2, PIPE_V>(0);
+        WaitFlag<PIPE_MTE2, PIPE_V>(0);   // MTE2→V: both TLOADs done before TADD
 
         TADD(a_ub, a_ub, b_ub);
-        pipe_barrier(PIPE_ALL);
+        SetFlag<PIPE_V, PIPE_MTE3>(0);
+        WaitFlag<PIPE_V, PIPE_MTE3>(0);   // V→MTE3: TADD done before TSTORE
 
         // Wait for Cube to free the workspace slot (skip on round 0).
         if (r > 0) {
             WaitCrossFlag(FLAG_C2V);
-            pipe_barrier(PIPE_ALL);
+            // No local-pipe barrier needed after cross-core wait.
         }
 
         TSTORE(ws_out, a_ub);
-        pipe_barrier(PIPE_ALL);
-
-        // Signal Cube: workspace tile is ready to read.
+        pipe_barrier(PIPE_ALL);         // MTE3: wait for DMA to complete before signaling Cube
         SetCrossFlag<PIPE_MTE3>(FLAG_V2C);
     }
 

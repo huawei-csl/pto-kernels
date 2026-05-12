@@ -147,7 +147,8 @@ AICORE void run_stream_c2v(
     WaitFlag<PIPE_MTE1, PIPE_M>(0);
 
     TMATMUL(c_l0, a_l0, b_l0);
-    pipe_barrier(PIPE_ALL);  // M→FIX: ensure c_l0 is ready before TPUSH reads it
+    SetFlag<PIPE_M, PIPE_FIX>(0);
+    WaitFlag<PIPE_M, PIPE_FIX>(0);    // M→FIX: c_l0 ready before TPUSH reads it
 
     for (int32_t r = 0; r < num_iters; ++r) {
         // ── pushpop replaces raw_flag: ───────────────────────────────────────

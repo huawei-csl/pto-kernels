@@ -9,14 +9,15 @@
 //  ─────────────────────────────┼─────────────────────────────────────────────
 //  TSTORE(ws_half, c_l0)        │  TALLOC<C2VPipe, SlotFull, UP_DOWN>(pipe, slot)
 //  pipe_barrier(PIPE_ALL)       │  TSTORE(slot, c_l0)   ← explicit fp32→fp16
-//  SetCrossFlag<FIX>(FLAG_C2V)  │  pipe_barrier(PIPE_ALL)
-//                               │  TPUSH<C2VPipe, SlotFull, UP_DOWN>(pipe, slot)
+//  SetCrossFlag<FIX>(FLAG_C2V)  │  TPUSH<C2VPipe, SlotFull, UP_DOWN>(pipe, slot)
+//                               │    (TSTORE and TPUSH are both FIX-pipe; ordered,
+//                               │     no barrier needed between them)
 //  ─────────────────────────────┼─────────────────────────────────────────────
 //  WaitCrossFlag(FLAG_C2V)      │  TPOP<C2VPipe, PopHalf, UP_DOWN>(pipe, pop)
 //  TLOAD(c_ub, ws_half)         │    └─ sync-only: assigns slot address to pop
 //  SetCrossFlag<MTE3>(FLAG_V2C) │  TLOAD(c_ub, pop)     ← explicit half load
-//                               │  pipe_barrier(PIPE_ALL)
 //                               │  TFREE<C2VPipe, PopHalf, UP_DOWN>(pipe, pop)
+//                               │    (TLOAD and TFREE are both MTE2-pipe; ordered)
 //
 // Key property:
 //   TSTORE(slot_half, c_l0) — GlobalTensor<half> ← TileAcc<float>:
@@ -149,7 +150,8 @@ AICORE void run_stream_c2v(
         WaitFlag<PIPE_MTE1, PIPE_M>(0);
 
         TMATMUL(c_l0, a_l0, b_l0);
-        pipe_barrier(PIPE_ALL);  // M→FIX: c_l0 ready for TSTORE
+        SetFlag<PIPE_M, PIPE_FIX>(0);
+        WaitFlag<PIPE_M, PIPE_FIX>(0);   // M→FIX: c_l0 ready for TSTORE
 
         SlotFull push_slot;
         for (int32_t r = 0; r < num_iters; ++r) {
@@ -161,7 +163,7 @@ AICORE void run_stream_c2v(
             TALLOC<C2VPipe, SlotFull, TileSplitAxis::TILE_UP_DOWN>(pipe, push_slot);
             TSTORE(push_slot, c_l0);
             //   GlobalTensor<half> ← TileAcc<float>: fp32→fp16 (hardware FIX unit)
-            pipe_barrier(PIPE_ALL);  // FIX: TSTORE complete before TPUSH signals Vec
+            pipe_barrier(PIPE_ALL);  // FIX: wait for DMA to complete before TPUSH signals Vec
             TPUSH<C2VPipe, SlotFull, TileSplitAxis::TILE_UP_DOWN>(pipe, push_slot);
             //   Sync-only: emits data-ready signal (no internal TSTORE)
         }
@@ -185,7 +187,8 @@ AICORE void run_stream_c2v(
             //   Waits for data-ready; assigns this sub-block's T/2-row slice address.
             TLOAD(c_ub, pop_slot);
             //   Explicit TLOAD: TileVecUB<half> ← GlobalTensor<half>
-            pipe_barrier(PIPE_ALL);  // MTE2: TLOAD complete before slot is released
+            pipe_barrier(PIPE_ALL);  // MTE2: wait for DMA to complete before freeing slot
+            //   TFREE fires from MTE2 pipe after TLOAD DMA completes.
             TFREE<C2VPipe, PopHalf, TileSplitAxis::TILE_UP_DOWN>(pipe, pop_slot);
             //   Emits free-space notification to Cube (conditional on SyncPeriod)
         }

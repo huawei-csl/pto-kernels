@@ -181,11 +181,13 @@ AICORE void run_add_matmul_v2c(
             WaitFlag<PIPE_MTE1, PIPE_M>(0);
 
             TMATMUL(c_l0, ab_l0, d_l0);
-            pipe_barrier(PIPE_ALL);
+            SetFlag<PIPE_M, PIPE_FIX>(0);
+            WaitFlag<PIPE_M, PIPE_FIX>(0);  // M→FIX: c_l0 ready for TSTORE
 
             TileGlobal c_global(C + row_c * TILE_SIZE);
             TSTORE(c_global, c_l0);
-            pipe_barrier(PIPE_ALL);
+            // Next iteration starts with wait_flag_dev (cross-core);
+            // c_global and ab_l1/c_l0 don't alias — no barrier needed after TSTORE.
         }
     }
 
@@ -201,14 +203,13 @@ AICORE void run_add_matmul_v2c(
             TLOAD(a_ub, a_global);
             HalfTileGlobal b_global(B + row_v * TILE_SIZE);
             TLOAD(b_ub, b_global);
-            pipe_barrier(PIPE_ALL);  // MTE2→V: TLOADs done
+            pipe_barrier(PIPE_ALL);  // MTE2→V: TLOADs done before TADD
 
             TADD(a_ub, a_ub, b_ub);
             pipe_barrier(PIPE_ALL);  // V→MTE3: TADD done before TSTORE
 
             // Wait for Cube to free the slot before overwriting it.
-            // Slot cycling: r%FIFO_DEPTH visits slot 0,1,0,1,...
-            // Slot 0 is first used at r=0; Cube must free it before r=2 writes it.
+            // TSTORE and ffts_cross_core_sync are both MTE3 — ordered in same pipe.
             if (r >= static_cast<int32_t>(FIFO_DEPTH)) {
                 wait_flag_dev(FLAG_V2C_FREE);
                 pipe_barrier(PIPE_ALL);
@@ -223,8 +224,7 @@ AICORE void run_add_matmul_v2c(
 
             // Explicit TSTORE to the GM slot (the gm_pipe data-move).
             TSTORE(slot_out, a_ub);
-            pipe_barrier(PIPE_ALL);  // MTE3: TSTORE complete before signaling Cube
-
+            pipe_barrier(PIPE_ALL);  // MTE3: wait for DMA to complete before signaling Cube
             // Signal Cube: this sub-block has written its T/2 rows.
             // mode=2 → Cube unblocks after BOTH sub-blocks (vid=0 and vid=1) signal.
             ffts_cross_core_sync(PIPE_MTE3, 1u | (SIGNAL_MODE << 4) | (FLAG_V2C_DATA << 8));

@@ -138,12 +138,13 @@ AICORE void run_matmul_add_c2v(
             WaitFlag<PIPE_MTE1, PIPE_M>(0);
 
             TMATMUL(c_l0, a_l0, b_l0);
-            pipe_barrier(PIPE_ALL);
+            SetFlag<PIPE_M, PIPE_FIX>(0);
+            WaitFlag<PIPE_M, PIPE_FIX>(0);  // M→FIX: c_l0 ready for TSTORE
 
             TALLOC<C2VPipe, SlotFull, TileSplitAxis::TILE_UP_DOWN>(pipe, push_slot);
             TSTORE(push_slot, c_l0);
             //   AccTile<float> → GlobalTensor<half>: fp32→fp16 via hardware FIX
-            pipe_barrier(PIPE_ALL);
+            pipe_barrier(PIPE_ALL);  // FIX: wait for DMA to complete before TPUSH signals Vec
             TPUSH<C2VPipe, SlotFull, TileSplitAxis::TILE_UP_DOWN>(pipe, push_slot);
         }
     }
@@ -162,16 +163,17 @@ AICORE void run_matmul_add_c2v(
             HalfTileGlobal d_global(D + row_v * TILE_SIZE);
             TLOAD(d_ub, d_global);
 
-            pipe_barrier(PIPE_ALL);
+            // TFREE fires from MTE2 after both TLOADs complete (same pipe, ordered).
+            TFREE<C2VPipe, PopHalf, TileSplitAxis::TILE_UP_DOWN>(pipe, pop_slot);
+
+            pipe_barrier(PIPE_ALL);  // MTE2→V: TLOADs done before TADD
 
             TADD(c_ub, c_ub, d_ub);
-            pipe_barrier(PIPE_ALL);
-
-            TFREE<C2VPipe, PopHalf, TileSplitAxis::TILE_UP_DOWN>(pipe, pop_slot);
+            pipe_barrier(PIPE_ALL);  // V→MTE3: TADD done before TSTORE
 
             HalfTileGlobal c_out(C + row_v * TILE_SIZE);
             TSTORE(c_out, c_ub);
-            pipe_barrier(PIPE_ALL);
+            pipe_barrier(PIPE_ALL);  // MTE3: TSTORE complete before next TPOP overwrites c_ub
         }
     }
 }

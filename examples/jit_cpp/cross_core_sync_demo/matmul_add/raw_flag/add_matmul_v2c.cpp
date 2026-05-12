@@ -194,12 +194,14 @@ AICORE void run_add_matmul_v2c(
 
         // GEMM: c_l0 = (A+B) @ D  (initialises c_l0)
         TMATMUL(c_l0, ab_l0, d_l0);
-        pipe_barrier(PIPE_ALL);
+        SetFlag<PIPE_M, PIPE_FIX>(0);
+        WaitFlag<PIPE_M, PIPE_FIX>(0);  // M→FIX: c_l0 ready for TSTORE
 
         // Store result (fp32 → fp16) to global memory C.
         TileGlobal c_global(C + row_c * TILE_SIZE);
         TSTORE(c_global, c_l0);
-        pipe_barrier(PIPE_ALL);
+        // Next iteration starts with WaitCrossFlag (cross-core);
+        // c_global and ab_l1/c_l0 don't alias — no barrier needed after TSTORE.
     }
 
 #endif  // __DAV_C220_CUBE__
@@ -224,11 +226,11 @@ AICORE void run_add_matmul_v2c(
         HalfTileGlobal b_global(B + row_v * TILE_SIZE);
         TLOAD(b_ub, b_global);
 
-        pipe_barrier(PIPE_ALL);  // wait for both TLOADs (MTE2) to complete
+        pipe_barrier(PIPE_ALL);  // MTE2→V: both TLOADs done before TADD
 
         // Compute element-wise sum: a_ub = A + B
         TADD(a_ub, a_ub, b_ub);
-        pipe_barrier(PIPE_ALL);
+        pipe_barrier(PIPE_ALL);  // V→MTE3: TADD done before TSTORE
 
         // Wait for Cube to signal that it has loaded the previous workspace tile
         // into L1 (slot is free to overwrite). Round 0: no previous tile, skip.
@@ -240,7 +242,7 @@ AICORE void run_add_matmul_v2c(
         // Write (A+B) sum to the workspace slot for this sub-block.
         HalfTileGlobal ws_out(workspace + ws_row * TILE_SIZE);
         TSTORE(ws_out, a_ub);
-        pipe_barrier(PIPE_ALL);
+        pipe_barrier(PIPE_ALL);  // MTE3: TSTORE complete before SetCrossFlag
 
         // Signal Cube: workspace tile is fully written, safe to read.
         SetCrossFlag<PIPE_MTE3>(FLAG_V2C);

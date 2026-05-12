@@ -67,6 +67,11 @@ using TileVecUB = Tile<TileType::Vec, half, HALF_TILE, TILE_SIZE,
                        BLayout::RowMajor, HALF_TILE, TILE_SIZE,
                        SLayout::NoneBox, 512, PadValue::Null>;
 
+template <pipe_t Src, pipe_t Dst>
+AICORE inline void SetFlag(uint32_t id) { set_flag(Src, Dst, static_cast<event_t>(id)); }
+template <pipe_t Src, pipe_t Dst>
+AICORE inline void WaitFlag(uint32_t id) { wait_flag(Src, Dst, static_cast<event_t>(id)); }
+
 // ── FIFO pipe type ────────────────────────────────────────────────────────────
 // FlagID=0, DIR_V2C, slot=half32KB, depth=2.
 // TPUSH calls TSTORE(GlobalTensor<half>, a_ub) — same dtype, no conversion.
@@ -119,7 +124,7 @@ AICORE void run_stream_v2c(
         TPOP<V2CPipe, TileL1, TileSplitAxis::TILE_UP_DOWN>(pipe, ws_l1);
         // └─ internally: wait, TLOAD(GlobalTensor<half>, ws_l1), free-space notify.
         //    ws_l1 assigned to V2C_L1_BASE rotation (slot 0 or 1).
-        pipe_barrier(PIPE_ALL);  // MTE2: drain TLOAD before next iteration overwrites ws_l1
+        //    Rotating L1 addresses avoid read-after-write: no barrier needed here.
     }
 
 #endif  // __DAV_C220_CUBE__
@@ -139,10 +144,12 @@ AICORE void run_stream_v2c(
         HalfTileGlobal d_global(D + row_v * TILE_SIZE);
         TLOAD(b_ub, d_global);
 
-        pipe_barrier(PIPE_ALL);  // MTE2→V: wait for both TLOADs before TADD
+        SetFlag<PIPE_MTE2, PIPE_V>(0);
+        WaitFlag<PIPE_MTE2, PIPE_V>(0);   // MTE2→V: both TLOADs done before TADD
 
         TADD(a_ub, a_ub, b_ub);
-        pipe_barrier(PIPE_ALL);  // V→MTE3: wait for TADD before TPUSH writes to GM
+        SetFlag<PIPE_V, PIPE_MTE3>(0);
+        WaitFlag<PIPE_V, PIPE_MTE3>(0);   // V→MTE3: TADD done before TPUSH writes to GM
 
         // ── pushpop replaces raw_flag: ───────────────────────────────────────
         // raw_flag: (if r>0) wait_flag_dev(FLAG_C2V)

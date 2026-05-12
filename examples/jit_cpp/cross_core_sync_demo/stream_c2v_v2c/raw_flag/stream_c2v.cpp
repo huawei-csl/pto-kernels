@@ -138,7 +138,8 @@ AICORE void run_stream_c2v(
 
     // c_l0 is filled here and re-spilled every iteration without recomputing.
     TMATMUL(c_l0, a_l0, b_l0);
-    pipe_barrier(PIPE_ALL);
+    SetFlag<PIPE_M, PIPE_FIX>(0);
+    WaitFlag<PIPE_M, PIPE_FIX>(0);    // M→FIX: c_l0 ready for TSTORE
 
     // ── Cube: inner bandwidth loop ─────────────────────────────────────────────
     TileGlobal ws_out(workspace + cid * TILE_SIZE * TILE_SIZE);
@@ -147,10 +148,11 @@ AICORE void run_stream_c2v(
         // (Skip round 0: Vec hasn't touched the slot yet.)
         if (r > 0) {
             WaitCrossFlag(FLAG_V2C);
-            pipe_barrier(PIPE_ALL);
+            // No local-pipe barrier needed: after cross-core wait returns,
+            // no pending FIX-pipe work from the previous iteration remains.
         }
         TSTORE(ws_out, c_l0);           // L0C → workspace  (FIX pipe, fp32 → fp16)
-        pipe_barrier(PIPE_ALL);
+        pipe_barrier(PIPE_ALL);         // FIX: wait for DMA to complete before signaling Vec
         SetCrossFlag<PIPE_FIX>(FLAG_C2V);  // signal Vec: workspace tile is ready
     }
 
@@ -167,9 +169,10 @@ AICORE void run_stream_c2v(
 
     for (int32_t r = 0; r < num_iters; ++r) {
         WaitCrossFlag(FLAG_C2V);         // workspace tile is ready
-        pipe_barrier(PIPE_ALL);
+        pipe_barrier(PIPE_ALL);         // ensure all local pipes flushed before TLOAD
         TLOAD(c_ub, ws_in);              // workspace → UB  (MTE2 pipe)
-        pipe_barrier(PIPE_ALL);
+        SetFlag<PIPE_MTE2, PIPE_MTE3>(0);
+        WaitFlag<PIPE_MTE2, PIPE_MTE3>(0);  // MTE2→MTE3: wait for DMA before signal
         SetCrossFlag<PIPE_MTE3>(FLAG_V2C);  // signal Cube: workspace slot freed
     }
 

@@ -8,14 +8,14 @@
 //  raw_flag equivalent               │  gm_pipe (this file)
 //  ──────────────────────────────────┼─────────────────────────────────────────
 //  TSTORE(ws_half, a_ub)             │  TALLOC<V2CPipe, HalfSlot, UP_DOWN>(pipe, slot)
-//  pipe_barrier(PIPE_ALL)            │  TSTORE(slot, a_ub)  ← explicit half store
-//  SetCrossFlag<MTE3>(FLAG_V2C)      │  pipe_barrier(PIPE_ALL)
+//  SetCrossFlag<MTE3>(FLAG_V2C)      │  TSTORE(slot, a_ub)  ← explicit half store
 //                                    │  TPUSH<V2CPipe, HalfSlot, UP_DOWN>(pipe, slot)
+//                                    │    (TSTORE and TPUSH are both MTE3-pipe; ordered)
 //  ──────────────────────────────────┼─────────────────────────────────────────
 //  WaitCrossFlag(FLAG_V2C)           │  TPOP<V2CPipe, FullSlot, NO_SPLIT>(pipe, slot)
 //  TLOAD(ws_l1, ws_half)             │  TLOAD(ws_l1, slot)  ← explicit L1 load
-//  SetCrossFlag<MTE2>(FLAG_C2V)      │  pipe_barrier(PIPE_ALL)
-//                                    │  TFREE<V2CPipe, FullSlot, NO_SPLIT>(pipe, slot)
+//  SetCrossFlag<MTE2>(FLAG_C2V)      │  TFREE<V2CPipe, FullSlot, NO_SPLIT>(pipe, slot)
+//                                    │    (TLOAD and TFREE are both MTE2-pipe; ordered)
 //
 // Vec TALLOC TILE_UP_DOWN: vid=0→slot_base+0, vid=1→slot_base+T/2×T×sizeof(half).
 // Cube TPOP TILE_NO_SPLIT: Cube always gets the full T×T slot address.
@@ -80,6 +80,11 @@ using HalfTileGlobal =
                  BaseShape2D<half, HALF_TILE, TILE_SIZE, Layout::ND>,
                  Layout::ND>;
 
+template <pipe_t Src, pipe_t Dst>
+AICORE inline void SetFlag(uint32_t id) { set_flag(Src, Dst, static_cast<event_t>(id)); }
+template <pipe_t Src, pipe_t Dst>
+AICORE inline void WaitFlag(uint32_t id) { wait_flag(Src, Dst, static_cast<event_t>(id)); }
+
 AICORE void run_stream_v2c(
     __gm__ half    *A,
     __gm__ half    *D,
@@ -113,7 +118,8 @@ AICORE void run_stream_v2c(
             //   Waits for data-ready; assigns the full T×T slot address.
             TLOAD(ws_l1, pop_slot);
             //   Explicit TLOAD: TileL1<half> ← GlobalTensor<half>
-            pipe_barrier(PIPE_ALL);  // MTE2: TLOAD must finish before TFREE and next TLOAD
+            pipe_barrier(PIPE_ALL);  // MTE2: wait for DMA to complete before freeing slot
+            //   TFREE fires from MTE2 pipe after TLOAD DMA completes.
             TFREE<V2CPipe, FullSlot, TileSplitAxis::TILE_NO_SPLIT>(pipe, pop_slot);
             //   Emits free-space notification to Vec (conditional on SyncPeriod)
         }
@@ -134,10 +140,12 @@ AICORE void run_stream_v2c(
             HalfTileGlobal d_global(D + row_v * TILE_SIZE);
             TLOAD(b_ub, d_global);
 
-            pipe_barrier(PIPE_ALL);  // MTE2→V: both TLOADs done
+            SetFlag<PIPE_MTE2, PIPE_V>(0);
+            WaitFlag<PIPE_MTE2, PIPE_V>(0);   // MTE2→V: both TLOADs done before TADD
 
             TADD(a_ub, a_ub, b_ub);
-            pipe_barrier(PIPE_ALL);  // V→MTE3: TADD done before TSTORE
+            SetFlag<PIPE_V, PIPE_MTE3>(0);
+            WaitFlag<PIPE_V, PIPE_MTE3>(0);   // V→MTE3: TADD done before TSTORE
 
             // ── gm_pipe replaces raw_flag: ───────────────────────────────────
             // raw_flag: (if r>0) wait_flag_dev(FLAG_C2V), TSTORE(ws_half, a_ub),
@@ -147,7 +155,7 @@ AICORE void run_stream_v2c(
             //   vid=0→slot_base+0, vid=1→slot_base+T/2×T×sizeof(half)
             TSTORE(push_slot, a_ub);
             //   Explicit TSTORE: GlobalTensor<half> ← TileVecUB<half> (same dtype)
-            pipe_barrier(PIPE_ALL);  // MTE3: TSTORE complete before TPUSH signals Cube
+            pipe_barrier(PIPE_ALL);  // MTE3: wait for DMA to complete before TPUSH signals Cube
             TPUSH<V2CPipe, HalfSlot, TileSplitAxis::TILE_UP_DOWN>(pipe, push_slot);
             //   Sync-only: emits data-ready signal
         }

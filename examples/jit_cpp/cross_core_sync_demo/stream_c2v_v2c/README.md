@@ -42,16 +42,22 @@ NPU_DEVICE=npu:5 python $BASE/raw_flag/run_stream_c2v_v2c.py  # choose NPU
 
 | Variant | Slot | Peak (GB/s) | at num_iters |
 |---------|------|-------------|--------------|
-| raw_flag | half 32 KB | 1179 | 1024 |
-| pushpop | **float 64 KB** | **2192** | 1024 (2× slot → 2× bw) |
-| gm_pipe | half 32 KB | 1669 | 1024 |
+| raw_flag | half 32 KB | 1148 | 1024 |
+| pushpop | **float 64 KB** | **2065** | 1024 (2× slot → 2× bw) |
+| gm_pipe | half 32 KB | 1670 | 1024 |
 
 **stream_v2c** — `Vec UB → workspace → Cube L1`:
 
 | Variant | Slot | Peak (GB/s) | at num_iters |
 |---------|------|-------------|--------------|
-| raw_flag | half 32 KB | 1103 | 128 |
-| pushpop | half 32 KB | 1067 | 128 |
-| gm_pipe | half 32 KB | 1236 | 128 |
+| raw_flag | half 32 KB | 1096 | 128 |
+| pushpop | half 32 KB | 1089 | 128 |
+| gm_pipe | half 32 KB | 1229 | 512 |
 
-Note: `pushpop` C2V uses a float32 slot (64 KB) so its bandwidth is naturally 2× the half-slot variants. For a like-for-like comparison, divide the `pushpop` C2V bandwidth by 2 (~1096 GB/s), which is comparable to raw_flag (1179 GB/s).
+Note: `pushpop` C2V uses a float32 slot (64 KB) so its bandwidth is naturally 2× the half-slot variants. For a like-for-like comparison, divide the `pushpop` C2V bandwidth by 2 (~1033 GB/s), which is comparable to raw_flag (1148 GB/s).
+
+**Sync optimization applied** (vs initial implementation with `pipe_barrier(PIPE_ALL)` everywhere):
+- TMATMUL → TSTORE (Cube): replaced `pipe_barrier(PIPE_ALL)` with `SetFlag<M,FIX>; WaitFlag<M,FIX>`
+- TLOAD+TLOAD → TADD (Vec): replaced with `SetFlag<MTE2,V>; WaitFlag<MTE2,V>`
+- TADD → TSTORE (Vec): replaced with `SetFlag<V,MTE3>; WaitFlag<V,MTE3>`
+- DMA → cross-core signal: `pipe_barrier(PIPE_ALL)` **kept** (required for memory visibility)

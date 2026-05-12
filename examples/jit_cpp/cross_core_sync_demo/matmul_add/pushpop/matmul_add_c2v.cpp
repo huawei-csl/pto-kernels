@@ -152,7 +152,8 @@ AICORE void run_matmul_add_c2v(
         WaitFlag<PIPE_MTE1, PIPE_M>(0);
 
         TMATMUL(c_l0, a_l0, b_l0);
-        pipe_barrier(PIPE_ALL);  // M→FIX: c_l0 ready before TPUSH stores it
+        SetFlag<PIPE_M, PIPE_FIX>(0);
+        WaitFlag<PIPE_M, PIPE_FIX>(0);   // M→FIX: c_l0 ready before TPUSH stores it
 
         TPUSH<C2VPipe, TileL0C, TileSplitAxis::TILE_UP_DOWN>(pipe, c_l0);
         // └─ internally: TSTORE(GlobalTensor<float>, c_l0) + data-ready signal

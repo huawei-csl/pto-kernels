@@ -134,11 +134,13 @@ AICORE void run_add_matmul_v2c(
         WaitFlag<PIPE_MTE1, PIPE_M>(0);
 
         TMATMUL(c_l0, ab_l0, d_l0);
-        pipe_barrier(PIPE_ALL);
+        SetFlag<PIPE_M, PIPE_FIX>(0);
+        WaitFlag<PIPE_M, PIPE_FIX>(0);  // M→FIX: c_l0 ready for TSTORE
 
         TileGlobal c_global(C + row_c * TILE_SIZE);
         TSTORE(c_global, c_l0);
-        pipe_barrier(PIPE_ALL);
+        // Next iteration starts with TPOP (cross-core wait);
+        // c_global doesn't alias ab_l1/c_l0 — no barrier needed after TSTORE.
     }
 
 #endif  // __DAV_C220_CUBE__
@@ -153,13 +155,13 @@ AICORE void run_add_matmul_v2c(
         const int32_t row_v = r * wave_rows + cid * TILE_SIZE + vid * HALF_TILE;
 
         HalfTileGlobal a_global(A + row_v * TILE_SIZE);
-        TLOAD(a_ub, a_global);
-        HalfTileGlobal b_global(B + row_v * TILE_SIZE);
-        TLOAD(b_ub, b_global);
-        pipe_barrier(PIPE_ALL);  // MTE2→V: TLOADs done
+            TLOAD(a_ub, a_global);
+            HalfTileGlobal b_global(B + row_v * TILE_SIZE);
+            TLOAD(b_ub, b_global);
+            pipe_barrier(PIPE_ALL);  // MTE2→V: both TLOADs done before TADD
 
-        TADD(a_ub, a_ub, b_ub);
-        pipe_barrier(PIPE_ALL);  // V→MTE3: TADD done before TPUSH writes to GM
+            TADD(a_ub, a_ub, b_ub);
+            pipe_barrier(PIPE_ALL);  // V→MTE3: TADD done before TPUSH writes to GM
 
         TPUSH<V2CPipe, TileVecUB, TileSplitAxis::TILE_UP_DOWN>(pipe, a_ub);
         // └─ waits for free space (pipe.prod.allocate = wait_flag_dev),
