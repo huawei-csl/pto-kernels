@@ -10,6 +10,9 @@ TARGET_TESTS = {
     "hadamard_quant_int8": ("fuse_int8_quant/test_hadamard_quant.py",),
     "quantize_int4": ("fuse_int4_quant/test_quantize.py",),
     "hadamard_quant_int4": ("fuse_int4_quant/test_hadamard_quant.py",),
+    "hadamard_dynamic_quant_int4": (
+        "fuse_int4_dynamic_quant/test_hadamard_dynamic_quant.py",
+    ),
 }
 
 

@@ -9,6 +9,7 @@ CORE_TARGET_MODULES = {
     "hadamard_quant_int8": "fuse_int8_quant.plot_hadamard_quant",
     "quantize_int4": "fuse_int4_quant.plot_quantize",
     "hadamard_quant_int4": "fuse_int4_quant.plot_hadamard_quant",
+    "hadamard_dynamic_quant_int4": "fuse_int4_dynamic_quant.plot_hadamard_dynamic_quant",
 }
 
 TARGET_MODULES = {
