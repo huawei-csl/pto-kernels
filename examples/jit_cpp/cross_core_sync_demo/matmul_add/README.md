@@ -81,7 +81,7 @@ Peak effective external bandwidth (read A+B+D, write C; workspace not counted):
 | Variant | matmul_add_c2v peak | add_matmul_v2c peak | Notes |
 |---------|--------------------|--------------------|-------|
 | `raw_flag` | **1357 GB/s** | **1543 GB/s** | Reference pipelined, 64 rounds |
-| `pushpop` | 78 GB/s (batch=3072) | 48 GB/s (batch=3072) | num_rounds=1 only — TileData tileIndex bug prevents multi-round; overhead-dominated result |
+| `pushpop` | **1954 GB/s** (32 rounds, f32 slot) | 45 GB/s (batch=3072) | C2V: FIFO_DEPTH=1 workaround enables multi-round (f32 slot is 2× larger than f16 → 2× bw); V2C: 2-sub-block producer deadlocks with FIFO_DEPTH=1, remains rounds=1 only |
 | `gm_pipe` | **1837 GB/s** | **1496 GB/s** | 64 rounds; requires pto-isa-master headers |
 | `naive_separate` | 1174 GB/s | 1211 GB/s | No pipeline — **15–30% lower** |
 | `torch.mm + torch.add` | ~2000 GB/s\* | ~2100 GB/s\* | Two separate launches |
@@ -94,7 +94,9 @@ round-by-round, reducing the effective latency of cross-core data movement.
 
 ## Known Limitations
 
-- **pushpop multi-round**: TileData TPUSH/TPOP with `TILE_UP_DOWN` and 2 Vec sub-blocks shares `pipe.prod.tileIndex` between sub-blocks, advancing it by 2 per logical round instead of 1.  This de-syncs producer/consumer FIFO slot indices for `num_rounds > 1`.  Use the `gm_pipe` variant for multi-round workloads.
+- **pushpop multi-round (C2V)**: Applying the `FIFO_DEPTH=1` workaround (forces `SyncPeriod=1`, strict alternation) makes `matmul_add_c2v` work for arbitrary `num_rounds`.  Note the C2V slot is `float32` (64 KB), so bandwidth figures are 2× those of the half-slot variants.
+
+- **pushpop multi-round (V2C)**: `add_matmul_v2c` cannot be fixed with `FIFO_DEPTH=1`: with only 1 free signal seeded in the constructor, sub-block 0 consumes it and sub-block 1 deadlocks at `allocate()`.  V2C therefore remains scoped to `num_rounds=1`.  Use `gm_pipe` for multi-round V2C.
 
 - **gm_pipe header requirement**: `TALLOC`/`TPOP(GlobalData)`/`TFREE` are in `pto-isa-master` headers, not the default `/sources/pto-isa`.  The `gm_pipe/jit_util.py` uses `-I/workdir/pto-isa-master/include`.
 

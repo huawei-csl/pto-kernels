@@ -46,7 +46,10 @@ constexpr uint32_t L0_OFFSET    = 0u;
 constexpr uint32_t UB_A_OFFSET  = 0u;
 constexpr uint32_t UB_B_OFFSET  = HALF_TILE * TILE_SIZE * sizeof(half);  // 16 KB
 
-// FIFO_DEPTH=2 for double-buffered overlap.
+// FIFO_DEPTH=2 for V2C: both Vec sub-blocks write without blocking at allocate().
+// With FIFO_DEPTH=1 only 1 free signal is seeded, sub-block 1 deadlocks.
+// V2CPipe uses FlagID=2 (flags 2 and 3) to avoid FFTS collision with
+// C2VPipe = TPipe<0, DIR_C2V> which occupies flags 0 and 1.
 constexpr uint32_t FIFO_DEPTH     = 2u;
 constexpr uint32_t V2C_SLOT_SIZE  = TILE_SIZE * TILE_SIZE * sizeof(half); // 32 KB
 constexpr uint32_t V2C_FIFO_BYTES = FIFO_DEPTH * V2C_SLOT_SIZE;           // 64 KB/core
@@ -63,7 +66,7 @@ using TileVecUB = Tile<TileType::Vec, half, HALF_TILE, TILE_SIZE,
                        BLayout::RowMajor, HALF_TILE, TILE_SIZE,
                        SLayout::NoneBox, 512, PadValue::Null>;
 
-using V2CPipe = TPipe<0, Direction::DIR_V2C, V2C_SLOT_SIZE, FIFO_DEPTH>;
+using V2CPipe = TPipe<2, Direction::DIR_V2C, V2C_SLOT_SIZE, FIFO_DEPTH>;
 
 using TileGlobal =
     GlobalTensor<half,
@@ -139,8 +142,9 @@ AICORE void run_add_matmul_v2c(
 
         TileGlobal c_global(C + row_c * TILE_SIZE);
         TSTORE(c_global, c_l0);
-        // Next iteration starts with TPOP (cross-core wait);
-        // c_global doesn't alias ab_l1/c_l0 — no barrier needed after TSTORE.
+        // Drain FIX pipe: the in-flight TSTORE DMA (reading c_l0) must complete
+        // before the next round's (or next call's) TMATMUL writes c_l0.
+        pipe_barrier(PIPE_ALL);
     }
 
 #endif  // __DAV_C220_CUBE__

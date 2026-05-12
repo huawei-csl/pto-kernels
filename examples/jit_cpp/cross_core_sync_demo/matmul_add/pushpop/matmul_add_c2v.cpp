@@ -44,12 +44,15 @@ constexpr uint32_t L0_OFFSET   = 0u;
 constexpr uint32_t UB_D_OFFSET = 0u;  // d_ub_float: 32 KB (float, HALF_TILE rows)
 
 // ── FIFO configuration ────────────────────────────────────────────────────────
-constexpr uint32_t FIFO_DEPTH      = 2u;
+// FIFO_DEPTH=1: workaround for the TPipe tileIndex sharing bug (see PTO_API_BUGS.md).
+// With FIFO_DEPTH=2 and TILE_UP_DOWN (2 Vec sub-blocks), both sub-blocks increment
+// the same tileIndex counter → FIFO slot selection drifts after round 1.
+// FIFO_DEPTH=1 forces SyncPeriod=1 and strict alternation (no double-buffer overlap),
+// which avoids the desync at the cost of no pipeline prefetch.
+constexpr uint32_t FIFO_DEPTH      = 1u;
 constexpr uint32_t C2V_SLOT_SIZE   = TILE_SIZE * TILE_SIZE * sizeof(float); // 64 KB
-constexpr uint32_t C2V_FIFO_BYTES  = FIFO_DEPTH * C2V_SLOT_SIZE;            // 128 KB/core
+constexpr uint32_t C2V_FIFO_BYTES  = FIFO_DEPTH * C2V_SLOT_SIZE;            // 64 KB/core
 constexpr uint32_t C2V_UB_BASE     = 0x20000;  // 128 KB offset: after d_ub (32 KB)
-// TPOP assigns c_ub_float to C2V_UB_BASE + rotation * HALF_TILE*TILE_SIZE*sizeof(float)
-// Slot 0: UB[0x20000], Slot 1: UB[0x28000] — within the 192 KB UB budget.
 
 // ── Tile types ────────────────────────────────────────────────────────────────
 using TileL1 = Tile<TileType::Mat, half, TILE_SIZE, TILE_SIZE,
@@ -157,6 +160,12 @@ AICORE void run_matmul_add_c2v(
 
         TPUSH<C2VPipe, TileL0C, TileSplitAxis::TILE_UP_DOWN>(pipe, c_l0);
         // └─ internally: TSTORE(GlobalTensor<float>, c_l0) + data-ready signal
+        // FIX→MTE2: drain the FIX TSTORE DMA before the next iteration's TLOAD
+        // starts.  Without this, the in-flight FIX DMA (reading c_l0) races with
+        // the next TMATMUL (M writing c_l0) → L0C read/write conflict.
+        // Mirrors the set_flag(PIPE_FIX, PIPE_MTE2) carry-over in the pto-isa
+        // reference test (tpushpop_cv_kernel.cpp, commit aef3a004).
+        pipe_barrier(PIPE_ALL);
     }
 
 #endif  // __DAV_C220_CUBE__

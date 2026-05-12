@@ -39,12 +39,18 @@ except (RuntimeError, AssertionError):
     BLOCK_DIM = 24
 
 TILE_SIZE  = 128
-FIFO_DEPTH = 2
-# C2V: float slot → float32 fifo_mem
-C2V_FIFO_ELEMS_PER_CORE = FIFO_DEPTH * TILE_SIZE * TILE_SIZE   # float32 elements
-# V2C: half slot → float16 fifo_mem
-# V2C: FIFO_DEPTH=1 (see add_matmul_v2c.cpp for why 2-sub-block Vec requires depth=1)
-V2C_FIFO_ELEMS_PER_CORE = FIFO_DEPTH * TILE_SIZE * TILE_SIZE   # float16 elements
+# C2V: FIFO_DEPTH=1 workaround — see PTO_API_BUGS.md Bug 1
+# With FIFO_DEPTH=2 and TILE_UP_DOWN, the tileIndex desync breaks multi-round.
+# FIFO_DEPTH=1 forces SyncPeriod=1 (strict alternation), fixing multi-round for C2V.
+C2V_FIFO_DEPTH = 1
+C2V_FIFO_ELEMS_PER_CORE = C2V_FIFO_DEPTH * TILE_SIZE * TILE_SIZE   # float32 elements
+
+# V2C: FIFO_DEPTH=2 needed — with FIFO_DEPTH=1, only 1 free signal is seeded.
+# Both Vec sub-blocks call allocate() independently; sub-block 1 deadlocks if
+# the single free signal is already consumed by sub-block 0.
+# V2C is therefore scoped to num_rounds=1 (single-round correctness).
+V2C_FIFO_DEPTH = 2
+V2C_FIFO_ELEMS_PER_CORE = V2C_FIFO_DEPTH * TILE_SIZE * TILE_SIZE   # float16 elements
 
 
 def _compile(cpp_basename: str, so_basename: str, verbose: bool = True) -> str:
