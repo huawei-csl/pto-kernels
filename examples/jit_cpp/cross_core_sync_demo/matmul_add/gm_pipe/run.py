@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Correctness tests for matmul_add/gm_pipe kernels.
+Correctness tests and bandwidth benchmark for matmul_add/gm_pipe kernels.
 
 matmul_add_c2v  (gm_pipe):  C = A @ B + D   — all float16, half FIFO slot
 add_matmul_v2c  (gm_pipe):  C = (A + B) @ D — all float16, half FIFO slot
@@ -14,7 +14,7 @@ NOTE on FFTS signal accumulation:
   after each run.  Use a fresh fifo buffer PER CALL to avoid accumulation.
 
 Usage:
-    python run.py
+    python run.py            # correctness + bandwidth
     NPU_DEVICE=npu:5 python run.py
 """
 from __future__ import annotations
@@ -92,6 +92,53 @@ def _v2c_tensors(batch, tile, device):
     return dict(A=A, B=B, D=D, ref=((A + B) @ D).half())
 
 
+def _benchmark(kernel, name: str, make_tensors, warmup: int = 10,
+               repeats: int = 30) -> None:
+    print("=" * 60)
+    print(f"BENCHMARK  {name}  gm_pipe")
+    print(f"  warmup={warmup}  repeats={repeats}")
+    print("=" * 60)
+
+    wave_rows = BLOCK_DIM * TILE_SIZE
+    hdr = f"{'batch':>10}  {'rounds':>6}  {'dur_us':>10}  {'bw_GB/s':>10}"
+    print(hdr)
+    print("-" * len(hdr))
+
+    records = []
+    for num_rounds in [1, 2, 4, 8, 16, 32, 64]:
+        batch = num_rounds * wave_rows
+        tensors = make_tensors(batch, TILE_SIZE, _DEVICE)
+        A, B, D = tensors['A'], tensors['B'], tensors['D']
+        C = torch.zeros(batch, TILE_SIZE, dtype=torch.float16, device=_DEVICE)
+        fifo = torch.zeros(BLOCK_DIM * FIFO_ELEMS_PER_CORE,
+                           dtype=torch.float16, device=_DEVICE)
+
+        for _ in range(warmup):
+            kernel(A, B, C, D, fifo)
+        torch.npu.synchronize()
+
+        start = torch.npu.Event(enable_timing=True)
+        end   = torch.npu.Event(enable_timing=True)
+        start.record()
+        for _ in range(repeats):
+            kernel(A, B, C, D, fifo)
+        end.record()
+        end.synchronize()
+
+        dur_us = start.elapsed_time(end) / repeats * 1e3
+        # Bytes: read A + read B/D + read D/B + write C  (all fp16 = 2 bytes)
+        bytes_total = (batch * TILE_SIZE * 3 + TILE_SIZE * TILE_SIZE) * 2
+        bw_gbs = bytes_total / dur_us * 1e-3
+
+        print(f"{batch:>10d}  {num_rounds:>6d}  {dur_us:>10.2f}  {bw_gbs:>10.2f}")
+        records.append(dict(batch=batch, num_rounds=num_rounds,
+                            dur_us=dur_us, bw_gbs=bw_gbs))
+
+    peak_bw = max(r["bw_gbs"] for r in records)
+    print(f"\nPeak bandwidth: {peak_bw:.1f} GB/s  "
+          f"(910B2 HBM roofline ≈ 1500 GB/s)\n")
+
+
 if __name__ == "__main__":
     print(f"BLOCK_DIM={BLOCK_DIM}\n")
 
@@ -104,3 +151,6 @@ if __name__ == "__main__":
 
     _test(c2v, "matmul_add_c2v  (C = A @ B + D)",    _c2v_tensors)
     _test(v2c, "add_matmul_v2c  (C = (A + B) @ D)", _v2c_tensors)
+
+    _benchmark(c2v, "matmul_add_c2v  (C = A @ B + D)",    _c2v_tensors)
+    _benchmark(v2c, "add_matmul_v2c  (C = (A + B) @ D)", _v2c_tensors)

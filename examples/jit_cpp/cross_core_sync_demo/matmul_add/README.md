@@ -33,19 +33,22 @@ implemented in three pipelined API styles and one non-pipelined naive baseline.
 ```bash
 BASE=/workdir/pto-kernels-fork/examples/jit_cpp/cross_core_sync_demo/matmul_add
 
-# raw_flag: full multi-round correctness (30/30 seeds × rounds)
+# raw_flag: correctness (30/30 seeds × rounds) + bandwidth
 python $BASE/raw_flag/run_matmul_add_c2v.py
 python $BASE/raw_flag/run_add_matmul_v2c.py
 
-# pushpop: num_rounds=1 scope (5/5 seeds)
+# pushpop: correctness (num_rounds=1 scope)
 python $BASE/pushpop/run.py
 
-# gm_pipe: multi-round correctness (3 batch sizes × 2 kernels)
+# gm_pipe: correctness + bandwidth (both kernels in one script)
 python $BASE/gm_pipe/run.py
 
-# naive_separate: baseline (30/30 seeds × rounds, both kernels)
+# naive_separate: correctness + bandwidth vs torch baseline
 python $BASE/naive_separate/run.py
 ```
+
+Each script prints correctness results followed by a bandwidth table.
+Set `NPU_DEVICE=npu:N` to select a specific NPU.
 
 ## API Syntax Comparison (C2V direction: `C = A @ B + D`)
 
@@ -79,7 +82,7 @@ Peak effective external bandwidth (read A+B+D, write C; workspace not counted):
 |---------|--------------------|--------------------|-------|
 | `raw_flag` | **1357 GB/s** | **1543 GB/s** | Reference pipelined, 64 rounds |
 | `pushpop` | ~50 GB/s | ~30 GB/s | rounds=1 scope only (batch=3072); limited by small-batch overhead, not algorithm |
-| `gm_pipe` | **1784 GB/s** | **1478 GB/s** | 64 rounds; requires pto-isa-master headers |
+| `gm_pipe` | **1837 GB/s** | **1496 GB/s** | 64 rounds; requires pto-isa-master headers |
 | `naive_separate` | 1174 GB/s | 1211 GB/s | No pipeline — **15–30% lower** |
 | `torch.mm + torch.add` | ~2000 GB/s\* | ~2100 GB/s\* | Two separate launches |
 

@@ -159,11 +159,6 @@ AICORE void run_add_matmul_v2c(
 
             // Wait for both Vec sub-blocks to write their half-tiles.
             wait_flag_dev(FLAG_V2C_DATA);
-            // Flush all pipes (including FIX) before the next TMATMUL.
-            // Without this, the previous round's TSTORE (FIX reading c_l0) can
-            // race with the next round's TMATMUL (M writing c_l0) — same ordering
-            // that raw_flag provides via pipe_barrier after WaitCrossFlag.
-            pipe_barrier(PIPE_ALL);
 
             // Compute the current slot view (explicit GlobalTensor — the gm_pipe pattern).
             const uint32_t slot_offset = static_cast<uint32_t>(r % FIFO_DEPTH) * V2C_SLOT_SIZE;
@@ -181,19 +176,38 @@ AICORE void run_add_matmul_v2c(
                 ffts_cross_core_sync(PIPE_MTE2, 1u | (SIGNAL_MODE << 4) | (FLAG_V2C_FREE << 8));
             }
 
+            // M→MTE1 (ab_l0): wait for the previous round's TMATMUL to finish
+            // reading ab_l0 before MTE1 overwrites it with TMOV.
+            // Skipped for r=0 — no previous TMATMUL to wait for.
+            // Uses id=1 to avoid aliasing the MTE1→M flag (id=0).
+            if (r > 0) {
+                WaitFlag<PIPE_M, PIPE_MTE1>(1);
+            }
+
             TMOV(ab_l0, ab_l1);
             SetFlag<PIPE_MTE1, PIPE_M>(0);
             WaitFlag<PIPE_MTE1, PIPE_M>(0);
 
             TMATMUL(c_l0, ab_l0, d_l0);
+            // Signal MTE1: ab_l0 is no longer in use by M (TMATMUL done).
+            // Consumed by WaitFlag<M,MTE1>(1) in the next round (or the drain
+            // after the loop for the final round).
+            SetFlag<PIPE_M, PIPE_MTE1>(1);
+
             SetFlag<PIPE_M, PIPE_FIX>(0);
             WaitFlag<PIPE_M, PIPE_FIX>(0);  // M→FIX: c_l0 ready for TSTORE
 
             TileGlobal c_global(C + row_c * TILE_SIZE);
             TSTORE(c_global, c_l0);
-            // Next iteration starts with wait_flag_dev (cross-core);
-            // c_global and ab_l1/c_l0 don't alias — no barrier needed after TSTORE.
+            // FIX→M (c_l0): wait for TSTORE to finish reading c_l0 before the
+            // next TMATMUL writes it.  Uses id=1 to avoid aliasing M→FIX (id=0).
+            SetFlag<PIPE_FIX, PIPE_M>(1);
+            WaitFlag<PIPE_FIX, PIPE_M>(1);
         }
+        // Drain the M→MTE1 token left over from the final round.
+        // Without this, the next kernel call's round-1 WaitFlag<M,MTE1>(1) would
+        // consume a stale token and skip waiting, risking an L0A conflict.
+        WaitFlag<PIPE_M, PIPE_MTE1>(1);
     }
 
     // ── Vec: compute A+B, write to slot view, signal Cube ─────────────────────
