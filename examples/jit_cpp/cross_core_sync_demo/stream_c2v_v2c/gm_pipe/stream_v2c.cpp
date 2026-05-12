@@ -65,7 +65,9 @@ using TileVecUB = Tile<TileType::Vec, half, HALF_TILE, TILE_SIZE,
                        BLayout::RowMajor, HALF_TILE, TILE_SIZE,
                        SLayout::NoneBox, 512, PadValue::Null>;
 
-using V2CPipe = TPipe<0, Direction::DIR_V2C, V2C_SLOT_SIZE, FIFO_DEPTH>;
+// Use FlagID=2 (FFTS flags 2 and 3) to avoid collision with stream_c2v's
+// C2VPipe = TPipe<0, DIR_C2V> which occupies flags 0 (push) and 1 (free).
+using V2CPipe = TPipe<2, Direction::DIR_V2C, V2C_SLOT_SIZE, FIFO_DEPTH>;
 
 // Vec writes T/2 rows per sub-block (TILE_UP_DOWN).
 using HalfSlot = GlobalTensor<half, pto::Shape<1, 1, 1, HALF_TILE, TILE_SIZE>,

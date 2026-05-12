@@ -31,13 +31,13 @@ implemented in three pipelined API styles and one non-pipelined naive baseline.
 ## Reproduce
 
 ```bash
-BASE=/workdir/pto-kernels-fork/examples/jit_cpp/cross_core_sync_demo/matmul_add
+BASE=examples/jit_cpp/cross_core_sync_demo/matmul_add
 
 # raw_flag: correctness (30/30 seeds × rounds) + bandwidth
 python $BASE/raw_flag/run_matmul_add_c2v.py
 python $BASE/raw_flag/run_add_matmul_v2c.py
 
-# pushpop: correctness (num_rounds=1 scope)
+# pushpop: correctness (num_rounds=1 scope) + bandwidth at batch=3072
 python $BASE/pushpop/run.py
 
 # gm_pipe: correctness + bandwidth (both kernels in one script)
@@ -81,7 +81,7 @@ Peak effective external bandwidth (read A+B+D, write C; workspace not counted):
 | Variant | matmul_add_c2v peak | add_matmul_v2c peak | Notes |
 |---------|--------------------|--------------------|-------|
 | `raw_flag` | **1357 GB/s** | **1543 GB/s** | Reference pipelined, 64 rounds |
-| `pushpop` | ~50 GB/s | ~30 GB/s | rounds=1 scope only (batch=3072); limited by small-batch overhead, not algorithm |
+| `pushpop` | 78 GB/s (batch=3072) | 48 GB/s (batch=3072) | num_rounds=1 only — TileData tileIndex bug prevents multi-round; overhead-dominated result |
 | `gm_pipe` | **1837 GB/s** | **1496 GB/s** | 64 rounds; requires pto-isa-master headers |
 | `naive_separate` | 1174 GB/s | 1211 GB/s | No pipeline — **15–30% lower** |
 | `torch.mm + torch.add` | ~2000 GB/s\* | ~2100 GB/s\* | Two separate launches |

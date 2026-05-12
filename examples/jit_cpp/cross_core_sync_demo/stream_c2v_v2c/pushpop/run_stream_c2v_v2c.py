@@ -38,12 +38,13 @@ WARMUP  = 5
 REPEATS = 20
 
 
-def _time_kernel(fn, *args, num_iters: int) -> float:
+def _time_kernel(fn, data_args: tuple, num_iters: int, fifos: list, offset: int) -> float:
+    """Time REPEATS calls, each using a fresh fifo from the pre-allocated pool."""
     start = torch.npu.Event(enable_timing=True)
     end   = torch.npu.Event(enable_timing=True)
     start.record()
-    for _ in range(REPEATS):
-        fn(*args, num_iters)
+    for i in range(REPEATS):
+        fn(*data_args, fifos[offset + i], num_iters)
     end.record()
     end.synchronize()
     return start.elapsed_time(end) / REPEATS * 1e3  # ms → µs
@@ -61,25 +62,38 @@ def run_c2v(kernel) -> None:
     wave_rows = BLOCK_DIM * TILE_SIZE
     A  = torch.randn(wave_rows, TILE_SIZE, dtype=torch.float16, device=_DEVICE)
     B  = torch.randn(TILE_SIZE, TILE_SIZE, dtype=torch.float16, device=_DEVICE)
-    # fifo_mem: float32, one entry per slot element
-    fifo_mem = torch.zeros(BLOCK_DIM * C2V_FIFO_ELEMS_PER_CORE,
-                           dtype=torch.float32, device=_DEVICE)
 
-    kernel(A, B, fifo_mem, 4)
+    # Smoke check with a fresh fifo
+    fifo_smoke = torch.zeros(BLOCK_DIM * C2V_FIFO_ELEMS_PER_CORE,
+                             dtype=torch.float32, device=_DEVICE)
+    kernel(A, B, fifo_smoke, 4)
     torch.npu.synchronize()
     print("  smoke (num_iters=4): OK\n")
 
+    records = []
     for num_iters in [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]:
-        for _ in range(WARMUP):
-            kernel(A, B, fifo_mem, num_iters)
+        # Pre-allocate one fresh fifo per call (warmup + repeats) so TPipe's
+        # internal head/tail state never accumulates across calls.
+        n_calls = WARMUP + REPEATS
+        fifos = [torch.zeros(BLOCK_DIM * C2V_FIFO_ELEMS_PER_CORE,
+                             dtype=torch.float32, device=_DEVICE)
+                 for _ in range(n_calls)]
+
+        for i in range(WARMUP):
+            kernel(A, B, fifos[i], num_iters)
         torch.npu.synchronize()
 
-        dur_us = _time_kernel(kernel, A, B, fifo_mem, num_iters=num_iters)
+        dur_us = _time_kernel(kernel, (A, B), num_iters=num_iters,
+                              fifos=fifos, offset=WARMUP)
         # float slot: 4 bytes per element; ×2 for write+read round-trip
         bw_gbs = 2 * BLOCK_DIM * TILE_SIZE * TILE_SIZE * 4 * num_iters / dur_us * 1e-3
         print(f"{num_iters:>10d}  {dur_us:>10.2f}  {bw_gbs:>10.1f}")
+        records.append((num_iters, dur_us, bw_gbs))
 
-    print()
+    peak_bw = max(r[2] for r in records)
+    peak_ni = max(records, key=lambda r: r[2])[0]
+    print(f"\nPeak: {peak_bw:.1f} GB/s at num_iters={peak_ni}  "
+          f"(910B2 HBM roofline ≈ 1500 GB/s)\n")
 
 
 def run_v2c(kernel) -> None:
@@ -92,29 +106,41 @@ def run_v2c(kernel) -> None:
     print("-" * len(header))
 
     wave_rows = BLOCK_DIM * TILE_SIZE
-    fifo_mem  = torch.zeros(BLOCK_DIM * V2C_FIFO_ELEMS_PER_CORE,
-                            dtype=torch.float16, device=_DEVICE)
 
+    # Smoke check
+    fifo_smoke = torch.zeros(BLOCK_DIM * V2C_FIFO_ELEMS_PER_CORE,
+                             dtype=torch.float16, device=_DEVICE)
     A_smoke = torch.randn(4 * wave_rows, TILE_SIZE, dtype=torch.float16, device=_DEVICE)
     D_smoke = torch.randn(4 * wave_rows, TILE_SIZE, dtype=torch.float16, device=_DEVICE)
-    kernel(A_smoke, D_smoke, fifo_mem, 4)
+    kernel(A_smoke, D_smoke, fifo_smoke, 4)
     torch.npu.synchronize()
     print("  smoke (num_iters=4): OK\n")
 
+    records = []
     for num_iters in [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]:
         total_rows = num_iters * wave_rows
         A = torch.randn(total_rows, TILE_SIZE, dtype=torch.float16, device=_DEVICE)
         D = torch.randn(total_rows, TILE_SIZE, dtype=torch.float16, device=_DEVICE)
 
-        for _ in range(WARMUP):
-            kernel(A, D, fifo_mem, num_iters)
+        n_calls = WARMUP + REPEATS
+        fifos = [torch.zeros(BLOCK_DIM * V2C_FIFO_ELEMS_PER_CORE,
+                             dtype=torch.float16, device=_DEVICE)
+                 for _ in range(n_calls)]
+
+        for i in range(WARMUP):
+            kernel(A, D, fifos[i], num_iters)
         torch.npu.synchronize()
 
-        dur_us = _time_kernel(kernel, A, D, fifo_mem, num_iters=num_iters)
+        dur_us = _time_kernel(kernel, (A, D), num_iters=num_iters,
+                              fifos=fifos, offset=WARMUP)
         bw_gbs = 2 * BLOCK_DIM * TILE_SIZE * TILE_SIZE * 2 * num_iters / dur_us * 1e-3
         print(f"{num_iters:>10d}  {dur_us:>10.2f}  {bw_gbs:>10.1f}")
+        records.append((num_iters, dur_us, bw_gbs))
 
-    print()
+    peak_bw = max(r[2] for r in records)
+    peak_ni = max(records, key=lambda r: r[2])[0]
+    print(f"\nPeak: {peak_bw:.1f} GB/s at num_iters={peak_ni}  "
+          f"(910B2 HBM roofline ≈ 1500 GB/s)\n")
 
 
 if __name__ == "__main__":

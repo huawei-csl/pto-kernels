@@ -27,7 +27,7 @@ Key differences:
 ## Reproduce
 
 ```bash
-BASE=examples/jit_cpp/cross_core_sync_demo/stream_c2v_v2c
+BASE=/workdir/pto-kernels-fork/examples/jit_cpp/cross_core_sync_demo/stream_c2v_v2c
 
 python $BASE/raw_flag/run_stream_c2v_v2c.py
 python $BASE/pushpop/run_stream_c2v_v2c.py
@@ -36,25 +36,34 @@ python $BASE/gm_pipe/run_stream_c2v_v2c.py
 NPU_DEVICE=npu:5 python $BASE/raw_flag/run_stream_c2v_v2c.py  # choose NPU
 ```
 
+Each script runs a smoke check followed by a full bandwidth sweep over
+`num_iters ∈ {1, 2, 4, … 1024}` and prints the peak GB/s.
+
 ## Results (910B2, 24 Cube cores)
 
 **stream_c2v** — `Cube L0C → workspace → Vec UB`:
 
 | Variant | Slot | Peak (GB/s) | at num_iters |
 |---------|------|-------------|--------------|
-| raw_flag | half 32 KB | 1148 | 1024 |
-| pushpop | **float 64 KB** | **2065** | 1024 (2× slot → 2× bw) |
-| gm_pipe | half 32 KB | 1670 | 1024 |
+| raw_flag | half 32 KB | 1152 | 1024 |
+| pushpop | **float 64 KB** | **2133–2194** | 1024 (2× slot → 2× bw) |
+| gm_pipe | half 32 KB | 1666 | 1024 |
 
 **stream_v2c** — `Vec UB → workspace → Cube L1`:
 
 | Variant | Slot | Peak (GB/s) | at num_iters |
 |---------|------|-------------|--------------|
-| raw_flag | half 32 KB | 1096 | 128 |
-| pushpop | half 32 KB | 1089 | 128 |
-| gm_pipe | half 32 KB | 1229 | 512 |
+| raw_flag | half 32 KB | 1098 | 128 |
+| pushpop | half 32 KB | 1106–1128 | 512–1024 |
+| gm_pipe | half 32 KB | 1233 | 512 |
 
-Note: `pushpop` C2V uses a float32 slot (64 KB) so its bandwidth is naturally 2× the half-slot variants. For a like-for-like comparison, divide the `pushpop` C2V bandwidth by 2 (~1033 GB/s), which is comparable to raw_flag (1148 GB/s).
+Note: `pushpop` C2V uses a float32 slot (64 KB) so its bandwidth is naturally 2× the half-slot variants. For a like-for-like comparison, divide by 2 (~1067–1097 GB/s), which is comparable to raw_flag (1152 GB/s) and gm_pipe (1666 GB/s).
+
+Previously `pushpop/run_stream_c2v_v2c.py` crashed mid-benchmark because it
+reused the same `fifo_mem` across all calls, causing TPipe internal head/tail
+state to accumulate.  The fix: pre-allocate one fresh fifo per call (warmup +
+repeats) and use a different buffer each time.  `V2CPipe` was also changed from
+`TPipe<0>` to `TPipe<2>` to avoid FFTS flag collision with `C2VPipe = TPipe<0>`.
 
 **Sync optimization applied** (vs initial implementation with `pipe_barrier(PIPE_ALL)` everywhere):
 - TMATMUL → TSTORE (Cube): replaced `pipe_barrier(PIPE_ALL)` with `SetFlag<M,FIX>; WaitFlag<M,FIX>`

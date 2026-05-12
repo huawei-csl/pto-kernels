@@ -76,7 +76,9 @@ AICORE inline void WaitFlag(uint32_t id) { wait_flag(Src, Dst, static_cast<event
 // FlagID=0, DIR_V2C, slot=half32KB, depth=2.
 // TPUSH calls TSTORE(GlobalTensor<half>, a_ub) — same dtype, no conversion.
 // TPOP  calls TLOAD(GlobalTensor<half>, ws_l1) — loads half into L1.
-using V2CPipe = TPipe<0, Direction::DIR_V2C, V2C_SLOT_SIZE, FIFO_DEPTH>;
+// Use FlagID=2 (FFTS flags 2 and 3) to avoid collision with stream_c2v's
+// C2VPipe = TPipe<0, DIR_C2V> which occupies flags 0 (push) and 1 (free).
+using V2CPipe = TPipe<2, Direction::DIR_V2C, V2C_SLOT_SIZE, FIFO_DEPTH>;
 
 using HalfTileGlobal =
     GlobalTensor<half,

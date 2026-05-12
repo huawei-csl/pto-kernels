@@ -110,18 +110,24 @@ def _benchmark(kernel, name: str, make_tensors, warmup: int = 10,
         tensors = make_tensors(batch, TILE_SIZE, _DEVICE)
         A, B, D = tensors['A'], tensors['B'], tensors['D']
         C = torch.zeros(batch, TILE_SIZE, dtype=torch.float16, device=_DEVICE)
-        fifo = torch.zeros(BLOCK_DIM * FIFO_ELEMS_PER_CORE,
-                           dtype=torch.float16, device=_DEVICE)
 
-        for _ in range(warmup):
-            kernel(A, B, C, D, fifo)
+        # Pre-allocate a fresh fifo for every call so TPipe FIFO head/tail
+        # pointers stored inside fifo_mem never accumulate across calls.
+        # Allocation happens before the timing window — no overhead inside timer.
+        n_calls = warmup + repeats
+        fifos = [torch.zeros(BLOCK_DIM * FIFO_ELEMS_PER_CORE,
+                             dtype=torch.float16, device=_DEVICE)
+                 for _ in range(n_calls)]
+
+        for i in range(warmup):
+            kernel(A, B, C, D, fifos[i])
         torch.npu.synchronize()
 
         start = torch.npu.Event(enable_timing=True)
         end   = torch.npu.Event(enable_timing=True)
         start.record()
-        for _ in range(repeats):
-            kernel(A, B, C, D, fifo)
+        for i in range(repeats):
+            kernel(A, B, C, D, fifos[warmup + i])
         end.record()
         end.synchronize()
 

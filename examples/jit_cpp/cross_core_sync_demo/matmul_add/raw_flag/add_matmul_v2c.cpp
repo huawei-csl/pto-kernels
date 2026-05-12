@@ -200,9 +200,14 @@ AICORE void run_add_matmul_v2c(
         // Store result (fp32 → fp16) to global memory C.
         TileGlobal c_global(C + row_c * TILE_SIZE);
         TSTORE(c_global, c_l0);
-        // Next iteration starts with WaitCrossFlag (cross-core);
-        // c_global and ab_l1/c_l0 don't alias — no barrier needed after TSTORE.
+        // Drain FIX pipe before the loop back-edge (or kernel exit on the last
+        // round): the next TMATMUL writes c_l0, so FIX must finish reading it.
+        // Back-to-back benchmark invocations would otherwise trigger an L0C
+        // read/write conflict (same pattern that raw_flag matmul_add_c2v avoids
+        // with its pipe_barrier before SetCrossFlag).
+        pipe_barrier(PIPE_ALL);
     }
+    // pipe_barrier(PIPE_ALL) inside the loop already drained the last round.
 
 #endif  // __DAV_C220_CUBE__
 

@@ -70,8 +70,10 @@ constexpr uint32_t V2C_SLOT_SIZE   = TILE_SIZE * TILE_SIZE * sizeof(half); // 32
 constexpr uint32_t V2C_FIFO_BYTES  = FIFO_DEPTH * V2C_SLOT_SIZE;           // 64 KB/core
 
 // FFTS flag assignments (raw, not managed by TPipe)
-constexpr uint32_t FLAG_V2C_DATA = 0;  // Vec signals Cube: slot written
-constexpr uint32_t FLAG_V2C_FREE = 1;  // Cube signals Vec: slot consumed
+// Use IDs 2 and 3 to avoid collision with matmul_add_c2v's TPipe<0> which
+// internally occupies flags 0 (push/data-ready) and 1 (free/slot-returned).
+constexpr uint32_t FLAG_V2C_DATA = 2;  // Vec signals Cube: slot written
+constexpr uint32_t FLAG_V2C_FREE = 3;  // Cube signals Vec: slot consumed
 // mode=2 (CV_CORES_SYNC): one Cube broadcast → both Vec sub-blocks unblock,
 //                         both Vec sub-blocks signal → Cube unblocks.
 constexpr uint32_t SIGNAL_MODE   = 2;
