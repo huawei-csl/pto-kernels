@@ -20,6 +20,17 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(PIP_INSTALL "True if building via pip" OFF)
 
+set(BASE_MODE
+    "MEMORY"
+    CACHE STRING "Base addressing mode: MEMORY or REGISTER")
+set_property(CACHE BASE_MODE PROPERTY STRINGS "MEMORY" "REGISTER")
+
+find_program(CCACHE_PROGRAM ccache)
+if(CCACHE_PROGRAM)
+  set(CMAKE_C_COMPILER_LAUNCHER ${CCACHE_PROGRAM})
+  set(CMAKE_CXX_COMPILER_LAUNCHER ${CCACHE_PROGRAM})
+endif()
+
 find_package(Python REQUIRED COMPONENTS Interpreter Development)
 find_package(pybind11 CONFIG REQUIRED)
 find_package(Torch REQUIRED)
@@ -78,10 +89,14 @@ include(${ASCENDC_CMAKE_DIR}/ascendc.cmake)
 
 include(FetchContent)
 
+# certain operations need newer pto-isa header, not CANN 8.5.0 default (pin
+# commit on 2026/03/16
+# https://gitcode.com/cann/pto-isa/commit/313817be696792a4e16a7ea5994ec98e34391613?ref=master)
+# to use default CANN 8.5.0 headers set GIT_TAG "8.5.0"
 FetchContent_Declare(
   libpto_isa_headers
   GIT_REPOSITORY https://gitcode.com/cann/pto-isa.git
-  GIT_TAG 8.5.0)
+  GIT_TAG v9.0.0)
 
 FetchContent_Populate(libpto_isa_headers)
 
@@ -109,22 +124,38 @@ ascendc_library(
   SHARED
   csrc/kernel/kernel_tri_inv_col_sweep.cpp
   csrc/kernel/kernel_abs.cpp
+  csrc/kernel/kernel_chunk_cumsum.cpp
+  csrc/kernel/kernel_csr_gather.cpp
+  csrc/kernel/kernel_gdn_chunk_h.cpp
+  csrc/kernel/kernel_gdn_scaled_dot_kkt.cpp
+  csrc/kernel/kernel_gdn_chunk_o.cpp
+  csrc/kernel/kernel_scan_ul1.cpp
   csrc/kernel/kernel_simple_matmul.cpp
   csrc/kernel/kernel_batch_matrix_square.cpp
+  csrc/kernel/kernel_tri_inv_ns.cpp
   csrc/kernel/kernel_tri_inv_rec_unroll.cpp
-  csrc/kernel/kernel_tri_inv_trick.cpp)
+  csrc/kernel/kernel_tri_inv_trick.cpp
+  csrc/kernel/kernel_swiglu.cpp
+  csrc/kernel/kernel_gdn_wy_fast.cpp)
 
 ascendc_include_directories(
   no_workspace_kernel PRIVATE ${libpto_isa_headers_SOURCE_DIR}/include
   ${libpto_isa_headers_SOURCE_DIR}/include/pto/common)
 
+if(BASE_MODE STREQUAL "MEMORY")
+  message(STATUS "BASE_MODE is MEMORY")
+  ascendc_compile_definitions(no_workspace_kernel PRIVATE -DMEMORY_BASE)
+elseif(BASE_MODE STREQUAL "REGISTER")
+  message(STATUS "BASE_MODE is REGISTER")
+  ascendc_compile_definitions(no_workspace_kernel PRIVATE -DREGISTER_BASE)
+else()
+  message(FATAL_ERROR "BASE_MODE must be MEMORY or REGISTER, got: ${BASE_MODE}")
+endif()
+
 pybind11_add_module(pto_kernels_ops csrc/host/pybind11.cpp)
 
-target_link_libraries(
-  pto_kernels_ops
-  PRIVATE ${TORCH_LIBRARIES} c10 torch_cpu torch_npu
-          platform # Required for 'ascendc_platform->GetCoreNumAic()'
-          no_workspace_kernel)
+target_link_libraries(pto_kernels_ops PRIVATE ${TORCH_LIBRARIES} c10 torch_cpu
+                                              torch_npu no_workspace_kernel)
 
 target_link_directories(pto_kernels_ops PRIVATE ${TORCH_INSTALL_PREFIX}/lib
                         ${TORCH_NPU_PATH}/lib)

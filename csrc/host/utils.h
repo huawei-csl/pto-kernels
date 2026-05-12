@@ -12,6 +12,7 @@ full text of the License.
 #pragma once
 
 #include <ATen/ATen.h>
+#include <acl/acl.h>
 #include <torch/library.h>
 
 #include "torch_npu/csrc/core/npu/NPUStream.h"
@@ -20,6 +21,53 @@ full text of the License.
 namespace pto_isa_ops {
 
 #define DEVICE_TYPE c10::DeviceType::PrivateUse1
+
+// Copied from tools/build/asc_rt/ascendc_runtime.h to avoid dependency on the
+// header file. See
+// https://gitcode.com/cann/asc-devkit/blob/v8.5.0/tools/build/asc_rt/ascendc_runtime.h
+#define ASSERT_RETVAL(exp, ret)         \
+  do {                                  \
+    if (!(exp)) {                       \
+      printf("Assert %s failed", #exp); \
+      return (ret);                     \
+    }                                   \
+  } while (0)
+
+#define ASSERT_RTOK_RETVAL(v) ASSERT_RETVAL(((v) == 0), (1))
+
+/**
+ * @brief Returns the number of Cube cores on the specified device.
+ *
+ * Important: aclInit() must be called before this function to initialize the
+ * ACL runtime.
+ *
+ * @param [in] device_id Device ID, default is 0.
+ * @return uint32_t Number of Cube cores on the specified device.
+ */
+uint32_t GetNumCubeCores(int32_t device_id = 0) {
+  int64_t aicoreNum64 = 0;
+  ASSERT_RTOK_RETVAL(aclrtGetDevice(&device_id));
+  ASSERT_RTOK_RETVAL(aclrtGetDeviceInfo(device_id, ACL_DEV_ATTR_AICORE_CORE_NUM,
+                                        &aicoreNum64));
+  return static_cast<uint32_t>(aicoreNum64);
+}
+
+/**
+ * @brief Get the number of vector Cores.
+ *
+ * Important: aclInit() must be called before this function to initialize the
+ * ACL runtime.
+ *
+ * @param [in] device_id Device ID, default is 0.
+ * @return uint32_t Number of vector cores on the specified device.
+ */
+uint32_t GetNumVectorCores(int32_t device_id = 0) {
+  int64_t numVectorCores = 0;
+  ASSERT_RTOK_RETVAL(aclrtGetDevice(&device_id));
+  ASSERT_RTOK_RETVAL(aclrtGetDeviceInfo(device_id, ACL_DEV_ATTR_VECTOR_CORE_NUM,
+                                        &numVectorCores));
+  return static_cast<uint32_t>(numVectorCores);
+}
 
 /**
  * @brief Copies a tensor from host to device.

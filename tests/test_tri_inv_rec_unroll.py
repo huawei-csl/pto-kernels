@@ -6,32 +6,34 @@
 # for the full License text.
 # --------------------------------------------------------------------------------
 
-
 import torch
-from pto_kernels import pto_tri_inv_rec_unroll
 import pytest
 import numpy as np
-import os
 import random
 from typing import Callable
+from pto_kernels import pto_tri_inv_rec_unroll
 
 random.seed(42)
 torch.manual_seed(42)
 np.random.seed(42)
 
-NPU_DEVICE = os.environ.get("NPU_DEVICE", "npu:1")
-torch.npu.config.allow_internal_format = False
-torch.npu.set_device(NPU_DEVICE)
+
+def random_tri_matrix(n, block_dim_x, block_dim_y, scale=0.1, is_lower=False):
+    if is_lower:
+        return scale * torch.tril(
+            torch.rand((block_dim_x, block_dim_y, n, n)), diagonal=-1
+        )
+    else:
+        return scale * torch.triu(
+            torch.rand((block_dim_x, block_dim_y, n, n)), diagonal=1
+        )
 
 
-def random_triu_matrix(n, block_dim_x, block_dim_y, scale=0.1):
-    U = scale * torch.triu(torch.rand((block_dim_x, block_dim_y, n, n)), diagonal=1)
-    return U
-
-
-def ones_triu_matrix(n, block_dim_x, block_dim_y):
-    U = torch.triu(torch.ones((block_dim_x, block_dim_y, n, n)), diagonal=1)
-    return U
+def ones_tri_matrix(n, block_dim_x, block_dim_y, is_lower=False):
+    if is_lower:
+        return torch.tril(torch.ones((block_dim_x, block_dim_y, n, n)), diagonal=-1)
+    else:
+        return torch.triu(torch.ones((block_dim_x, block_dim_y, n, n)), diagonal=1)
 
 
 def block_ones_triu_matrix(n, block_dim_x, block_dim_y):
@@ -58,26 +60,42 @@ def block_random_triu_matrix(n, block_dim_x, block_dim_y, scale=0.2):
     return torch.from_numpy(U)
 
 
-def _test_tri_inv_trick(U: torch.tensor, atol: float, rtol: float, ftol: float):
-
+def linalg_inv(U: torch.tensor) -> torch.tensor:
     n = U.shape[-1]
-    U = U.to(torch.half)
-    U_npu = U.to(NPU_DEVICE)
-    torch.npu.synchronize()
-
-    Identity = np.ones((n, n), dtype=np.double)
-    Identity = np.triu(Identity)
-    Identity = np.tril(Identity)
+    Identity = np.eye(n, dtype=np.double)
     golden_numpy = np.zeros((U.shape))
     for x in range(U.shape[0]):
         for y in range(U.shape[1]):
             golden_numpy[x, y] = np.linalg.inv(
-                U[x, y].numpy().astype(np.double) + Identity
+                U[x, y].double().numpy().astype(np.double) + Identity
             )
-    golden_cpu = torch.from_numpy(golden_numpy)
+    return torch.from_numpy(golden_numpy)
+
+
+def _test_tri_inv_rec_unroll(
+    A: torch.tensor,
+    atol: float,
+    rtol: float,
+    ftol: float,
+    is_lower: bool,
+    input_dtype: torch.dtype = torch.float16,
+    output_dtype: torch.dtype = torch.float16,
+):
+
+    # Make sure A is lower triangular and contiguous in memory.
+    if is_lower:
+        A = A.transpose(-1, -2).contiguous().to(input_dtype)
+    else:
+        A = A.contiguous().to(input_dtype)
+
+    golden_cpu = linalg_inv(A)
+
+    A_npu = A.npu()
 
     torch.npu.synchronize()
-    actual = pto_tri_inv_rec_unroll(U_npu)
+    actual = pto_tri_inv_rec_unroll(
+        A_npu, is_bsnd_format=False, dtype_out=output_dtype, is_lower=is_lower
+    )
     torch.npu.synchronize()
     actual_cpu = actual.cpu()
     torch.npu.synchronize()
@@ -91,23 +109,112 @@ def _test_tri_inv_trick(U: torch.tensor, atol: float, rtol: float, ftol: float):
 
     assert np.allclose(
         actual_numpy, golden_numpy, atol=atol, rtol=rtol
-    ), f"Error at allclose - tensor shape: {U.shape} - rtol: {rtol}."
+    ), f"Error at allclose - tensor shape: {A.shape} - rtol: {rtol}."
+    assert frob_error <= ftol, f"frob_error: {frob_error}"
+
+
+# pylint: disable=too-many-function-args,too-many-positional-arguments
+def _test_tri_inv_rec_unroll_bsnd(
+    A: torch.tensor,
+    B: int,
+    S: int,
+    N: int,
+    D: int,
+    atol: float,
+    rtol: float,
+    ftol: float,
+    is_lower: bool,
+    input_dtype: torch.dtype = torch.float16,
+    output_dtype: torch.dtype = torch.float16,
+):
+
+    # Make sure U is lower triangular and contiguous in memory.
+    if is_lower:
+        A = A.transpose(-1, -2).contiguous().to(input_dtype)
+    else:
+        A = A.contiguous().to(input_dtype)
+
+    golden_cpu = linalg_inv(A)
+
+    # Transform to bsnd layout
+    A_bsnd = A.transpose(1, 2).contiguous().reshape(B, S, N, D)
+    golden_cpu = golden_cpu.transpose(1, 2).contiguous().reshape(B, S, N, D)
+    torch.npu.synchronize()
+
+    A_bsnd_npu = A_bsnd.npu()
+
+    torch.npu.synchronize()
+    actual = pto_tri_inv_rec_unroll(
+        A_bsnd_npu, is_bsnd_format=True, is_lower=is_lower, dtype_out=output_dtype
+    )
+    torch.npu.synchronize()
+    actual_cpu = actual.cpu()
+    torch.npu.synchronize()
+    actual_cpu = actual_cpu.to(torch.float64)
+    frob_error = torch.sqrt(
+        torch.sum((golden_cpu - actual_cpu) * (golden_cpu - actual_cpu))
+        / torch.sum(golden_cpu * golden_cpu)
+    )
+    actual_numpy = actual_cpu.numpy()
+    golden_numpy = golden_cpu.numpy()
+
+    assert np.allclose(
+        actual_numpy, golden_numpy, atol=atol, rtol=rtol
+    ), f"Error at allclose - tensor shape: {A.shape} - rtol: {rtol}."
     assert frob_error <= ftol, f"frob_error: {frob_error}"
 
 
 @pytest.mark.parametrize("n", [16, 32, 64, 128])
-@pytest.mark.parametrize("block_dim_x", [1, 3, 7, 16])
-@pytest.mark.parametrize("block_dim_y", [1, 2, 4, 16])
+@pytest.mark.parametrize("block_dim_x", [1, 2, 3, 4])
+@pytest.mark.parametrize("block_dim_y", [2, 4, 8])
 @pytest.mark.parametrize(
-    "matrix_gen,atol,rtol,ftol",
+    "matrix_gen,atol,rtol,ftol,is_lower,input_dtype,output_dtype",
     [
-        (block_ones_triu_matrix, 0, 0, 0),
-        (ones_triu_matrix, 0, 0, 0),
-        (block_random_triu_matrix, 5e-5, 0.1, 1e-4),
-        (random_triu_matrix, 5e-5, 0.1, 1e-4),
+        (block_ones_triu_matrix, 0, 0, 0, False, torch.float16, torch.float16),
+        (ones_tri_matrix, 0, 0, 0, False, torch.float16, torch.float16),
+        (ones_tri_matrix, 0, 0, 0, True, torch.float16, torch.float16),
+        (
+            block_random_triu_matrix,
+            5e-5,
+            0.1,
+            1e-4,
+            False,
+            torch.float16,
+            torch.float16,
+        ),
+        (random_tri_matrix, 5e-5, 0.1, 1e-4, False, torch.float16, torch.float16),
+        (random_tri_matrix, 5e-5, 0.1, 1e-4, True, torch.float16, torch.float16),
+        (block_ones_triu_matrix, 0, 0, 0, False, torch.float16, torch.float32),
+        (ones_tri_matrix, 0, 0, 0, False, torch.float16, torch.float32),
+        (ones_tri_matrix, 0, 0, 0, True, torch.float16, torch.float32),
+        (
+            block_random_triu_matrix,
+            5e-5,
+            0.1,
+            1e-4,
+            False,
+            torch.float16,
+            torch.float32,
+        ),
+        (random_tri_matrix, 5e-5, 0.1, 1e-4, False, torch.float16, torch.float32),
+        (random_tri_matrix, 5e-5, 0.1, 1e-4, True, torch.float16, torch.float32),
+        (block_ones_triu_matrix, 0, 0, 0, False, torch.bfloat16, torch.float32),
+        (ones_tri_matrix, 0, 0, 0, False, torch.bfloat16, torch.float32),
+        (ones_tri_matrix, 0, 0, 0, True, torch.bfloat16, torch.float32),
+        (
+            block_random_triu_matrix,
+            5e-4,
+            0.1,
+            1e-3,
+            False,
+            torch.bfloat16,
+            torch.float32,
+        ),
+        (random_tri_matrix, 5e-5, 0.1, 1e-3, False, torch.bfloat16, torch.float32),
+        (random_tri_matrix, 5e-5, 0.1, 1e-3, True, torch.bfloat16, torch.float32),
     ],
 )
-def test_tri_inv_trick_ones(
+def test_tri_inv_rec_unroll(
     n: int,
     block_dim_x: int,
     block_dim_y: int,
@@ -115,6 +222,83 @@ def test_tri_inv_trick_ones(
     atol: float,
     rtol: float,
     ftol: float,
+    is_lower: bool,
+    input_dtype: torch.dtype,
+    output_dtype: torch.dtype,
 ):
     U = matrix_gen(n, block_dim_x, block_dim_y)
-    _test_tri_inv_trick(U, atol, rtol, ftol)
+    _test_tri_inv_rec_unroll(U, atol, rtol, ftol, is_lower, input_dtype, output_dtype)
+
+
+@pytest.mark.parametrize("B", [1, 4])
+@pytest.mark.parametrize("S", [128, 256, 1024])
+@pytest.mark.parametrize("N", [4, 8])
+@pytest.mark.parametrize("C", [16, 32, 64, 128])
+@pytest.mark.parametrize(
+    "matrix_gen,atol,rtol,ftol,is_lower,input_dtype,output_dtype",
+    [
+        (block_ones_triu_matrix, 0, 0, 0, False, torch.float16, torch.float16),
+        (ones_tri_matrix, 0, 0, 0, False, torch.float16, torch.float16),
+        (ones_tri_matrix, 0, 0, 0, True, torch.float16, torch.float16),
+        (
+            block_random_triu_matrix,
+            5e-4,
+            0.1,
+            1e-3,
+            False,
+            torch.float16,
+            torch.float16,
+        ),
+        (random_tri_matrix, 5e-5, 0.1, 1e-4, False, torch.float16, torch.float16),
+        (random_tri_matrix, 5e-5, 0.1, 1e-4, True, torch.float16, torch.float16),
+        (block_ones_triu_matrix, 0, 0, 0, False, torch.float16, torch.float32),
+        (ones_tri_matrix, 0, 0, 0, False, torch.float16, torch.float32),
+        (ones_tri_matrix, 0, 0, 0, True, torch.float16, torch.float32),
+        (
+            block_random_triu_matrix,
+            5e-5,
+            0.1,
+            1e-4,
+            False,
+            torch.float16,
+            torch.float32,
+        ),
+        (random_tri_matrix, 5e-5, 0.1, 1e-4, False, torch.float16, torch.float32),
+        (random_tri_matrix, 5e-5, 0.1, 1e-4, True, torch.float16, torch.float32),
+        (block_ones_triu_matrix, 0, 0, 0, False, torch.bfloat16, torch.float32),
+        (ones_tri_matrix, 0, 0, 0, False, torch.bfloat16, torch.float32),
+        (ones_tri_matrix, 0, 0, 0, True, torch.bfloat16, torch.float32),
+        (
+            block_random_triu_matrix,
+            5e-5,
+            0.1,
+            1e-3,
+            False,
+            torch.bfloat16,
+            torch.float32,
+        ),
+        (random_tri_matrix, 5e-5, 0.1, 1e-3, False, torch.bfloat16, torch.float32),
+        (random_tri_matrix, 5e-5, 0.1, 1e-3, True, torch.bfloat16, torch.float32),
+    ],
+)
+# pylint: disable=too-many-positional-arguments
+def test_tri_inv_rec_unroll_bsnd(
+    B: int,
+    S: int,
+    N: int,
+    C: int,
+    matrix_gen: Callable,
+    atol: float,
+    rtol: float,
+    ftol: float,
+    is_lower: bool,
+    input_dtype: torch.dtype,
+    output_dtype: torch.dtype,
+):
+    # only test cases where the sequence length is a multiple of the chunk size are accepted
+    if S % C != 0:
+        pytest.skip("Sequence length must be a multiple of chunk size C.")
+    U = matrix_gen(C, B * S // C, N)
+    _test_tri_inv_rec_unroll_bsnd(
+        U, B, S, N, C, atol, rtol, ftol, is_lower, input_dtype, output_dtype
+    )

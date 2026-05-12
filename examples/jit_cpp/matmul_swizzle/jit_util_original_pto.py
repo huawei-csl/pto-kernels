@@ -7,7 +7,7 @@ import torch
 ASCEND_TOOLKIT_HOME = os.environ["ASCEND_TOOLKIT_HOME"]
 PTO_LIB_PATH = os.environ.get("PTO_LIB_PATH", ASCEND_TOOLKIT_HOME)
 
-DEFAULT_MAX_BLOCK_DIM = int(os.environ.get("ORIG_PTO_MATMUL_BLOCK_DIM", "20"))
+BLOCK_DIM = int(getattr(torch.npu.get_device_properties("npu:0"), "cube_core_num", 20))
 M_TILE = 128
 N_TILE = 256
 K_TILE = 64
@@ -145,7 +145,7 @@ def jit_compile(src_path, verbose=True, clean_up=False):
         compiled_paths.append(lib_path)
         return compiled[key]
 
-    def matmul_abt(a, b, max_block_dim=DEFAULT_MAX_BLOCK_DIM, stream_ptr=None):
+    def matmul_abt(a, b, max_block_dim=BLOCK_DIM, stream_ptr=None):
         if a.ndim != 2 or b.ndim != 2:
             raise ValueError("matmul_abt expects 2D tensors: a[M,K], b[N,K]")
         if a.shape[1] != b.shape[1]:
