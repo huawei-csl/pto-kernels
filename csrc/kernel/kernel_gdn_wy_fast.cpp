@@ -632,7 +632,7 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 // =====================================================================
 // CUBE PHASE: U = A2 @ V and W = A1 @ K using Vec-prepared workspaces
 // =====================================================================
-#if defined(__DAV_C220_CUBE__)
+#if defined(__DAV_CUBE__)
   if (cu_seqlens == nullptr) {
     int64_t gi = 0;
     for (int64_t seq_idx = 0; seq_idx < num_seqs; ++seq_idx) {

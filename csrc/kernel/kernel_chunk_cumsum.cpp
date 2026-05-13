@@ -112,7 +112,7 @@ AICORE void cumsum_kernel_varlen(__gm__ float* g_ptr, __gm__ float* g_sum_ptr,
   // #if defined(__DAV_VEC__): This block only compiles for the Vec core
   // pass. The bisheng compiler makes 3 passes over the same source file:
   //   Pass 1: __DAV_VEC__  defined → compiles Vec (SIMD) code
-  //   Pass 2: __DAV_C220_CUBE__ defined → compiles Cube (matrix) code
+  //   Pass 2: __DAV_CUBE__ defined → compiles Cube (matrix) code
   //   Pass 3: neither defined → compiles host (CPU) launcher code
   // Using these guards lets us put Vec, Cube, and host code in one file.
   if (vid != 0) return;
@@ -279,7 +279,7 @@ AICORE void cumsum_kernel_static(__gm__ float* g_ptr, __gm__ float* g_sum_ptr,
   // #if defined(__DAV_VEC__): This block only compiles for the Vec core
   // pass. The bisheng compiler makes 3 passes over the same source file:
   //   Pass 1: __DAV_VEC__  defined → compiles Vec (SIMD) code
-  //   Pass 2: __DAV_C220_CUBE__ defined → compiles Cube (matrix) code
+  //   Pass 2: __DAV_CUBE__ defined → compiles Cube (matrix) code
   //   Pass 3: neither defined → compiles host (CPU) launcher code
   // Using these guards lets us put Vec, Cube, and host code in one file.
   if (vid != 0) return;

@@ -157,7 +157,7 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
 // =====================================================================
 // CUBE PHASE: Compute KK^T = K @ K^T for each chunk via GEMM
 // =====================================================================
-#if defined(__DAV_C220_CUBE__)
+#if defined(__DAV_CUBE__)
   for (int64_t work_idx = 0;
        work_idx < (total_work + block_num - 1) / block_num; ++work_idx) {
     int64_t pid =
