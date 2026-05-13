@@ -19,10 +19,10 @@ for the full License text.
 #define __DAV_C220_CUBE__
 
 /**
- *  * @brief Global accessor for block number in CPU simulation.
- *   *
- *    * We need this function because pto/common/cpu_stub.hpp doesn't define it.
- *     */
+ * @brief Global accessor for block number in CPU simulation.
+ *
+ * We need this function because pto/common/cpu_stub.hpp doesn't define it.
+ */
 extern "C" uint32_t get_block_num() { return 1; }
 #endif
 
