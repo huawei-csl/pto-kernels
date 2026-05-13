@@ -135,11 +135,8 @@ extern "C" void call_vabs_fp16(uint32_t blockDim, void* stream, uint8_t* x,
 #ifndef __CPU_SIM
   vabs_fp16<<<blockDim * 2, nullptr, stream>>>(x, z, in_length);
 #else
-  printf("Running CPU mode. block_dim=%d , in_length=%d\n", blockDim,
-         in_length);
   set_block_num(blockDim);
   for (uint32_t i = 0; i < blockDim; ++i) {
-    printf("hello:%d\n", i);
     {
       pto::cpu_sim::ScopedExecutionContext ctx(i, 0, 2);
       vabs_fp16(x, z, in_length);
