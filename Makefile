@@ -39,8 +39,10 @@ compile_cpu_%:
 	g++-15 -fPIC -shared -D__CPU_SIM -std=c++20 \
 		-I$(CSRC_KERNEL_DIR) \
 		-I$(PTO_LIB_PATH)/include \
-		-D_FORTIFY_SOURCE=2 -Wno-macro-redefined -Wno-ignored-attributes \
-	        -fstack-protector-strong \
+		-D_FORTIFY_SOURCE=2 \
+		-Wno-macro-redefined \
+		-Wno-ignored-attributes \
+		-fstack-protector-strong \
 		$(CSRC_KERNEL_DIR)/kernel_$*.cpp \
 		-o libkernel_$*.so
 
