@@ -259,7 +259,7 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
 //   A[i,j] = KK^T[i,j] · coeff[i,j] · mask[i,j]
 // vid=0 handles rows [0, C/2), vid=1 handles rows [C/2, C).
 // =====================================================================
-#if defined(__DAV_C220_VEC__)
+#if defined(__DAV_VEC__)
   set_mask_norm();
   set_vector_mask(-1, -1);
 

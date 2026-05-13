@@ -528,7 +528,7 @@ AICORE void chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
     }
   }
 #endif
-#if defined(__DAV_C220_VEC__)
+#if defined(__DAV_VEC__)
   set_mask_norm();
   set_vector_mask(-1, -1);
 

@@ -330,7 +330,7 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 // =====================================================================
 // VEC PHASE: Build A2 = A*beta_2d and A1 = A*(exp(g)*beta)_2d in workspace
 // =====================================================================
-#if defined(__DAV_C220_VEC__)
+#if defined(__DAV_VEC__)
   set_mask_norm();
   set_vector_mask(-1, -1);
 
