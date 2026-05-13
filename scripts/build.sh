@@ -8,7 +8,7 @@ SHORT=v:,
 LONG=soc-version:,
 OPTS=$(getopt -a --options $SHORT --longoptions $LONG -- "$@")
 eval set -- "$OPTS"
-SOC_VERSION="Ascend910B4"
+SOC_VERSION="ascend950pr_9599"
 
 while :; do
     case "$1" in
@@ -57,7 +57,7 @@ mkdir -p build
 cmake -S "${PARENT_DIR}" \
       -B build \
       -DSOC_VERSION="${SOC_VERSION}" \
-      -DBASE_MODE=MEMORY \
+      -DBASE_MODE=REGISTER \
       -DCMAKE_PREFIX_PATH="${CMAKE_PREFIX_PATH}" \
       -DASCEND_CANN_PACKAGE_PATH="${_ASCEND_INSTALL_PATH}"
 

@@ -158,9 +158,9 @@ AICORE void cumsum_kernel_varlen(__gm__ float* g_ptr, __gm__ float* g_sum_ptr,
   // This is equivalent to:
   //   g_gm = torch.as_strided(g_ptr, size=[valid, NumHeads], stride=[NumHeads,
   //   1])
-  using GmShape = Shape<1, 1, 1, DYNAMIC, DYNAMIC>;
-  using GmStride = Stride<1, 1, 1, NumHeads, 1>;
-  using GmFloat = GlobalTensor<float, GmShape, GmStride>;
+  using GmShape = pto::Shape<1, 1, 1, DYNAMIC, DYNAMIC>;
+  using GmStride = pto::Stride<1, 1, 1, NumHeads, 1>;
+  using GmFloat = pto::GlobalTensor<float, GmShape, GmStride>;
 
   // Pre-assign row accumulator at fixed UB address
   // TASSIGN(tile, address): Binds a tile descriptor to a fixed byte address in
@@ -327,9 +327,9 @@ AICORE void cumsum_kernel_static(__gm__ float* g_ptr, __gm__ float* g_sum_ptr,
   // This is equivalent to:
   //   g_gm = torch.as_strided(g_ptr, size=[valid, NumHeads],
   //   stride=[NumHeads, 1])
-  using GmShape = Shape<1, 1, 1, DYNAMIC, DYNAMIC>;
-  using GmStride = Stride<1, 1, 1, NumHeads, 1>;
-  using GmFloat = GlobalTensor<float, GmShape, GmStride>;
+  using GmShape = pto::Shape<1, 1, 1, DYNAMIC, DYNAMIC>;
+  using GmStride = pto::Stride<1, 1, 1, NumHeads, 1>;
+  using GmFloat = pto::GlobalTensor<float, GmShape, GmStride>;
 
   // Pre-assign row accumulator at fixed UB address
   // TASSIGN(tile, address): Binds a tile descriptor to a fixed byte address
