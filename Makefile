@@ -11,7 +11,7 @@ CSRC_KERNEL_DIR := csrc/kernel
 .PHONY: clean setup_once build_cmake build_wheel install docs test test_tri_inv
 
 clean:
-	rm -rf build/ dist/ extra-info/ *.egg-info/ kernel_meta/ pto_kernels-*.whl
+	rm -rf build/ dist/ extra-info/ *.so *.egg-info/ kernel_meta/ pto_kernels-*.whl
 
 setup_once:
 	pip3 install -r requirements.txt
@@ -31,9 +31,19 @@ compile_%:
 		-I$(CSRC_KERNEL_DIR) \
 		-I$(PTO_LIB_PATH)/include \
 		--npu-arch=dav-2201 \
-	    -Wno-ignored-attributes \
+	        -Wno-ignored-attributes \
 		$(CSRC_KERNEL_DIR)/kernel_$*.cpp \
 		-o libkernel_$*.so
+
+compile_cpu_%:
+	g++-15 -fPIC -shared -D__CPU_SIM -std=c++20 \
+		-I$(CSRC_KERNEL_DIR) \
+		-I$(PTO_LIB_PATH)/include \
+		-D_FORTIFY_SOURCE=2 -Wno-macro-redefined -Wno-ignored-attributes \
+	        -fstack-protector-strong \
+		$(CSRC_KERNEL_DIR)/kernel_$*.cpp \
+		-o libkernel_$*.so
+
 
 
 install:
