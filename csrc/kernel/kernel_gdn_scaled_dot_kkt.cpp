@@ -202,7 +202,8 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
         Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
         _gs.shape[3] = valid_rows;
         _gs.shape[4] = HiddenSize;
-        GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, BSND_QK_STRIDE, 1>>
+        GlobalTensor<half, decltype(_gs),
+                     pto::Stride<1, 1, 1, BSND_QK_STRIDE, 1>>
             _gm(K_handle + k_offset, _gs);
         TLOAD(_l1, _gm);
         if (valid_rows != ChunkSize) TFILLPAD(_l1, _l1);
@@ -240,10 +241,10 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
         Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
         _gs.shape[3] = ChunkSize;
         _gs.shape[4] = ChunkSize;
-        GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, ChunkSize, 1>> _gm(
-            workspace_handle +
-                (static_cast<int64_t>(cid) * 2 + slot) * ChunkSquare,
-            _gs);
+        GlobalTensor<half, decltype(_gs), pto::Stride<1, 1, 1, ChunkSize, 1>>
+            _gm(workspace_handle +
+                    (static_cast<int64_t>(cid) * 2 + slot) * ChunkSquare,
+                _gs);
         TSTORE(_gm, _l0);
       }
 
@@ -268,7 +269,7 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
     Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
     _gs.shape[3] = HalfChunk;
     _gs.shape[4] = ChunkSize;
-    GlobalTensor<float, decltype(_gs), Stride<1, 1, 1, ChunkSize, 1>> _gm(
+    GlobalTensor<float, decltype(_gs), pto::Stride<1, 1, 1, ChunkSize, 1>> _gm(
         Msk_handle + static_cast<int64_t>(vid) * HalfChunk * ChunkSize, _gs);
     UbND<float, HalfChunk, ChunkSize, DYNAMIC, DYNAMIC, PadValue::Zero> _ld(
         HalfChunk, ChunkSize);
@@ -321,7 +322,7 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
           Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
           _gs.shape[3] = 1;
           _gs.shape[4] = valid_rows;
-          GlobalTensor<float, decltype(_gs), Stride<1, 1, 1, 1, 1>> _gm(
+          GlobalTensor<float, decltype(_gs), pto::Stride<1, 1, 1, 1, 1>> _gm(
               G_handle + static_cast<int64_t>(head_idx) * total_tokens +
                   (bos + chunk_start),
               _gs);
@@ -340,7 +341,7 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
           Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
           _gs.shape[3] = 1;
           _gs.shape[4] = local_valid;
-          GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, 1, 1>> _gm(
+          GlobalTensor<half, decltype(_gs), pto::Stride<1, 1, 1, 1, 1>> _gm(
               Beta_handle + static_cast<int64_t>(head_idx) * total_tokens +
                   (bos + chunk_start + row_offset),
               _gs);
@@ -397,11 +398,11 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
           Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
           _gs.shape[3] = HalfChunk;
           _gs.shape[4] = ChunkSize;
-          GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, ChunkSize, 1>> _gm(
-              workspace_handle +
-                  (static_cast<int64_t>(cid) * 2 + slot) * ChunkSquare +
-                  static_cast<int64_t>(vid) * HalfChunk * ChunkSize,
-              _gs);
+          GlobalTensor<half, decltype(_gs), pto::Stride<1, 1, 1, ChunkSize, 1>>
+              _gm(workspace_handle +
+                      (static_cast<int64_t>(cid) * 2 + slot) * ChunkSquare +
+                      static_cast<int64_t>(vid) * HalfChunk * ChunkSize,
+                  _gs);
           UbND<half, HalfChunk, ChunkSize, DYNAMIC, DYNAMIC, PadValue::Zero>
               _ld(HalfChunk, ChunkSize);
           TASSIGN(_ld, AUbHalfAddr);
@@ -431,7 +432,7 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
           _gs.shape[3] = local_valid;
           _gs.shape[4] = ChunkSize;
           GlobalTensor<half, decltype(_gs),
-                       Stride<1, 1, 1, NumHeads * ChunkSize, 1>>
+                       pto::Stride<1, 1, 1, NumHeads * ChunkSize, 1>>
               _gm(A_handle + a_gm_offset, _gs);
           UbND<half, HalfChunk, ChunkSize, DYNAMIC, DYNAMIC> _st(local_valid,
                                                                  ChunkSize);
