@@ -23,8 +23,7 @@ template <typename InputT, typename OutputT, uint32_t MatrixSize>
 AICORE void runKernelTriInvTrick(__gm__ OutputT* M_inv, __gm__ InputT* M,
                                  __gm__ InputT* I_neg,
                                  uint32_t max_block_size) {
-#if (__CHECK_FEATURE_AT_PRECOMPILE) || \
-    (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))  // Cube compilation
+#if defined(__DAV_CUBE__)  // Cube compilation
 
   constexpr uint32_t TileLen = MatrixSize * MatrixSize;
   const uint32_t global_index = get_block_idx() * TileLen;
