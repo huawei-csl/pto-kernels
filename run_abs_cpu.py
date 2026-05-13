@@ -33,6 +33,7 @@ if __name__ == "__main__":
         actual = torch.empty_like(x)
         expected = torch.abs(x)
 
+        print(f"Input: {x[-20:]}")
         lib.call_vabs_fp16(
             block_num,
             stream_ptr,
