@@ -682,8 +682,7 @@ AICORE void runKernelTriInvRecUnroll(__gm__ OutputT* M_inv, __gm__ InputT* M,
                                      uint32_t num_bsnd_heads = 0,
                                      uint32_t is_lower = 0,
                                      __gm__ int32_t* cu_seqlens = nullptr) {
-#if (__CHECK_FEATURE_AT_PRECOMPILE) || \
-    (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))  // Cube compilation
+#if defined(__DAV_CUBE__)  // Cube compilation
 
   TriInvRecUnrollKernel<InputT, OutputT, MatrixSize, NumTilesPerCubeIter,
                         IsBSND>(M_inv, M, I_neg, total_tiles, num_bsnd_heads,
