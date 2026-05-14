@@ -209,7 +209,7 @@ extern "C" __global__ AICORE void csr_gather_fp16(GM_ADDR values,
                                                   GM_ADDR indices, GM_ADDR x,
                                                   GM_ADDR z, uint32_t x_size,
                                                   uint32_t indices_size) {
-#if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
+#if defined(__DAV_VEC__)
 
   constexpr uint32_t TILE_SIZE = 512;
   constexpr uint32_t TILE_SIZE_X = 40960;
@@ -223,7 +223,7 @@ extern "C" __global__ AICORE void csr_gather_fp32(GM_ADDR values,
                                                   GM_ADDR indices, GM_ADDR x,
                                                   GM_ADDR z, uint32_t x_size,
                                                   uint32_t indices_size) {
-#if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
+#if defined(__DAV_VEC__)
 
   constexpr uint32_t TILE_SIZE = 512;
   constexpr uint32_t TILE_SIZE_X = 40960;
