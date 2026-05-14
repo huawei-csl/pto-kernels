@@ -8,7 +8,11 @@ for the full License text.
 */
 #pragma once
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wall"
+#pragma GCC diagnostic ignored "-Wextra"
 #include <pto/pto-inst.hpp>
+#pragma GCC diagnostic pop
 #include <type_traits>
 
 // clang-format off: so it does not get wrongfully flagged by linter
