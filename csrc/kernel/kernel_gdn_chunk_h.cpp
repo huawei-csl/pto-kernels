@@ -351,7 +351,6 @@ AICORE void chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
   TileAcc<float, D, D, D, D> kv_l0;
   TASSIGN(kv_l0, C * D * sizeof(float));
 
-  constexpr int32_t G_BLOCK_UB = 0;
   // Leading UB scratch: legacy kernels used ``C * NumHeads * sizeof(float)``,
   // which overflows UB when
   // ``NumHeads`` is 32/48/64. Keep the same slack as the historical

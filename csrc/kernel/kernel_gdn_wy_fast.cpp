@@ -245,12 +245,9 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
   constexpr int32_t Hg = NumKeyHeads;
   static_assert(Hg > 0 && H % Hg == 0,
                 "NumHeads must be divisible by NumKeyHeads");
-  constexpr int32_t GROUP = H / Hg;
   constexpr int32_t BSND_V_STRIDE = H * HiddenSize;
   constexpr int32_t BSND_QK_STRIDE = Hg * HiddenSize;
-
   constexpr int32_t GHeadTileCols = ((NumHeads + 7) / 8) * 8;
-  constexpr int32_t BetaHeadTileCols = ((NumHeads + 15) / 16) * 16;
 
   // ── UB address map ───────────────────────────────────────────────────
   constexpr int32_t BetaHalfUbAddr = 0;
@@ -267,7 +264,6 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
   constexpr int32_t G2dUbAddr = 157952;
 
   constexpr int32_t GBlockUbAddr = TmpUbAddr;
-  constexpr int32_t BetaBlockUbAddr = TmpUbAddr;
 
   constexpr int32_t WsA1Size = ChunkSize * ChunkSize;
   constexpr int32_t WsA2Size = ChunkSize * ChunkSize;
@@ -320,12 +316,6 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
   TASSIGN(a1_l1, 98304);
   TileAcc<float, ChunkSize, HiddenSize, ChunkSize, HiddenSize> w_l0;
   TASSIGN(w_l0, 65536);
-
-  int64_t total_work = 0;
-  if (cu_seqlens == nullptr) {
-    int64_t chunks_per_seq = (seq_len + ChunkSize - 1) / ChunkSize;
-    total_work = num_seqs * chunks_per_seq * NumHeads;
-  }
 
 // =====================================================================
 // VEC PHASE: Build A2 = A*beta_2d and A1 = A*(exp(g)*beta)_2d in workspace

@@ -470,7 +470,6 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
   /* Initializations */
   constexpr uint32_t TileLen = MatrixSize * MatrixSize;
   constexpr uint32_t FractalSize = 16;  // fractal size for half
-  constexpr uint32_t NumFractalsRowWise = MatrixSize / FractalSize;
   constexpr uint32_t NumL0Buffers = 2;
 
   if (get_block_idx() * NumTilesPerCubeIter >= total_tiles) {
@@ -753,13 +752,14 @@ AICORE void run_tri_inv_rec_unroll_per_num_matrices(
     __gm__ OutputT* tensor_out, __gm__ InputT* tensor_in, uint32_t matrix_size,
     uint32_t num_matrices, uint32_t num_bsnd_heads, uint32_t is_lower = 0,
     __gm__ int32_t* cu_seqlens = nullptr) {
+  const uint32_t num_blocks = static_cast<uint32_t>(get_block_num());
   if (num_bsnd_heads == 0) {
-    if (num_matrices <= get_block_num()) {
+    if (num_matrices <= num_blocks) {
       run_tri_inv_rec_unroll<half, OutputT, 1 /* NumTilesPerCubeIter */,
                              false /* IsBSND */>(
           tensor_out, tensor_in, matrix_size, num_matrices, num_bsnd_heads,
           is_lower, cu_seqlens);
-    } else if (num_matrices <= 2 * get_block_num()) {
+    } else if (num_matrices <= 2 * num_blocks) {
       run_tri_inv_rec_unroll<half, OutputT, 2 /* NumTilesPerCubeIter */,
                              false /* IsBSND */>(
           tensor_out, tensor_in, matrix_size, num_matrices, num_bsnd_heads,
@@ -771,12 +771,12 @@ AICORE void run_tri_inv_rec_unroll_per_num_matrices(
           is_lower, cu_seqlens);
     }
   } else {
-    if (num_matrices <= get_block_num()) {
+    if (num_matrices <= num_blocks) {
       run_tri_inv_rec_unroll<half, OutputT, 1 /* NumTilesPerCubeIter */,
                              true /* IsBSND */>(
           tensor_out, tensor_in, matrix_size, num_matrices, num_bsnd_heads,
           is_lower, cu_seqlens);
-    } else if (num_matrices <= 2 * get_block_num()) {
+    } else if (num_matrices <= 2 * num_blocks) {
       run_tri_inv_rec_unroll<half, OutputT, 2 /* NumTilesPerCubeIter */,
                              true /* IsBSND */>(
           tensor_out, tensor_in, matrix_size, num_matrices, num_bsnd_heads,

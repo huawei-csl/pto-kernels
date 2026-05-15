@@ -11,9 +11,6 @@ for the full License text.
 
 using namespace pto;
 
-constexpr unsigned NUM_BLOCKS = 20;    // number of AICs
-constexpr unsigned UB_SIZE = 0x30000;  // 192KB UB of A2A3
-
 template <pipe_t SrcPipe, pipe_t DstPipe>
 AICORE inline void SetFlag(uint32_t id) {
   set_flag(SrcPipe, DstPipe, static_cast<event_t>(id));

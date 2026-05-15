@@ -96,9 +96,6 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
   constexpr int32_t ChunkSquare = ChunkSize * ChunkSize;
   static_assert(NumHeads % NumKeyHeads == 0,
                 "NumHeads must be divisible by NumKeyHeads (GQA grouping)");
-  constexpr int32_t GROUP = NumHeads / NumKeyHeads;
-  constexpr int32_t BSND_QK_STRIDE = NumKeyHeads * HiddenSize;
-  constexpr uint32_t KTail = (HiddenSize % 128 == 0) ? 128 : (HiddenSize % 128);
 
   // ── UB address map ───────────────────────────────────────────────────
   constexpr int32_t GUbAddr = 0;
