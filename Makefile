@@ -32,7 +32,7 @@ compile_%:
 		-I$(CSRC_KERNEL_DIR) \
 		-I$(PTO_LIB_PATH)/include \
 		--npu-arch=dav-2201 \
-	    -Wno-ignored-attributes \
+	        -Wno-ignored-attributes \
 		$(CSRC_KERNEL_DIR)/kernel_$*.cpp \
 		-o build/libkernel_$*.so
 
@@ -52,5 +52,8 @@ test_tri_inv:
 
 run_abs_a5: compile_abs
 	python scripts/data_gen_abs.py
-	g++ -o build/main_abs csrc/examples/main_abs.cpp  -L$(shell pwd)/build/ -L$(ASCEND_TOOLKIT_HOME)/lib64/ -lkernel_abs -lacl_rt -I$(ASCEND_TOOLKIT_HOME)/include/ -I$(CSRC_KERNEL_DIR) -Wno-ignored-attributes
-	LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:$(shell pwd)/build/:$(shell pwd)/build/lib/ cannsim record --soc=Ascend950 ./main_abs
+	g++ -o build/main_abs csrc/examples/main_abs.cpp  \
+		-L$(shell pwd)/build/ -L$(ASCEND_TOOLKIT_HOME)/lib64/ \
+		-lkernel_abs -lacl_rt -I$(ASCEND_TOOLKIT_HOME)/include/ \
+		-I$(CSRC_KERNEL_DIR) -Wno-ignored-attributes
+	LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:$(shell pwd)/build/:$(shell pwd)/build/lib/ cannsim record --soc=Ascend950 ./build/main_abs
