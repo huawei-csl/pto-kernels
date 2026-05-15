@@ -38,7 +38,7 @@ build_docker:
     - cpu # Build docker using CPU
   <<: *build_config
   script:
-    - make build_wheel
+    - make wheel
 
 build_and_test_x86_910B4:
   image: quay.io/ascend/cann:9.0.0-910b-ubuntu22.04-py3.11
@@ -50,7 +50,7 @@ build_and_test_x86_910B4:
     - pip3 install -r requirements.txt
   script:
     - make setup_once
-    - make build_wheel
+    - make wheel
     - pip install pto_kernels*.whl
     - python3 -m pytest -v tests/
 
@@ -65,7 +65,7 @@ build_and_test_aarch64_910B2_py3.11:
     - pip3 install -r requirements.txt
   script:
     - make setup_once
-    - make build_wheel
+    - make wheel
     - pip install pto_kernels*.whl
     - python3 -m pytest -v tests/
   when: manual
