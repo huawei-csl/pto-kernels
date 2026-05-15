@@ -8,7 +8,7 @@
 PTO_LIB_PATH    ?= $(ASCEND_TOOLKIT_HOME)
 CSRC_KERNEL_DIR := csrc/kernel
 
-.PHONY: clean setup_once build_cmake build_wheel install docs test test_tri_inv
+.PHONY: clean setup_once build wheel install docs test test_tri_inv
 
 clean:
 	rm -rf build/ dist/ extra-info/ *.egg-info/ kernel_meta/ pto_kernels-*.whl
@@ -17,10 +17,10 @@ setup_once:
 	pip3 install -r requirements.txt
 	pip3 install torch-npu==2.8.0.post4 --extra-index-url https://download.pytorch.org/whl/cpu
 
-build_cmake: clean
+build: clean
 	bash scripts/build.sh
 
-build_wheel:
+wheel:
 	export CMAKE_GENERATOR="Unix Makefiles" && pip wheel -v  . --extra-index-url https://download.pytorch.org/whl/cpu
 
 

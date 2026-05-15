@@ -31,7 +31,7 @@ export CMAKE_GENERATOR="Unix Makefiles" && pip install -v git+https://github.com
 ```bash
 source /usr/local/Ascend/ascend-toolkit/set_env.sh
 pip3 install -r requirements.txt
-make build_wheel
+make wheel
 ```
 
 This produces an installable Python wheel:
