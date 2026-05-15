@@ -9,7 +9,7 @@
 #include "data_utils.h"
 
 extern "C" void call_vabs_fp16(uint32_t blockDim, aclrtStream stream, void* x,
-                               void* y, uint32_t num_elements);
+                               void* z, uint32_t num_elements);
 
 /// Number of elements in input vectors.
 constexpr size_t VABS_TOTAL_LENGTH = 8 * 128;
@@ -23,8 +23,8 @@ int32_t main(int32_t argc, char* argv[]) {
     blockDim = std::stoul(argv[1]);
     std::cout << "[vabs] Use input BlockDim: " << blockDim << std::endl;
   } else {
-    std::cout << "[vabs] Use default BlockDim: 4" << std::endl;
-    blockDim = 4;
+    std::cout << "[vabs] Use default BlockDim: 8" << std::endl;
+    blockDim = 8;
   }
 
   constexpr size_t inputByteSize = VABS_TOTAL_LENGTH * sizeof(uint16_t);

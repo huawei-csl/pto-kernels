@@ -28,7 +28,7 @@ wheel:
 # This is useful for development and debugging of individual kernels.
 compile_%:
 	mkdir -p build/
-	bisheng -fPIC -shared -xcce -DREGISTER -O2 -std=c++20 \
+	bisheng -fPIC -shared -xcce -DREGISTER_BASE -O2 -std=c++20 \
 		-I$(CSRC_KERNEL_DIR) \
 		-I$(PTO_LIB_PATH)/include \
 		--npu-arch=dav-2201 \
@@ -50,7 +50,7 @@ test_tri_inv:
 	pytest tests/test_tri_inv_*.py
 
 
-run_abs: compile_abs
+run_abs_a5: compile_abs
 	python scripts/data_gen_abs.py
 	g++ -o build/main_abs csrc/examples/main_abs.cpp  -L$(shell pwd)/build/ -L$(ASCEND_TOOLKIT_HOME)/lib64/ -lkernel_abs -lacl_rt -I$(ASCEND_TOOLKIT_HOME)/include/ -I$(CSRC_KERNEL_DIR) -Wno-ignored-attributes
 	LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:$(shell pwd)/build/:$(shell pwd)/build/lib/ cannsim record --soc=Ascend950 ./main_abs

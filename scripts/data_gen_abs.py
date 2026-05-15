@@ -11,4 +11,4 @@ if __name__ == "__main__":
     rng = np.random.default_rng(seed=42)
     input_x = rng.uniform(-100, 100, shape).astype(np.float16)
     Path("./input").mkdir(parents=True, exist_ok=True)
-    input_x.tofile("./input_x.bin")
+    input_x.tofile("./input/input_x.bin")
