@@ -28,15 +28,14 @@ at::Tensor run_scan_ul1(const at::Tensor& x) {
   const auto dtype = x.options().dtype();
   const auto dtype_out = at::kFloat;
 
-  if (!(dtype == at::kHalf or dtype == at::kFloat)) {
-    throw std::runtime_error(
-        "Unsupported dtype for scan_ul1 kernel. Supports only fp16/fp32");
-  }
+  TORCH_CHECK(device.type() == DEVICE_TYPE,
+              "scan_ul1: tensor must be on NPU, got ", device);
+  TORCH_CHECK(dtype == at::kHalf || dtype == at::kFloat,
+              "scan_ul1: dtype must be fp16 or float32, got ", dtype);
 
   const uint32_t scan_size = static_cast<uint32_t>(x.size(-1));
-  if (x.dim() != 1) {
-    throw std::runtime_error("Only 1D scan is supported.\n");
-  }
+  TORCH_CHECK(x.dim() == 1, "scan_ul1: only 1D tensors are supported, got ",
+              x.dim(), "D");
 
   constexpr uint32_t block_dim = 1;
 
@@ -46,11 +45,9 @@ at::Tensor run_scan_ul1(const at::Tensor& x) {
   const uint32_t matrix_size = ceil(sqrt(scan_size));
 
   // FIXME: pad to support other sizes
-  if (matrix_size % 16 != 0) {
-    throw std::runtime_error(
-        "Matrix size must be a multiple of 16. Matrix size: " +
-        std::to_string(matrix_size));
-  }
+  TORCH_CHECK(matrix_size % 16 == 0,
+              "scan_ul1: matrix size must be a multiple of 16, got ",
+              matrix_size);
 
   // FIXME: use vector or scalar cores to generate O, U and L directly on the
   // device

@@ -11,7 +11,12 @@ for the full License text.
 
 #include "torch_abs.h"
 #include "torch_batch_matrix_square.h"
+#include "torch_chunk_cumsum.h"
 #include "torch_csr_gather.h"
+#include "torch_gdn_chunk_h.h"
+#include "torch_gdn_chunk_o.h"
+#include "torch_gdn_scaled_dot_kkt.h"
+#include "torch_gdn_wy_fast.h"
 #include "torch_scan_ul1.h"
 #include "torch_simple_matmul.h"
 #include "torch_swiglu.h"
@@ -38,17 +43,36 @@ PYBIND11_MODULE(pto_kernels_ops, m) {
       },
       pybind11::arg("device_id") = 0);
   m.def("pto_abs", &pto_isa_ops::run_abs);
+  m.def("pto_chunk_h", &pto_isa_ops::run_gdn_chunk_h, py::arg("K"),
+        py::arg("W"), py::arg("U"), py::arg("G"),
+        py::arg("cu_seqlens") = at::zeros({1}), py::arg("batch_size"),
+        py::arg("seq_len"), py::arg("total_chunks"));
+  m.def("pto_chunk_cumsum", &pto_isa_ops::run_chunk_cumsum, py::arg("g"),
+        py::arg("batch_size"), py::arg("seq_len"),
+        py::arg("cu_seqlens") = at::zeros({1}));
   m.def("pto_batch_matrix_square", &pto_isa_ops::run_batch_matrix_square);
   m.def("pto_csr_gather", &pto_isa_ops::run_csr_gather);
+  m.def("pto_gdn_scaled_dot_kkt", &pto_isa_ops::run_gdn_scaled_dot_kkt,
+        py::arg("K"), py::arg("Beta"), py::arg("G"), py::arg("Msk"),
+        py::arg("batch_size"), py::arg("seq_len"),
+        py::arg("cu_seqlens") = at::zeros({1}));
+  m.def("pto_gdn_chunk_o", &pto_isa_ops::run_gdn_chunk_o, py::arg("Q"),
+        py::arg("K"), py::arg("V"), py::arg("S"), py::arg("G"), py::arg("Msk"),
+        py::arg("batch_size"), py::arg("seq_len"),
+        py::arg("cu_seqlens") = at::zeros({1}));
   m.def("pto_scan_ul1", &pto_isa_ops::run_scan_ul1);
   m.def("pto_simple_matmul", &pto_isa_ops::run_simple_matmul);
   m.def("pto_swiglu", &pto_isa_ops::run_swiglu, py::arg("x"),
         py::arg("dim") = -1);
   m.def("pto_tri_inv_trick", &pto_isa_ops::run_tri_inv_trick);
   m.def("pto_tri_inv_rec_unroll", &pto_isa_ops::run_tri_inv_rec_unroll,
-        py::arg("M"), py::arg("is_bsnd_format") = false,
-        py::arg("cu_seqlens") = at::zeros({1}));
+        py::arg("M"), py::arg("cu_seqlens") = at::zeros({1}),
+        py::arg("is_bsnd_format") = false, py::arg("is_lower") = false);
   m.def("pto_tri_inv_ns", &pto_isa_ops::run_tri_inv_ns, py::arg("M"),
         py::arg("num_iters") = 0, py::arg("scale_value") = 0.0f);
   m.def("pto_tri_inv", &pto_isa_ops::run_tri_inv);
+  m.def("pto_gdn_wy_fast", &pto_isa_ops::run_gdn_wy_fast, py::arg("K"),
+        py::arg("V"), py::arg("Beta"), py::arg("G"), py::arg("A"),
+        py::arg("batch_size"), py::arg("seq_len"),
+        py::arg("cu_seqlens") = at::zeros({1}));
 }

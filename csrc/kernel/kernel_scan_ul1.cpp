@@ -37,8 +37,7 @@ template <typename InputT, typename OutputT, uint32_t matrix_size>
 AICORE void runKernelScanUl1(__gm__ InputT* x, __gm__ InputT* o,
                              __gm__ InputT* u, __gm__ InputT* l,
                              __gm__ OutputT* s) {
-#if (__CHECK_FEATURE_AT_PRECOMPILE) || \
-    (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))
+#if defined(__DAV_CUBE__)
 
   // Type definitions for different memory levels
   // GM

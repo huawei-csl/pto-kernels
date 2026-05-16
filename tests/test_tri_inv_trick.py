@@ -36,7 +36,7 @@ def block_ones_matrix(n, block_dim_x, block_dim_y):
     return torch.from_numpy(np.triu(U, 1))
 
 
-def block_random_matrix(n, block_dim_x, block_dim_y, scale=0.2):
+def block_random_matrix(n, block_dim_x, block_dim_y, scale=0.15):
     U_ = scale * np.random.rand(16, 16)
     U_ = np.triu(U_, k=1)
     U = np.zeros((block_dim_x, block_dim_y, n, n))

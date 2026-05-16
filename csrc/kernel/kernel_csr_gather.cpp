@@ -116,10 +116,13 @@ AICORE void runTCsrGather(__gm__ T* values, __gm__ int32_t* indices,
     TileDataVal wTiles(remaining_elements);
     TileDataVal zTiles(remaining_elements);
     TileDataIdx idxTiles(remaining_elements);
+    TileDataIdx tmpTiles(remaining_elements);
 
     // Assign the UB address for each tile
     TASSIGN(valTiles, V_T_ADDR + stage * TILE_SIZE_IN_BYTES);
     TASSIGN(wTiles, W_T_ADDR + stage * 2 * TILE_SIZE_IDX_IN_BYTES);
+    TASSIGN(tmpTiles, W_T_ADDR + stage * 2 * TILE_SIZE_IDX_IN_BYTES +
+                          TILE_SIZE_IDX_IN_BYTES);
     TASSIGN(zTiles, Z_T_ADDR + stage * TILE_SIZE_IN_BYTES);
     TASSIGN(idxTiles, IDX_T_ADDR + stage * TILE_SIZE_IDX_IN_BYTES);
 
@@ -147,7 +150,7 @@ AICORE void runTCsrGather(__gm__ T* values, __gm__ int32_t* indices,
     pipe_barrier(PIPE_V);
 
     // Gather
-    TGATHER(wTiles, xTiles, idxTiles);
+    TGATHER(wTiles, xTiles, idxTiles, tmpTiles);
 
     // Signal end of gather to MTE2 (next load)
     set_flag(PIPE_V, PIPE_MTE2, ev1);
@@ -206,7 +209,7 @@ extern "C" __global__ AICORE void csr_gather_fp16(GM_ADDR values,
                                                   GM_ADDR indices, GM_ADDR x,
                                                   GM_ADDR z, uint32_t x_size,
                                                   uint32_t indices_size) {
-#if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
+#if defined(__DAV_VEC__)
 
   constexpr uint32_t TILE_SIZE = 512;
   constexpr uint32_t TILE_SIZE_X = 40960;
@@ -220,7 +223,7 @@ extern "C" __global__ AICORE void csr_gather_fp32(GM_ADDR values,
                                                   GM_ADDR indices, GM_ADDR x,
                                                   GM_ADDR z, uint32_t x_size,
                                                   uint32_t indices_size) {
-#if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
+#if defined(__DAV_VEC__)
 
   constexpr uint32_t TILE_SIZE = 512;
   constexpr uint32_t TILE_SIZE_X = 40960;

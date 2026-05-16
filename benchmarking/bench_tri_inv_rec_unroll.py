@@ -1,5 +1,5 @@
 """
-Performance benchmark for triangular inverse recursive unroll kernel comparing bf16 and fp16 data types.
+Performance benchmark for triangular inverse recursive unroll kernel.
 """
 
 import matplotlib.pyplot as plt
@@ -41,7 +41,7 @@ def plot_csv(path):
     plt.savefig(str(path).replace(".csv", ".png"))
 
 
-def bench(path: str = "benchmark_data/tri_inv_rec_unroll_bf16_vs_fp16.csv"):
+def bench(path: str = "benchmark_data/tri_inv_rec_unroll.csv"):
     rows = [
         [
             "dtype",
@@ -50,11 +50,18 @@ def bench(path: str = "benchmark_data/tri_inv_rec_unroll_bf16_vs_fp16.csv"):
             "block_dim_y",
             "time_ms",
             "bandwidth_gbps",
+            "giga_elements_per_sec",
         ]
     ]
-    for dtype in (torch.float16, torch.bfloat16):
+    for dtype in (torch.float16,):
         for n in (16, 32, 64, 128):
-            for block_dim_x, block_dim_y in ((20, 4), (20, 16)):
+            for block_dim_x, block_dim_y in (
+                (20, 4),
+                (20, 8),
+                (20, 16),
+                (32, 16),
+                (32, 32),
+            ):
                 U = random_triu_matrix(n, block_dim_x, block_dim_y).to(dtype).npu()
                 ms = do_bench(
                     lambda inp=U: pto_tri_inv_rec_unroll(inp, is_bsnd_format=False),
@@ -63,12 +70,13 @@ def bench(path: str = "benchmark_data/tri_inv_rec_unroll_bf16_vs_fp16.csv"):
                 n_el = U.numel()
                 # I/O: Input and output have 16 bits, so (2 + 2) bytes per element
                 gbps = (2 + 2) * n_el / (ms / 1e3) / 1e9
+                gelems = n_el / (ms / 1e3) / 1e9
                 dtype_name = "fp16" if dtype == torch.float16 else "bf16"
                 print(
                     f"{dtype_name}, N={n}, bdx={block_dim_x}, bdy={block_dim_y}, "
-                    f"{ms:.3f} ms, {gbps:.3f} GB/s"
+                    f"{ms:.3f} ms, {gbps:.3f} GB/s, {gelems:.3f} Gelems/s"
                 )
-                rows.append([dtype_name, n, block_dim_x, block_dim_y, ms, gbps])
+                rows.append([dtype_name, n, block_dim_x, block_dim_y, ms, gbps, gelems])
 
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
