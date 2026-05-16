@@ -1,14 +1,14 @@
 [build-system]
 requires = [
   "scikit-build-core",
-  "pybind11==3.0.1",
+  "pybind11==3.0.4",
   "numpy==1.26.4",
   "scipy==1.13.1",
   "decorator==5.1.1",
   "psutil==6.1.0",
   "PyYAML==6.0.2",
   "attrs==24.2.0",
-  "torch-npu==2.8.0.post4",
+  "torch-npu==2.9.0.post2",
 ]
 build-backend = "scikit_build_core.build"
 
@@ -51,7 +51,7 @@ dependencies = [
 
 [project.optional-dependencies]
 torch = [
-  "torch-npu==2.8.0.post4",
+  "torch-npu==2.9.0.post2",
 ]
 
 [tool.scikit-build]
