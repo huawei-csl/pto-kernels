@@ -87,19 +87,6 @@ endif()
 
 include(${ASCENDC_CMAKE_DIR}/ascendc.cmake)
 
-include(FetchContent)
-
-# certain operations need newer pto-isa header, not CANN 8.5.0 default (pin
-# commit on 2026/03/16
-# https://gitcode.com/cann/pto-isa/commit/313817be696792a4e16a7ea5994ec98e34391613?ref=master)
-# to use default CANN 8.5.0 headers set GIT_TAG "8.5.0"
-FetchContent_Declare(
-  libpto_isa_headers
-  GIT_REPOSITORY https://gitcode.com/cann/pto-isa.git
-  GIT_TAG v9.0.0)
-
-FetchContent_Populate(libpto_isa_headers)
-
 # TORCH_NPU_PATH is the location where PyTorch Ascend Adapter (torch_npu) is
 # installed.
 execute_process(
@@ -139,8 +126,12 @@ ascendc_library(
   csrc/kernel/kernel_gdn_wy_fast.cpp)
 
 ascendc_include_directories(
-  no_workspace_kernel PRIVATE ${libpto_isa_headers_SOURCE_DIR}/include
-  ${libpto_isa_headers_SOURCE_DIR}/include/pto/common)
+  no_workspace_kernel PRIVATE ${ASCEND_CANN_PACKAGE_PATH}/include
+  ${ASCEND_CANN_PACKAGE_PATH}/include/pto/common)
+
+# TODO: enable -Wall -Wextra -Werror after fixing all warnings in the kernel
+# code ascendc_compile_options(no_workspace_kernel PRIVATE -Wall -Wextra
+# -Werror)
 
 if(BASE_MODE STREQUAL "MEMORY")
   message(STATUS "BASE_MODE is MEMORY")
@@ -156,6 +147,7 @@ pybind11_add_module(pto_kernels_ops csrc/host/pybind11.cpp)
 # pybind11 does not work with C++20, so we set C++17 for the pybind11 module
 # target
 set_target_properties(pto_kernels_ops PROPERTIES CXX_STANDARD 17)
+target_compile_options(pto_kernels_ops PRIVATE -Wall -Wextra -Werror)
 
 target_link_libraries(pto_kernels_ops PRIVATE ${TORCH_LIBRARIES} c10 torch_cpu
                                               torch_npu no_workspace_kernel)

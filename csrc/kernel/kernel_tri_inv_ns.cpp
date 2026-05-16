@@ -212,7 +212,6 @@ AICORE void runKernelTriInvNS(__gm__ OutputT* M_inv, __gm__ InputT* M,
 #if defined(__DAV_CUBE__)  // Cube compilation
 
   constexpr uint32_t TileLen = MatrixSize * MatrixSize;
-  const uint32_t global_index = get_block_idx() * TileLen;
   constexpr uint32_t NumL0Buffers = 2;
   const uint32_t max_iters_per_aic = kernel_utils::CeilDiv(
       total_tiles, (uint32_t)(NumTilesPerCubeIter * get_block_num()));
@@ -390,12 +389,13 @@ extern "C" __global__ AICORE void tri_inv_ns_fp16(
     __gm__ void* tensor_out, __gm__ void* tensor_in,
     __gm__ void* identity_neg_in, __gm__ void* identity_over_n_in,
     uint32_t matrix_size, uint32_t num_iters, uint32_t num_matrices) {
-  if (num_matrices <= get_block_num()) {
+  const uint32_t block_dim = get_block_num();
+  if (num_matrices <= block_dim) {
     run_tri_inv_ns<half, 1>((__gm__ float*)tensor_out, (__gm__ half*)tensor_in,
                             (__gm__ half*)identity_neg_in,
                             (__gm__ half*)identity_over_n_in, matrix_size,
                             num_iters, num_matrices);
-  } else if (num_matrices <= 2 * get_block_num()) {
+  } else if (num_matrices <= 2 * block_dim) {
     run_tri_inv_ns<half, 2>((__gm__ float*)tensor_out, (__gm__ half*)tensor_in,
                             (__gm__ half*)identity_neg_in,
                             (__gm__ half*)identity_over_n_in, matrix_size,
