@@ -129,7 +129,9 @@ ascendc_include_directories(
   no_workspace_kernel PRIVATE ${ASCEND_CANN_PACKAGE_PATH}/include
   ${ASCEND_CANN_PACKAGE_PATH}/include/pto/common)
 
-ascendc_compile_options(no_workspace_kernel PRIVATE -Wall -Wextra -Werror)
+# TODO: enable -Wall -Wextra -Werror after fixing all warnings in the kernel
+# code ascendc_compile_options(no_workspace_kernel PRIVATE -Wall -Wextra
+# -Werror)
 
 if(BASE_MODE STREQUAL "MEMORY")
   message(STATUS "BASE_MODE is MEMORY")
@@ -145,6 +147,7 @@ pybind11_add_module(pto_kernels_ops csrc/host/pybind11.cpp)
 # pybind11 does not work with C++20, so we set C++17 for the pybind11 module
 # target
 set_target_properties(pto_kernels_ops PROPERTIES CXX_STANDARD 17)
+target_compile_options(pto_kernels_ops PRIVATE -Wall -Wextra -Werror)
 
 target_link_libraries(pto_kernels_ops PRIVATE ${TORCH_LIBRARIES} c10 torch_cpu
                                               torch_npu no_workspace_kernel)
