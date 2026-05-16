@@ -14,7 +14,7 @@
 cmake_minimum_required(VERSION 3.16.0)
 project(pto-kernels)
 set(LINUX TRUE)
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -142,6 +142,9 @@ else()
 endif()
 
 pybind11_add_module(pto_kernels_ops csrc/host/pybind11.cpp)
+# pybind11 does not work with C++20, so we set C++17 for the pybind11 module
+# target
+set_target_properties(pto_kernels_ops PROPERTIES CXX_STANDARD 17)
 
 target_link_libraries(pto_kernels_ops PRIVATE ${TORCH_LIBRARIES} c10 torch_cpu
                                               torch_npu no_workspace_kernel)

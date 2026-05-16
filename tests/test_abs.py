@@ -24,6 +24,8 @@ def test_pto_abs(size0: int, size1: int, dtype: torch.dtype):
     # Call the custom abs operator
     output = pto_abs(x_npu).cpu()
     # Compute the expected result using standard torch.abs on CPU
+    torch.npu.synchronize()
     cpuout = torch.abs(x)
+    torch.npu.synchronize()
     # Validate the results
     assert torch.allclose(output, cpuout)
