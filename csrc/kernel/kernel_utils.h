@@ -100,7 +100,7 @@ AICORE inline BSNDVarlenTileInfo GetBSNDVarlenTileInfoFromCuSeqlens(
   }
 }
 
-// ─── SyncAllImpl: full cross-core barrier ────────────────────────
+// ─── SyncAll: full cross-core barrier ────────────────────────
 constexpr uint16_t SYNC_AIV_FLAG = 12;
 constexpr uint16_t SYNC_AIC_FLAG = 11;
 constexpr uint16_t SYNC_AIC_AIV_FLAG = 13;
@@ -126,7 +126,7 @@ AICORE inline uint16_t GetffstMsg(uint16_t mode, uint16_t flagId) {
  * @tparam isAIVOnly Whether to synchronize only AIV cores.
  */
 template <bool isAIVOnly = true>
-AICORE inline void SyncAllImpl() {
+AICORE inline void SyncAll() {
   pipe_barrier(PIPE_ALL);
   if constexpr (isAIVOnly) {
     ffts_cross_core_sync(PIPE_MTE3, GetffstMsg(0x0, SYNC_AIV_ONLY_ALL));
