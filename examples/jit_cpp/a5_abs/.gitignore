@@ -1,0 +1,3 @@
+*.so
+OPPROF_*/
+kernel_meta/
