@@ -27,14 +27,14 @@ wheel:
 # 'make compile_abs' compiles 'kernel_abs.cpp' into 'libkernel_abs.so' without building the whole wheel package.
 # This is useful for development and debugging of individual kernels.
 compile_%:
-	mkdir -p build/
+	mkdir -p build/lib/
 	bisheng -fPIC -shared -xcce -DREGISTER_BASE -O2 -std=c++20 \
 		-I$(CSRC_KERNEL_DIR) \
 		-I$(PTO_LIB_PATH)/include \
 		--npu-arch=dav-2201 \
 	        -Wno-ignored-attributes \
 		$(CSRC_KERNEL_DIR)/kernel_$*.cpp \
-		-o build/libkernel_$*.so
+		-o build/lib/libkernel_$*.so
 
 
 install:
@@ -52,8 +52,9 @@ test_tri_inv:
 
 run_abs_a5: compile_abs
 	python scripts/data_gen_abs.py
-	g++ -o build/main_abs csrc/examples/main_abs.cpp  \
-		-L$(shell pwd)/build/ -L$(ASCEND_TOOLKIT_HOME)/lib64/ \
+	g++ -o build/main_abs examples/a5/main_abs.cpp  \
+		-L$(shell pwd)/build/lib/ -L$(ASCEND_TOOLKIT_HOME)/lib64/ \
 		-lkernel_abs -lacl_rt -I$(ASCEND_TOOLKIT_HOME)/include/ \
-		-I$(CSRC_KERNEL_DIR) -Wno-ignored-attributes
-	LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:$(shell pwd)/build/:$(shell pwd)/build/lib/ cannsim record --soc=Ascend950 ./build/main_abs
+		-I$(shell pwd)/examples/a5/ -Wno-ignored-attributes
+	LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:$(shell pwd)/build/lib/ cannsim record \
+		--soc=Ascend950 -g ./build/main_abs
