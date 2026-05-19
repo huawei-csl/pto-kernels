@@ -28,10 +28,12 @@ wheel:
 # This is useful for development and debugging of individual kernels.
 compile_%:
 	mkdir -p build/lib/
-	bisheng -fPIC -shared -xcce -DREGISTER_BASE -O2 -std=c++20 \
+	bisheng -fPIC -shared -xcce -DREGISTER_BASE -O2 -std=gnu++17 \
 		-I$(CSRC_KERNEL_DIR) \
 		-I$(PTO_LIB_PATH)/include \
-		--npu-arch=dav-2201 \
+		--cce-aicore-arch=dav-c310 \
+		-mllvm -cce-aicore-stack-size=0x8000 \
+		-mllvm -cce-aicore-function-stack-size=0x8000 \
 	        -Wno-ignored-attributes \
 		$(CSRC_KERNEL_DIR)/kernel_$*.cpp \
 		-o build/lib/libkernel_$*.so
