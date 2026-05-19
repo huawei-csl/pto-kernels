@@ -59,4 +59,4 @@ run_abs_a5: compile_abs
 		-lkernel_abs -lacl_rt -I$(ASCEND_TOOLKIT_HOME)/include/ \
 		-I$(shell pwd)/examples/a5/ -Wno-ignored-attributes
 	LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:$(shell pwd)/build/lib/ cannsim record \
-		--soc=Ascend950 -g ./main_abs
+		--soc=Ascend950 ./main_abs
