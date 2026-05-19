@@ -11,8 +11,8 @@ for the full License text.
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
-#include "aclrtlaunch_tri_inv_rec_unroll_fp16fp16.h"
-#include "aclrtlaunch_tri_inv_rec_unroll_fp16fp32.h"
+#include "aclrtlaunch_tri_inv_rec_unroll_bf16.h"
+#include "aclrtlaunch_tri_inv_rec_unroll_fp16.h"
 #include "utils.h"
 
 namespace pto_isa_ops {
@@ -32,29 +32,26 @@ namespace pto_isa_ops {
  * num_bsnd_heads=M.size(-2), which is used to do strided load / store ops.
  * @param is_lower If input matrices are lower-triangular (is_lower == true) or
  * upper-triangular (is_lower == false). Default is upper triangular.
- * @param dtype_out Output dtype, either fp16 or fp32.
- * @return at::Tensor Tensor containing inverses of input matrices (dtype is
- * fp16/fp32).
+ * @return at::Tensor Tensor containing inverses of input matrices having same
+ * dtype as input.
  */
-at::Tensor run_tri_inv_rec_unroll(
-    const at::Tensor& M, const at::Tensor& cu_seqlens = at::zeros({1}),
-    const bool is_bsnd_format = false, const bool is_lower = false,
-    const at::ScalarType dtype_out = at::ScalarType::Half) {
+at::Tensor run_tri_inv_rec_unroll(const at::Tensor& M,
+                                  const at::Tensor& cu_seqlens = at::zeros({1}),
+                                  const bool is_bsnd_format = false,
+                                  const bool is_lower = false) {
   const at::Device device = M.options().device();
   const auto dtype = M.options().dtype();
 
   TORCH_CHECK(device.type() == DEVICE_TYPE,
               "tri_inv_ns: tensor must be on NPU, got ", device);
-  TORCH_CHECK(dtype_out == at::kHalf || dtype_out == at::kFloat,
-              "tri_inv_rec_unroll: dtype_out must be fp16 or float32, got ",
-              dtype_out);
   TORCH_CHECK(dtype == at::kHalf || dtype == at::kBFloat16,
               "tri_inv_rec_unroll: input dtype must be fp16 or bfloat16, got ",
               dtype);
 
-  at::Tensor M_half;
-  if (dtype == at::kBFloat16) {
-    M_half = M.to(at::kHalf);
+  if ((dtype != at::kHalf) and (dtype != at::kBFloat16)) {
+    throw std::runtime_error(
+        "Unsupported dtype for tri_inv_rec_unroll kernel. Supports only "
+        "fp16 and bf16.");
   }
 
   const uint32_t matrix_size = static_cast<uint32_t>(M.size(-1));
@@ -80,21 +77,24 @@ at::Tensor run_tri_inv_rec_unroll(
     block_dim = total_tiles;
   }
 
-  const at::Tensor M_inv =
-      at::zeros_like(M, at::TensorOptions().dtype(dtype_out).device(device));
+  const at::Tensor M_inv = at::zeros_like(M);
+
+  const at::Tensor I_neg =
+      at::zeros({matrix_size, matrix_size},
+                at::TensorOptions().dtype(dtype).device(device));
+  I_neg.fill_diagonal_(-1);
 
   void* cu_seqlens_ptr = nullptr;
   if (cu_seqlens.numel() != 1) {
     cu_seqlens_ptr = ConvertType(cu_seqlens);
   }
 
-  const at::Tensor M_input = (dtype == at::kBFloat16) ? M_half : M;
-  if (dtype_out == at::kHalf) {
-    EXEC_KERNEL_CMD(tri_inv_rec_unroll_fp16fp16, block_dim, M_inv, M_input,
+  if (dtype == at::kBFloat16) {
+    EXEC_KERNEL_CMD(tri_inv_rec_unroll_bf16, block_dim, M_inv, M, I_neg,
                     matrix_size, total_tiles, num_bsnd_heads, is_lower,
                     cu_seqlens_ptr);
-  } else if (dtype_out == at::kFloat) {
-    EXEC_KERNEL_CMD(tri_inv_rec_unroll_fp16fp32, block_dim, M_inv, M_input,
+  } else if (dtype == at::kHalf) {
+    EXEC_KERNEL_CMD(tri_inv_rec_unroll_fp16, block_dim, M_inv, M, I_neg,
                     matrix_size, total_tiles, num_bsnd_heads, is_lower,
                     cu_seqlens_ptr);
   }

@@ -20,7 +20,7 @@ setup_once:
 build: clean
 	bash scripts/build.sh
 
-wheel:
+wheel: clean
 	export CMAKE_GENERATOR="Unix Makefiles" && pip wheel -v  . --extra-index-url https://download.pytorch.org/whl/cpu
 
 
