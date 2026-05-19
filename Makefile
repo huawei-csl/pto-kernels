@@ -52,9 +52,9 @@ test_tri_inv:
 
 run_abs_a5: compile_abs
 	python scripts/data_gen_abs.py
-	g++ -o build/main_abs examples/a5/main_abs.cpp  \
+	g++ -o main_abs examples/a5/main_abs.cpp  \
 		-L$(shell pwd)/build/lib/ -L$(ASCEND_TOOLKIT_HOME)/lib64/ \
 		-lkernel_abs -lacl_rt -I$(ASCEND_TOOLKIT_HOME)/include/ \
 		-I$(shell pwd)/examples/a5/ -Wno-ignored-attributes
 	LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:$(shell pwd)/build/lib/ cannsim record \
-		--soc=Ascend950 -g ./build/main_abs
+		--soc=Ascend950 -g ./main_abs
