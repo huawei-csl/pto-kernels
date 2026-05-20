@@ -39,8 +39,7 @@ constexpr unsigned UB_SIZE = 0x30000;  // 192KB UB of A2A3
 template <typename InputT, typename OutputT, uint32_t tile_size>
 AICORE void scanULOne(__gm__ InputT* x, __gm__ InputT* o, __gm__ InputT* u,
                       __gm__ InputT* l, __gm__ OutputT* s, uint32_t scan_size) {
-#if (__CHECK_FEATURE_AT_PRECOMPILE) || \
-    (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))
+#if (__CHECK_FEATURE_AT_PRECOMPILE) || defined(__DAV_CUBE__)
 
   // Type definitions for different memory levels
   // GM
@@ -211,8 +210,7 @@ AICORE void scanULOne(__gm__ InputT* x, __gm__ InputT* o, __gm__ InputT* u,
 template <typename OutputT, uint32_t tile_size>
 AICORE void singleVecBlockScan(__gm__ OutputT* s, uint32_t scan_size,
                                __gm__ OutputT* scan_core_buf) {
-#if (__CHECK_FEATURE_AT_PRECOMPILE) || \
-    (__CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__))
+#if (__CHECK_FEATURE_AT_PRECOMPILE) || defined(__DAV_VEC__)
 
   if (get_block_idx() != 0 || get_subblockid() != 0) {
     return;  // Only one vector core does the scan
@@ -244,8 +242,7 @@ AICORE void singleVecBlockScan(__gm__ OutputT* s, uint32_t scan_size,
 template <typename OutputT, uint32_t tile_size>
 AICORE void addAllBlockScan(__gm__ OutputT* s, uint32_t scan_size,
                             __gm__ OutputT* scan_core_buf) {
-#if (__CHECK_FEATURE_AT_PRECOMPILE) || \
-    (__CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__))
+#if (__CHECK_FEATURE_AT_PRECOMPILE) || defined(__DAV_VEC__)
 
   if (get_subblockid() != 0) {
     return;  // Only one vector core does the scan
