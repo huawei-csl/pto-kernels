@@ -339,11 +339,11 @@ AICORE void runKernelScanMCSSA(__gm__ InputT* x, __gm__ InputT* o,
 
   scanULOne<InputT, OutputT, tile_size>(x, o, u, l, s, scan_size);
 
-  kernel_utils::SyncAllImpl<false>();
+  kernel_utils::SyncAll<false>();
 
   singleVecBlockScan<OutputT, tile_size>(s, scan_size, scan_core_buf);
 
-  kernel_utils::SyncAllImpl<true>();
+  kernel_utils::SyncAll<true>();
 
   addAllBlockScan<OutputT, tile_size>(s, scan_size, scan_core_buf);
 }
