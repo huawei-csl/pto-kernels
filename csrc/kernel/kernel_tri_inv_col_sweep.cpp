@@ -103,6 +103,8 @@ AICORE void runTTriInv(__gm__ T* vec_in, __gm__ T* vec_out,
       }
 
       TASSIGN(A_k, j * S * sizeof(T));
+      set_flag(PIPE_S, PIPE_V, EVENT_ID0);
+      wait_flag(PIPE_S, PIPE_V, EVENT_ID0);
       TAXPY(b, A_k, static_cast<T>(-1));
       set_flag(PIPE_V, PIPE_S, EVENT_ID0);
       wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
@@ -119,12 +121,10 @@ AICORE void runTTriInv(__gm__ T* vec_in, __gm__ T* vec_out,
         wait_flag(PIPE_S, PIPE_V, EVENT_ID0);
         TAXPY(b, A_k, static_cast<T>(-xk));
 
-        set_flag(PIPE_S, PIPE_V, EVENT_ID0);
-        wait_flag(PIPE_S, PIPE_V, EVENT_ID0);
-        x.SetValue(k + 1, static_cast<T>(xkp1));
-        xkp1 = xk;
         set_flag(PIPE_V, PIPE_S, EVENT_ID0);
         wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
+        x.SetValue(k + 1, static_cast<T>(xkp1));
+        xkp1 = xk;
         xk = static_cast<float>(b.GetValue(k - 1));
       }
 
