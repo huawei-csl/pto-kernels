@@ -8,7 +8,7 @@ Kernels compile with `--cce-aicore-arch=dav-c310-vec` and `-DREGISTER_BASE`. For
 
 ```bash
 source /usr/local/Ascend/ascend-toolkit/latest/bin/setenv.bash
-export PTO_LIB_PATH=/path/to/pto-isa   # or megagdn-pto/third_party/pto-isa
+export PTO_LIB_PATH=/path/to/pto-kernels/third_party/pto-isa
 pip install torch torch-npu
 ```
 
@@ -36,15 +36,22 @@ python3 -m common.build --all
 ./run_thread_sweep.sh   # OMP sweep, T=512, both tools
 ```
 
-## Host environment
+## Host environments
 
-Measured on **Kunpeng-920** (HUAWEI Kunpeng 920 5250), **192 logical CPUs** (4 sockets × 48 cores, 1 thread/core), **aarch64**, CANN **9.0.0**, May 2026.
+| Host | CPU | Logical CPUs | Arch | CANN |
+|------|-----|--------------|------|------|
+| Kunpeng server | HUAWEI Kunpeng 920 5250 | 192 (4×48 cores, 1 thread/core) | aarch64 | 9.0.0 |
+| x86 server | AMD EPYC 9654 96-Core | 192 (1×96 cores, 2 threads/core) | x86_64 | 9.0.0 |
+
+Both measured May 2026. On the same ladder shapes, the x86 host is roughly **3–5× faster** in simulator wall time (startup overhead still dominates smoke on both).
 
 ## Simulator time cost summary
 
 Wall time uses `time.perf_counter()` around one kernel launch (includes PEM/msprof or cannsim startup). **T** = output element count (same ladder labels as the 910B `chunk_h` benchmark). **Correctness PASS** at smoke shape on both tools (PyTorch CPU reference).
 
-### SiLU — msprof (`Ascend950PR_9599`)
+### Kunpeng-920 (aarch64)
+
+#### SiLU — msprof (`Ascend950PR_9599`)
 
 | Label | T | Sim wall | ms/element |
 |-------|---|----------|------------|
@@ -54,7 +61,7 @@ Wall time uses `time.perf_counter()` around one kernel launch (includes PEM/mspr
 | varlen_2x512 | 1024 | **26 s** | 26 ms |
 | medium | 4096 | **29 s** | 7.1 ms |
 
-### SiLU — cannsim (`Ascend950`)
+#### SiLU — cannsim (`Ascend950`)
 
 | Label | T | Sim wall | ms/element |
 |-------|---|----------|------------|
@@ -64,7 +71,7 @@ Wall time uses `time.perf_counter()` around one kernel launch (includes PEM/mspr
 | varlen_2x512 | 1024 | **16 s** | 16 ms |
 | medium | 4096 | **17 s** | 4.1 ms |
 
-### SwiGLU — msprof
+#### SwiGLU — msprof
 
 | Label | T | Sim wall | ms/element |
 |-------|---|----------|------------|
@@ -74,7 +81,7 @@ Wall time uses `time.perf_counter()` around one kernel launch (includes PEM/mspr
 | varlen_2x512 | 1024 | **47 s** | 46 ms |
 | medium | 4096 | **52 s** | 13 ms |
 
-### SwiGLU — cannsim
+#### SwiGLU — cannsim
 
 | Label | T | Sim wall | ms/element |
 |-------|---|----------|------------|
@@ -84,14 +91,65 @@ Wall time uses `time.perf_counter()` around one kernel launch (includes PEM/mspr
 | varlen_2x512 | 1024 | **21 s** | 21 ms |
 | medium | 4096 | **22 s** | 5.4 ms |
 
-**Scaling law (approximate):**
+**Scaling law (Kunpeng, approximate):**
 
 - Fixed overhead **~15–75 s** at T=128 dominates smoke; do not extrapolate from smoke alone.
 - After startup, cost scales **roughly linearly with T** at ~**0.005–0.06 s/element** on cannsim and ~**0.007–0.06 s/element** on msprof for T≥512.
 - **Varlen vs fixed length** at the same T: negligible (1024 tokens: SiLU msprof 26 s vs 26 s).
 - Pure-vector kernels finish in **minutes** on the default ladder; contrast with mix `chunk_h_mini` v1 (scalar matmul, 35+ min timeouts).
 
+### AMD EPYC 9654 (x86_64)
+
+#### SiLU — msprof (`Ascend950PR_9599`)
+
+| Label | T | Sim wall | ms/element |
+|-------|---|----------|------------|
+| smoke | 128 | **12 s** | 91 ms |
+| tiny | 512 | **7 s** | 14 ms |
+| small | 1024 | **7 s** | 7.1 ms |
+| varlen_2x512 | 1024 | **7 s** | 6.9 ms |
+| medium | 4096 | **12 s** | 3.0 ms |
+
+#### SiLU — cannsim (`Ascend950`)
+
+| Label | T | Sim wall | ms/element |
+|-------|---|----------|------------|
+| smoke | 128 | **9 s** | 72 ms |
+| tiny | 512 | **4 s** | 7.2 ms |
+| small | 1024 | **4 s** | 3.9 ms |
+| varlen_2x512 | 1024 | **4 s** | 3.5 ms |
+| medium | 4096 | **5 s** | 1.3 ms |
+
+#### SwiGLU — msprof
+
+| Label | T | Sim wall | ms/element |
+|-------|---|----------|------------|
+| smoke | 128 | **18 s** | 137 ms |
+| tiny | 512 | **13 s** | 25 ms |
+| small | 1024 | **17 s** | 16 ms |
+| varlen_2x512 | 1024 | **15 s** | 14 ms |
+| medium | 4096 | **20 s** | 4.9 ms |
+
+#### SwiGLU — cannsim
+
+| Label | T | Sim wall | ms/element |
+|-------|---|----------|------------|
+| smoke | 128 | **11 s** | 87 ms |
+| tiny | 512 | **6 s** | 12 ms |
+| small | 1024 | **6 s** | 6.3 ms |
+| varlen_2x512 | 1024 | **6 s** | 5.8 ms |
+| medium | 4096 | **7 s** | 1.7 ms |
+
+**Scaling law (AMD EPYC, approximate):**
+
+- Fixed overhead **~9–18 s** at T=128 dominates smoke; do not extrapolate from smoke alone.
+- After startup, cost scales **roughly linearly with T** at ~**0.001–0.012 s/element** on cannsim and ~**0.003–0.014 s/element** on msprof for T≥512.
+- **Varlen vs fixed length** at the same T: negligible (1024 tokens: SiLU msprof 7 s vs 7 s).
+- Pure-vector kernels finish in **under ~2 min** for the full ladder on this host.
+
 ### vs CPU thread count (OMP)
+
+Measured on **Kunpeng-920** only (not re-run on x86).
 
 Fixed workload **T=512** (SiLU), swept `OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, `MKL_NUM_THREADS` together:
 
