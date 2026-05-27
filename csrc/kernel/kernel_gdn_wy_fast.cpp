@@ -38,6 +38,7 @@ for the full License text.
 
 #include "kernel_utils.h"
 using namespace pto;
+using namespace kernel_utils;
 
 // ── Compile-time configuration (overridable at build time via -D flags) ──
 #ifndef GDN_H
@@ -394,7 +395,7 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
             } else {
               // Empty lower-half tail: zero-fill so Cube sees valid padding
               TEXPANDS(a1_ub, 0.0f);
-              pipe_barrier(PIPE_V);
+              PipeBarrierVec();
               TCVT(a1_ub_half, a1_ub, pto::RoundMode::CAST_NONE);
             }
 
@@ -403,9 +404,9 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 
             // A2 = A * beta_2d   (beta broadcast along columns)
             TCVT(beta_ub, beta_ub_half, pto::RoundMode::CAST_NONE);
-            pipe_barrier(PIPE_V);
+            PipeBarrierVec();
             TMOV(beta_r_ub, beta_ub);
-            pipe_barrier(PIPE_V);
+            PipeBarrierVec();
             TCOLEXPAND(beta_2d_ub, beta_r_ub);
 
             TCVT(a1_ub, a1_ub_half, pto::RoundMode::CAST_NONE);
@@ -450,11 +451,11 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 
             // A1 = A * (exp(g)*beta)_2d
             TEXP(g_ub, g_ub);
-            pipe_barrier(PIPE_V);
+            PipeBarrierVec();
             TMUL(g_ub, g_ub, beta_ub);
-            pipe_barrier(PIPE_V);
+            PipeBarrierVec();
             TMOV(g_r_ub, g_ub);
-            pipe_barrier(PIPE_V);
+            PipeBarrierVec();
             TCOLEXPAND(g_2d_ub, g_r_ub);
             TMUL(a1_ub, a1_ub, g_2d_ub);
             TCVT(a1_ub_half, a1_ub, pto::RoundMode::CAST_NONE);
@@ -542,7 +543,7 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               }
             } else {
               TEXPANDS(a1_ub, 0.0f);
-              pipe_barrier(PIPE_V);
+              PipeBarrierVec();
               TCVT(a1_ub_half, a1_ub, pto::RoundMode::CAST_NONE);
             }
 
@@ -551,9 +552,9 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 
             // A2 = A * beta_2d
             TCVT(beta_ub, beta_ub_half, pto::RoundMode::CAST_NONE);
-            pipe_barrier(PIPE_V);
+            PipeBarrierVec();
             TMOV(beta_r_ub, beta_ub);
-            pipe_barrier(PIPE_V);
+            PipeBarrierVec();
             TCOLEXPAND(beta_2d_ub, beta_r_ub);
 
             TCVT(a1_ub, a1_ub_half, pto::RoundMode::CAST_NONE);
