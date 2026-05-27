@@ -39,6 +39,10 @@ def _pto_include_root() -> Path:
         candidate = Path(ascend)
         if (candidate / "include" / "pto" / "pto-inst.hpp").is_file():
             return candidate / "include"
+    repo_root = A5_SIM_ROOT.parent.parent
+    local = repo_root / "third_party" / "pto-isa" / "include"
+    if (local / "pto" / "pto-inst.hpp").is_file():
+        return local
     fallback = Path("/workdir/megagdn-pto/third_party/pto-isa/include")
     if (fallback / "pto" / "pto-inst.hpp").is_file():
         return fallback
