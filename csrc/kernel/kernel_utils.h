@@ -144,4 +144,14 @@ AICORE inline void SyncAll() {
 #endif
 }
 
+/**
+ * @brief Pipe in-core barrier for vector core.
+ *
+ */
+AICORE void PipeBarrierVec() {
+#if __CCE_AICORE__ == 220
+  pipe_barrier(PIPE_V);
+#endif
+}
+
 }  // namespace kernel_utils

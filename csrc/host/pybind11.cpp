@@ -19,7 +19,7 @@ for the full License text.
 #include "torch_gdn_wy_fast.h"
 #include "torch_scan_ul1.h"
 #include "torch_simple_matmul.h"
-// #include "torch_swiglu.h"
+#include "torch_swiglu.h"
 #include "torch_tri_inv.h"
 #include "torch_tri_inv_ns.h"
 #include "torch_tri_inv_rec_unroll.h"
@@ -62,8 +62,8 @@ PYBIND11_MODULE(pto_kernels_ops, m) {
         py::arg("cu_seqlens") = at::zeros({1}));
   m.def("pto_scan_ul1", &pto_isa_ops::run_scan_ul1);
   m.def("pto_simple_matmul", &pto_isa_ops::run_simple_matmul);
-  //  m.def("pto_swiglu", &pto_isa_ops::run_swiglu, py::arg("x"), py::arg("dim")
-  //  = -1);
+  m.def("pto_swiglu", &pto_isa_ops::run_swiglu, py::arg("x"),
+        py::arg("dim") = -1);
   m.def("pto_tri_inv_trick", &pto_isa_ops::run_tri_inv_trick);
   m.def("pto_tri_inv_rec_unroll", &pto_isa_ops::run_tri_inv_rec_unroll,
         py::arg("M"), py::arg("cu_seqlens") = at::zeros({1}),
