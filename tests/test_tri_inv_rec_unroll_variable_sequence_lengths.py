@@ -186,13 +186,10 @@ def _test_inverse_accuracy(
     atol: float,
     rtol: float,
     ftol: float,
-    output_dtype: torch.dtype,
 ):
 
     ref = _reference_inverse(A, cu_seqlens, chunk_size)
-    tri = pto_tri_inv_rec_unroll(
-        A, cu_seqlens, is_bsnd_format=True, is_lower=False, dtype_out=output_dtype
-    )
+    tri = pto_tri_inv_rec_unroll(A, cu_seqlens, is_bsnd_format=True, is_lower=False)
     torch.npu.synchronize()
     tri = tri.to(torch.float32).cpu().to(torch.float64)
     torch.npu.synchronize()
@@ -202,7 +199,6 @@ def _test_inverse_accuracy(
     assert frob_error <= ftol
 
 
-@pytest.mark.parametrize("output_dtype", [torch.float16, torch.float32])
 @pytest.mark.parametrize("B", [1, 2, 7, 17, 32, 93])
 @pytest.mark.parametrize("N", [4])
 @pytest.mark.parametrize(
@@ -221,7 +217,6 @@ def test_tri_inv_rec_unroll_variable_length(
     atol: float,
     rtol: float,
     ftol: float,
-    output_dtype: torch.dtype,
 ):
     """
     Args:
@@ -243,6 +238,4 @@ def test_tri_inv_rec_unroll_variable_length(
         feature_dim=default_feature_dim,
         matrix_type=matrix_type,
     )
-    _test_inverse_accuracy(
-        packed_input, cu_seqlens, chunk_size, atol, rtol, ftol, output_dtype
-    )
+    _test_inverse_accuracy(packed_input, cu_seqlens, chunk_size, atol, rtol, ftol)
