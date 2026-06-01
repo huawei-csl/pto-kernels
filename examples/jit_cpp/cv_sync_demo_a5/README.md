@@ -9,6 +9,24 @@ new direct Cube/Vector data paths:
 The code is self-contained in this directory and launches through `torch_npu`
 ctypes wrappers on the real device `npu:0`.
 
+## Reproducible PTO-ISA Version
+
+This repo pins PTO-ISA as a git submodule at:
+
+```text
+third_party/pto-isa @ 01666f3b386f296c95e6e05825fe63b8e6bb4ef4
+```
+
+Initialize it after cloning:
+
+```bash
+git submodule update --init --recursive third_party/pto-isa
+```
+
+`common_build.py` uses `third_party/pto-isa/include` by default. Set
+`PTO_ISA_ROOT=/path/to/pto-isa` only when intentionally testing another PTO-ISA
+checkout.
+
 ## Run
 
 ```bash

@@ -9,6 +9,7 @@ import subprocess
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+REPO_ROOT = HERE.parents[2]
 BUILD_DIR = HERE / "build"
 KERNEL_LIB = "libcv_sync_kernels.so"
 OUT_LIB = "libcv_sync_demo_a5.so"
@@ -36,7 +37,13 @@ def _bisheng() -> str:
 
 
 def _pto_isa_root() -> Path:
-    return Path(os.environ.get("PTO_ISA_ROOT", "/home/jzhuang/pto-isa"))
+    override = os.environ.get("PTO_ISA_ROOT")
+    if override:
+        return Path(override)
+    vendored = REPO_ROOT / "third_party" / "pto-isa"
+    if vendored.is_dir():
+        return vendored
+    return Path("/home/jzhuang/pto-isa")
 
 
 def _includes() -> list[str]:
