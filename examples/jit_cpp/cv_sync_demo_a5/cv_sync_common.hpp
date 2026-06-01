@@ -1,7 +1,6 @@
 #pragma once
 
 #include <pto/pto-inst.hpp>
-#include <pto/common/fifo.hpp>
 
 using namespace pto;
 
@@ -39,8 +38,6 @@ using TileVecNZ = Tile<TileType::Vec, half, HALF_TILE, TILE_SIZE, BLayout::ColMa
                        SLayout::RowMajor, 512, PadValue::Null>;
 using TileVecFloat = Tile<TileType::Vec, float, HALF_TILE, TILE_SIZE, BLayout::RowMajor, HALF_TILE, TILE_SIZE,
                           SLayout::NoneBox, 512, PadValue::Null>;
-using C2VFloatPipe = TPipe<0, Direction::DIR_C2V, TILE_SIZE * TILE_SIZE * sizeof(float), 2>;
-using V2CMatPipe = TPipe<2, Direction::DIR_V2C, TILE_SIZE * TILE_SIZE * sizeof(half), 2>;
 
 using TileGlobal = GlobalTensor<half, TileShape2D<half, TILE_SIZE, TILE_SIZE, Layout::ND>,
                                 BaseShape2D<half, TILE_SIZE, TILE_SIZE, Layout::ND>, Layout::ND>;

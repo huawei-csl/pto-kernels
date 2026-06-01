@@ -57,10 +57,10 @@ Old baselines are from the DAV_2201 raw-flag READMEs. A5 results are from
 
 | Kernel | Old DAV_2201 peak | A5 measured peak | Ratio |
 | --- | ---: | ---: | ---: |
-| `stream_c2v` | 1154.2 GB/s | 9745.6 GB/s | 8.44x |
-| `stream_v2c` | 1102.8 GB/s | 8256.5 GB/s counting actual A5 bytes (`UB -> L1` only); 16512.9 GB/s using the old DAV_2201 round-trip formula (`Vec -> workspace` + `workspace -> Cube`) | 7.49x by actual A5 bytes; 14.97x by old formula |
-| `matmul_add_c2v` | 1401.3 GB/s | 2003.9 GB/s | 1.43x |
-| `add_matmul_v2c` | 1593.8 GB/s | 273.3 GB/s | 0.17x |
+| `stream_c2v` | 1154.2 GB/s | 9704.5 GB/s | 8.41x |
+| `stream_v2c` | 1102.8 GB/s | 8328.2 GB/s counting actual A5 bytes (`UB -> L1` only); 16656.5 GB/s using the old DAV_2201 round-trip formula (`Vec -> workspace` + `workspace -> Cube`) | 7.55x by actual A5 bytes; 15.10x by old formula |
+| `matmul_add_c2v` | 1401.3 GB/s | 2039.4 GB/s | 1.46x |
+| `add_matmul_v2c` | 1593.8 GB/s | 1727.6 GB/s | 1.08x |
 
 Notes:
 
@@ -76,10 +76,9 @@ Notes:
   benchmark's byte-counting formula can still be compared apples-to-apples.
 - `matmul_add_c2v` uses float32 `D` and `C`, matching the native direct
   accumulator-to-Vec path.
-- `add_matmul_v2c` launches once for the full batch. The host launcher expands
-  `block_dim` to `physical_cube_cores * num_rounds`, so each logical wave/core
-  pair performs one direct `UB -> L1` handoff without a Python per-wave loop.
-  This avoids the Python overhead, but still reloads the weight tile per logical
-  wave; attempts to reuse one physical-core persistent L1 handoff slot across
-  waves were not correct on this software stack.
+- `add_matmul_v2c` is a persistent physical-core kernel: `block_dim` is the
+  physical Cube core count, `D` is loaded once per core, and each round performs
+  one direct `UB -> L1` handoff using `TINSERT` / `copy_ubuf_to_cbuf`. The
+  producer waits for a Cube-side free signal before overwriting the L1 handoff
+  slot, and the Cube drains the relevant pipes before releasing it.
 

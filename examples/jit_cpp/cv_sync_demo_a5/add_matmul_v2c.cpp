@@ -2,15 +2,15 @@
 
 #ifdef __CCE_AICORE__
 
-AICORE void run_add_matmul_v2c(__gm__ half *A, __gm__ half *B, __gm__ half *C, __gm__ half *D,
-                               int32_t physical_cores)
+AICORE void run_add_matmul_v2c(__gm__ half *A, __gm__ half *B, __gm__ half *C, __gm__ half *D, int64_t batch)
 {
-    const int32_t bid = static_cast<int32_t>(get_block_idx());
-    const int32_t cid = bid % physical_cores;
-    const int32_t round = bid / physical_cores;
+    const int32_t cid = static_cast<int32_t>(get_block_idx());
     const int32_t vid = static_cast<int32_t>(get_subblockid());
-    const int32_t wave_rows = physical_cores * TILE_SIZE;
-    constexpr uint16_t READY_FLAG = 6;
+    const int32_t num_cores = static_cast<int32_t>(block_num);
+    const int32_t wave_rows = num_cores * TILE_SIZE;
+    const int32_t num_rounds = static_cast<int32_t>(batch) / wave_rows;
+    constexpr uint16_t READY_FLAG = 10;
+    constexpr uint16_t FREE_FLAG = 11;
 
     TileL1 d_l1, ab_l1;
     TileL1Insert ab_insert;
@@ -40,43 +40,59 @@ AICORE void run_add_matmul_v2c(__gm__ half *A, __gm__ half *B, __gm__ half *C, _
     SetFlag<PIPE_MTE1, PIPE_M>(0);
     WaitFlag<PIPE_MTE1, PIPE_M>(0);
 
-    const int32_t row_c = round * wave_rows + cid * TILE_SIZE;
+    for (int32_t r = 0; r < num_rounds; ++r) {
+        const int32_t row_c = r * wave_rows + cid * TILE_SIZE;
 
-    WaitBothVec<PIPE_MTE1>(READY_FLAG);
-    TMOV(ab_l0, ab_l1);
-    SetFlag<PIPE_MTE1, PIPE_M>(0);
-    WaitFlag<PIPE_MTE1, PIPE_M>(0);
+        WaitBothVec<PIPE_MTE1>(READY_FLAG);
+        pipe_barrier(PIPE_ALL);
+        TMOV(ab_l0, ab_l1);
+        SetFlag<PIPE_MTE1, PIPE_M>(0);
+        WaitFlag<PIPE_MTE1, PIPE_M>(0);
+        pipe_barrier(PIPE_ALL);
+        SignalBothVec<PIPE_MTE1>(FREE_FLAG);
 
-    TMATMUL(c_l0, ab_l0, d_l0);
-    SetFlag<PIPE_M, PIPE_FIX>(0);
-    WaitFlag<PIPE_M, PIPE_FIX>(0);
+        TMATMUL(c_l0, ab_l0, d_l0);
+        SetFlag<PIPE_M, PIPE_FIX>(0);
+        WaitFlag<PIPE_M, PIPE_FIX>(0);
 
-    TileGlobal c_global(C + row_c * TILE_SIZE);
-    TSTORE(c_global, c_l0);
-    pipe_barrier(PIPE_ALL);
+        TileGlobal c_global(C + row_c * TILE_SIZE);
+        TSTORE(c_global, c_l0);
+        pipe_barrier(PIPE_ALL);
+    }
 #endif
 
 #if defined(__DAV_VEC__)
     set_mask_norm();
     set_vector_mask(-1, -1);
-    const int32_t row_v = round * wave_rows + cid * TILE_SIZE + vid * HALF_TILE;
+    for (int32_t r = 0; r < num_rounds; ++r) {
+        const int32_t row_v = r * wave_rows + cid * TILE_SIZE + vid * HALF_TILE;
 
-    HalfTileGlobal a_global(A + row_v * TILE_SIZE);
-    HalfTileGlobal b_global(B + row_v * TILE_SIZE);
-    TLOAD(a_ub, a_global);
-    TLOAD(b_ub, b_global);
-    SetFlag<PIPE_MTE2, PIPE_V>(0);
-    WaitFlag<PIPE_MTE2, PIPE_V>(0);
+        HalfTileGlobal a_global(A + row_v * TILE_SIZE);
+        HalfTileGlobal b_global(B + row_v * TILE_SIZE);
+        TLOAD(a_ub, a_global);
+        TLOAD(b_ub, b_global);
+        SetFlag<PIPE_MTE2, PIPE_V>(0);
+        WaitFlag<PIPE_MTE2, PIPE_V>(0);
 
-    TADD(a_ub, a_ub, b_ub);
-    SetFlag<PIPE_V, PIPE_MTE3>(0);
-    WaitFlag<PIPE_V, PIPE_MTE3>(0);
-    TMOV(ab_nz, a_ub);
-    SetFlag<PIPE_V, PIPE_MTE3>(0);
-    WaitFlag<PIPE_V, PIPE_MTE3>(0);
+        TADD(a_ub, a_ub, b_ub);
+        SetFlag<PIPE_V, PIPE_MTE3>(0);
+        WaitFlag<PIPE_V, PIPE_MTE3>(0);
+        TMOV(ab_nz, a_ub);
+        SetFlag<PIPE_V, PIPE_MTE3>(0);
+        WaitFlag<PIPE_V, PIPE_MTE3>(0);
 
-    TINSERT(ab_insert, ab_nz, static_cast<uint16_t>(vid * HALF_TILE), static_cast<uint16_t>(0));
-    set_intra_block(PIPE_MTE3, READY_FLAG);
+        if (r > 0) {
+            wait_intra_block(PIPE_MTE3, FREE_FLAG);
+            pipe_barrier(PIPE_ALL);
+        }
+        TINSERT(ab_insert, ab_nz, static_cast<uint16_t>(vid * HALF_TILE), static_cast<uint16_t>(0));
+        pipe_barrier(PIPE_ALL);
+        set_intra_block(PIPE_MTE3, READY_FLAG);
+    }
+    if (num_rounds > 0) {
+        wait_intra_block(PIPE_MTE3, FREE_FLAG);
+        pipe_barrier(PIPE_ALL);
+    }
 #endif
 }
 
@@ -86,15 +102,12 @@ extern "C" __global__ AICORE void add_matmul_v2c_kernel(__gm__ uint8_t *A, __gm_
                                                          __gm__ uint8_t *D, int64_t batch)
 {
     run_add_matmul_v2c(reinterpret_cast<__gm__ half *>(A), reinterpret_cast<__gm__ half *>(B),
-                       reinterpret_cast<__gm__ half *>(C), reinterpret_cast<__gm__ half *>(D),
-                       static_cast<int32_t>(batch));
+                       reinterpret_cast<__gm__ half *>(C), reinterpret_cast<__gm__ half *>(D), batch);
 }
 
 void LaunchAddMatmulV2C(uint32_t block_dim, uint8_t *A, uint8_t *B, uint8_t *C, uint8_t *D, int64_t batch,
                         void *stream)
 {
-    const int64_t wave_rows = static_cast<int64_t>(block_dim) * TILE_SIZE;
-    const uint32_t num_rounds = static_cast<uint32_t>(batch / wave_rows);
-    add_matmul_v2c_kernel<<<block_dim * num_rounds, nullptr, stream>>>(A, B, C, D, static_cast<int64_t>(block_dim));
+    add_matmul_v2c_kernel<<<block_dim, nullptr, stream>>>(A, B, C, D, batch);
 }
 
