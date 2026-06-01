@@ -76,7 +76,7 @@ Old baselines are from the DAV_2201 raw-flag READMEs. A5 results are from
 | Kernel | Old DAV_2201 peak | A5 measured peak | Ratio |
 | --- | ---: | ---: | ---: |
 | `stream_c2v` | 1154.2 GB/s | 9704.5 GB/s | 8.41x |
-| `stream_v2c` | 1102.8 GB/s | 8328.2 GB/s counting actual A5 bytes (`UB -> L1` only); 16656.5 GB/s using the old DAV_2201 round-trip formula (`Vec -> workspace` + `workspace -> Cube`) | 7.55x by actual A5 bytes; 15.10x by old formula |
+| `stream_v2c` | 1102.8 GB/s | 8328.2 GB/s actual A5 direct-copy bytes (`UB -> L1`) | 7.55x |
 | `matmul_add_c2v` | 1401.3 GB/s | 2039.4 GB/s | 1.46x |
 | `add_matmul_v2c` | 1593.8 GB/s | 1727.6 GB/s | 1.08x |
 
@@ -88,10 +88,9 @@ Notes:
 - For `stream_v2c`, the timed loop now measures the hot direct-copy path only:
   setup loads `A` and `D`, computes `A + D`, and converts to NZ once before the
   timed loop; each timed iteration performs `TINSERT`, which uses
-  `copy_ubuf_to_cbuf` for `UB -> L1`. The old DAV_2201 benchmark had two GM
-  transfers per iteration: `Vec -> workspace` and `workspace -> Cube`. The README
-  shows both calculations so the actual A5 transfer rate is visible and the old
-  benchmark's byte-counting formula can still be compared apples-to-apples.
+  `copy_ubuf_to_cbuf` for `UB -> L1`. Do not interpret this as a measured
+  `Vec -> workspace -> Cube` GM round trip. The old DAV_2201 path was measured
+  separately at 1102.8 GB/s and remains the correct baseline for that path.
 - `matmul_add_c2v` uses float32 `D` and `C`, matching the native direct
   accumulator-to-Vec path.
 - `add_matmul_v2c` is a persistent physical-core kernel: `block_dim` is the
