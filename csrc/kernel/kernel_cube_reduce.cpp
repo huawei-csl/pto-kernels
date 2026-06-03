@@ -67,7 +67,6 @@ AICORE void runKernelCubeReduce(__gm__ InputT* vec_in,
                                 __gm__ InputT* all_ones_b,
                                 __gm__ OutputT* workspace, uint32_t vec_len,
                                 uint32_t block_num) {
-#if defined(__DAV_CUBE__)
   constexpr uint32_t MAT_DIM_16 = 16;
   constexpr uint32_t tile_len = S * S;
   constexpr uint32_t out_tile_len = S * MAT_DIM_16;
@@ -161,7 +160,6 @@ AICORE void runKernelCubeReduce(__gm__ InputT* vec_in,
   wait_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
   GlobalDataOut out_global(workspace + id * out_tile_len);
   TSTORE(out_global, c_l0);
-#endif
 }
 
 /**
