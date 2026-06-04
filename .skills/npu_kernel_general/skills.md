@@ -175,6 +175,18 @@ Query `torch.npu.current_stream()._as_parameter_` is relatively expensive. Reuse
 
 ### Choosing error threshold in numerical correctness check
 
-Definitely avoid `atol=1e-2` in correctness checks. The values of intermediate activations are often on the magnitude of `1e-2`, thus passing asserts with `atol=1e-2` can mean 100% relative error, which is a meaningless check. Keep atol very small like `1e-5`. In comparison, `rtol=1e-2` is fine for bfloat16 dtype, ref [`torch.testing.assert_close` defaults](https://docs.pytorch.org/docs/main/testing.html#torch.testing.assert_close).
+For numerical kernels, evaluating the accuracy depends on several factors, such as the working `precision` (`float`, `double`, `half`, ...), and the properties of the underlying operations.
 
-In case of few outliers that break `rtol`, can also check `rmse` vs average output magnitude (`rmse` should be 1~2 orders of magnitudes smaller than output values themselves). Also check R2 score between kernel output and reference output (should get R2=0.99 even with a few outliers). 
+If the operations take place at the tensor-level, for example, batch matrix-products, element-wise arithmetic operations, and so on, there are different metrics to evaluate the accuracy:
+- Fine-grained, element-wise errors, such as:
+  - Absolute and/or relative error. For example, `torch.allclose(x_true, x_computed, atol, rtol)`, where `x_true` is the expected true tensor and `x_computed` is the tensor returned by our kernel. 
+  - If `x_true` is not known analytically, it needs to be computed in high accuracy by a reliable algorithm using high precision (e.g. `double`). In this case, one can also check the "symmetric" variant of element-wise error: `|x_true - x_computed| <= atol + rtol * (|x_true| + |x_computed|)/2`.
+- Collective error measures, for example:
+  - Frobenius norm-wise relative error: `torch.linalg.norm(x_true - x_computed, 'fro') / torch.linalg.norm(x_true, 'fro') <= ftol`, where `ftol` is some chosen tolerance.
+  - RMSE: `torch.sqrt(((x_true - x_computed)**2).mean())`.
+- Different types of algorithms have different "stability" properties, i.e., a numerically-stable algorithm for a specific task returns more accurate solutions than an unstable one. As a rule-of-thumb, collective operations, such as sums, matrix products, reductions, and so on, are generally stable. The errors grow proportionally to the corresponding input size, and, therefore, the tolerances can be scaled-up to absorb the (unavoidable) error growth.
+- Depending on the numerical precision of the algorithm, `atol`, `rtol`, `ftol` can be adjusted accordingly, depending on the requirements of the underlying operation.
+  - `atol` should generally be very small, ideally close to the machine precision, to avoid "hiding" large errors for smaller values. Avoid `atol=1e-2` in correctness checks. The values of intermediate activations are often on the magnitude of `1e-2`, thus passing asserts with `atol=1e-2` can mean 100% relative error, which is a meaningless check. Keep atol very small like `1e-5`. 
+  - On the other hand, `rtol` indicates the number of correct decimal digits of accuracy, and it can be larger than `atol`. In many applications, two, or even one, decimal digit of accuracy might be enough, ref [`torch.testing.assert_close` defaults](https://docs.pytorch.org/docs/main/testing.html#torch.testing.assert_close). Especially in low-precision formats, such as `bf16` and `float16`, the limits of the numerical precision one cannot expect more than few digits of accuracy. Once again, if there are many floating point operations involved per output-element, then `rtol` should be scaled accordingly by the number of operations involved. For example, if `n` numbers are summed together sequentially, then the `rtol` can be scaled by `n`, since each addition incurs errors.
+  - `ftol` indicates a "weighted average" of the number of correct digits, and, therefore, in general it should be smaller than `rtol`.
+  - `R2` score between kernel output and reference output is also helpful to determine outliers (should get `R2=0.99` even with a few outliers). 
