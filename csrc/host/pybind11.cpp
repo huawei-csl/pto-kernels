@@ -17,6 +17,7 @@ for the full License text.
 #include "torch_gdn_chunk_o.h"
 #include "torch_gdn_scaled_dot_kkt.h"
 #include "torch_gdn_wy_fast.h"
+#include "torch_kda_chunk_h.h"
 #include "torch_scan_ul1.h"
 #include "torch_simple_matmul.h"
 #include "torch_swiglu.h"
@@ -71,6 +72,10 @@ PYBIND11_MODULE(pto_kernels_ops, m) {
   m.def("pto_tri_inv_ns", &pto_isa_ops::run_tri_inv_ns, py::arg("M"),
         py::arg("num_iters") = 0, py::arg("scale_value") = 0.0f);
   m.def("pto_tri_inv", &pto_isa_ops::run_tri_inv);
+  m.def("pto_kda_chunk_h", &pto_isa_ops::run_kda_chunk_h, py::arg("K"),
+        py::arg("W"), py::arg("U"), py::arg("G"), py::arg("S_out"),
+        py::arg("V_corr_out"), py::arg("cu_seqlens") = at::zeros({1}),
+        py::arg("batch_size"), py::arg("seq_len"), py::arg("total_tokens"));
   m.def("pto_gdn_wy_fast", &pto_isa_ops::run_gdn_wy_fast, py::arg("K"),
         py::arg("V"), py::arg("Beta"), py::arg("G"), py::arg("A"),
         py::arg("batch_size"), py::arg("seq_len"),
