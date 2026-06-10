@@ -34,26 +34,26 @@ Optional cannsim path:
 
 Use tiny shapes first. CA-model startup dominates wall time.
 
-Pybind CA-model smoke:
+Pybind CA-model smoke (allow ~90 s wall time):
 
 ```bash
-msprof op simulator --soc-version=Ascend950PR_9599 --timeout=30 \
+msprof op simulator --soc-version=Ascend950PR_9599 --timeout=120 \
   --output=outputs/msprof_pybind \
   python3 run_kernel_pybind.py --kernel all --n 128 --block-dim 8
 ```
 
 ## A5 Mix Notes
 
-Run one mix direction at a time under CA model:
+Run one mix direction at a time under CA model. Mix kernels need **120–180 s** simulator timeout (observed ~177 s for C2V on 910B hosts):
 
 ```bash
-msprof op simulator --soc-version=Ascend950PR_9599 --timeout=30 \
+msprof op simulator --soc-version=Ascend950PR_9599 --timeout=180 \
   --output=outputs/msprof_mix_c2v \
   python3 run_mix_ctypes.py --kernel matmul_add --rounds 1 --block-dim 8
 ```
 
 ```bash
-msprof op simulator --soc-version=Ascend950PR_9599 --timeout=30 \
+msprof op simulator --soc-version=Ascend950PR_9599 --timeout=180 \
   --output=outputs/msprof_mix_v2c \
   python3 run_mix_ctypes.py --kernel add_matmul --rounds 1 --block-dim 8
 ```
