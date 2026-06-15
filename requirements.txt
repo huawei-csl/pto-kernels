@@ -19,3 +19,5 @@ pybind11==3.0.4
 PyYAML==6.0.2
 attrs==24.2.0
 matplotlib==3.10.8 # used in benchs/
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch-npu==2.10.0
