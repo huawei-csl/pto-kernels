@@ -77,22 +77,39 @@ AICORE inline void processUnit(__gm__ IoT* x, __gm__ IoT* y, __gm__ AccT* wgt,
   set_flag(PIPE_MTE2, PIPE_V, EVENT_ID3);
   wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID3);
 
-  set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+  set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);   // xin_h initially free
   set_flag(PIPE_MTE3, PIPE_V, EVENT_ID1);
   set_flag(PIPE_MTE3, PIPE_V, EVENT_ID2);
 
+  // PROLOGUE: issue the first input load (x[hstart]) so iter 0 can prefetch x[1].
+  if (hstart < l1) {
+    GIo xG0(x + row_base + (uint64_t)hstart * W + wbase, {lanes});
+    TIo xin_h0(lanes);
+    TASSIGN(xin_h0, UB_XINH);
+    wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+    TLOAD(xin_h0, xG0);
+    set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+  }
+
   for (uint32_t j = hstart; j < l1; ++j) {
-    GIo xG(x + row_base + (uint64_t)j * W + wbase, {lanes});
     TIo xin_h(lanes);
     TAcc xin_f(lanes);
     TASSIGN(xin_h, UB_XINH);
     TASSIGN(xin_f, UB_XINF);
-    wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
-    TLOAD(xin_h, xG);
-    set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+
+    // (1) consume current: x[j] was loaded by the prologue / previous prefetch.
     wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
     TCVT(xin_f, xin_h, pto::RoundMode::CAST_NONE);
-    set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+    set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);   // xin_h free again
+
+    // (2) prefetch next: load x[j+1] into the SAME xin_h; overlaps compute below.
+    if (j + 1 < l1) {
+      GIo xGn(x + row_base + (uint64_t)(j + 1) * W + wbase, {lanes});
+      wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+      TLOAD(xin_h, xGn);
+      set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+    }
+
     pipe_barrier(PIPE_V);
 
     // scatter: products (only outputs in [l0,l1))
