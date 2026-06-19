@@ -16,10 +16,10 @@ using namespace pto;
 // Weights W[K,W] + bias[W] are fp32 GM tensors. fp16 OR bf16 I/O, fp32
 // accumulate.
 //
-// 2-D-plus-batch work grid: units = batch x num_wt(W-tiles) x
-// lchunks(L-chunks). Each unit produces outputs [l0,l1) for channels
-// [wbase,wbase+lanes) of one sequence, replaying K-1 causal halo rows to prime
-// its accumulators. The grid fills all cores: batch supplies parallelism first,
+// 2-D-plus-batch work grid: units = batch x lchunks(L-chunks) x num_wt(W-tiles).
+// Each unit produces outputs [b_nr] x [l0,l1) x [wbase,wbase+lanes),
+// replaying K-1 causal halo rows to prime its accumulators.
+// The grid fills all cores: batch supplies parallelism first,
 // then W-tiles, then L-chunks; col_w is widened for coalesced stores. (See
 // processUnit + the grid below.)
 //
@@ -230,13 +230,14 @@ AICORE void runConvSiluBatched(__gm__ IoT* x, __gm__ IoT* y, __gm__ AccT* wgt,
   if (lchunks > max_chunks) lchunks = max_chunks;
 
   const uint32_t lc_len = DIV_ROUNDUP(seqLen, lchunks);
-  const uint32_t total_units = batch * num_wt * lchunks;
 
+  // Going through the middle dimension (convolution direction) first due to overlap of input and weights
+  const uint32_t total_units = batch * num_wt * lchunks;
   for (uint32_t unit = core_id; unit < total_units; unit += num_cores) {
     const uint32_t lc = unit % lchunks;
     const uint32_t t2 = unit / lchunks;
     const uint32_t wt = t2 % num_wt;
-    const uint32_t seq = t2 / num_wt;
+    const uint32_t b_nr = t2 / num_wt;
     const uint32_t wbase = wt * col_w;
     const uint32_t rem = W - wbase;
     const int32_t lanes = rem > col_w ? (int32_t)col_w : (int32_t)rem;
@@ -244,7 +245,7 @@ AICORE void runConvSiluBatched(__gm__ IoT* x, __gm__ IoT* y, __gm__ AccT* wgt,
     if (l0 >= seqLen) continue;
     uint32_t l1 = l0 + lc_len;
     if (l1 > seqLen) l1 = seqLen;
-    const uint64_t row_base = (uint64_t)seq * seqLen * W;
+    const uint64_t row_base = (uint64_t)b_nr * seqLen * W;
     processUnit<IoT, AccT, K, MAX_W>(x, y, wgt, bia, W, row_base, wbase, lanes,
                                      l0, l1, activation);
   }
