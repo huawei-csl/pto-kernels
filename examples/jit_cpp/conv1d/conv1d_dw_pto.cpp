@@ -5,21 +5,25 @@ using namespace pto;
 // ===========================================================================
 // DEPTHWISE fused causal conv1d + bias + (optional) SiLU   (per-channel, K=4)
 //
-//   y[b,i,c] = act( bias[c] + sum_{k=0..K-1} W[k,c] * x[b, i-K+1+k, c] ),  x[<0]=0
+//   y[b,i,c] = act( bias[c] + sum_{k=0..K-1} W[k,c] * x[b, i-K+1+k, c] ),
+//   x[<0]=0
 //
 // Per-channel K-tap filter (Mamba/GDN short conv). x,y are [batch, seqLen, W]
 // row-major; W (= channels) is the lane axis, seqLen (= seq) the conv axis.
-// Weights W[K,W] + bias[W] are fp32 GM tensors. fp16 OR bf16 I/O, fp32 accumulate.
+// Weights W[K,W] + bias[W] are fp32 GM tensors. fp16 OR bf16 I/O, fp32
+// accumulate.
 //
-// 2-D-plus-batch work grid: units = batch x num_wt(W-tiles) x lchunks(L-chunks).
-// Each unit produces outputs [l0,l1) for channels [wbase,wbase+lanes) of one
-// sequence, replaying K-1 causal halo rows to prime its accumulators. The grid
-// fills all cores: batch supplies parallelism first, then W-tiles, then L-chunks;
-// col_w is widened for coalesced stores. (See processUnit + the grid below.)
+// 2-D-plus-batch work grid: units = batch x num_wt(W-tiles) x
+// lchunks(L-chunks). Each unit produces outputs [l0,l1) for channels
+// [wbase,wbase+lanes) of one sequence, replaying K-1 causal halo rows to prime
+// its accumulators. The grid fills all cores: batch supplies parallelism first,
+// then W-tiles, then L-chunks; col_w is widened for coalesced stores. (See
+// processUnit + the grid below.)
 //
 // UB (per lane, fp32 unless noted): W0..W3(4) + bias(1) + acc0..3(4) +
 //   t1..t3(3) + xin_f(1) = 13 fp32; xin_h + out0 + out1 = 3 IoT. MAX_W=3072.
-// NOTE: TAXPY/TMUL/TCVT need pto-isa v9.0.0; namespace `csilu` (v9 has pto::detail).
+// NOTE: TAXPY/TMUL/TCVT need pto-isa v9.0.0; namespace `csilu` (v9 has
+// pto::detail).
 // ===========================================================================
 
 namespace csilu {
@@ -47,7 +51,8 @@ AICORE inline void processUnit(__gm__ IoT* x, __gm__ IoT* y, __gm__ AccT* wgt,
   using GIo = pto::GlobalTensor<IoT, GShapeIo, GStride>;
   using GAcc = pto::GlobalTensor<AccT, GShapeIo, GStride>;
   using TIo = Tile<TileType::Vec, IoT, 1, MAX_W, BLayout::RowMajor, 1, DYNAMIC>;
-  using TAcc = Tile<TileType::Vec, AccT, 1, MAX_W, BLayout::RowMajor, 1, DYNAMIC>;
+  using TAcc =
+      Tile<TileType::Vec, AccT, 1, MAX_W, BLayout::RowMajor, 1, DYNAMIC>;
 
   constexpr uint32_t FB = MAX_W * sizeof(AccT);
   constexpr uint32_t HB = MAX_W * sizeof(IoT);
@@ -77,11 +82,12 @@ AICORE inline void processUnit(__gm__ IoT* x, __gm__ IoT* y, __gm__ AccT* wgt,
   set_flag(PIPE_MTE2, PIPE_V, EVENT_ID3);
   wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID3);
 
-  set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);   // xin_h initially free
+  set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);  // xin_h initially free
   set_flag(PIPE_MTE3, PIPE_V, EVENT_ID1);
   set_flag(PIPE_MTE3, PIPE_V, EVENT_ID2);
 
-  // PROLOGUE: issue the first input load (x[hstart]) so iter 0 can prefetch x[1].
+  // PROLOGUE: issue the first input load (x[hstart]) so iter 0 can prefetch
+  // x[1].
   if (hstart < l1) {
     GIo xG0(x + row_base + (uint64_t)hstart * W + wbase, {lanes});
     TIo xin_h0(lanes);
@@ -100,9 +106,10 @@ AICORE inline void processUnit(__gm__ IoT* x, __gm__ IoT* y, __gm__ AccT* wgt,
     // (1) consume current: x[j] was loaded by the prologue / previous prefetch.
     wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
     TCVT(xin_f, xin_h, pto::RoundMode::CAST_NONE);
-    set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);   // xin_h free again
+    set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);  // xin_h free again
 
-    // (2) prefetch next: load x[j+1] into the SAME xin_h; overlaps compute below.
+    // (2) prefetch next: load x[j+1] into the SAME xin_h; overlaps compute
+    // below.
     if (j + 1 < l1) {
       GIo xGn(x + row_base + (uint64_t)(j + 1) * W + wbase, {lanes});
       wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
@@ -179,8 +186,9 @@ AICORE inline void processUnit(__gm__ IoT* x, __gm__ IoT* y, __gm__ AccT* wgt,
 
 template <typename IoT, typename AccT, uint32_t K, uint32_t MAX_W>
 AICORE void runConvSiluBatched(__gm__ IoT* x, __gm__ IoT* y, __gm__ AccT* wgt,
-                               __gm__ AccT* bia, uint32_t batch, uint32_t seqLen,
-                               uint32_t W, uint32_t activation) {
+                               __gm__ AccT* bia, uint32_t batch,
+                               uint32_t seqLen, uint32_t W,
+                               uint32_t activation) {
   static_assert((K & (K - 1)) == 0u, "K power of two");
   static_assert(K == 4, "this prototype is specialised to K=4");
 
@@ -192,7 +200,8 @@ AICORE void runConvSiluBatched(__gm__ IoT* x, __gm__ IoT* y, __gm__ AccT* wgt,
   if (seqLen == 0 || batch == 0 || W == 0) return;
 
   constexpr uint32_t LC_MIN = 32u;
-  // batch supplies parallelism first; each sequence needs `target` (wt x lchunk) units.
+  // batch supplies parallelism first; each sequence needs `target` (wt x
+  // lchunk) units.
   uint32_t target = (num_cores + batch - 1) / batch;
   if (target < 1) target = 1;
   uint32_t max_chunks = (seqLen + LC_MIN - 1) / LC_MIN;
@@ -234,7 +243,8 @@ AICORE void runConvSiluBatched(__gm__ IoT* x, __gm__ IoT* y, __gm__ AccT* wgt,
 
 }  // namespace csilu
 
-// ---- single-sequence entry (back-compat: x,y [L,W] fp16, wgt[K,W]/bia[W] fp32) ----
+// ---- single-sequence entry (back-compat: x,y [L,W] fp16, wgt[K,W]/bia[W]
+// fp32) ----
 extern "C" __global__ AICORE void conv1d_dw_kernel(__gm__ uint8_t* x,
                                                    __gm__ uint8_t* y,
                                                    __gm__ uint8_t* wgt,
@@ -246,35 +256,56 @@ extern "C" __global__ AICORE void conv1d_dw_kernel(__gm__ uint8_t* x,
       (__gm__ half*)x, (__gm__ half*)y, (__gm__ float*)wgt, (__gm__ float*)bia,
       1u, L_in, W, 1u);
 #else
-  (void)x; (void)y; (void)wgt; (void)bia; (void)L_in; (void)W;
+  (void)x;
+  (void)y;
+  (void)wgt;
+  (void)bia;
+  (void)L_in;
+  (void)W;
 #endif
 }
 
 // ---- batched fp16 entry: x,y [batch,seqLen,W] fp16, wgt[K,W]/bia[W] fp32 ----
 extern "C" __global__ AICORE void conv1d_dw_batched_kernel(
-    __gm__ uint8_t* x, __gm__ uint8_t* y, __gm__ uint8_t* wgt, __gm__ uint8_t* bia,
-    uint32_t batch, uint32_t seqLen, uint32_t W, uint32_t activation) {
+    __gm__ uint8_t* x, __gm__ uint8_t* y, __gm__ uint8_t* wgt,
+    __gm__ uint8_t* bia, uint32_t batch, uint32_t seqLen, uint32_t W,
+    uint32_t activation) {
 #if defined(__DAV_VEC__)
   constexpr uint32_t K = 4, MAX_W = 3072;
   csilu::runConvSiluBatched<half, float, K, MAX_W>(
       (__gm__ half*)x, (__gm__ half*)y, (__gm__ float*)wgt, (__gm__ float*)bia,
       batch, seqLen, W, activation);
 #else
-  (void)x; (void)y; (void)wgt; (void)bia; (void)batch; (void)seqLen; (void)W; (void)activation;
+  (void)x;
+  (void)y;
+  (void)wgt;
+  (void)bia;
+  (void)batch;
+  (void)seqLen;
+  (void)W;
+  (void)activation;
 #endif
 }
 
 // ---- batched bf16 entry: x,y [batch,seqLen,W] bf16, wgt[K,W]/bia[W] fp32 ----
 extern "C" __global__ AICORE void conv1d_dw_batched_bf16_kernel(
-    __gm__ uint8_t* x, __gm__ uint8_t* y, __gm__ uint8_t* wgt, __gm__ uint8_t* bia,
-    uint32_t batch, uint32_t seqLen, uint32_t W, uint32_t activation) {
+    __gm__ uint8_t* x, __gm__ uint8_t* y, __gm__ uint8_t* wgt,
+    __gm__ uint8_t* bia, uint32_t batch, uint32_t seqLen, uint32_t W,
+    uint32_t activation) {
 #if defined(__DAV_VEC__)
   constexpr uint32_t K = 4, MAX_W = 3072;
   csilu::runConvSiluBatched<bfloat16_t, float, K, MAX_W>(
       (__gm__ bfloat16_t*)x, (__gm__ bfloat16_t*)y, (__gm__ float*)wgt,
       (__gm__ float*)bia, batch, seqLen, W, activation);
 #else
-  (void)x; (void)y; (void)wgt; (void)bia; (void)batch; (void)seqLen; (void)W; (void)activation;
+  (void)x;
+  (void)y;
+  (void)wgt;
+  (void)bia;
+  (void)batch;
+  (void)seqLen;
+  (void)W;
+  (void)activation;
 #endif
 }
 
