@@ -211,9 +211,9 @@ AICORE void runConvSiluBatched(__gm__ IoT* x, __gm__ IoT* y, __gm__ AccT* wgt,
   uint32_t max_chunks = DIV_ROUNDUP(seqLen, LC_MIN);
   if (max_chunks < 1) max_chunks = 1;
 
-  const uint32_t nwt_ub = DIV_ROUNDUP(W, MAX_W);
+  const uint32_t nwt_lb = DIV_ROUNDUP(W, MAX_W);
   const uint32_t nwt_fill = DIV_ROUNDUP(target, max_chunks);
-  uint32_t num_wt = nwt_ub > nwt_fill ? nwt_ub : nwt_fill;
+  uint32_t num_wt = nwt_lb > nwt_fill ? nwt_lb : nwt_fill;
 
   const uint32_t nwt_128 = DIV_ROUNDUP(W, 128u);
   if (num_wt > nwt_128) num_wt = nwt_128;
