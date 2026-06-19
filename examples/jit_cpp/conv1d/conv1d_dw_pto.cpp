@@ -8,18 +8,18 @@ using namespace pto;
 // ===========================================================================
 // DEPTHWISE fused causal conv1d + bias + (optional) SiLU   (per-channel, K=4)
 //
-//   y[b,i,c] = act( bias[c] + sum_{k=max(0,K-1-i)..K-1} W[k,c] * x[b, i-K+1+k, c] ),
-//   x[<0]=0
+//   y[b,i,c] = act( bias[c] + sum_{k=max(0,K-1-i)..K-1} W[k,c] * x[b, i-K+1+k,
+//   c] ), x[<0]=0
 //
 // Per-channel K-tap filter (Mamba/GDN short conv). x,y are [batch, seqLen, W]
 // row-major; W (= channels) is the lane axis, seqLen (= seq) the conv axis.
 // Weights W[K,W] + bias[W] are fp32 GM tensors. fp16 OR bf16 I/O, fp32
 // accumulate.
 //
-// 2-D-plus-batch work grid: units = batch x lchunks(L-chunks) x num_wt(W-tiles).
-// Each unit produces outputs [b_nr] x [l0,l1) x [wbase,wbase+lanes),
-// replaying K-1 causal halo rows to prime its accumulators.
-// The grid fills all cores: batch supplies parallelism first,
+// 2-D-plus-batch work grid: units = batch x lchunks(L-chunks) x
+// num_wt(W-tiles). Each unit produces outputs [b_nr] x [l0,l1) x
+// [wbase,wbase+lanes), replaying K-1 causal halo rows to prime its
+// accumulators. The grid fills all cores: batch supplies parallelism first,
 // then W-tiles, then L-chunks; col_w is widened for coalesced stores. (See
 // processUnit + the grid below.)
 //
@@ -31,8 +31,9 @@ using namespace pto;
 
 namespace csilu {
 
-template <typename T, typename TileT>
+template <typename TileT>
 AICORE inline void siluTile(TileT& dst, TileT& src, TileT& tmp) {
+  using T = typename TileT::DType;
   TMULS(tmp, src, (T)-1);
   pipe_barrier(PIPE_V);
   TEXP(tmp, tmp);
@@ -64,8 +65,9 @@ AICORE inline void processUnit(__gm__ IoT* x, __gm__ IoT* y, __gm__ AccT* wgt,
   const uint32_t UB_ACC0 = 5 * FB;
   const uint32_t UB_T[4] = {0, 9 * FB, 10 * FB, 11 * FB};
   const uint32_t UB_XINF = 12 * FB;
-  const uint32_t UB_XINH = 13 * FB;
   const uint32_t UB_OUT[2] = {13 * FB + HB, 13 * FB + 2 * HB};
+  // double-buffered input load slots: slot 0 before the outputs, slot 1 after.
+  const uint32_t UB_XINH[2] = {13 * FB, 13 * FB + 3 * HB};
 
   const uint32_t hstart = (l0 > (K - 1)) ? (l0 - (K - 1)) : 0u;
 
@@ -85,7 +87,11 @@ AICORE inline void processUnit(__gm__ IoT* x, __gm__ IoT* y, __gm__ AccT* wgt,
   set_flag(PIPE_MTE2, PIPE_V, EVENT_ID3);
   wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID3);
 
-  set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);  // xin_h initially free
+  // double-buffered input: two load slots with independent handshakes.
+  // EVENT_ID3 is reused here (the weight load above already consumed it).
+  const event_t IEV[2] = {EVENT_ID0, EVENT_ID3};
+  set_flag(PIPE_V, PIPE_MTE2, IEV[0]);  // xin_h[0] initially free
+  set_flag(PIPE_V, PIPE_MTE2, IEV[1]);  // xin_h[1] initially free
   set_flag(PIPE_MTE3, PIPE_V, EVENT_ID1);
   set_flag(PIPE_MTE3, PIPE_V, EVENT_ID2);
 
@@ -94,30 +100,35 @@ AICORE inline void processUnit(__gm__ IoT* x, __gm__ IoT* y, __gm__ AccT* wgt,
   if (hstart < l1) {
     GIo xG0(x + row_base + (uint64_t)hstart * W + wbase, {lanes});
     TIo xin_h0(lanes);
-    TASSIGN(xin_h0, UB_XINH);
-    wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+    TASSIGN(xin_h0, UB_XINH[0]);
+    wait_flag(PIPE_V, PIPE_MTE2, IEV[0]);
     TLOAD(xin_h0, xG0);
-    set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+    set_flag(PIPE_MTE2, PIPE_V, IEV[0]);
   }
 
   for (uint32_t j = hstart; j < l1; ++j) {
+    const uint32_t par = (j - hstart) & 1u;
     TIo xin_h(lanes);
     TAcc xin_f(lanes);
-    TASSIGN(xin_h, UB_XINH);
+    TASSIGN(xin_h, UB_XINH[par]);
     TASSIGN(xin_f, UB_XINF);
 
-    // (1) consume current: x[j] was loaded by the prologue / previous prefetch.
-    wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+    // (1) consume current: x[j] is in buffer `par` (loaded by the prologue /
+    // previous prefetch).
+    wait_flag(PIPE_MTE2, PIPE_V, IEV[par]);
     TCVT(xin_f, xin_h, pto::RoundMode::CAST_NONE);
-    set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);  // xin_h free again
+    set_flag(PIPE_V, PIPE_MTE2, IEV[par]);  // buffer `par` free again
 
-    // (2) prefetch next: load x[j+1] into the SAME xin_h; overlaps compute
-    // below.
+    // (2) prefetch next: load x[j+1] into the OTHER buffer; overlaps compute
+    // below without waiting on the buffer being consumed this iteration.
     if (j + 1 < l1) {
+      const uint32_t p1 = par ^ 1u;
+      TIo xin_hn(lanes);
+      TASSIGN(xin_hn, UB_XINH[p1]);
       GIo xGn(x + row_base + (uint64_t)(j + 1) * W + wbase, {lanes});
-      wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
-      TLOAD(xin_h, xGn);
-      set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+      wait_flag(PIPE_V, PIPE_MTE2, IEV[p1]);
+      TLOAD(xin_hn, xGn);
+      set_flag(PIPE_MTE2, PIPE_V, IEV[p1]);
     }
 
     pipe_barrier(PIPE_V);
@@ -169,7 +180,7 @@ AICORE inline void processUnit(__gm__ IoT* x, __gm__ IoT* y, __gm__ AccT* wgt,
     TADD(acc, acc, bT);
     pipe_barrier(PIPE_V);
     if (activation) {
-      siluTile<AccT>(acc, acc, tmp);
+      siluTile(acc, acc, tmp);
       pipe_barrier(PIPE_V);
     }
     wait_flag(PIPE_MTE3, PIPE_V, oev);
@@ -182,7 +193,8 @@ AICORE inline void processUnit(__gm__ IoT* x, __gm__ IoT* y, __gm__ AccT* wgt,
     set_flag(PIPE_MTE3, PIPE_V, oev);
   }
 
-  wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
+  wait_flag(PIPE_V, PIPE_MTE2, IEV[0]);
+  wait_flag(PIPE_V, PIPE_MTE2, IEV[1]);
   wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID1);
   wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID2);
 }
@@ -231,7 +243,8 @@ AICORE void runConvSiluBatched(__gm__ IoT* x, __gm__ IoT* y, __gm__ AccT* wgt,
 
   const uint32_t lc_len = DIV_ROUNDUP(seqLen, lchunks);
 
-  // Going through the middle dimension (convolution direction) first due to overlap of input and weights
+  // Going through the middle dimension (convolution direction) first due to
+  // overlap of input and weights
   const uint32_t total_units = batch * num_wt * lchunks;
   for (uint32_t unit = core_id; unit < total_units; unit += num_cores) {
     const uint32_t lc = unit % lchunks;
