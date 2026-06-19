@@ -12,7 +12,7 @@ in-kernel policy), so the 2-D tiling behaviour is visible.
     cd ~/conv_pto/pto-kernels/examples/jit_cpp/conv1d
     ASCEND_RT_VISIBLE_DEVICES=5 python sweep_conv1d_dw.py
 """
-import time
+
 from pathlib import Path
 
 import torch
@@ -24,11 +24,11 @@ from jit_util_conv1d_dw import jit_compile, K, BLOCK_DIM
 torch.npu.set_device("npu")
 torch.manual_seed(0)
 
-NUM_CORES = BLOCK_DIM * 2     # launch = cube_core_num*2 = 48 AIV blocks
-MAX_W = 3072                  # UB tile cap in the kernel
+NUM_CORES = BLOCK_DIM * 2  # launch = cube_core_num*2 = 48 AIV blocks
+MAX_W = 3072  # UB tile cap in the kernel
 LC_MIN = 32
 OVH = 3000
-HBM_CEIL = 1758.0            # GB/s, measured practical ceiling (torch silu)
+HBM_CEIL = 1758.0  # GB/s, measured practical ceiling (torch silu)
 
 
 def ceil(a, b):
@@ -65,18 +65,20 @@ def dev_time(call, it=60, wu=20):
     for _ in range(wu):
         call()
     torch.npu.synchronize()
-    s = torch.npu.Event(True); e = torch.npu.Event(True)
+    s = torch.npu.Event(True)
+    e = torch.npu.Event(True)
     s.record()
     for _ in range(it):
         call()
-    e.record(); torch.npu.synchronize()
-    return s.elapsed_time(e) / it * 1e3   # us
+    e.record()
+    torch.npu.synchronize()
+    return s.elapsed_time(e) / it * 1e3  # us
 
 
 def row(fn, L, W):
-    x = (2 * torch.rand((L, W), device="npu", dtype=torch.float16) - 1)
-    w = (torch.rand((K, W), device="npu", dtype=torch.float32) - 0.5)
-    b = (torch.rand((W,), device="npu", dtype=torch.float32) - 0.5)
+    x = 2 * torch.rand((L, W), device="npu", dtype=torch.float16) - 1
+    w = torch.rand((K, W), device="npu", dtype=torch.float32) - 0.5
+    b = torch.rand((W,), device="npu", dtype=torch.float32) - 0.5
     xt = F.pad(x.t().reshape(1, W, L).float(), (K - 1, 0))
     weight = w.t().contiguous().reshape(W, 1, K)
     bf = b.float()
@@ -86,15 +88,20 @@ def row(fn, L, W):
     cw, nwt, lc = grid(L, W)
     units = nwt * lc
     g = f"{cw}x{nwt}x{lc}={units}u"
-    print(f"{L:>5} {W:>6} {g:>16} {t_our:>8.1f} {t_acl:>9.1f} {t_acl/t_our:>7.2f}x "
-          f"{gbps:>8.1f} {100*gbps/HBM_CEIL:>6.1f}%")
+    print(
+        f"{L:>5} {W:>6} {g:>16} {t_our:>8.1f} {t_acl:>9.1f} {t_acl/t_our:>7.2f}x "
+        f"{gbps:>8.1f} {100*gbps/HBM_CEIL:>6.1f}%"
+    )
 
 
 def main():
-    fn = jit_compile(str(Path(__file__).resolve().parent / "conv1d_dw_pto.cpp"),
-                     verbose=False)
-    hdr = (f"{'L':>5} {'W':>6} {'grid(cw x nwt x lc)':>16} {'ours_us':>8} "
-           f"{'aclnn_us':>9} {'speedup':>8} {'GB/s':>8} {'%peak':>6}")
+    fn = jit_compile(
+        str(Path(__file__).resolve().parent / "conv1d_dw_pto.cpp"), verbose=False
+    )
+    hdr = (
+        f"{'L':>5} {'W':>6} {'grid(cw x nwt x lc)':>16} {'ours_us':>8} "
+        f"{'aclnn_us':>9} {'speedup':>8} {'GB/s':>8} {'%peak':>6}"
+    )
 
     print("\n#### L-sweep at W=2048 (GDN channel width = H*D) ####")
     print(hdr)
