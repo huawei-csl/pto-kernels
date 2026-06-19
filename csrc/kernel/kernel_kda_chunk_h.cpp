@@ -1,7 +1,7 @@
 // ============================================================================
-// chunk_h_kda.cpp — Recurrent hidden state update for KDA (per-dim gate)
+// kda_chunk_h.cpp — Recurrent hidden state update for KDA (per-dim gate)
 //
-// Math (per chunk, matches ref_chunk_h_kda in
+// Math (per chunk, matches ref_kda_chunk_h in
 //   tests/test_kda_single_kernels.py:276-326):
 //   v_corr  = u - w @ S                              # [c_len, V]
 //   k_rest  = k * exp(g_total - g_cs)                # [c_len, K]
@@ -226,7 +226,7 @@ AICORE PTO_INLINE void gemm_v0(
 #endif
 
 template <int32_t NumHeads, int32_t HiddenSize, int32_t ChunkSize>
-AICORE void chunk_h_kda_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
+AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
                                __gm__ half* U_handle, __gm__ float* G_handle,
                                __gm__ half* S_handle, __gm__ half* V_handle,
                                __gm__ half* workspace_handle,
@@ -743,12 +743,12 @@ AICORE void chunk_h_kda_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
 #endif
 }
 
-extern "C" __global__ AICORE void chunk_h_kda(
+extern "C" __global__ AICORE void kda_chunk_h(
     __gm__ uint8_t* K, __gm__ uint8_t* W, __gm__ uint8_t* U, __gm__ uint8_t* G,
     __gm__ uint8_t* S, __gm__ uint8_t* V_corr, __gm__ uint8_t* workspace,
     __gm__ uint8_t* cu_seqlens, int64_t batch_size, int64_t seq_len,
     int64_t total_tokens) {
-  chunk_h_kda_kernel<GDN_H, GDN_D, GDN_C>(
+  kda_chunk_h_kernel<GDN_H, GDN_D, GDN_C>(
       reinterpret_cast<__gm__ half*>(K), reinterpret_cast<__gm__ half*>(W),
       reinterpret_cast<__gm__ half*>(U), reinterpret_cast<__gm__ float*>(G),
       reinterpret_cast<__gm__ half*>(S), reinterpret_cast<__gm__ half*>(V_corr),

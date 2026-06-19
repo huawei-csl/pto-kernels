@@ -1,7 +1,7 @@
 // ============================================================================
-// chunk_o_kda.cpp — Output stage for KDA (per-dim gate)
+// kda_chunk_o.cpp — Output stage for KDA (per-dim gate)
 //
-// Math (per chunk, matches ref_chunk_o_kda in
+// Math (per chunk, matches ref_kda_chunk_o in
 //   tests/test_kda_single_kernels.py:333-380):
 //   q_eff = q * exp(g_cs)              # [c_len, K]
 //   k_eff = k * exp(-g_cs)             # [c_len, K]
@@ -11,8 +11,8 @@
 //   o     = inter + Aqk @ v_corr       # [c_len, V]
 //
 // where S = s_snapshots[ci_base + ci, head] is the [K, V] state *entering*
-// this chunk (already computed by chunk_h_kda), and v_corr = u - w @ S is
-// the corrected values (also from chunk_h_kda).
+// this chunk (already computed by kda_chunk_h), and v_corr = u - w @ S is
+// the corrected values (also from kda_chunk_h).
 //
 // Differences from GDN chunk_o.cpp:
 //   - Gate is per-DIMENSION (g_cs has shape [HV, T, K] head-major).
@@ -22,21 +22,21 @@
 //   - Causal mask is INCLUSIVE of the diagonal (rows >= cols), so the mask
 //     tensor passed from Python differs from kkt_kda's strict-lower mask.
 //   - No GQA: Q, K, V_corr, O all use HV heads.
-//   - S is fp16 in GM (from chunk_h_kda's output) — Vec casts to fp32 into
+//   - S is fp16 in GM (from kda_chunk_h's output) — Vec casts to fp32 into
 //     workspace so Cube has fp32 sources for all three GEMMs.
 //
 // Chunks within a (seq, head) work item are fully independent (each reads
 // its own s_snapshots entry).  Cube/Vec still process them sequentially per
 // work item to keep the per-core 4-flag protocol simple.
 //
-// Cross-core sync: same data-flow flags as chunk_h_kda (0-3), plus SyncAll
+// Cross-core sync: same data-flow flags as kda_chunk_h (0-3), plus SyncAll
 // on entry/exit via kernel_utils::SyncAll<false>().
 //
 // Inputs:
 //   Q       [HV, T, K]               fp16  — queries (head-major)
 //   K       [HV, T, K]               fp16  — keys    (head-major)
-//   V_corr  [T, HV, V]               fp16  — corrected values from chunk_h_kda
-//   (BSND) S       [total_chunks, HV, K, V] fp16  — snapshots from chunk_h_kda
+//   V_corr  [T, HV, V]               fp16  — corrected values from kda_chunk_h
+//   (BSND) S       [total_chunks, HV, K, V] fp16  — snapshots from kda_chunk_h
 //   G_cs    [HV, T, K]               fp32  — per-dim cumulative gate
 //   (head-major) Msk     [C, C]                   fp32  — inclusive lower-tri
 //   mask (rows >= cols) workspace [per-core scratch]     fp32  — 7 slots × K*V
@@ -161,7 +161,7 @@ AICORE PTO_INLINE void gemm_oneshot(
 #endif
 
 template <int32_t NumHeads, int32_t HiddenSize, int32_t ChunkSize>
-AICORE void chunk_o_kda_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
+AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
                                __gm__ half* V_handle, __gm__ half* S_handle,
                                __gm__ float* G_handle,
                                __gm__ float* Mask_handle,
@@ -730,12 +730,12 @@ AICORE void chunk_o_kda_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
 #endif
 }
 
-extern "C" __global__ AICORE void chunk_o_kda(
+extern "C" __global__ AICORE void kda_chunk_o(
     __gm__ uint8_t* Q, __gm__ uint8_t* K, __gm__ uint8_t* V_corr,
     __gm__ uint8_t* S, __gm__ uint8_t* G, __gm__ uint8_t* Mask,
     __gm__ uint8_t* workspace, __gm__ uint8_t* O, __gm__ uint8_t* cu_seqlens,
     int64_t batch_size, int64_t seq_len, int64_t total_tokens) {
-  chunk_o_kda_kernel<GDN_H, GDN_D, GDN_C>(
+  kda_chunk_o_kernel<GDN_H, GDN_D, GDN_C>(
       reinterpret_cast<__gm__ half*>(Q), reinterpret_cast<__gm__ half*>(K),
       reinterpret_cast<__gm__ half*>(V_corr), reinterpret_cast<__gm__ half*>(S),
       reinterpret_cast<__gm__ float*>(G), reinterpret_cast<__gm__ float*>(Mask),

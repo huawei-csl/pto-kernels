@@ -11,7 +11,7 @@ for the full License text.
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
-#include "aclrtlaunch_chunk_o_kda.h"
+#include "aclrtlaunch_kda_chunk_o.h"
 #include "utils.h"
 
 namespace pto_isa_ops {
@@ -29,9 +29,9 @@ namespace pto_isa_ops {
  *
  * @param [in] Q          Queries [HV, total_tokens, D] fp16, head-major.
  * @param [in] K          Keys    [HV, total_tokens, D] fp16, head-major.
- * @param [in] V_corr     Corrected values from chunk_h_kda [total_tokens, HV,
+ * @param [in] V_corr     Corrected values from kda_chunk_h [total_tokens, HV,
  * D] fp16, BSND.
- * @param [in] S          State snapshots from chunk_h_kda [total_chunks, HV, D,
+ * @param [in] S          State snapshots from kda_chunk_h [total_chunks, HV, D,
  * D] fp16.
  * @param [in] G          Per-dim cumulative gate [HV, total_tokens, D] fp32,
  * head-major.
@@ -45,33 +45,33 @@ namespace pto_isa_ops {
  * @param [in] total_chunks Total chunks across all sequences.
  * @return at::Tensor     Output O [total_tokens, HV, D] fp16, BSND.
  */
-at::Tensor run_chunk_o_kda(const at::Tensor& Q, const at::Tensor& K,
+at::Tensor run_kda_chunk_o(const at::Tensor& Q, const at::Tensor& K,
                            const at::Tensor& V_corr, const at::Tensor& S,
                            const at::Tensor& G, const at::Tensor& Mask,
                            const at::Tensor& cu_seqlens, int64_t batch_size,
                            int64_t seq_len, int64_t total_chunks) {
   TORCH_CHECK(Q.device().type() == DEVICE_TYPE,
-              "chunk_o_kda: Q must be on NPU, got ", Q.device());
-  TORCH_CHECK(Q.scalar_type() == at::kHalf, "chunk_o_kda: Q must be fp16, got ",
+              "kda_chunk_o: Q must be on NPU, got ", Q.device());
+  TORCH_CHECK(Q.scalar_type() == at::kHalf, "kda_chunk_o: Q must be fp16, got ",
               Q.scalar_type());
-  TORCH_CHECK(K.scalar_type() == at::kHalf, "chunk_o_kda: K must be fp16, got ",
+  TORCH_CHECK(K.scalar_type() == at::kHalf, "kda_chunk_o: K must be fp16, got ",
               K.scalar_type());
   TORCH_CHECK(V_corr.scalar_type() == at::kHalf,
-              "chunk_o_kda: V_corr must be fp16, got ", V_corr.scalar_type());
-  TORCH_CHECK(S.scalar_type() == at::kHalf, "chunk_o_kda: S must be fp16, got ",
+              "kda_chunk_o: V_corr must be fp16, got ", V_corr.scalar_type());
+  TORCH_CHECK(S.scalar_type() == at::kHalf, "kda_chunk_o: S must be fp16, got ",
               S.scalar_type());
   TORCH_CHECK(G.scalar_type() == at::kFloat,
-              "chunk_o_kda: G must be fp32, got ", G.scalar_type());
+              "kda_chunk_o: G must be fp32, got ", G.scalar_type());
   TORCH_CHECK(Mask.scalar_type() == at::kFloat,
-              "chunk_o_kda: Mask must be fp32, got ", Mask.scalar_type());
-  TORCH_CHECK(Q.dim() == 3, "chunk_o_kda: Q must be 3D [HV, total_tokens, D]");
-  TORCH_CHECK(K.dim() == 3, "chunk_o_kda: K must be 3D [HV, total_tokens, D]");
+              "kda_chunk_o: Mask must be fp32, got ", Mask.scalar_type());
+  TORCH_CHECK(Q.dim() == 3, "kda_chunk_o: Q must be 3D [HV, total_tokens, D]");
+  TORCH_CHECK(K.dim() == 3, "kda_chunk_o: K must be 3D [HV, total_tokens, D]");
   TORCH_CHECK(V_corr.dim() == 3,
-              "chunk_o_kda: V_corr must be 3D [total_tokens, HV, D]");
+              "kda_chunk_o: V_corr must be 3D [total_tokens, HV, D]");
   TORCH_CHECK(S.dim() == 4,
-              "chunk_o_kda: S must be 4D [total_chunks, HV, D, D]");
-  TORCH_CHECK(G.dim() == 3, "chunk_o_kda: G must be 3D [HV, total_tokens, D]");
-  TORCH_CHECK(Mask.dim() == 2, "chunk_o_kda: Mask must be 2D [C, C]");
+              "kda_chunk_o: S must be 4D [total_chunks, HV, D, D]");
+  TORCH_CHECK(G.dim() == 3, "kda_chunk_o: G must be 3D [HV, total_tokens, D]");
+  TORCH_CHECK(Mask.dim() == 2, "kda_chunk_o: Mask must be 2D [C, C]");
 
   const int64_t HV = Q.size(0);
   const int64_t total_tokens = Q.size(1);
@@ -95,7 +95,7 @@ at::Tensor run_chunk_o_kda(const at::Tensor& Q, const at::Tensor& K,
     cu_seqlens_ptr = ConvertType(cu_seqlens);
   }
 
-  EXEC_KERNEL_CMD(chunk_o_kda, block_dim, Q, K, V_corr, S, G, Mask, workspace,
+  EXEC_KERNEL_CMD(kda_chunk_o, block_dim, Q, K, V_corr, S, G, Mask, workspace,
                   O, cu_seqlens_ptr, batch_size, seq_len, total_tokens);
 
   return O;

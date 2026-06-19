@@ -126,8 +126,8 @@ ascendc_library(
   csrc/kernel/kernel_abs.cpp
   csrc/kernel/kernel_chunk_cumsum.cpp
   csrc/kernel/kernel_csr_gather.cpp
-  csrc/kernel/kernel_chunk_h_kda.cpp
-  csrc/kernel/kernel_chunk_o_kda.cpp
+  csrc/kernel/kernel_kda_chunk_h.cpp
+  csrc/kernel/kernel_kda_chunk_o.cpp
   csrc/kernel/kernel_gdn_chunk_h.cpp
   csrc/kernel/kernel_gdn_scaled_dot_kkt.cpp
   csrc/kernel/kernel_gdn_chunk_o.cpp

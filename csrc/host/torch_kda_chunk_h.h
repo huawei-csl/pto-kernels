@@ -11,7 +11,7 @@ for the full License text.
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
-#include "aclrtlaunch_chunk_h_kda.h"
+#include "aclrtlaunch_kda_chunk_h.h"
 #include "utils.h"
 
 namespace pto_isa_ops {
@@ -44,24 +44,24 @@ namespace pto_isa_ops {
  *         (S  [total_chunks, HV, D, D] fp16  — state snapshots,
  *          V_corr [total_tokens, HV, D] fp16 — corrected values)
  */
-std::tuple<at::Tensor, at::Tensor> run_chunk_h_kda(
+std::tuple<at::Tensor, at::Tensor> run_kda_chunk_h(
     const at::Tensor& K, const at::Tensor& W, const at::Tensor& U,
     const at::Tensor& G, const at::Tensor& cu_seqlens, int64_t batch_size,
     int64_t seq_len, int64_t total_chunks, int64_t chunk_size) {
   TORCH_CHECK(K.device().type() == DEVICE_TYPE,
-              "chunk_h_kda: K must be on NPU, got ", K.device());
-  TORCH_CHECK(K.scalar_type() == at::kHalf, "chunk_h_kda: K must be fp16, got ",
+              "kda_chunk_h: K must be on NPU, got ", K.device());
+  TORCH_CHECK(K.scalar_type() == at::kHalf, "kda_chunk_h: K must be fp16, got ",
               K.scalar_type());
-  TORCH_CHECK(W.scalar_type() == at::kHalf, "chunk_h_kda: W must be fp16, got ",
+  TORCH_CHECK(W.scalar_type() == at::kHalf, "kda_chunk_h: W must be fp16, got ",
               W.scalar_type());
-  TORCH_CHECK(U.scalar_type() == at::kHalf, "chunk_h_kda: U must be fp16, got ",
+  TORCH_CHECK(U.scalar_type() == at::kHalf, "kda_chunk_h: U must be fp16, got ",
               U.scalar_type());
   TORCH_CHECK(G.scalar_type() == at::kFloat,
-              "chunk_h_kda: G must be fp32, got ", G.scalar_type());
-  TORCH_CHECK(K.dim() == 3, "chunk_h_kda: K must be 3D [HV, total_tokens, D]");
-  TORCH_CHECK(W.dim() == 3, "chunk_h_kda: W must be 3D [total_tokens, HV, D]");
-  TORCH_CHECK(U.dim() == 3, "chunk_h_kda: U must be 3D [total_tokens, HV, D]");
-  TORCH_CHECK(G.dim() == 3, "chunk_h_kda: G must be 3D [HV, total_tokens, D]");
+              "kda_chunk_h: G must be fp32, got ", G.scalar_type());
+  TORCH_CHECK(K.dim() == 3, "kda_chunk_h: K must be 3D [HV, total_tokens, D]");
+  TORCH_CHECK(W.dim() == 3, "kda_chunk_h: W must be 3D [total_tokens, HV, D]");
+  TORCH_CHECK(U.dim() == 3, "kda_chunk_h: U must be 3D [total_tokens, HV, D]");
+  TORCH_CHECK(G.dim() == 3, "kda_chunk_h: G must be 3D [HV, total_tokens, D]");
 
   const int64_t HV = K.size(0);
   const int64_t total_tokens = K.size(1);
@@ -83,7 +83,7 @@ std::tuple<at::Tensor, at::Tensor> run_chunk_h_kda(
     cu_seqlens_ptr = ConvertType(cu_seqlens);
   }
 
-  EXEC_KERNEL_CMD(chunk_h_kda, block_dim, K, W, U, G, S, V_corr, workspace,
+  EXEC_KERNEL_CMD(kda_chunk_h, block_dim, K, W, U, G, S, V_corr, workspace,
                   cu_seqlens_ptr, batch_size, seq_len, total_tokens);
 
   return {S, V_corr};
