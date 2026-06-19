@@ -131,7 +131,7 @@ def ref_kda_chunk_o(
     Returns [T, HV, D] float32.
     """
     T, HV_local, D_local = Q.shape
-    O = torch.zeros(T, HV_local, D_local, dtype=torch.float32)
+    output = torch.zeros(T, HV_local, D_local, dtype=torch.float32)
     ranges = _seq_ranges(T, cu_seqlens)
     ci_base = 0
 
@@ -154,11 +154,11 @@ def ref_kda_chunk_o(
                 inter = q_eff @ S  # [valid, D]
                 Aqk = torch.tril(q_eff @ k_eff.T)  # [valid, valid], inclusive
 
-                O[s:e, h, :] = inter + Aqk @ v
+                output[s:e, h, :] = inter + Aqk @ v
 
         ci_base += nc
 
-    return O
+    return output
 
 
 def _r2(y_ref: torch.Tensor, y_pred: torch.Tensor) -> float:
