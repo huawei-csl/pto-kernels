@@ -2,10 +2,13 @@
 
 using namespace pto;
 
+#define DIV_ROUNDUP(x, y) (((x) + (y) - 1) / (y))
+#define ALIGN_UP(x, y) (DIV_ROUNDUP((x), (y)) * (y))
+
 // ===========================================================================
 // DEPTHWISE fused causal conv1d + bias + (optional) SiLU   (per-channel, K=4)
 //
-//   y[b,i,c] = act( bias[c] + sum_{k=0..K-1} W[k,c] * x[b, i-K+1+k, c] ),
+//   y[b,i,c] = act( bias[c] + sum_{k=max(0,K-1-i)..K-1} W[k,c] * x[b, i-K+1+k, c] ),
 //   x[<0]=0
 //
 // Per-channel K-tap filter (Mamba/GDN short conv). x,y are [batch, seqLen, W]
@@ -189,7 +192,7 @@ AICORE void runConvSiluBatched(__gm__ IoT* x, __gm__ IoT* y, __gm__ AccT* wgt,
                                __gm__ AccT* bia, uint32_t batch,
                                uint32_t seqLen, uint32_t W,
                                uint32_t activation) {
-  static_assert((K & (K - 1)) == 0u, "K power of two");
+  static_assert((K > 0u) && ((K & (K - 1)) == 0u), "K power of two");
   static_assert(K == 4, "this prototype is specialised to K=4");
 
   set_mask_norm();
@@ -202,25 +205,31 @@ AICORE void runConvSiluBatched(__gm__ IoT* x, __gm__ IoT* y, __gm__ AccT* wgt,
   constexpr uint32_t LC_MIN = 32u;
   // batch supplies parallelism first; each sequence needs `target` (wt x
   // lchunk) units.
-  uint32_t target = (num_cores + batch - 1) / batch;
+  uint32_t target = DIV_ROUNDUP(num_cores, batch);
   if (target < 1) target = 1;
-  uint32_t max_chunks = (seqLen + LC_MIN - 1) / LC_MIN;
+
+  uint32_t max_chunks = DIV_ROUNDUP(seqLen, LC_MIN);
   if (max_chunks < 1) max_chunks = 1;
-  const uint32_t nwt_ub = (W + MAX_W - 1) / MAX_W;
-  const uint32_t nwt_fill = (target + max_chunks - 1) / max_chunks;
+
+  const uint32_t nwt_ub = DIV_ROUNDUP(W, MAX_W);
+  const uint32_t nwt_fill = DIV_ROUNDUP(target, max_chunks);
   uint32_t num_wt = nwt_ub > nwt_fill ? nwt_ub : nwt_fill;
-  const uint32_t nwt_128 = (W + 127u) / 128u;
+
+  const uint32_t nwt_128 = DIV_ROUNDUP(W, 128u);
   if (num_wt > nwt_128) num_wt = nwt_128;
   if (num_wt < 1) num_wt = 1;
-  uint32_t col_w = ((((W + num_wt - 1) / num_wt) + 127u) / 128u) * 128u;
+
+  uint32_t col_w = ALIGN_UP(DIV_ROUNDUP(W, num_wt), 128u);
   if (col_w < 128u) col_w = 128u;
   if (col_w > MAX_W) col_w = MAX_W;
   if (col_w > W) col_w = W;
-  num_wt = (W + col_w - 1) / col_w;
-  uint32_t lchunks = (target + num_wt - 1) / num_wt;
+
+  num_wt = DIV_ROUNDUP(W, col_w);
+  uint32_t lchunks = DIV_ROUNDUP(target, num_wt);
   if (lchunks < 1) lchunks = 1;
   if (lchunks > max_chunks) lchunks = max_chunks;
-  const uint32_t lc_len = (seqLen + lchunks - 1) / lchunks;
+
+  const uint32_t lc_len = DIV_ROUNDUP(seqLen, lchunks);
   const uint32_t total_units = batch * num_wt * lchunks;
 
   for (uint32_t unit = core_id; unit < total_units; unit += num_cores) {
