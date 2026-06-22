@@ -31,6 +31,20 @@ using namespace pto;
 
 namespace csilu {
 
+constexpr uint32_t roundUpPow2(uint32_t num) {
+  if (num != 0u) --num;
+
+  num |= (num >>  1u);
+  num |= (num >>  2u);
+  num |= (num >>  4u);
+  num |= (num >>  8u);
+  num |= (num >> 16u);
+  
+  ++num;
+  
+  return num;
+}
+
 template <typename TileT>
 AICORE inline void siluTile(TileT& dst, TileT& src, TileT& tmp) {
   using T = typename TileT::DType;
