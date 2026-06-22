@@ -111,16 +111,11 @@ AICORE void kda_kkt_kernel(__gm__ half* k_ptr, __gm__ float* g_cs_ptr,
   using GmFloatMaskColRow =
       GlobalTensor<float, GmShapeDyn, Stride<1, 1, 1, ChunkSize, 1>>;
 
-#if defined(__DAV_CUBE__)
-  // Cube does no compute here; it only participates in the entry/exit barriers
-  // so the Vec-side sync_all() handshakes complete.
   kernel_utils::SyncAll();
-#endif
 
 #if defined(__DAV_VEC__)
   set_mask_norm();
   set_vector_mask(-1, -1);
-  kernel_utils::SyncAll();
 
   // ── UB layout (per vid) ──────────────────────────────────────────────────
   constexpr int32_t MYG_ADDR = 0;  // [HalfChunk, K] fp32
@@ -358,8 +353,9 @@ AICORE void kda_kkt_kernel(__gm__ half* k_ptr, __gm__ float* g_cs_ptr,
     }
   }
 
-  kernel_utils::SyncAll();
 #endif
+
+  kernel_utils::SyncAll();
 }
 
 // ── Device entry point
