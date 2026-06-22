@@ -1,8 +1,7 @@
 """Validate + benchmark the DEPTHWISE causal conv1d + bias + SiLU.
 
-    source ~/conv_pto/pto_env.sh
-    cd ~/conv_pto/pto-kernels/examples/jit_cpp/conv1d
-    ASCEND_RT_VISIBLE_DEVICES=5 python run_conv1d_dw.py
+    # source the CANN environment first (sets ASCEND_TOOLKIT_HOME), then:
+    ASCEND_RT_VISIBLE_DEVICES=0 python run_conv1d_dw.py
 
 What this does
   1. CORRECTNESS: many shapes (edge / GDN / random), worst-case max error vs the

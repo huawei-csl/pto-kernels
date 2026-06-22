@@ -4,6 +4,7 @@ Run:
     pytest test_conv1d_dw.py -q --npu npu:0
 """
 
+import ctypes
 from pathlib import Path
 
 import pytest
@@ -11,7 +12,7 @@ import torch
 import torch.nn.functional as F
 import torch_npu  # noqa: F401
 
-from jit_util_conv1d_dw import jit_compile, K
+from jit_util_conv1d_dw import BLOCK_DIM, K, compile_cpp, jit_compile
 
 KERNEL_CPP = Path(__file__).resolve().parent / "conv1d_dw_pto.cpp"
 
@@ -91,3 +92,69 @@ def test_single_fp16_entry_matches_reference(conv1d_kernel, npu_device, seed, se
     ref = conv1d_dw_ref(x.unsqueeze(0), w, bias, activation=True)[0]
     err = (y.float() - ref).abs().max().item()
     assert err <= TOL[torch.float16], f"max abs err {err:.3e}"
+
+
+# --- generalized K / MAX_W: build the kernel with -DCONV_K / -DCONV_MAX_W ---
+# Covers non-power-of-two K (3, 5), power-of-two K (2, 8) and MAX_W variations.
+KCONFIGS = [(2, 3072), (3, 3072), (4, 2048), (5, 2048), (8, 1536)]
+_BATCHED_ARGS = (
+    [ctypes.c_uint32, ctypes.c_void_p] + [ctypes.c_void_p] * 4 + [ctypes.c_uint32] * 4
+)
+
+
+def _ptr(t):
+    return ctypes.c_void_p(t.data_ptr())
+
+
+def conv1d_dw_ref_k(x, w, bias, k_width):
+    """fp32 reference for an arbitrary filter width k_width (always SiLU)."""
+    B, L, W = x.shape
+    pad = torch.zeros((B, k_width - 1, W), device=x.device, dtype=x.dtype)
+    xe = torch.cat([pad, x], dim=1).float()
+    wf = w.float()
+    acc = sum(xe[:, k : k + L] * wf[k] for k in range(k_width)) + bias.float()
+    return F.silu(acc)
+
+
+@pytest.fixture(scope="session")
+def kconfig_libs(npu_device):
+    """Compile the kernel once per (K, MAX_W) via -DCONV_K / -DCONV_MAX_W."""
+    libs = {}
+    for k_width, max_w in KCONFIGS:
+        so = compile_cpp(
+            str(KERNEL_CPP),
+            extra_flags=[f"-DCONV_K={k_width}", f"-DCONV_MAX_W={max_w}"],
+            out_name=f"conv1d_k{k_width}_mw{max_w}.so",
+        )
+        libs[(k_width, max_w)] = ctypes.CDLL(so)
+    return libs
+
+
+@pytest.mark.parametrize("seed", TEST_SEEDS)
+@pytest.mark.parametrize("k_width,max_w", KCONFIGS)
+@pytest.mark.parametrize(
+    "batch,seq,dim",
+    [(1, 64, 256), (2, 128, 2048), (8, 256, 2048), (1, 384, 6144), (4, 200, 777)],
+)
+def test_general_k_max_w(
+    kconfig_libs, npu_device, seed, k_width, max_w, batch, seq, dim
+):
+    """Kernel built with different K / MAX_W (fp16). dim > MAX_W exercises W-tiling."""
+    torch.manual_seed(seed)
+    x = 2 * torch.rand(batch, seq, dim, device=npu_device, dtype=torch.float16) - 1
+    w = torch.rand(k_width, dim, device=npu_device, dtype=torch.float32) - 0.5
+    bias = torch.rand(dim, device=npu_device, dtype=torch.float32) - 0.5
+    y = torch.empty_like(x)
+
+    fn = kconfig_libs[(k_width, max_w)].call_kernel_batched
+    fn.argtypes = _BATCHED_ARGS
+    fn.restype = None
+    stream = torch.npu.current_stream()._as_parameter_  # noqa: SLF001
+    fn(BLOCK_DIM, stream, _ptr(x), _ptr(y), _ptr(w), _ptr(bias), batch, seq, dim, 1)
+    torch.npu.synchronize()
+
+    ref = conv1d_dw_ref_k(x, w, bias, k_width)
+    err = (y.float() - ref).abs().max().item()
+    assert (
+        err <= TOL[torch.float16]
+    ), f"K={k_width} MAX_W={max_w} B={batch} L={seq} W={dim}: max abs err {err:.3e}"

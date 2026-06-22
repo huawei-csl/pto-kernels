@@ -5,8 +5,23 @@ using namespace pto;
 #define DIV_ROUNDUP(x, y) (((x) + (y) - 1) / (y))
 #define ALIGN_UP(x, y) (DIV_ROUNDUP((x), (y)) * (y))
 
+// Filter width K, per-tile channel width MAX_W and the per-core UB size are
+// build-time configurable: override with -DCONV_K=<int> / -DCONV_MAX_W=<int> /
+// -DCONV_UB_BYTES=<int>. CONV_UB_BYTES defaults to 192 KiB (Ascend 910B2 AIV);
+// raise it for next-gen NPUs with a larger UB. The UB static_assert in
+// processUnit rejects any combination that would exceed CONV_UB_BYTES.
+#ifndef CONV_K
+#define CONV_K 4
+#endif
+#ifndef CONV_MAX_W
+#define CONV_MAX_W 3072
+#endif
+#ifndef CONV_UB_BYTES
+#define CONV_UB_BYTES (192u * 1024u)
+#endif
+
 // ===========================================================================
-// DEPTHWISE fused causal conv1d + bias + (optional) SiLU   (per-channel, K=4)
+// DEPTHWISE fused causal conv1d + bias + (optional) SiLU  (per-channel, any K)
 //
 //   y[b,i,c] = act( bias[c] + sum_{k=max(0,K-1-i)..K-1} W[k,c] * x[b, i-K+1+k,
 //   c] ), x[<0]=0
@@ -23,25 +38,30 @@ using namespace pto;
 // then W-tiles, then L-chunks; col_w is widened for coalesced stores. (See
 // processUnit + the grid below.)
 //
-// UB (per lane, fp32 unless noted): W0..W3(4) + bias(1) + acc0..3(4) +
-//   t1..t3(3) + xin_f(1) = 13 fp32; xin_h + out0 + out1 = 3 IoT. MAX_W=3072.
-// NOTE: TAXPY/TMUL/TCVT need pto-isa v9.0.0; namespace `csilu` (v9 has
-// pto::detail).
+// Generic in K (filter width) and MAX_W (tile width). RS = smallest power of
+// two >= K is the accumulator ring size, so the K outputs in flight map to
+// distinct slots via `& (RS - 1)`.
+// UB (per lane, fp32 unless noted): K weights + bias(1) + RS accumulators +
+//   (K-1) temps + xin_f(1) = 2*K+RS+1 fp32; xin_h[0..1] + out0 + out1 = 4 I/O
+//   (input load double-buffered). A static_assert keeps this within
+//   CONV_UB_BYTES (192 KiB by default) for the chosen K / MAX_W / dtypes.
+// NOTE: uses the PTO tile-op API (<pto/pto-inst.hpp>); the `csilu` namespace
+// avoids a clash with pto::detail.
 // ===========================================================================
 
 namespace csilu {
 
-constexpr uint32_t roundUpPow2(uint32_t num) {
+AICORE constexpr uint32_t roundUpPow2(uint32_t num) {
   if (num != 0u) --num;
 
-  num |= (num >>  1u);
-  num |= (num >>  2u);
-  num |= (num >>  4u);
-  num |= (num >>  8u);
+  num |= (num >> 1u);
+  num |= (num >> 2u);
+  num |= (num >> 4u);
+  num |= (num >> 8u);
   num |= (num >> 16u);
-  
+
   ++num;
-  
+
   return num;
 }
 
@@ -59,29 +79,39 @@ AICORE inline void siluTile(TileT& dst, TileT& src, TileT& tmp) {
 
 // Process ONE unit: outputs [l0,l1) for channels [wbase,wbase+lanes) of the
 // sequence whose first row is at element offset row_base. x[<0]=0 (no cache).
-template <typename IoT, typename AccT, uint32_t K, uint32_t MAX_W>
-AICORE inline void processUnit(__gm__ IoT* x, __gm__ IoT* y, __gm__ AccT* wgt,
-                               __gm__ AccT* bia, uint32_t W, uint64_t row_base,
-                               uint32_t wbase, int32_t lanes, uint32_t l0,
-                               uint32_t l1, uint32_t activation) {
+template <typename InOutT, typename AccT, uint32_t K, uint32_t MAX_W>
+AICORE inline void processUnit(__gm__ InOutT* x, __gm__ InOutT* y,
+                               __gm__ AccT* wgt, __gm__ AccT* bia, uint32_t W,
+                               uint64_t row_base, uint32_t wbase, int32_t lanes,
+                               uint32_t l0, uint32_t l1, uint32_t activation) {
   using GShapeIo = pto::Shape<1, 1, 1, 1, DYNAMIC>;
   using GStride = pto::Stride<1, 1, 1, 1, 1>;
-  using GIo = pto::GlobalTensor<IoT, GShapeIo, GStride>;
+  using GIo = pto::GlobalTensor<InOutT, GShapeIo, GStride>;
   using GAcc = pto::GlobalTensor<AccT, GShapeIo, GStride>;
-  using TIo = Tile<TileType::Vec, IoT, 1, MAX_W, BLayout::RowMajor, 1, DYNAMIC>;
+  using TIo =
+      Tile<TileType::Vec, InOutT, 1, MAX_W, BLayout::RowMajor, 1, DYNAMIC>;
   using TAcc =
       Tile<TileType::Vec, AccT, 1, MAX_W, BLayout::RowMajor, 1, DYNAMIC>;
 
   constexpr uint32_t FB = MAX_W * sizeof(AccT);
-  constexpr uint32_t HB = MAX_W * sizeof(IoT);
-  const uint32_t UB_W[4] = {0, FB, 2 * FB, 3 * FB};
-  const uint32_t UB_BIAS = 4 * FB;
-  const uint32_t UB_ACC0 = 5 * FB;
-  const uint32_t UB_T[4] = {0, 9 * FB, 10 * FB, 11 * FB};
-  const uint32_t UB_XINF = 12 * FB;
-  const uint32_t UB_OUT[2] = {13 * FB + HB, 13 * FB + 2 * HB};
-  // double-buffered input load slots: slot 0 before the outputs, slot 1 after.
-  const uint32_t UB_XINH[2] = {13 * FB, 13 * FB + 3 * HB};
+  constexpr uint32_t HB = MAX_W * sizeof(InOutT);
+  constexpr uint32_t RS = roundUpPow2(K);  // accumulator ring size (pow2 >= K)
+
+  // UB byte offsets. fp32 region: K weights (weight k at k*FB) | bias |
+  // RS accumulators | K-1 temps | xin_f.  Then the I/O region: 4 HB-sized
+  // tiles.
+  constexpr uint32_t UB_BIAS = K * FB;
+  constexpr uint32_t UB_ACC0 = (K + 1u) * FB;
+  constexpr uint32_t UB_TMP1 =
+      (K + 1u + RS) * FB;  // temp k at UB_TMP1+(k-1)*FB
+  constexpr uint32_t UB_XINF = (2u * K + RS) * FB;
+  constexpr uint32_t UB_IO = (2u * K + RS + 1u) * FB;  // I/O region base
+  static_assert(UB_IO + 4u * HB <= (CONV_UB_BYTES),
+                "conv1d UB exceeds CONV_UB_BYTES: lower K/MAX_W or raise it");
+
+  const uint32_t UB_OUT[2] = {UB_IO + HB, UB_IO + 2u * HB};
+  // input load is double-buffered: slot 0 before the outputs, slot 1 after.
+  const uint32_t UB_XINH[2] = {UB_IO, UB_IO + 3u * HB};
 
   const uint32_t hstart = (l0 > (K - 1)) ? (l0 - (K - 1)) : 0u;
 
@@ -89,7 +119,7 @@ AICORE inline void processUnit(__gm__ IoT* x, __gm__ IoT* y, __gm__ AccT* wgt,
   for (uint32_t k = 0; k < K; ++k) {
     GAcc wG(wgt + (uint64_t)k * W + wbase, {lanes});
     TAcc wT(lanes);
-    TASSIGN(wT, UB_W[k]);
+    TASSIGN(wT, k * FB);
     TLOAD(wT, wG);
   }
   {
@@ -152,14 +182,14 @@ AICORE inline void processUnit(__gm__ IoT* x, __gm__ IoT* y, __gm__ AccT* wgt,
       const uint32_t out = j + (K - 1) - k;
       if (out < l0 || out >= l1) continue;
       TAcc wT(lanes);
-      TASSIGN(wT, UB_W[k]);
+      TASSIGN(wT, k * FB);
       if (j == 0 || k == 0) {
         TAcc acc(lanes);
-        TASSIGN(acc, UB_ACC0 + (out & (K - 1)) * FB);
+        TASSIGN(acc, UB_ACC0 + (out & (RS - 1u)) * FB);
         TMUL(acc, xin_f, wT);
       } else {
         TAcc t(lanes);
-        TASSIGN(t, UB_T[k]);
+        TASSIGN(t, UB_TMP1 + (k - 1u) * FB);
         TMUL(t, xin_f, wT);
       }
     }
@@ -170,8 +200,8 @@ AICORE inline void processUnit(__gm__ IoT* x, __gm__ IoT* y, __gm__ AccT* wgt,
         if (out < l0 || out >= l1) continue;
         TAcc acc(lanes);
         TAcc t(lanes);
-        TASSIGN(acc, UB_ACC0 + (out & (K - 1)) * FB);
-        TASSIGN(t, UB_T[k]);
+        TASSIGN(acc, UB_ACC0 + (out & (RS - 1u)) * FB);
+        TASSIGN(t, UB_TMP1 + (k - 1u) * FB);
         TADD(acc, acc, t);
       }
     }
@@ -179,7 +209,7 @@ AICORE inline void processUnit(__gm__ IoT* x, __gm__ IoT* y, __gm__ AccT* wgt,
 
     if (j < l0) continue;  // halo row: primed accumulators only
 
-    const uint32_t slot = j & (K - 1);
+    const uint32_t slot = j & (RS - 1u);
     const uint32_t ob = j & 1u;
     const event_t oev = (event_t)(1u + ob);
     TAcc acc(lanes);
@@ -188,7 +218,7 @@ AICORE inline void processUnit(__gm__ IoT* x, __gm__ IoT* y, __gm__ AccT* wgt,
     TIo outT(lanes);
     TASSIGN(acc, UB_ACC0 + slot * FB);
     TASSIGN(bT, UB_BIAS);
-    TASSIGN(tmp, UB_T[1]);
+    TASSIGN(tmp, UB_TMP1);
     TASSIGN(outT, UB_OUT[ob]);
 
     TADD(acc, acc, bT);
@@ -213,13 +243,12 @@ AICORE inline void processUnit(__gm__ IoT* x, __gm__ IoT* y, __gm__ AccT* wgt,
   wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID2);
 }
 
-template <typename IoT, typename AccT, uint32_t K, uint32_t MAX_W>
-AICORE void runConvSiluBatched(__gm__ IoT* x, __gm__ IoT* y, __gm__ AccT* wgt,
-                               __gm__ AccT* bia, uint32_t batch,
-                               uint32_t seqLen, uint32_t W,
+template <typename InOutT, typename AccT, uint32_t K, uint32_t MAX_W>
+AICORE void runConvSiluBatched(__gm__ InOutT* x, __gm__ InOutT* y,
+                               __gm__ AccT* wgt, __gm__ AccT* bia,
+                               uint32_t batch, uint32_t seqLen, uint32_t W,
                                uint32_t activation) {
-  static_assert((K > 0u) && ((K & (K - 1)) == 0u), "K power of two");
-  static_assert(K == 4, "this prototype is specialised to K=4");
+  static_assert(K >= 1u, "K (filter width) must be >= 1");
 
   set_mask_norm();
   set_vector_mask(-1, -1);
@@ -273,8 +302,8 @@ AICORE void runConvSiluBatched(__gm__ IoT* x, __gm__ IoT* y, __gm__ AccT* wgt,
     uint32_t l1 = l0 + lc_len;
     if (l1 > seqLen) l1 = seqLen;
     const uint64_t row_base = (uint64_t)b_nr * seqLen * W;
-    processUnit<IoT, AccT, K, MAX_W>(x, y, wgt, bia, W, row_base, wbase, lanes,
-                                     l0, l1, activation);
+    processUnit<InOutT, AccT, K, MAX_W>(x, y, wgt, bia, W, row_base, wbase,
+                                        lanes, l0, l1, activation);
   }
 }
 
@@ -288,7 +317,7 @@ extern "C" __global__ AICORE void conv1d_dw_kernel(__gm__ uint8_t* x,
                                                    __gm__ uint8_t* bia,
                                                    uint32_t L_in, uint32_t W) {
 #if defined(__DAV_VEC__)
-  constexpr uint32_t K = 4, MAX_W = 3072;
+  constexpr uint32_t K = CONV_K, MAX_W = CONV_MAX_W;
   csilu::runConvSiluBatched<half, float, K, MAX_W>(
       (__gm__ half*)x, (__gm__ half*)y, (__gm__ float*)wgt, (__gm__ float*)bia,
       1u, L_in, W, 1u);
@@ -308,7 +337,7 @@ extern "C" __global__ AICORE void conv1d_dw_batched_kernel(
     __gm__ uint8_t* bia, uint32_t batch, uint32_t seqLen, uint32_t W,
     uint32_t activation) {
 #if defined(__DAV_VEC__)
-  constexpr uint32_t K = 4, MAX_W = 3072;
+  constexpr uint32_t K = CONV_K, MAX_W = CONV_MAX_W;
   csilu::runConvSiluBatched<half, float, K, MAX_W>(
       (__gm__ half*)x, (__gm__ half*)y, (__gm__ float*)wgt, (__gm__ float*)bia,
       batch, seqLen, W, activation);
@@ -330,7 +359,7 @@ extern "C" __global__ AICORE void conv1d_dw_batched_bf16_kernel(
     __gm__ uint8_t* bia, uint32_t batch, uint32_t seqLen, uint32_t W,
     uint32_t activation) {
 #if defined(__DAV_VEC__)
-  constexpr uint32_t K = 4, MAX_W = 3072;
+  constexpr uint32_t K = CONV_K, MAX_W = CONV_MAX_W;
   csilu::runConvSiluBatched<bfloat16_t, float, K, MAX_W>(
       (__gm__ bfloat16_t*)x, (__gm__ bfloat16_t*)y, (__gm__ float*)wgt,
       (__gm__ float*)bia, batch, seqLen, W, activation);

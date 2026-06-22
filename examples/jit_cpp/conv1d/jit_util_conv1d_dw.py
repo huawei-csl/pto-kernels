@@ -6,15 +6,20 @@ import torch
 
 ASCEND_TOOLKIT_HOME = os.environ["ASCEND_TOOLKIT_HOME"]
 PTO_LIB_PATH = os.environ.get("PTO_LIB_PATH", ASCEND_TOOLKIT_HOME)
-PTO_ISA_V9 = os.environ.get("PTO_ISA_V9", "/home/cmatzoros/conv_pto/pto-isa-v9")
 BLOCK_DIM = int(getattr(torch.npu.get_device_properties("npu:0"), "cube_core_num", 20))
 K = 4
 
 
-def compile_cpp(kernel_cpp: str, verbose: bool = False, timeout: int = 120) -> str:
+def compile_cpp(
+    kernel_cpp: str,
+    verbose: bool = False,
+    timeout: int = 120,
+    extra_flags=None,
+    out_name: str = "conv1d_dw_jit.so",
+) -> str:
     so_dir = os.path.join(os.path.dirname(kernel_cpp), "outputs", "so")
     os.makedirs(so_dir, exist_ok=True)
-    lib_path = os.path.join(so_dir, "conv1d_dw_jit.so")
+    lib_path = os.path.join(so_dir, out_name)
     flags = [
         "-fPIC",
         "-shared",
@@ -22,10 +27,13 @@ def compile_cpp(kernel_cpp: str, verbose: bool = False, timeout: int = 120) -> s
         "-DMEMORY_BASE",
         "-O2",
         "-std=c++17",
-        "--npu-arch=dav-2201",
-        f"-I{PTO_ISA_V9}/include",
-        f"-I{PTO_LIB_PATH}/include",
+        "-Wno-ignored-attributes",
+        "--cce-aicore-arch=dav-c220-vec",
+        "-isystem",
+        f"{PTO_LIB_PATH}/include",
     ]
+    if extra_flags:
+        flags += list(extra_flags)
     command = ["bisheng", *flags, kernel_cpp, "-o", lib_path]
     if verbose:
         print("compile:", " ".join(command))
