@@ -86,7 +86,7 @@ at::Tensor run_kda_kkt(const at::Tensor& K, const at::Tensor& G_cs,
   EXEC_KERNEL_CMD(kda_kkt, block_dim, K, G_cs, Beta, mask, L_out,
                   cu_seqlens_ptr, batch_size, seq_len, total_tokens);
 
-  return L;
+  return L_out;
 }
 
 }  // namespace pto_isa_ops
