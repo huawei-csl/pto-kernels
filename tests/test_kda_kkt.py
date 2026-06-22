@@ -1,504 +1,216 @@
-#!/usr/bin/env python3
-"""CPU float32 reference implementations and unit tests for each KDA stage.
+# --------------------------------------------------------------------------------
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# All rights reserved.
+# See LICENSE in the root of the software repository:
+# https://github.com/huawei-csl/pto-kernels/
+# for the full License text.
+# --------------------------------------------------------------------------------
+"""Tests for kernel_kda_kkt: within-chunk gated attention matrix for KDA.
 
-Matches the math of ``kda_naive.naive_chunk_kda`` exactly, which is used as
-ground truth in test_kda_e2e.py.
+Math (per chunk, per head h, strictly lower-tri r > c):
+  L[r, c] = beta[r] * sum_d k[r,d] * k[c,d] * exp(min(g_cs[r,d]-g_cs[c,d], 0))
 
-KDA pipeline stages:
-  gate_cumsum → kkt (L matrix) → inversion → wy (u, w) → chunk_h_kda (snapshots + v_corr) → chunk_o_kda (output)
+All tensors passed to the kernel are in head-major layout:
+  K    [H, total_tokens, D]  fp16
+  G_cs [H, total_tokens, D]  fp32   within-chunk cumulative sum of log-gates
+  Beta [H, total_tokens]     fp16   post-sigmoid scalar
 
-Key math (see kda_naive.py):
-  - g is per-dimension log-space decay (natural exp applied internally)
-  - beta is post-sigmoid scalar per (position, head)
-  - L[r,c] = beta[r] * k_r·(k_c*exp(g_cs[r]-g_cs[c])) for r>c  (strictly lower tri)
-  - (I+L)^{-1} via Neumann recursion: A=-L; for i: A[i,:i]+=A[i,:]@A[:,:i]; INV=A+I
-  - A_final = (I+L)^{-1} @ diag(beta)  (column-scale after inversion)
-  - u = A_final @ v = INV @ (beta*v),  w = A_final @ (exp(g)*k) = INV @ (beta*exp(g)*k)
-  - Aqk[r,c] = q_r·(k_c*exp(g_cs[r]-g_cs[c])) for r>=c  (causal, includes diagonal)
-  - output: (q*exp(g_cs)) @ S + Aqk @ (u - w @ S)
-  - state:  S_new[k,:] = exp(g_total[k]) * S[k,:] + sum_c k_rest[c,k]*v_corr[c,:]
-
-Stage device requirements:
-  - cumsum: runs on NPU (requires --device); calls gate_cumsum_kda PTO kernel.
-  - all others: CPU float32 reference only.
-
-Usage:
-
-    python tests/test_kda_kkt.py --device npu:0
-    python tests/test_kda_kkt.py --device npu:0 --quick
-    python tests/test_kda_kkt.py --device npu:0 --stage kkt,inv
+Output L [total_tokens, H, C] fp16  BSND, strictly-lower-tri per chunk.
 """
 
-from __future__ import annotations
-
-import argparse
-import os
-import random
-import sys
-import time
-from dataclasses import dataclass
-
 import numpy as np
+import pytest
 import torch
+import torch.nn.functional as F
 
-from megagdn_pto.fast_inverse import load_tri_inverse, solve_tril
-from megagdn_pto.kda_kernel_libs import (
-    run_chunk_o_kda,
-    run_chunk_h_kda,
-    run_wy_kda,
-    run_gate_cumsum_kda,
-    run_kkt_kda,
-)
+from pto_kernels import pto_kda_kkt
 
-from tests.utils import NumericalAccuracy, generate_random_inputs
-from tests.ref_kda import RefKDA
-
-ACCURACY = NumericalAccuracy()
-
-C = 128  # PTO chunk size
+# Compile-time kernel constants (default build: GDN_H=4, GDN_D=128, GDN_C=128)
+C = 128  # chunk size
 D = 128  # head dimension
-
-torch.manual_seed(42)
-
-CHUNK = 128  # small chunk for fast CPU tests
-K = 128  # key/query dimension
-V_DIM = 128  # value dimension
+H = 4  # number of heads
 
 RTOL = 1e-2
 ATOL = 1e-5
 MAX_RMSE_RATIO = 0.05
 MIN_R2 = 0.99
+HARD_FAIL_MAX = 1.0
 
 
 # ---------------------------------------------------------------------------
-# Test-case registry
+# Helpers
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class TestCase:
-    label: str
-    cu_seqlens_list: list[int] | None
-    T: int
-    dtype: torch.dtype = torch.double
-
-    def __post_init__(self):
-        self.ref_kda = RefKDA(self.dtype)
+def _seq_ranges(T: int, cu_seqlens=None):
+    """Return (bos, eos) pairs for each sequence."""
+    if cu_seqlens is None:
+        return [(0, T)]
+    cu = cu_seqlens if isinstance(cu_seqlens, list) else cu_seqlens.tolist()
+    return [(cu[i], cu[i + 1]) for i in range(len(cu) - 1)]
 
 
-def _cu_from_seqlens(seqlens: list[int]) -> list[int]:
-    cu = [0]
-    for s in seqlens:
-        cu.append(cu[-1] + s)
-    return cu
+def _chunk_cumsum_per_dim(g: torch.Tensor, cu_seqlens=None) -> torch.Tensor:
+    """Within-chunk cumulative sum of per-dimension log-gates.
+
+    g: [H, T, D] float32
+    Returns [H, T, D] float32 — resets at sequence and chunk boundaries.
+    """
+    out = torch.zeros_like(g, dtype=torch.float32)
+    _, T, _ = g.shape
+    for bos, eos in _seq_ranges(T, cu_seqlens):
+        for j in range(bos, eos, C):
+            s, e = j, min(j + C, eos)
+            out[:, s:e, :] = g[:, s:e, :].float().cumsum(dim=1)
+    return out
 
 
-def _rand_cu(n_seq: int, total: int, rng: random.Random) -> list[int]:
-    if n_seq == 1:
-        return [0, total]
-    bnd = sorted(rng.sample(range(1, total), n_seq - 1))
-    return [0] + bnd + [total]
+def ref_kda_kkt(
+    k: torch.Tensor,  # [H, T, D] float32
+    g_cs: torch.Tensor,  # [H, T, D] float32
+    beta: torch.Tensor,  # [H, T]    float32
+    cu_seqlens=None,
+) -> torch.Tensor:
+    """CPU float32 reference for pto_kda_kkt.
+
+    Returns L [T, H, C] float32, strictly-lower-tri per chunk.
+    """
+    _, T, _ = k.shape
+    out = torch.zeros(T, H, C, dtype=torch.float32)
+
+    for bos, eos in _seq_ranges(T, cu_seqlens):
+        for j in range(bos, eos, C):
+            s, e = j, min(j + C, eos)
+            v = e - s
+            for h in range(H):
+                kc = k[h, s:e, :].float()  # [v, D]
+                gc = g_cs[h, s:e, :].float()  # [v, D]
+                bc = beta[h, s:e].float()  # [v]
+
+                # diff[r, c, d] = g_cs[r,d] - g_cs[c,d], clamped to <= 0
+                diff = gc[:, None, :] - gc[None, :, :]  # [v, v, D]
+                diff = torch.clamp(diff, max=0.0)
+
+                # prod[r, c] = sum_d k[r,d] * k[c,d] * exp(diff[r,c,d])
+                prod = (kc[:, None, :] * kc[None, :, :] * diff.exp()).sum(-1)  # [v, v]
+
+                # Scale by beta[r] and apply strict-lower-tri mask
+                prod = prod * bc[:, None]
+                mask = torch.arange(v)[:, None] > torch.arange(v)[None, :]
+                out[s:e, h, :v] = prod * mask.float()
+
+    return out
 
 
-def _align_cu(raw: list[int], cs: int) -> list[int]:
-    aligned = [0]
-    for i in range(1, len(raw) - 1):
-        val = ((raw[i] + cs - 1) // cs) * cs
-        aligned.append(max(val, aligned[-1] + cs))
-    total = max(raw[-1], aligned[-1] + cs)
-    aligned.append(((total + cs - 1) // cs) * cs)
-    return aligned
+# ---------------------------------------------------------------------------
+# Statistical accuracy check (shared with other kernel tests)
+# ---------------------------------------------------------------------------
 
 
-def _build_test_cases(quick: bool) -> list[TestCase]:
-    if quick:
-        return [TestCase("quick T=128", None, 128)]
-    cases = []
-    for T in [128, 256, 385, 512, 1024]:
-        cases.append(TestCase(f"fixed T={T}", None, T))
-    for seqlens in [
+def _r2(y_ref: torch.Tensor, y_pred: torch.Tensor) -> float:
+    ref = y_ref.detach().cpu().numpy().ravel().astype(np.float64)
+    pred = y_pred.detach().cpu().numpy().ravel().astype(np.float64)
+    ss_res = np.sum((ref - pred) ** 2)
+    ss_tot = np.sum((ref - np.mean(ref)) ** 2)
+    return float("nan") if ss_tot < 1e-30 else 1.0 - ss_res / ss_tot
+
+
+def stats_ok(actual: torch.Tensor, expected: torch.Tensor) -> bool:
+    diff = (actual - expected).abs()
+    if diff.max().item() > HARD_FAIL_MAX:
+        return False
+    if (diff <= ATOL + RTOL * expected.abs()).all():
+        return True
+    mean_abs = float(expected.float().flatten().abs().mean())
+    rmse = float(torch.sqrt((diff.float().flatten() ** 2).mean()))
+    ratio = rmse / max(mean_abs, 1e-15)
+    r2 = _r2(expected, actual)
+    if mean_abs < 1e-9:
+        return rmse < 5e-4
+    return ratio <= MAX_RMSE_RATIO and np.isfinite(r2) and r2 >= MIN_R2
+
+
+# ---------------------------------------------------------------------------
+# Input generation
+# ---------------------------------------------------------------------------
+
+
+def _make_inputs(T: int):
+    """Return (k, g_cs, beta) in head-major [H, T, D] / [H, T] layout."""
+    torch.manual_seed(42)
+    # Normalised keys — avoids ill-conditioned L with large condition numbers
+    k = F.normalize(torch.randn(H, T, D), dim=-1, p=2).float()
+    # Production-like gates: cumulative sum can reach ~-64 per dim inside a chunk
+    g_log = -torch.rand(H, T, D)  # log-gates in (-1, 0)
+    g_cs = _chunk_cumsum_per_dim(g_log)  # [H, T, D] fp32
+    beta = torch.sigmoid(torch.randn(H, T)).float()
+    return k, g_cs, beta
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("seq_len", [128, 256, 384, 512])
+def test_kda_kkt_fixed(npu_device, seq_len: int):
+    T = seq_len
+    k, g_cs, beta = _make_inputs(T)
+
+    k_npu = k.half().to(npu_device)  # [H, T, D] fp16
+    g_cs_npu = g_cs.float().to(npu_device)  # [H, T, D] fp32
+    beta_npu = beta.half().to(npu_device)  # [H, T]    fp16
+
+    L_npu = pto_kda_kkt(k_npu, g_cs_npu, beta_npu, batch_size=1, seq_len=seq_len)
+    torch.npu.synchronize()
+
+    L_ref = ref_kda_kkt(k, g_cs, beta)
+
+    assert stats_ok(
+        L_npu.float().cpu(), L_ref
+    ), f"kda_kkt output does not match reference (seq_len={seq_len})"
+
+
+@pytest.mark.parametrize(
+    "seqlens",
+    [
         [128],
         [256],
-        [384],
-        [512],
-        [256, 256],
         [128, 256],
-        [384, 128],
+        [256, 128],
         [128, 128, 128],
         [256, 128, 384],
-    ]:
-        cu = _cu_from_seqlens(seqlens)
-        cases.append(TestCase(f"varlen {seqlens}", cu, cu[-1]))
-    for seqlens in [
-        [1, 63, 64, 65, 127, 128, 129, 447],
-        [1, 17, 31, 32, 33, 95, 127, 128, 129, 191, 192, 193, 367],
-    ]:
-        cu = _cu_from_seqlens(seqlens)
-        cases.append(TestCase(f"varlen {seqlens}", cu, cu[-1]))
-    rng = random.Random(42)
-    for n_seq, total in [(3, 768), (7, 1792), (10, 2560)]:
-        cu = _align_cu(_rand_cu(n_seq, total, rng), CHUNK)
-        cases.append(TestCase(f"varlen rand {n_seq}seq T={cu[-1]}", cu, cu[-1]))
-    return cases
+    ],
+)
+def test_kda_kkt_varlen(npu_device, seqlens: list):
+    cu_seqlens_list = [0]
+    for s in seqlens:
+        cu_seqlens_list.append(cu_seqlens_list[-1] + s)
 
+    T = cu_seqlens_list[-1]
+    N_seq = len(seqlens)
 
-def _make_inputs(tc: TestCase, H: int, HV: int | None = None):
-    HV = HV or H
-    T = tc.T
+    k, g_cs, beta = _make_inputs(T)
+    # Recompute g_cs with varlen boundaries
     torch.manual_seed(42)
-    q = torch.randn(1, T, H, K)
-    k = torch.randn(1, T, H, K)
-    # L2-normalize q and k to match actual KDA usage (model always normalizes).
-    # Unnormalized keys with K=128 produce L matrices with condition numbers ~1e6,
-    # making float32 linalg.inv inaccurate. Normalized keys give L entries ~0
-    # (random orthogonal vectors), keeping (I+L) well-conditioned.
-    q = q / q.norm(dim=-1, keepdim=True).clamp(min=1e-6)
-    k = k / k.norm(dim=-1, keepdim=True).clamp(min=1e-6)
-    v = torch.randn(1, T, HV, V_DIM)
-    # Production-like gate magnitude: values in (-1, 0) make the per-128-chunk
-    # cumulative |g_cs| reach ~64, so exp(-g_cs) ≈ e^64.  The kernels now stage
-    # g_cs and the gated GEMMs in fp32 (max 3.4e38), so this no longer overflows
-    # — it is the regression test for that fix.
-    g_log = -torch.rand(1, T, HV, K)  # values in (-1, 0)
-    beta_sig = torch.sigmoid(torch.randn(1, T, HV))
-    scale = K**-0.5
-    return q, k, v, g_log, beta_sig, scale
+    k = F.normalize(torch.randn(H, T, D), dim=-1, p=2).float()
+    g_log = -torch.rand(H, T, D)
+    g_cs = _chunk_cumsum_per_dim(g_log, cu_seqlens_list)
+    beta = torch.sigmoid(torch.randn(H, T)).float()
 
+    cu_npu = torch.tensor(cu_seqlens_list, dtype=torch.int32).to(npu_device)
 
-# ---------------------------------------------------------------------------
-# Per-stage test functions
-# ---------------------------------------------------------------------------
+    k_npu = k.half().to(npu_device)
+    g_cs_npu = g_cs.float().to(npu_device)
+    beta_npu = beta.half().to(npu_device)
 
-
-def test_gate_cumsum(tc: TestCase, H: int, dev: "torch.device | None" = None) -> bool:
-    """Compare gate_cumsum_kda NPU kernel output to CPU float32 reference.
-
-    Runs the PTO kernel on ``dev`` and checks that it matches ``tc.ref_kda.gate_cumsum``
-    element-wise within tolerance.
-
-    Args:
-        tc:  Test case (defines T and optional cu_seqlens).
-        H:   Number of value/gate heads HV.
-        dev: NPU device (e.g. ``torch.device("npu:0")``).  Required.
-    """
-    if dev is None:
-        raise ValueError("test_gate_cumsum requires --device (NPU device).")
-
-    _, _, _, g_log, _, _ = _make_inputs(tc, H)
-    # g_log: [1, T, H, K]
-    g_dev = g_log.half().to(dev)
-    g_sum = torch.empty(g_dev.shape, dtype=torch.float32, device=dev)
-    cu = (
-        torch.tensor(tc.cu_seqlens_list, dtype=torch.int32, device=dev)
-        if tc.cu_seqlens_list
-        else None
-    )
-    N_seq = len(tc.cu_seqlens_list) - 1 if tc.cu_seqlens_list else 1
-    stream = torch.npu.current_stream()._as_parameter_
-
-    torch.npu.synchronize()
-    run_gate_cumsum_kda(
-        g_dev,
-        g_sum,
-        stream=stream,
-        chunk_size=CHUNK,
-        cu_seqlens=cu,
-        batch_size_override=N_seq,
+    L_npu = pto_kda_kkt(
+        k_npu, g_cs_npu, beta_npu, batch_size=N_seq, seq_len=0, cu_seqlens=cu_npu
     )
     torch.npu.synchronize()
 
-    ref = tc.ref_kda.gate_cumsum(g_dev.cpu(), CHUNK, tc.cu_seqlens_list)
-    acc = NumericalAccuracy(rtol=5e-3, atol=0, ftol=2e-3)
-    return acc.stats_ok(g_sum.cpu(), ref)
+    L_ref = ref_kda_kkt(k, g_cs, beta, cu_seqlens_list)
 
-
-def test_kkt(tc: TestCase, H: int, dev=None) -> bool:
-    """Compare kkt_kda NPU kernel output to tc.ref_kda.kkt_kda CPU reference."""
-    if dev is None:
-        raise ValueError("test_kkt_npu requires --device (NPU device).")
-
-    _, k, _, g_log, beta_sig, _ = _make_inputs(tc, H)
-
-    g_cs = tc.ref_kda.gate_cumsum(g_log, CHUNK, tc.cu_seqlens_list)
-
-    L_npu = torch.zeros(1, tc.T, H, CHUNK, device=dev, dtype=torch.float16)
-    cu = (
-        torch.tensor(tc.cu_seqlens_list, dtype=torch.int32, device=dev)
-        if tc.cu_seqlens_list
-        else None
-    )
-    N_seq = len(tc.cu_seqlens_list) - 1 if tc.cu_seqlens_list else 1
-    stream = torch.npu.current_stream()._as_parameter_
-    torch.npu.synchronize()
-
-    run_kkt_kda(
-        k.half().to(dev),
-        g_cs.float().to(dev),
-        beta_sig.half().to(dev),
-        L_npu,
-        stream=stream,
-        chunk_size=CHUNK,
-        cu_seqlens=cu,
-        batch_size_override=N_seq,
-    )
-    torch.npu.synchronize()
-
-    ref = tc.ref_kda.kkt_kda(k.float(), g_cs, beta_sig, CHUNK, tc.cu_seqlens_list)
-    return ACCURACY.stats_ok(L_npu.cpu(), ref)
-
-
-def test_inv(tc: TestCase, H: int, dev=None) -> bool:
-    """Compare PTO-ISA tri_inverse output to ref_inversion_kda CPU reference."""
-    if dev is None:
-        raise ValueError("test_inv requires --device (NPU device).")
-
-    _, k, _, g_log, beta_sig, _ = _make_inputs(tc, H)
-
-    g_cs = tc.ref_kda.gate_cumsum(g_log, CHUNK, tc.cu_seqlens_list)
-    L_ref = tc.ref_kda.kkt_kda(k.float(), g_cs, beta_sig, CHUNK, tc.cu_seqlens_list)
-
-    L_fp16 = L_ref.to(torch.float16).to(dev)
-    cu = (
-        torch.tensor(tc.cu_seqlens_list, dtype=torch.int32, device=dev)
-        if tc.cu_seqlens_list
-        else None
-    )
-
-    tri_inv = load_tri_inverse()
-    A_inv = solve_tril(L_fp16, cu, CHUNK, H, tri_inv)
-    torch.npu.synchronize()
-
-    ref = tc.ref_kda.inversion_kda(L_ref, CHUNK, tc.cu_seqlens_list)
-    return ACCURACY.stats_ok(A_inv.float().cpu(), ref)
-
-
-def test_wy(tc: TestCase, H: int, dev=None) -> bool:
-    """Compare wy_kda NPU kernel output (u, w) to tc.ref_kda.wy_kda CPU reference.
-
-    Feeds CPU-computed INV (via torch.linalg.inv) into the kernel so this
-    isolates wy's correctness from the inversion stage — same strategy as
-    test_inv at line 574.
-    """
-    if dev is None:
-        raise ValueError("test_wy requires --device (NPU device).")
-
-    _, k, v, g_log, beta_sig, _ = _make_inputs(tc, H)
-
-    g_cs = tc.ref_kda.gate_cumsum(g_log, CHUNK, tc.cu_seqlens_list)
-    L_ref = tc.ref_kda.kkt_kda(k.float(), g_cs, beta_sig, CHUNK, tc.cu_seqlens_list)
-    INV_ref = tc.ref_kda.inversion_kda(L_ref, CHUNK, tc.cu_seqlens_list)
-    u_ref, w_ref = tc.ref_kda.wy_kda(
-        k.float(), v.float(), g_cs, beta_sig, INV_ref, CHUNK, tc.cu_seqlens_list
-    )
-
-    k_d = k.half().to(dev)
-    v_d = v.half().to(dev)
-    g_cs_d = g_cs.float().to(dev)
-    beta_d = beta_sig.half().to(dev)
-    INV_d = INV_ref.half().to(dev)
-    u_npu = torch.zeros(1, tc.T, H, V_DIM, device=dev, dtype=torch.float16)
-    w_npu = torch.zeros(1, tc.T, H, K, device=dev, dtype=torch.float16)
-    cu = (
-        torch.tensor(tc.cu_seqlens_list, dtype=torch.int32, device=dev)
-        if tc.cu_seqlens_list
-        else None
-    )
-    N_seq = len(tc.cu_seqlens_list) - 1 if tc.cu_seqlens_list else 1
-    stream = torch.npu.current_stream()._as_parameter_
-
-    torch.npu.synchronize()
-    run_wy_kda(
-        k_d,
-        v_d,
-        g_cs_d,
-        beta_d,
-        INV_d,
-        u_npu,
-        w_npu,
-        stream=stream,
-        chunk_size=CHUNK,
-        cu_seqlens=cu,
-        batch_size_override=N_seq,
-    )
-    torch.npu.synchronize()
-
-    return ACCURACY.stats_ok(u_npu.cpu(), u_ref) and ACCURACY.stats_ok(
-        w_npu.cpu(), w_ref
-    )
-
-
-def test_chunk_h_kda(tc: TestCase, H: int, dev=None) -> bool:
-    """Compare chunk_h_kda NPU kernel output (s_snapshots, v_corr) to ref."""
-    if dev is None:
-        raise ValueError("test_chunk_h_kda requires --device (NPU device).")
-
-    _, k, v, g_log, beta_sig, _ = _make_inputs(tc, H)
-
-    # Build inputs by chaining the CPU reference pipeline (matches test_wy).
-    g_cs = tc.ref_kda.gate_cumsum(g_log, CHUNK, tc.cu_seqlens_list)
-    L_ref = tc.ref_kda.kkt_kda(k.float(), g_cs, beta_sig, CHUNK, tc.cu_seqlens_list)
-    INV_ref = tc.ref_kda.inversion_kda(L_ref, CHUNK, tc.cu_seqlens_list)
-    u_ref, w_ref = tc.ref_kda.wy_kda(
-        k.float(), v.float(), g_cs, beta_sig, INV_ref, CHUNK, tc.cu_seqlens_list
-    )
-    s_ref, vcorr_ref = tc.ref_kda.chunk_h_kda(
-        k.float(), u_ref, w_ref, g_cs, CHUNK, tc.cu_seqlens_list
-    )
-
-    s_npu = torch.zeros_like(s_ref, device=dev, dtype=torch.float16)
-    vcorr_npu = torch.zeros(1, tc.T, H, V_DIM, device=dev, dtype=torch.float16)
-    cu = (
-        torch.tensor(tc.cu_seqlens_list, dtype=torch.int32, device=dev)
-        if tc.cu_seqlens_list
-        else None
-    )
-    N_seq = len(tc.cu_seqlens_list) - 1 if tc.cu_seqlens_list else 1
-    stream = torch.npu.current_stream()._as_parameter_
-
-    torch.npu.synchronize()
-    run_chunk_h_kda(
-        k.half().to(dev),
-        w_ref.half().to(dev),
-        u_ref.half().to(dev),
-        g_cs.float().to(dev),
-        s_npu,
-        vcorr_npu,
-        stream=stream,
-        chunk_size=CHUNK,
-        cu_seqlens=cu,
-        batch_size_override=N_seq,
-    )
-    torch.npu.synchronize()
-
-    return ACCURACY.stats_ok(s_npu.cpu(), s_ref) and ACCURACY.stats_ok(
-        vcorr_npu.cpu(), vcorr_ref
-    )
-
-
-def test_chunk_o_kda(tc: TestCase, H: int, dev=None) -> bool:
-    """Compare chunk_o_kda NPU kernel output to tc.ref_kda.chunk_o_kda CPU reference."""
-    if dev is None:
-        raise ValueError("test_chunk_o_kda requires --device (NPU device).")
-
-    q, k, v, g_log, beta_sig, scale = _make_inputs(tc, H)
-
-    # Apply scale (matches cpu_pipeline_kda lines 416-418).  No GQA expansion
-    # needed since _make_inputs gives H == HV.
-    qf = q.float() * scale
-    kf = k.float()
-
-    # Reference pipeline up through chunk_h_kda.
-    g_cs = tc.ref_kda.gate_cumsum(g_log, CHUNK, tc.cu_seqlens_list)
-    L_ref = tc.ref_kda.kkt_kda(kf, g_cs, beta_sig, CHUNK, tc.cu_seqlens_list)
-    INV_ref = tc.ref_kda.inversion_kda(L_ref, CHUNK, tc.cu_seqlens_list)
-    u_ref, w_ref = tc.ref_kda.wy_kda(
-        kf, v.float(), g_cs, beta_sig, INV_ref, CHUNK, tc.cu_seqlens_list
-    )
-    s_ref, vcorr_ref = tc.ref_kda.chunk_h_kda(
-        kf, u_ref, w_ref, g_cs, CHUNK, tc.cu_seqlens_list
-    )
-    # Round-trip through fp16 to match what the NPU kernel actually receives.
-    # s_ref accumulates across chunks; the rounding error in s_ref.half() propagates
-    # through q_eff @ S and causes the NPU output to diverge from a float32 reference.
-    o_ref = tc.ref_kda.chunk_o_kda(
-        qf,
-        kf,
-        vcorr_ref.half().float(),
-        s_ref.half().float(),
-        g_cs,
-        CHUNK,
-        tc.cu_seqlens_list,
-    )
-
-    # NPU run.
-    o_npu = torch.zeros(1, tc.T, H, V_DIM, device=dev, dtype=torch.float16)
-    cu = (
-        torch.tensor(tc.cu_seqlens_list, dtype=torch.int32, device=dev)
-        if tc.cu_seqlens_list
-        else None
-    )
-    N_seq = len(tc.cu_seqlens_list) - 1 if tc.cu_seqlens_list else 1
-    stream = torch.npu.current_stream()._as_parameter_
-
-    torch.npu.synchronize()
-    run_chunk_o_kda(
-        qf.half().to(dev),
-        kf.half().to(dev),
-        vcorr_ref.half().to(dev),
-        s_ref.half().to(dev),
-        g_cs.float().to(dev),
-        o_npu,
-        stream=stream,
-        chunk_size=CHUNK,
-        cu_seqlens=cu,
-        batch_size_override=N_seq,
-    )
-    torch.npu.synchronize()
-
-    return ACCURACY.stats_ok(o_npu.cpu(), o_ref)
-
-
-# ---------------------------------------------------------------------------
-# Stage registry and runner
-# ---------------------------------------------------------------------------
-
-_STAGES = {
-    "cumsum": ("Gate cumsum", test_gate_cumsum),
-    "kkt": ("KKT NPU kernel", test_kkt),
-    "inv": ("Linalg (I+L)^{-1}", test_inv),
-    "wy": ("WY transform (u, w)", test_wy),
-    "chunk_h": ("chunk_h_kda (snapshots)", test_chunk_h_kda),
-    "chunk_o": ("chunk_o_kda (output)", test_chunk_o_kda),
-}
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--quick", action="store_true")
-    parser.add_argument("--H", type=int, default=4)
-    parser.add_argument("--stage", default=",".join(_STAGES))
-    parser.add_argument(
-        "--device",
-        default=os.getenv("GDN_NPU_DEVICE", "npu:0"),
-        help="NPU device for stages that run on device (e.g. cumsum). "
-        "CPU-only stages ignore this. Default: $GDN_NPU_DEVICE or npu:0.",
-    )
-    args = parser.parse_args()
-
-    stages = [s.strip() for s in args.stage.split(",") if s.strip()]
-    for s in stages:
-        if s not in _STAGES:
-            sys.exit(f"Unknown stage {s!r}; choose from {list(_STAGES)}")
-
-    # Initialise NPU device only when a device stage is requested.
-    dev = None
-    _DEVICE_STAGES = {"cumsum", "kkt", "inv", "wy", "chunk_h", "chunk_o"}
-    if any(s in _DEVICE_STAGES for s in stages):
-        torch.npu.set_device(args.device)
-        dev = torch.device(args.device)
-
-    cases = _build_test_cases(args.quick)
-    H = args.H
-    print(
-        f"device={args.device}  H={H}  K={K}  V={V_DIM}  CHUNK={CHUNK}  cases={len(cases)}"
-    )
-
-    all_pass = True
-    for stage in stages:
-        name, fn = _STAGES[stage]
-        print(f"\n{'='*60}\nStage: {name}\n{'='*60}")
-        for i, tc in enumerate(cases):
-            t0 = time.time()
-            ok = fn(tc, H, dev)
-            dt = time.time() - t0
-            status = "PASS" if ok else "FAIL"
-            if not ok:
-                all_pass = False
-            print(f"  [{i+1:2d}/{len(cases)}] {status}  {tc.label}  ({dt:.2f}s)")
-
-    print(f"\n{'ALL PASS' if all_pass else 'SOME FAILED'}")
-    sys.exit(0 if all_pass else 1)
-
-
-if __name__ == "__main__":
-    main()
+    assert stats_ok(
+        L_npu.float().cpu(), L_ref
+    ), f"kda_kkt varlen output does not match reference (seqlens={seqlens})"

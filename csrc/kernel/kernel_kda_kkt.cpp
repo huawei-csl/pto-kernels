@@ -59,7 +59,7 @@ using namespace pto;
 #endif
 
 #ifndef GDN_C
-#define GDN_C 16
+#define GDN_C 128
 #endif
 
 #ifdef __CCE_AICORE__
@@ -365,7 +365,7 @@ AICORE void kda_kkt_kernel(__gm__ half* k_ptr, __gm__ float* g_cs_ptr,
 
 // ── Device entry point
 // ────────────────────────────────────────────────────────
-extern "C" __global__ AICORE void launch_kda_kkt(
+extern "C" __global__ AICORE void kda_kkt(
     __gm__ uint8_t* k_ptr, __gm__ uint8_t* g_cs_ptr, __gm__ uint8_t* beta_ptr,
     __gm__ uint8_t* mask_ptr, __gm__ uint8_t* ws_in_ptr,
     __gm__ uint8_t* ws_out_ptr, __gm__ uint8_t* L_out_ptr,
@@ -381,16 +381,4 @@ extern "C" __global__ AICORE void launch_kda_kkt(
       reinterpret_cast<__gm__ half*>(L_out_ptr),
       reinterpret_cast<__gm__ int32_t*>(cu_seqlens), batch_size, seq_len,
       total_tokens);
-}
-
-// ── Host entry point (called from Python via ctypes) ─────────────────────────
-extern "C" void call_kernel(uint32_t block_dim, void* stream, uint8_t* k_ptr,
-                            uint8_t* g_cs_ptr, uint8_t* beta_ptr,
-                            uint8_t* mask_ptr, uint8_t* ws_in_ptr,
-                            uint8_t* ws_out_ptr, uint8_t* L_out_ptr,
-                            uint8_t* cu_seqlens, int64_t batch_size,
-                            int64_t seq_len, int64_t total_tokens) {
-  launch_kda_kkt<<<block_dim, nullptr, stream>>>(
-      k_ptr, g_cs_ptr, beta_ptr, mask_ptr, ws_in_ptr, ws_out_ptr, L_out_ptr,
-      cu_seqlens, batch_size, seq_len, total_tokens);
 }
