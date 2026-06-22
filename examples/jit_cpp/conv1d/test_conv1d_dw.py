@@ -94,9 +94,56 @@ def test_single_fp16_entry_matches_reference(conv1d_kernel, npu_device, seed, se
     assert err <= TOL[torch.float16], f"max abs err {err:.3e}"
 
 
-# --- generalized K / MAX_W: build the kernel with -DCONV_K / -DCONV_MAX_W ---
-# Covers non-power-of-two K (3, 5), power-of-two K (2, 8) and MAX_W variations.
+# --- generalized K / MAX_W: compile a parametric wrapper per (K, MAX_W) that
+# #includes the kernel and instantiates runConvSiluBatched at that K, leaving the
+# K=4 production entry points untouched. Covers non-power-of-two K (3, 5),
+# power-of-two K (2, 8), MAX_W variations, and both fp16 + bf16 I/O.
 KCONFIGS = [(2, 3072), (3, 3072), (4, 2048), (5, 2048), (8, 1536)]
+
+# Wrapper source: include the kernel + add parametric fp16 and bf16
+# entries/launchers (weights/bias stay fp32; only the I/O element type changes).
+_WRAPPER_SRC = """#include "{kernel}"
+extern "C" __global__ AICORE void conv1d_dw_test_kernel_fp16(
+    __gm__ uint8_t* x, __gm__ uint8_t* y, __gm__ uint8_t* wgt,
+    __gm__ uint8_t* bia, uint32_t batch, uint32_t seqLen, uint32_t channels,
+    uint32_t activation) {{
+#if defined(__DAV_VEC__)
+  constexpr uint32_t K = {k}, MAX_W = {mw};
+  csilu::runConvSiluBatched<half, float, K, MAX_W>(
+      (__gm__ half*)x, (__gm__ half*)y, (__gm__ float*)wgt, (__gm__ float*)bia,
+      batch, seqLen, channels, activation);
+#else
+  (void)x; (void)y; (void)wgt; (void)bia; (void)batch; (void)seqLen;
+  (void)channels; (void)activation;
+#endif
+}}
+extern "C" __global__ AICORE void conv1d_dw_test_kernel_bf16(
+    __gm__ uint8_t* x, __gm__ uint8_t* y, __gm__ uint8_t* wgt,
+    __gm__ uint8_t* bia, uint32_t batch, uint32_t seqLen, uint32_t channels,
+    uint32_t activation) {{
+#if defined(__DAV_VEC__)
+  constexpr uint32_t K = {k}, MAX_W = {mw};
+  csilu::runConvSiluBatched<bfloat16_t, float, K, MAX_W>(
+      (__gm__ bfloat16_t*)x, (__gm__ bfloat16_t*)y, (__gm__ float*)wgt,
+      (__gm__ float*)bia, batch, seqLen, channels, activation);
+#else
+  (void)x; (void)y; (void)wgt; (void)bia; (void)batch; (void)seqLen;
+  (void)channels; (void)activation;
+#endif
+}}
+extern "C" void call_test_kernel_fp16(uint32_t blockDim, void* stream,
+    uint8_t* x, uint8_t* y, uint8_t* wgt, uint8_t* bia, uint32_t batch,
+    uint32_t seqLen, uint32_t channels, uint32_t activation) {{
+  conv1d_dw_test_kernel_fp16<<<blockDim * 2, nullptr, stream>>>(
+      x, y, wgt, bia, batch, seqLen, channels, activation);
+}}
+extern "C" void call_test_kernel_bf16(uint32_t blockDim, void* stream,
+    uint8_t* x, uint8_t* y, uint8_t* wgt, uint8_t* bia, uint32_t batch,
+    uint32_t seqLen, uint32_t channels, uint32_t activation) {{
+  conv1d_dw_test_kernel_bf16<<<blockDim * 2, nullptr, stream>>>(
+      x, y, wgt, bia, batch, seqLen, channels, activation);
+}}
+"""
 _BATCHED_ARGS = (
     [ctypes.c_uint32, ctypes.c_void_p] + [ctypes.c_void_p] * 4 + [ctypes.c_uint32] * 4
 )
@@ -118,35 +165,37 @@ def conv1d_dw_ref_k(x, w, bias, k_width):
 
 @pytest.fixture(scope="session")
 def kconfig_libs(npu_device):
-    """Compile the kernel once per (K, MAX_W) via -DCONV_K / -DCONV_MAX_W."""
+    """Compile a parametric wrapper per (K, MAX_W) and load it."""
+    gen_dir = KERNEL_CPP.parent / "outputs" / "gen"
+    gen_dir.mkdir(parents=True, exist_ok=True)
     libs = {}
     for k_width, max_w in KCONFIGS:
-        so = compile_cpp(
-            str(KERNEL_CPP),
-            extra_flags=[f"-DCONV_K={k_width}", f"-DCONV_MAX_W={max_w}"],
-            out_name=f"conv1d_k{k_width}_mw{max_w}.so",
-        )
+        src = gen_dir / f"wrap_k{k_width}_mw{max_w}.cpp"
+        src.write_text(_WRAPPER_SRC.format(kernel=KERNEL_CPP, k=k_width, mw=max_w))
+        so = compile_cpp(str(src), out_name=f"conv1d_k{k_width}_mw{max_w}.so")
         libs[(k_width, max_w)] = ctypes.CDLL(so)
     return libs
 
 
 @pytest.mark.parametrize("seed", TEST_SEEDS)
+@pytest.mark.parametrize("dtype", DTYPES)
 @pytest.mark.parametrize("k_width,max_w", KCONFIGS)
 @pytest.mark.parametrize(
     "batch,seq,dim",
     [(1, 64, 256), (2, 128, 2048), (8, 256, 2048), (1, 384, 6144), (4, 200, 777)],
 )
 def test_general_k_max_w(
-    kconfig_libs, npu_device, seed, k_width, max_w, batch, seq, dim
+    kconfig_libs, npu_device, seed, dtype, k_width, max_w, batch, seq, dim
 ):
-    """Kernel built with different K / MAX_W (fp16). dim > MAX_W exercises W-tiling."""
+    """Kernel built with different K / MAX_W, fp16 + bf16. dim > MAX_W tiles W."""
     torch.manual_seed(seed)
-    x = 2 * torch.rand(batch, seq, dim, device=npu_device, dtype=torch.float16) - 1
+    x = 2 * torch.rand(batch, seq, dim, device=npu_device, dtype=dtype) - 1
     w = torch.rand(k_width, dim, device=npu_device, dtype=torch.float32) - 0.5
     bias = torch.rand(dim, device=npu_device, dtype=torch.float32) - 0.5
     y = torch.empty_like(x)
 
-    fn = kconfig_libs[(k_width, max_w)].call_kernel_batched
+    lib = kconfig_libs[(k_width, max_w)]
+    fn = lib.call_test_kernel_fp16 if dtype == torch.float16 else lib.call_test_kernel_bf16
     fn.argtypes = _BATCHED_ARGS
     fn.restype = None
     stream = torch.npu.current_stream()._as_parameter_  # noqa: SLF001
@@ -155,6 +204,7 @@ def test_general_k_max_w(
 
     ref = conv1d_dw_ref_k(x, w, bias, k_width)
     err = (y.float() - ref).abs().max().item()
-    assert (
-        err <= TOL[torch.float16]
-    ), f"K={k_width} MAX_W={max_w} B={batch} L={seq} W={dim}: max abs err {err:.3e}"
+    assert err <= TOL[dtype], (
+        f"K={k_width} MAX_W={max_w} dt={dtype} B={batch} L={seq} W={dim}: "
+        f"max abs err {err:.3e}"
+    )
