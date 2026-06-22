@@ -79,7 +79,6 @@ using UbDN = pto::Tile<pto::TileType::Vec, T, R, C, pto::BLayout::ColMajor, RV,
 template <int32_t NumHeads, int32_t KDim, int32_t ChunkSize>
 AICORE void kda_kkt_kernel(__gm__ half* k_ptr, __gm__ float* g_cs_ptr,
                            __gm__ half* beta_ptr, __gm__ float* mask_ptr,
-                           __gm__ float* ws_in_ptr, __gm__ float* ws_out_ptr,
                            __gm__ half* L_out_ptr, __gm__ int32_t* cu_seqlens,
                            int64_t batch_size, int64_t seq_len,
                            int64_t total_tokens) {
@@ -367,8 +366,7 @@ AICORE void kda_kkt_kernel(__gm__ half* k_ptr, __gm__ float* g_cs_ptr,
 // ────────────────────────────────────────────────────────
 extern "C" __global__ AICORE void kda_kkt(
     __gm__ uint8_t* k_ptr, __gm__ uint8_t* g_cs_ptr, __gm__ uint8_t* beta_ptr,
-    __gm__ uint8_t* mask_ptr, __gm__ uint8_t* ws_in_ptr,
-    __gm__ uint8_t* ws_out_ptr, __gm__ uint8_t* L_out_ptr,
+    __gm__ uint8_t* mask_ptr, __gm__ uint8_t* L_out_ptr,
     __gm__ uint8_t* cu_seqlens, int64_t batch_size, int64_t seq_len,
     int64_t total_tokens) {
   kda_kkt_kernel<GDN_H, GDN_D, GDN_C>(
@@ -376,8 +374,6 @@ extern "C" __global__ AICORE void kda_kkt(
       reinterpret_cast<__gm__ float*>(g_cs_ptr),
       reinterpret_cast<__gm__ half*>(beta_ptr),
       reinterpret_cast<__gm__ float*>(mask_ptr),
-      reinterpret_cast<__gm__ float*>(ws_in_ptr),
-      reinterpret_cast<__gm__ float*>(ws_out_ptr),
       reinterpret_cast<__gm__ half*>(L_out_ptr),
       reinterpret_cast<__gm__ int32_t*>(cu_seqlens), batch_size, seq_len,
       total_tokens);

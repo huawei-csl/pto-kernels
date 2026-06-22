@@ -60,7 +60,7 @@ at::Tensor run_kda_kkt(const at::Tensor& K, const at::Tensor& G_cs,
   const int64_t num_heads = K.size(0);
   const int64_t total_tokens = K.size(1);
   // GDN_C compile-time constant — matches kernel default build
-  constexpr int64_t chunk_c = 128;
+  constexpr int64_t CHUNK_C = 128;
 
   const int64_t total_work = batch_size * num_heads;
   uint32_t block_dim = GetNumCubeCores();
@@ -70,24 +70,20 @@ at::Tensor run_kda_kkt(const at::Tensor& K, const at::Tensor& G_cs,
 
   // Strict-lower-triangular mask [C, C] float32 — used by the kernel to zero
   // the upper-triangular entries of each chunk's L matrix.
-  at::Tensor mask =
-      at::tril(at::ones({chunk_c, chunk_c}, G_cs.options()), /*diagonal=*/-1);
-
-  // ws_in and ws_out are present in the ABI for future use but never read.
-  at::Tensor ws_in = at::zeros({1}, G_cs.options());
-  at::Tensor ws_out = at::zeros({1}, G_cs.options());
+  const at::Tensor mask =
+      at::tril(at::ones({CHUNK_C, CHUNK_C}, G_cs.options()), /*diagonal=*/-1);
 
   // Output L [total_tokens, H, C] fp16, BSND layout.
   // Zero-initialised: the kernel only writes strict-lower-tri entries.
-  at::Tensor L = at::zeros({total_tokens, num_heads, chunk_c}, K.options());
+  at::Tensor L = at::zeros({total_tokens, num_heads, CHUNK_C}, K.options());
 
   void* cu_seqlens_ptr = nullptr;
   if (cu_seqlens.numel() != 1) {
     cu_seqlens_ptr = ConvertType(cu_seqlens);
   }
 
-  EXEC_KERNEL_CMD(kda_kkt, block_dim, K, G_cs, Beta, mask, ws_in, ws_out, L,
-                  cu_seqlens_ptr, batch_size, seq_len, total_tokens);
+  EXEC_KERNEL_CMD(kda_kkt, block_dim, K, G_cs, Beta, mask, L, cu_seqlens_ptr,
+                  batch_size, seq_len, total_tokens);
 
   return L;
 }
