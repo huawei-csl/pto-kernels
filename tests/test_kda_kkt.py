@@ -160,6 +160,7 @@ def test_kda_kkt_fixed(npu_device, seq_len: int):
     k_npu = k.half().to(npu_device)  # [H, T, D] fp16
     g_cs_npu = g_cs.float().to(npu_device)  # [H, T, D] fp32
     beta_npu = beta.half().to(npu_device)  # [H, T]    fp16
+    torch.npu.synchronize()
 
     L_npu = pto_kda_kkt(k_npu, g_cs_npu, beta_npu, batch_size=1, seq_len=seq_len)
     torch.npu.synchronize()
@@ -190,19 +191,17 @@ def test_kda_kkt_varlen(npu_device, seqlens: list):
     T = cu_seqlens_list[-1]
     N_seq = len(seqlens)
 
-    k, g_cs, beta = _make_inputs(T)
-    # Recompute g_cs with varlen boundaries
-    torch.manual_seed(42)
+    # Compute g_cs with varlen boundaries
     k = F.normalize(torch.randn(H, T, D), dim=-1, p=2).float()
     g_log = -torch.rand(H, T, D)
     g_cs = _chunk_cumsum_per_dim(g_log, cu_seqlens_list)
     beta = torch.sigmoid(torch.randn(H, T)).float()
 
-    cu_npu = torch.tensor(cu_seqlens_list, dtype=torch.int32).to(npu_device)
-
     k_npu = k.half().to(npu_device)
     g_cs_npu = g_cs.float().to(npu_device)
     beta_npu = beta.half().to(npu_device)
+    cu_npu = torch.tensor(cu_seqlens_list, dtype=torch.int32).to(npu_device)
+    torch.npu.synchronize()
 
     L_npu = pto_kda_kkt(
         k_npu, g_cs_npu, beta_npu, batch_size=N_seq, seq_len=0, cu_seqlens=cu_npu

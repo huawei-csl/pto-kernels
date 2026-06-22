@@ -75,15 +75,16 @@ at::Tensor run_kda_kkt(const at::Tensor& K, const at::Tensor& G_cs,
 
   // Output L [total_tokens, H, C] fp16, BSND layout.
   // Zero-initialised: the kernel only writes strict-lower-tri entries.
-  at::Tensor L = at::zeros({total_tokens, num_heads, CHUNK_C}, K.options());
+  const at::Tensor L_out =
+      at::zeros({total_tokens, num_heads, CHUNK_C}, K.options());
 
   void* cu_seqlens_ptr = nullptr;
   if (cu_seqlens.numel() != 1) {
     cu_seqlens_ptr = ConvertType(cu_seqlens);
   }
 
-  EXEC_KERNEL_CMD(kda_kkt, block_dim, K, G_cs, Beta, mask, L, cu_seqlens_ptr,
-                  batch_size, seq_len, total_tokens);
+  EXEC_KERNEL_CMD(kda_kkt, block_dim, K, G_cs, Beta, mask, L_out,
+                  cu_seqlens_ptr, batch_size, seq_len, total_tokens);
 
   return L;
 }
