@@ -77,20 +77,21 @@ using UbDN = pto::Tile<pto::TileType::Vec, T, R, C, pto::BLayout::ColMajor, RV,
 #endif
 
 template <int32_t NumHeads, int32_t KDim, int32_t ChunkSize>
-AICORE void kda_kkt_kernel(__gm__ half* k_ptr, __gm__ float* g_cs_ptr,
-                           __gm__ half* beta_ptr, __gm__ float* mask_ptr,
-                           __gm__ half* L_out_ptr, __gm__ int32_t* cu_seqlens,
-                           int64_t batch_size, int64_t seq_len,
-                           int64_t total_tokens) {
-  auto cid = get_block_idx();
-  auto block_num = get_block_num();
-  auto vid = get_subblockid();
+AICORE inline void kda_kkt_kernel(__gm__ half* k_ptr, __gm__ float* g_cs_ptr,
+                                  __gm__ half* beta_ptr, __gm__ float* mask_ptr,
+                                  __gm__ half* L_out_ptr,
+                                  __gm__ int32_t* cu_seqlens,
+                                  int64_t batch_size, int64_t seq_len,
+                                  int64_t total_tokens) {
+  const auto cid = get_block_idx();
+  const auto block_num = get_block_num();
+  const auto vid = get_subblockid();
 
   constexpr int32_t HalfChunk = ChunkSize / 2;
   constexpr int32_t KTC = ((KDim + 7) / 8) * 8;
 
-  int64_t num_seqs = batch_size;
-  int64_t total_work = num_seqs * NumHeads;
+  const int64_t num_seqs = batch_size;
+  const int64_t total_work = num_seqs * NumHeads;
 
   // ── GM type aliases (head-major [HV, T, K]) ──────────────────────────────
   using GmShapeDyn = Shape<1, 1, 1, DYNAMIC, DYNAMIC>;
@@ -111,9 +112,6 @@ AICORE void kda_kkt_kernel(__gm__ half* k_ptr, __gm__ float* g_cs_ptr,
   using GmFloatMaskColRow =
       GlobalTensor<float, GmShapeDyn, Stride<1, 1, 1, ChunkSize, 1>>;
 
-  kernel_utils::SyncAll();
-
-#if defined(__DAV_VEC__)
   set_mask_norm();
   set_vector_mask(-1, -1);
 
@@ -162,7 +160,7 @@ AICORE void kda_kkt_kernel(__gm__ half* k_ptr, __gm__ float* g_cs_ptr,
       bos = seq_idx * seq_len;
       slen = seq_len;
     }
-    int64_t num_chunks = (slen + ChunkSize - 1) / ChunkSize;
+    const int64_t num_chunks = (slen + ChunkSize - 1) / ChunkSize;
 
     for (int64_t ci = 0; ci < num_chunks; ++ci) {
       int64_t chunk_start = ci * ChunkSize;
@@ -196,10 +194,10 @@ AICORE void kda_kkt_kernel(__gm__ half* k_ptr, __gm__ float* g_cs_ptr,
         TLOAD(g_ld, g_gm);
       }
       {
-        GmShapeDyn gs;
-        gs.shape[3] = my_rows;
-        gs.shape[4] = KDim;
-        GmHalfK k_gm(k_ptr + hbase + my_first * KDim, gs);
+        GmShapeDyn tensor;
+        tensor.shape[3] = my_rows;
+        tensor.shape[4] = KDim;
+        GmHalfK k_gm(k_ptr + hbase + my_first * KDim, tensor);
         UbND<half, HalfChunk, KTC, DYNAMIC, DYNAMIC, PadValue::Zero> k_ld(
             my_rows, KDim);
         TASSIGN(k_ld, MYKH_ADDR);
@@ -352,10 +350,6 @@ AICORE void kda_kkt_kernel(__gm__ half* k_ptr, __gm__ float* g_cs_ptr,
       }
     }
   }
-
-#endif
-
-  kernel_utils::SyncAll();
 }
 
 // ── Device entry point
@@ -365,6 +359,7 @@ extern "C" __global__ AICORE void kda_kkt(
     __gm__ uint8_t* mask_ptr, __gm__ uint8_t* L_out_ptr,
     __gm__ uint8_t* cu_seqlens, int64_t batch_size, int64_t seq_len,
     int64_t total_tokens) {
+#if defined(__DAV_VEC__)
   kda_kkt_kernel<GDN_H, GDN_D, GDN_C>(
       reinterpret_cast<__gm__ half*>(k_ptr),
       reinterpret_cast<__gm__ float*>(g_cs_ptr),
@@ -373,4 +368,5 @@ extern "C" __global__ AICORE void kda_kkt(
       reinterpret_cast<__gm__ half*>(L_out_ptr),
       reinterpret_cast<__gm__ int32_t*>(cu_seqlens), batch_size, seq_len,
       total_tokens);
+#endif
 }
