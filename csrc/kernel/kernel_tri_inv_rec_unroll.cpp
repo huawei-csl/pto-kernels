@@ -38,9 +38,15 @@ AICORE inline void CopyDiagonalFractalsL1ToL0(SrcL1TileT src, DstL0TileT dst) {
   constexpr TileType LeftOrRight = is_left ? TileType::Left : TileType::Right;
   constexpr SLayout InnerLayout =
       is_left ? SLayout::RowMajor : SLayout::ColMajor;
+#ifdef __DAV_C310__
+  constexpr BLayout OuterLayout =
+      is_left ? BLayout::ColMajor : BLayout::RowMajor;
+#else
+  constexpr BLayout OuterLayout = BLayout::RowMajor;
+#endif
 
-  Tile<LeftOrRight, InputT, FractalSize, FractalSize, BLayout::RowMajor,
-       FractalSize, FractalSize, InnerLayout, TileConfig::fractalABSize>
+  Tile<LeftOrRight, InputT, FractalSize, FractalSize, OuterLayout, FractalSize,
+       FractalSize, InnerLayout, TileConfig::fractalABSize>
       fractals[NumFractals];
   const std::uintptr_t starting_address =
       reinterpret_cast<std::uintptr_t>(dst.data());
@@ -86,7 +92,12 @@ AICORE inline void CopyOddOrEvenBlocksL1ToL0(SrcL1TileT src, DstL0TileT dst,
   constexpr TileType LeftOrRight = is_left ? TileType::Left : TileType::Right;
   constexpr SLayout InnerLayout =
       is_left ? SLayout::RowMajor : SLayout::ColMajor;
-
+#ifdef __DAV_C310__
+  constexpr BLayout OuterLayout =
+      is_left ? BLayout::ColMajor : BLayout::RowMajor;
+#else
+  constexpr BLayout OuterLayout = BLayout::RowMajor;
+#endif
   // For left: copy even blocks 0, 2, 4, ... (starting_block=0)
   // For right: copy odd blocks 1, 3, 5, ... (starting_block=1)
   // Default: left→even(0), right→odd(1). swap_parity flips this.
@@ -97,8 +108,8 @@ AICORE inline void CopyOddOrEvenBlocksL1ToL0(SrcL1TileT src, DstL0TileT dst,
   const uint32_t num_fractals_per_block = block_size / FractalSize;
 
   // might need fewer fractals if block_size < FractalSize
-  Tile<LeftOrRight, InputT, FractalSize, FractalSize, BLayout::RowMajor,
-       FractalSize, FractalSize, InnerLayout, TileConfig::fractalABSize>
+  Tile<LeftOrRight, InputT, FractalSize, FractalSize, OuterLayout, FractalSize,
+       FractalSize, InnerLayout, TileConfig::fractalABSize>
       fractals[MatrixSize / FractalSize];
 
   const std::uintptr_t starting_address =
