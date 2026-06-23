@@ -195,7 +195,11 @@ def test_general_k_max_w(
     y = torch.empty_like(x)
 
     lib = kconfig_libs[(k_width, max_w)]
-    fn = lib.call_test_kernel_fp16 if dtype == torch.float16 else lib.call_test_kernel_bf16
+    fn = (
+        lib.call_test_kernel_fp16
+        if dtype == torch.float16
+        else lib.call_test_kernel_bf16
+    )
     fn.argtypes = _BATCHED_ARGS
     fn.restype = None
     stream = torch.npu.current_stream()._as_parameter_  # noqa: SLF001
