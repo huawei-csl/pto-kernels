@@ -1,7 +1,7 @@
 """Correctness tests for the depthwise causal conv1d + bias + SiLU PTO kernel.
 
 Run:
-    pytest test_conv1d_dw.py -q --npu npu:0
+    pytest test_causal_conv1d.py -q --npu npu:0
 """
 
 import ctypes
@@ -12,9 +12,9 @@ import torch
 import torch.nn.functional as F
 import torch_npu  # noqa: F401
 
-from jit_util_conv1d_dw import BLOCK_DIM, K, compile_cpp, jit_compile
+from jit_util_causal_conv1d import BLOCK_DIM, K, compile_cpp, jit_compile
 
-KERNEL_CPP = Path(__file__).resolve().parent / "conv1d_dw_pto.cpp"
+KERNEL_CPP = Path(__file__).resolve().parent / "causal_conv1d_pto.cpp"
 
 DTYPES = [torch.float16, torch.bfloat16]
 TEST_SEEDS = [0, 1]
@@ -38,7 +38,7 @@ TEST_CASES = [
 TOL = {torch.float16: 6e-3, torch.bfloat16: 6e-2}
 
 
-def conv1d_dw_ref(x, w, bias, activation):
+def causal_conv1d_ref(x, w, bias, activation):
     """Depthwise causal conv1d (width K) + per-channel bias + optional SiLU.
 
     fp32 accumulate; x[:, <0] padded with zeros (no conv_states).
@@ -72,7 +72,7 @@ def test_batched_matches_reference(
     y = conv1d_kernel.batched(x, w, bias, activation=activation)
     torch.npu.synchronize()
 
-    ref = conv1d_dw_ref(x, w, bias, activation)
+    ref = causal_conv1d_ref(x, w, bias, activation)
     err = (y.float() - ref).abs().max().item()
     assert err <= TOL[dtype], f"max abs err {err:.3e} > tol {TOL[dtype]:.1e}"
 
@@ -89,7 +89,7 @@ def test_single_fp16_entry_matches_reference(conv1d_kernel, npu_device, seed, se
     y = conv1d_kernel(x, w, bias)
     torch.npu.synchronize()
 
-    ref = conv1d_dw_ref(x.unsqueeze(0), w, bias, activation=True)[0]
+    ref = causal_conv1d_ref(x.unsqueeze(0), w, bias, activation=True)[0]
     err = (y.float() - ref).abs().max().item()
     assert err <= TOL[torch.float16], f"max abs err {err:.3e}"
 
@@ -103,7 +103,7 @@ KCONFIGS = [(2, 3072), (3, 3072), (4, 2048), (5, 2048), (8, 1536)]
 # Wrapper source: include the kernel + add parametric fp16 and bf16
 # entries/launchers (weights/bias stay fp32; only the I/O element type changes).
 _WRAPPER_SRC = """#include "{kernel}"
-extern "C" __global__ AICORE void conv1d_dw_test_kernel_fp16(
+extern "C" __global__ AICORE void causal_conv1d_test_kernel_fp16(
     __gm__ uint8_t* x, __gm__ uint8_t* y, __gm__ uint8_t* wgt,
     __gm__ uint8_t* bia, uint32_t batch, uint32_t seqLen, uint32_t channels,
     uint32_t activation) {{
@@ -117,7 +117,7 @@ extern "C" __global__ AICORE void conv1d_dw_test_kernel_fp16(
   (void)channels; (void)activation;
 #endif
 }}
-extern "C" __global__ AICORE void conv1d_dw_test_kernel_bf16(
+extern "C" __global__ AICORE void causal_conv1d_test_kernel_bf16(
     __gm__ uint8_t* x, __gm__ uint8_t* y, __gm__ uint8_t* wgt,
     __gm__ uint8_t* bia, uint32_t batch, uint32_t seqLen, uint32_t channels,
     uint32_t activation) {{
@@ -134,13 +134,13 @@ extern "C" __global__ AICORE void conv1d_dw_test_kernel_bf16(
 extern "C" void call_test_kernel_fp16(uint32_t blockDim, void* stream,
     uint8_t* x, uint8_t* y, uint8_t* wgt, uint8_t* bia, uint32_t batch,
     uint32_t seqLen, uint32_t channels, uint32_t activation) {{
-  conv1d_dw_test_kernel_fp16<<<blockDim * 2, nullptr, stream>>>(
+  causal_conv1d_test_kernel_fp16<<<blockDim * 2, nullptr, stream>>>(
       x, y, wgt, bia, batch, seqLen, channels, activation);
 }}
 extern "C" void call_test_kernel_bf16(uint32_t blockDim, void* stream,
     uint8_t* x, uint8_t* y, uint8_t* wgt, uint8_t* bia, uint32_t batch,
     uint32_t seqLen, uint32_t channels, uint32_t activation) {{
-  conv1d_dw_test_kernel_bf16<<<blockDim * 2, nullptr, stream>>>(
+  causal_conv1d_test_kernel_bf16<<<blockDim * 2, nullptr, stream>>>(
       x, y, wgt, bia, batch, seqLen, channels, activation);
 }}
 """
@@ -153,7 +153,7 @@ def _ptr(t):
     return ctypes.c_void_p(t.data_ptr())
 
 
-def conv1d_dw_ref_k(x, w, bias, k_width):
+def causal_conv1d_ref_k(x, w, bias, k_width):
     """fp32 reference for an arbitrary filter width k_width (always SiLU)."""
     B, L, W = x.shape
     pad = torch.zeros((B, k_width - 1, W), device=x.device, dtype=x.dtype)
@@ -206,7 +206,7 @@ def test_general_k_max_w(
     fn(BLOCK_DIM, stream, _ptr(x), _ptr(y), _ptr(w), _ptr(bias), batch, seq, dim, 1)
     torch.npu.synchronize()
 
-    ref = conv1d_dw_ref_k(x, w, bias, k_width)
+    ref = causal_conv1d_ref_k(x, w, bias, k_width)
     err = (y.float() - ref).abs().max().item()
     assert err <= TOL[dtype], (
         f"K={k_width} MAX_W={max_w} dt={dtype} B={batch} L={seq} W={dim}: "

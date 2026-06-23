@@ -377,7 +377,7 @@ AICORE void runConvSiluBatched(__gm__ IoElemType* input,
 
 // ---- single-sequence entry (back-compat: input,output [seqLen,channels] fp16,
 // weights[K,channels]/bias[channels] fp32) ----
-extern "C" __global__ AICORE void conv1d_dw_kernel(
+extern "C" __global__ AICORE void causal_conv1d_kernel(
     __gm__ uint8_t* input, __gm__ uint8_t* output, __gm__ uint8_t* weights,
     __gm__ uint8_t* bias, uint32_t seqLen, uint32_t channels) {
 #if defined(__DAV_VEC__)
@@ -397,7 +397,7 @@ extern "C" __global__ AICORE void conv1d_dw_kernel(
 
 // ---- batched fp16 entry: input,output [batch,seqLen,channels] fp16,
 // weights/bias fp32 ----
-extern "C" __global__ AICORE void conv1d_dw_batched_kernel(
+extern "C" __global__ AICORE void causal_conv1d_batched_kernel(
     __gm__ uint8_t* input, __gm__ uint8_t* output, __gm__ uint8_t* weights,
     __gm__ uint8_t* bias, uint32_t batch, uint32_t seqLen, uint32_t channels,
     uint32_t applyActivation) {
@@ -420,7 +420,7 @@ extern "C" __global__ AICORE void conv1d_dw_batched_kernel(
 
 // ---- batched bf16 entry: input,output [batch,seqLen,channels] bf16,
 // weights/bias fp32 ----
-extern "C" __global__ AICORE void conv1d_dw_batched_bf16_kernel(
+extern "C" __global__ AICORE void causal_conv1d_batched_bf16_kernel(
     __gm__ uint8_t* input, __gm__ uint8_t* output, __gm__ uint8_t* weights,
     __gm__ uint8_t* bias, uint32_t batch, uint32_t seqLen, uint32_t channels,
     uint32_t applyActivation) {
@@ -445,8 +445,8 @@ extern "C" __global__ AICORE void conv1d_dw_batched_bf16_kernel(
 extern "C" void call_kernel(uint32_t blockDim, void* stream, uint8_t* input,
                             uint8_t* output, uint8_t* weights, uint8_t* bias,
                             uint32_t seqLen, uint32_t channels) {
-  conv1d_dw_kernel<<<blockDim * 2, nullptr, stream>>>(input, output, weights,
-                                                      bias, seqLen, channels);
+  causal_conv1d_kernel<<<blockDim * 2, nullptr, stream>>>(
+      input, output, weights, bias, seqLen, channels);
 }
 
 extern "C" void call_kernel_batched(uint32_t blockDim, void* stream,
@@ -455,7 +455,7 @@ extern "C" void call_kernel_batched(uint32_t blockDim, void* stream,
                                     uint32_t batch, uint32_t seqLen,
                                     uint32_t channels,
                                     uint32_t applyActivation) {
-  conv1d_dw_batched_kernel<<<blockDim * 2, nullptr, stream>>>(
+  causal_conv1d_batched_kernel<<<blockDim * 2, nullptr, stream>>>(
       input, output, weights, bias, batch, seqLen, channels, applyActivation);
 }
 
@@ -465,6 +465,6 @@ extern "C" void call_kernel_batched_bf16(uint32_t blockDim, void* stream,
                                          uint32_t batch, uint32_t seqLen,
                                          uint32_t channels,
                                          uint32_t applyActivation) {
-  conv1d_dw_batched_bf16_kernel<<<blockDim * 2, nullptr, stream>>>(
+  causal_conv1d_batched_bf16_kernel<<<blockDim * 2, nullptr, stream>>>(
       input, output, weights, bias, batch, seqLen, channels, applyActivation);
 }

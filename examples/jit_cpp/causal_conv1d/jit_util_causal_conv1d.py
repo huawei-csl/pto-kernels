@@ -15,7 +15,7 @@ def compile_cpp(
     verbose: bool = False,
     timeout: int = 120,
     extra_flags=None,
-    out_name: str = "conv1d_dw_jit.so",
+    out_name: str = "causal_conv1d_jit.so",
 ) -> str:
     so_dir = os.path.join(os.path.dirname(kernel_cpp), "outputs", "so")
     os.makedirs(so_dir, exist_ok=True)
@@ -79,7 +79,7 @@ def load_lib(lib_path):
         ]
         getattr(lib, name).restype = None
 
-    def conv1d_dw(x, w, bias, *, block_dim=BLOCK_DIM, stream_ptr=None):
+    def causal_conv1d(x, w, bias, *, block_dim=BLOCK_DIM, stream_ptr=None):
         """Depthwise causal conv1d + bias + SiLU.
         x: [L, W] fp16 (contig).  w: [K, W] fp32 (contig).  bias: [W] fp32.
         Returns y: [L, W] fp16.
@@ -96,7 +96,7 @@ def load_lib(lib_path):
         lib.call_kernel(block_dim, stream_ptr, _p(x), _p(y), _p(w), _p(bias), L_in, W)
         return y
 
-    def conv1d_dw_batched(
+    def causal_conv1d_batched(
         x, w, bias, *, activation=True, block_dim=BLOCK_DIM, stream_ptr=None
     ):
         """Depthwise causal conv1d + bias + (optional) SiLU, batched.
@@ -143,8 +143,8 @@ def load_lib(lib_path):
             raise TypeError(f"unsupported dtype {x.dtype}")
         return y
 
-    conv1d_dw.batched = conv1d_dw_batched
-    return conv1d_dw
+    causal_conv1d.batched = causal_conv1d_batched
+    return causal_conv1d
 
 
 def jit_compile(src_path, verbose=True):

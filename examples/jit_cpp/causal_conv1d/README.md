@@ -17,16 +17,16 @@ y[b, i, c] = silu( bias[c] + sum_{k=0..K-1} W[k, c] * x[b, i-K+1+k, c] ),   x[<0
 
 ## Files
 
-- `conv1d_dw_pto.cpp` — the PTO kernel.
-- `jit_util_conv1d_dw.py` — JIT compile + ctypes bindings.
-- `test_conv1d_dw.py` — correctness tests vs an fp32 reference.
-- `run_conv1d_dw.py` — validate + benchmark against `aclnnConvolution`.
+- `causal_conv1d_pto.cpp` — the PTO kernel.
+- `jit_util_causal_conv1d.py` — JIT compile + ctypes bindings.
+- `test_causal_conv1d.py` — correctness tests vs an fp32 reference.
+- `run_causal_conv1d.py` — validate + benchmark against `aclnnConvolution`.
 
 ## Suggested workflow
 
 ```bash
-pytest test_conv1d_dw.py -q --npu npu:0
-python run_conv1d_dw.py
+pytest test_causal_conv1d.py -q --npu npu:0
+python run_causal_conv1d.py
 ```
 
 JIT shared objects are written under `outputs/so/` (git-ignored).

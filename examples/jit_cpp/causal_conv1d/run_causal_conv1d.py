@@ -1,7 +1,7 @@
 """Validate + benchmark the DEPTHWISE causal conv1d + bias + SiLU.
 
     # source the CANN environment first (sets ASCEND_TOOLKIT_HOME), then:
-    ASCEND_RT_VISIBLE_DEVICES=0 python run_conv1d_dw.py
+    ASCEND_RT_VISIBLE_DEVICES=0 python run_causal_conv1d.py
 
 What this does
   1. CORRECTNESS: many shapes (edge / GDN / random), worst-case max error vs the
@@ -19,7 +19,7 @@ import torch
 import torch.nn.functional as F
 import torch_npu  # noqa: F401
 
-from jit_util_conv1d_dw import jit_compile, K
+from jit_util_causal_conv1d import jit_compile, K
 
 torch.npu.set_device("npu")
 torch.manual_seed(0)
@@ -258,7 +258,7 @@ def perf(fn):
 
 def main():
     fn = jit_compile(
-        str(Path(__file__).resolve().parent / "conv1d_dw_pto.cpp"), verbose=True
+        str(Path(__file__).resolve().parent / "causal_conv1d_pto.cpp"), verbose=True
     )
     correctness(fn)
     perf(fn)
