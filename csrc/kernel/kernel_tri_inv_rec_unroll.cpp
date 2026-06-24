@@ -117,10 +117,17 @@ AICORE inline void CopyOddOrEvenBlocksL1ToL0(SrcL1TileT src, DstL0TileT dst,
   for (uint32_t i = 0; i < num_fractals_per_block; ++i) {
     for (uint32_t j = 0; j < num_fractals_per_block; ++j) {
       for (uint32_t b = starting_block_index; b < num_blocks; b += 2) {
+#ifdef __DAV_C310__
+        const uint32_t row_stride = is_left ? FractalSize : MatrixSize;
+        const uint32_t col_stride = is_left ? MatrixSize : FractalSIze;
+#else
+        const uint32_t row_stride = MatrixSize;
+        const uint32_t col_stride = FractalSize;
+#endif
         const uint32_t offset =
             b * (MatrixSize + FractalSize) * block_size /* block_offset */ +
-            i * MatrixSize * FractalSize /* col_fractal_offset */ +
-            j * FractalSize * FractalSize /* row_fractal_offset */;
+            j * col_stride * FractalSize /* col_fractal_offset */ +
+            i * row_stride * FractalSize /* row_fractal_offset */;
         TASSIGN(fractals[b], starting_address + offset * sizeof(InputT));
         TEXTRACT(fractals[b], src, b * block_size + i * FractalSize,
                  b * block_size + j * FractalSize);
