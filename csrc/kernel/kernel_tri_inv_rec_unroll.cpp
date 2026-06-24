@@ -38,12 +38,7 @@ AICORE inline void CopyDiagonalFractalsL1ToL0(SrcL1TileT src, DstL0TileT dst) {
   constexpr TileType LeftOrRight = is_left ? TileType::Left : TileType::Right;
   constexpr SLayout InnerLayout =
       is_left ? SLayout::RowMajor : SLayout::ColMajor;
-#ifdef __DAV_C310__
-  constexpr BLayout OuterLayout =
-      is_left ? BLayout::ColMajor : BLayout::RowMajor;
-#else
-  constexpr BLayout OuterLayout = BLayout::RowMajor;
-#endif
+  constexpr BLayout OuterLayout = kernel_utils::GetOuterLayout(is_left);
 
   Tile<LeftOrRight, InputT, FractalSize, FractalSize, OuterLayout, FractalSize,
        FractalSize, InnerLayout, TileConfig::fractalABSize>
@@ -92,12 +87,7 @@ AICORE inline void CopyOddOrEvenBlocksL1ToL0(SrcL1TileT src, DstL0TileT dst,
   constexpr TileType LeftOrRight = is_left ? TileType::Left : TileType::Right;
   constexpr SLayout InnerLayout =
       is_left ? SLayout::RowMajor : SLayout::ColMajor;
-#ifdef __DAV_C310__
-  constexpr BLayout OuterLayout =
-      is_left ? BLayout::ColMajor : BLayout::RowMajor;
-#else
-  constexpr BLayout OuterLayout = BLayout::RowMajor;
-#endif
+  constexpr BLayout OuterLayout = kernel_utils::GetOuterLayout(is_left);
   // For left: copy even blocks 0, 2, 4, ... (starting_block=0)
   // For right: copy odd blocks 1, 3, 5, ... (starting_block=1)
   // Default: left→even(0), right→odd(1). swap_parity flips this.
@@ -119,7 +109,7 @@ AICORE inline void CopyOddOrEvenBlocksL1ToL0(SrcL1TileT src, DstL0TileT dst,
       for (uint32_t b = starting_block_index; b < num_blocks; b += 2) {
 #ifdef __DAV_C310__
         const uint32_t row_stride = is_left ? FractalSize : MatrixSize;
-        const uint32_t col_stride = is_left ? MatrixSize : FractalSIze;
+        const uint32_t col_stride = is_left ? MatrixSize : FractalSize;
 #else
         const uint32_t row_stride = MatrixSize;
         const uint32_t col_stride = FractalSize;
