@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 import torch
 import torch.nn.functional as F
-import torch_npu  # noqa: F401
+import torch_npu  # noqa
 
 from jit_util_causal_conv1d import BLOCK_DIM, K, compile_cpp, jit_compile
 
@@ -53,7 +53,7 @@ def causal_conv1d_ref(x, w, bias, activation):
 
 
 @pytest.fixture(scope="session")
-def conv1d_kernel(npu_device):
+def conv1d_kernel(npu_device):  # pylint: disable=unused-argument
     return jit_compile(str(KERNEL_CPP), verbose=False)
 
 
@@ -122,7 +122,7 @@ def causal_conv1d_ref_k(x, w, bias, k_width):
 
 
 @pytest.fixture(scope="session")
-def kconfig_libs(npu_device):
+def kconfig_libs(npu_device):  # pylint: disable=unused-argument
     """Recompile the kernel per (K, MAX_W) via -DCAUSAL_CONV_K / -DCAUSAL_CONV_MAX_W."""
     libs = {}
     for k_width, max_w in KCONFIGS:
@@ -160,7 +160,7 @@ def test_general_k_max_w(
     )
     fn.argtypes = _BATCHED_ARGS
     fn.restype = None
-    stream = torch.npu.current_stream()._as_parameter_  # noqa: SLF001
+    stream = torch.npu.current_stream()._as_parameter_  # noqa
     fn(BLOCK_DIM, stream, _ptr(x), _ptr(y), _ptr(w), _ptr(bias), batch, seq, dim, 1)
     torch.npu.synchronize()
 

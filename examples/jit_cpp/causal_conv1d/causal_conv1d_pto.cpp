@@ -377,8 +377,9 @@ AICORE void runConvSiluBatched(__gm__ IoElemType* input,
 
 // Filter width / per-tile channel width the entry points below are compiled at.
 // Default to the K=4, MAX_W=3072 production configuration; the test suite
-// recompiles this file at other widths via -DCAUSAL_CONV_K / -DCAUSAL_CONV_MAX_W
-// (see test_causal_conv1d.py), so a plain build is byte-for-byte unaffected.
+// recompiles this file at other widths via -DCAUSAL_CONV_K /
+// -DCAUSAL_CONV_MAX_W (see test_causal_conv1d.py), so a plain build is
+// byte-for-byte unaffected.
 #ifndef CAUSAL_CONV_K
 #define CAUSAL_CONV_K 4
 #endif

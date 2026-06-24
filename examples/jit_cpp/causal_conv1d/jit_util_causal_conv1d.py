@@ -92,7 +92,7 @@ def load_lib(lib_path):
         )
         y = torch.empty((L_in, W), device=x.device, dtype=torch.float16)
         if stream_ptr is None:
-            stream_ptr = torch.npu.current_stream()._as_parameter_  # noqa: SLF001
+            stream_ptr = torch.npu.current_stream()._as_parameter_  # noqa
         lib.call_kernel(block_dim, stream_ptr, _p(x), _p(y), _p(w), _p(bias), L_in, W)
         return y
 
@@ -111,7 +111,7 @@ def load_lib(lib_path):
         )
         y = torch.empty_like(x)
         if stream_ptr is None:
-            stream_ptr = torch.npu.current_stream()._as_parameter_  # noqa: SLF001
+            stream_ptr = torch.npu.current_stream()._as_parameter_  # noqa
         act = 1 if activation else 0
         if x.dtype == torch.float16:
             lib.call_kernel_batched(

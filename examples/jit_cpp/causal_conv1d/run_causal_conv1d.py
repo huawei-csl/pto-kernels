@@ -6,13 +6,16 @@
 What this does
   1. CORRECTNESS: many shapes (edge / GDN / random), worst-case max error vs the
      torch depthwise reference (which dispatches to aclnnConvolution on NPU).
-  2. PERF: sweep (L, W); compare our kernel vs
-        - aclnnConvolution  (torch F.conv1d depthwise + bias + SiLU), and
-        - torch_npu.npu_fused_causal_conv1d  (the native Ascend fused causal conv;
-          K is fixed at 3 and it is a 910_95-only op -> reported if unavailable).
+  2. PERF: batched sweep (B, seq, dim) with device-event timing; compare PTO vs
+        - aclnnConvolution timed END-TO-END (torch F.conv1d depthwise + bias +
+          SiLU, including the layout conversion a real [B,seq,dim]-fp16 pipeline
+          pays — PTO does it fused from that layout), and
+        - torch_npu.npu_fused_causal_conv1d (native Ascend fused causal conv;
+          K fixed at 3, a 910_95-only op -> reported if unavailable).
+
+Run on an otherwise-idle NPU (set ASCEND_RT_VISIBLE_DEVICES) for stable numbers.
 """
 
-import time
 from pathlib import Path
 
 import torch
@@ -25,6 +28,10 @@ torch.npu.set_device("npu")
 torch.manual_seed(0)
 
 
+def silu(z):
+    return z * torch.sigmoid(z)
+
+
 # ---------------------------------------------------------------------------
 # Reference (torch depthwise causal conv1d + bias + SiLU)
 #   On NPU, F.conv1d(groups=W) dispatches to aclnnConvolution.
@@ -35,8 +42,7 @@ def ref(x, w, bias):
     xt = F.pad(x.t().reshape(1, W, L).float(), (K - 1, 0))  # [1, W, L+K-1]
     weight = w.t().contiguous().reshape(W, 1, K)  # [W,1,K]
     z = F.conv1d(xt, weight, bias=bias.float(), groups=W)  # [1, W, L]
-    silu = z * torch.sigmoid(z)
-    return silu.reshape(W, L).t().contiguous().to(torch.float16)
+    return silu(z).reshape(W, L).t().contiguous().to(torch.float16)
 
 
 def make_inputs(L, W, scale=1.0):
@@ -186,22 +192,98 @@ def try_native_fused(L, W):
 
 
 # ---------------------------------------------------------------------------
-# 2. PERFORMANCE
+# 2. PERFORMANCE  (batched; device-event timing; aclnn timed end-to-end)
 # ---------------------------------------------------------------------------
-def bench(call, iters=100, warmup=20):
+def pick_iters(elems, target_us=250000.0):
+    """Iteration count that keeps each timed run ~target_us of work: 100 where
+    cheap, down to 3 for multi-GB shapes (rough ~100 GB/s estimate)."""
+    est_per_call_us = elems / 25000.0
+    return int(max(3, min(100, target_us / max(est_per_call_us, 1.0))))
+
+
+def event_us(call, iters, runs=2):
+    """Mean us/call over `runs` runs of `iters` back-to-back launches, timed with
+    NPU events. Device-event (not wall-clock) timing keeps the ~200us host /
+    dispatch floor and per-call allocation from dominating; bracketing many
+    launches in one event pair (rather than taking a per-iter min) avoids
+    latching a spurious near-zero reading off the async stream. `iters` adapts to
+    shape size (pick_iters); warmup scales with it.
+    """
+    warmup = max(2, min(8, iters))
     for _ in range(warmup):
         call()
     torch.npu.synchronize()
-    t0 = time.perf_counter()
-    for _ in range(iters):
-        call()
-    torch.npu.synchronize()
-    return (time.perf_counter() - t0) / iters
+    start = torch.npu.Event(enable_timing=True)
+    end = torch.npu.Event(enable_timing=True)
+    run_avgs = []
+    for _ in range(runs):
+        start.record()
+        for _ in range(iters):
+            call()
+        end.record()
+        end.synchronize()
+        run_avgs.append(start.elapsed_time(end) * 1e3 / iters)  # ms -> us/call
+    return sum(run_avgs) / len(run_avgs)
+
+
+# (B, seq, dim) — GDN matrix (dim 2048 = H*D, 6144 = q+k+v), sorted by B*seq*dim.
+PERF_SHAPES = [
+    (16, 512, 2048),
+    (32, 512, 2048),
+    (16, 1024, 2048),
+    (16, 512, 6144),
+    (64, 512, 2048),
+    (32, 1024, 2048),
+    (16, 2048, 2048),
+    (32, 512, 6144),
+    (16, 1024, 6144),
+    (128, 512, 2048),
+    (64, 1024, 2048),
+    (32, 2048, 2048),
+    (64, 512, 6144),
+    (32, 1024, 6144),
+    (16, 2048, 6144),
+    (256, 512, 2048),
+    (128, 1024, 2048),
+    (64, 2048, 2048),
+    (128, 512, 6144),
+    (64, 1024, 6144),
+    (32, 2048, 6144),
+    (512, 512, 2048),
+    (256, 1024, 2048),
+    (128, 2048, 2048),
+    (256, 512, 6144),
+    (128, 1024, 6144),
+    (64, 2048, 6144),
+    (1024, 512, 2048),
+    (512, 1024, 2048),
+    (256, 2048, 2048),
+    (512, 512, 6144),
+    (256, 1024, 6144),
+    (128, 2048, 6144),
+    (2048, 512, 2048),
+    (1024, 1024, 2048),
+    (512, 2048, 2048),
+    (1024, 512, 6144),
+    (512, 1024, 6144),
+    (256, 2048, 6144),
+    (4096, 512, 2048),
+    (2048, 1024, 2048),
+    (1024, 2048, 2048),
+    (2048, 512, 6144),
+    (1024, 1024, 6144),
+    (512, 2048, 6144),
+]
 
 
 def perf(fn):
-    print("== performance sweep ==")
-    # probe native op once
+    print("== performance sweep (batched, device-event avg-of-2, adaptive iters) ==")
+    print(
+        "   aclnn = aclnnConvolution timed END-TO-END from the [B,seq,dim] fp16\n"
+        "   layout (transpose + pad + fp32 conv + SiLU + transpose-back + cast) —\n"
+        "   the layout cost a real pipeline pays; PTO does it fused. SiLU on both.\n"
+        "   aclnn's fp32 intermediates OOM past ~2GB; PTO (fused) still runs.\n"
+    )
     native_ok = try_native_fused(128, 2048) is not None
     if not native_ok:
         print(
@@ -213,45 +295,56 @@ def perf(fn):
         )
 
     hdr = (
-        f"{'L':>5} {'W':>6} {'ours_us':>9} {'aclnn_us':>9} {'native_us':>10} "
-        f"{'ours GB/s':>10} {'vs aclnn':>9}"
+        f"{'B*s*d':>7} {'seq':>5} {'dim':>5} {'B':>5} | {'PTO_us':>10} "
+        f"{'aclnn_us':>10} {'speedup':>8} | {'GB/s':>6} {'it':>4} | {'maxerr':>8}"
     )
     print(hdr)
-    shapes = [
-        (128, 2048),
-        (256, 2048),
-        (384, 2048),
-        (512, 2048),
-        (1024, 2048),
-        (256, 4096),
-        (256, 8192),
-        (512, 4096),
-        (2048, 2048),
-        (4096, 2048),
-    ]
-    for L, W in shapes:
-        x, w, bias = make_inputs(L, W)
-        xt = F.pad(x.t().reshape(1, W, L).float(), (K - 1, 0))
-        weight = w.t().contiguous().reshape(W, 1, K)
-        bf = bias.float()
+    print("-" * len(hdr))
+    for B, seq, dim in PERF_SHAPES:
+        torch.npu.empty_cache()
+        elems = B * seq * dim
+        iters = pick_iters(elems)
+        em = f"{elems // 1_000_000}M"
+        try:
+            x = 2 * torch.rand(B, seq, dim, device="npu", dtype=torch.float16) - 1
+            w = torch.rand(K, dim, device="npu", dtype=torch.float32) - 0.5
+            bias = torch.rand(dim, device="npu", dtype=torch.float32) - 0.5
 
-        t_ours = bench(lambda: fn(x, w, bias))
-        t_aclnn = bench(
-            lambda: (lambda z: z * torch.sigmoid(z))(
-                F.conv1d(xt, weight, bias=bf, groups=W)
-            )
-        )
+            def ours(x=x, w=w, bias=bias):
+                return fn.batched(x, w, bias, activation=True)
 
-        native_call = try_native_fused(L, W)
-        t_native = bench(native_call) if native_call is not None else None
-        native_str = (
-            f"{t_native*1e6:>10.1f}" if t_native is not None else f"{'n/a':>10}"
-        )
+            t_ours = event_us(ours, iters)
+            gbps = 4.0 * elems / (t_ours * 1e-6) / 1e9  # 2B in + 2B out per elem
+        except RuntimeError as ex:
+            print(f"{em:>7} {seq:>5} {dim:>5} {B:>5} | PTO err: {str(ex)[:40]}")
+            torch.npu.empty_cache()
+            continue
 
-        gbps = 4.0 * L * W / t_ours / 1e9  # 2B in + 2B out per elem
+        t_aclnn = None
+        err = None
+        try:
+            weight = w.t().contiguous().reshape(dim, 1, K)
+            bf = bias.float()
+
+            def aclnn(x=x, weight=weight, bf=bf, dim=dim):
+                xt = F.pad(x.transpose(1, 2).float(), (K - 1, 0))
+                z = F.conv1d(xt, weight, bias=bf, groups=dim)
+                return silu(z).transpose(1, 2).contiguous().to(torch.float16)
+
+            t_aclnn = event_us(aclnn, iters)
+            y_pto = fn.batched(x, w, bias, activation=True)
+            torch.npu.synchronize()
+            ref = aclnn()
+            err = (y_pto.float() - ref.float()).abs().max().item()
+        except RuntimeError:
+            torch.npu.empty_cache()
+
+        acl_s = f"{t_aclnn:>10.1f}" if t_aclnn is not None else f"{'OOM':>10}"
+        spd_s = f"{t_aclnn / t_ours:>7.2f}x" if t_aclnn is not None else f"{'n/a':>8}"
+        err_s = f"{err:>8.2e}" if err is not None else f"{'n/a':>8}"
         print(
-            f"{L:>5} {W:>6} {t_ours*1e6:>9.1f} {t_aclnn*1e6:>9.1f} {native_str} "
-            f"{gbps:>10.1f} {t_aclnn/t_ours:>8.2f}x"
+            f"{em:>7} {seq:>5} {dim:>5} {B:>5} | {t_ours:>10.1f} {acl_s} {spd_s} | "
+            f"{gbps:>6.0f} {iters:>4} | {err_s}"
         )
     print()
 
