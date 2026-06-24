@@ -18,7 +18,7 @@ using namespace pto;
 //
 // Filter width K and per-tile channel width MAX_W are compile-time constants
 // chosen at the call site as template parameters (no preprocessor config), e.g.
-//   constexpr uint32_t K = 4, MAX_W = 3072;
+//   constexpr uint32_t K = CAUSAL_CONV_K, MAX_W = CAUSAL_CONV_MAX_W;
 //   csilu::runConvSiluBatched<bfloat16_t, float, K, MAX_W>(...);
 //
 // 2-D-plus-batch work grid: workUnits = batch x sequenceChunkCount x
@@ -375,13 +375,24 @@ AICORE void runConvSiluBatched(__gm__ IoElemType* input,
 
 }  // namespace csilu
 
+// Filter width / per-tile channel width the entry points below are compiled at.
+// Default to the K=4, MAX_W=3072 production configuration; the test suite
+// recompiles this file at other widths via -DCAUSAL_CONV_K / -DCAUSAL_CONV_MAX_W
+// (see test_causal_conv1d.py), so a plain build is byte-for-byte unaffected.
+#ifndef CAUSAL_CONV_K
+#define CAUSAL_CONV_K 4
+#endif
+#ifndef CAUSAL_CONV_MAX_W
+#define CAUSAL_CONV_MAX_W 3072
+#endif
+
 // ---- single-sequence entry (back-compat: input,output [seqLen,channels] fp16,
 // weights[K,channels]/bias[channels] fp32) ----
 extern "C" __global__ AICORE void causal_conv1d_kernel(
     __gm__ uint8_t* input, __gm__ uint8_t* output, __gm__ uint8_t* weights,
     __gm__ uint8_t* bias, uint32_t seqLen, uint32_t channels) {
 #if defined(__DAV_VEC__)
-  constexpr uint32_t K = 4, MAX_W = 3072;
+  constexpr uint32_t K = CAUSAL_CONV_K, MAX_W = CAUSAL_CONV_MAX_W;
   csilu::runConvSiluBatched<half, float, K, MAX_W>(
       (__gm__ half*)input, (__gm__ half*)output, (__gm__ float*)weights,
       (__gm__ float*)bias, 1u, seqLen, channels, 1u);
@@ -402,7 +413,7 @@ extern "C" __global__ AICORE void causal_conv1d_batched_kernel(
     __gm__ uint8_t* bias, uint32_t batch, uint32_t seqLen, uint32_t channels,
     uint32_t applyActivation) {
 #if defined(__DAV_VEC__)
-  constexpr uint32_t K = 4, MAX_W = 3072;
+  constexpr uint32_t K = CAUSAL_CONV_K, MAX_W = CAUSAL_CONV_MAX_W;
   csilu::runConvSiluBatched<half, float, K, MAX_W>(
       (__gm__ half*)input, (__gm__ half*)output, (__gm__ float*)weights,
       (__gm__ float*)bias, batch, seqLen, channels, applyActivation);
@@ -425,7 +436,7 @@ extern "C" __global__ AICORE void causal_conv1d_batched_bf16_kernel(
     __gm__ uint8_t* bias, uint32_t batch, uint32_t seqLen, uint32_t channels,
     uint32_t applyActivation) {
 #if defined(__DAV_VEC__)
-  constexpr uint32_t K = 4, MAX_W = 3072;
+  constexpr uint32_t K = CAUSAL_CONV_K, MAX_W = CAUSAL_CONV_MAX_W;
   csilu::runConvSiluBatched<bfloat16_t, float, K, MAX_W>(
       (__gm__ bfloat16_t*)input, (__gm__ bfloat16_t*)output,
       (__gm__ float*)weights, (__gm__ float*)bias, batch, seqLen, channels,

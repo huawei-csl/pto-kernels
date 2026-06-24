@@ -94,56 +94,14 @@ def test_single_fp16_entry_matches_reference(conv1d_kernel, npu_device, seed, se
     assert err <= TOL[torch.float16], f"max abs err {err:.3e}"
 
 
-# --- generalized K / MAX_W: compile a parametric wrapper per (K, MAX_W) that
-# #includes the kernel and instantiates runConvSiluBatched at that K, leaving the
-# K=4 production entry points untouched. Covers non-power-of-two K (3, 5),
-# power-of-two K (2, 8), MAX_W variations, and both fp16 + bf16 I/O.
+# --- generalized K / MAX_W: recompile the kernel per (K, MAX_W) by passing
+# -DCAUSAL_CONV_K / -DCAUSAL_CONV_MAX_W, which override the K=4 / MAX_W=3072
+# defaults the batched entry points are compiled at (see causal_conv1d_pto.cpp).
+# The existing call_kernel_batched / call_kernel_batched_bf16 launchers are
+# reused as-is. Covers non-power-of-two K (3, 5), power-of-two K (2, 8), MAX_W
+# variations, and both fp16 + bf16 I/O.
 KCONFIGS = [(2, 3072), (3, 3072), (4, 2048), (5, 2048), (8, 1536)]
 
-# Wrapper source: include the kernel + add parametric fp16 and bf16
-# entries/launchers (weights/bias stay fp32; only the I/O element type changes).
-_WRAPPER_SRC = """#include "{kernel}"
-extern "C" __global__ AICORE void causal_conv1d_test_kernel_fp16(
-    __gm__ uint8_t* x, __gm__ uint8_t* y, __gm__ uint8_t* wgt,
-    __gm__ uint8_t* bia, uint32_t batch, uint32_t seqLen, uint32_t channels,
-    uint32_t activation) {{
-#if defined(__DAV_VEC__)
-  constexpr uint32_t K = {k}, MAX_W = {mw};
-  csilu::runConvSiluBatched<half, float, K, MAX_W>(
-      (__gm__ half*)x, (__gm__ half*)y, (__gm__ float*)wgt, (__gm__ float*)bia,
-      batch, seqLen, channels, activation);
-#else
-  (void)x; (void)y; (void)wgt; (void)bia; (void)batch; (void)seqLen;
-  (void)channels; (void)activation;
-#endif
-}}
-extern "C" __global__ AICORE void causal_conv1d_test_kernel_bf16(
-    __gm__ uint8_t* x, __gm__ uint8_t* y, __gm__ uint8_t* wgt,
-    __gm__ uint8_t* bia, uint32_t batch, uint32_t seqLen, uint32_t channels,
-    uint32_t activation) {{
-#if defined(__DAV_VEC__)
-  constexpr uint32_t K = {k}, MAX_W = {mw};
-  csilu::runConvSiluBatched<bfloat16_t, float, K, MAX_W>(
-      (__gm__ bfloat16_t*)x, (__gm__ bfloat16_t*)y, (__gm__ float*)wgt,
-      (__gm__ float*)bia, batch, seqLen, channels, activation);
-#else
-  (void)x; (void)y; (void)wgt; (void)bia; (void)batch; (void)seqLen;
-  (void)channels; (void)activation;
-#endif
-}}
-extern "C" void call_test_kernel_fp16(uint32_t blockDim, void* stream,
-    uint8_t* x, uint8_t* y, uint8_t* wgt, uint8_t* bia, uint32_t batch,
-    uint32_t seqLen, uint32_t channels, uint32_t activation) {{
-  causal_conv1d_test_kernel_fp16<<<blockDim * 2, nullptr, stream>>>(
-      x, y, wgt, bia, batch, seqLen, channels, activation);
-}}
-extern "C" void call_test_kernel_bf16(uint32_t blockDim, void* stream,
-    uint8_t* x, uint8_t* y, uint8_t* wgt, uint8_t* bia, uint32_t batch,
-    uint32_t seqLen, uint32_t channels, uint32_t activation) {{
-  causal_conv1d_test_kernel_bf16<<<blockDim * 2, nullptr, stream>>>(
-      x, y, wgt, bia, batch, seqLen, channels, activation);
-}}
-"""
 _BATCHED_ARGS = (
     [ctypes.c_uint32, ctypes.c_void_p] + [ctypes.c_void_p] * 4 + [ctypes.c_uint32] * 4
 )
@@ -165,14 +123,14 @@ def causal_conv1d_ref_k(x, w, bias, k_width):
 
 @pytest.fixture(scope="session")
 def kconfig_libs(npu_device):
-    """Compile a parametric wrapper per (K, MAX_W) and load it."""
-    gen_dir = KERNEL_CPP.parent / "outputs" / "gen"
-    gen_dir.mkdir(parents=True, exist_ok=True)
+    """Recompile the kernel per (K, MAX_W) via -DCAUSAL_CONV_K / -DCAUSAL_CONV_MAX_W."""
     libs = {}
     for k_width, max_w in KCONFIGS:
-        src = gen_dir / f"wrap_k{k_width}_mw{max_w}.cpp"
-        src.write_text(_WRAPPER_SRC.format(kernel=KERNEL_CPP, k=k_width, mw=max_w))
-        so = compile_cpp(str(src), out_name=f"conv1d_k{k_width}_mw{max_w}.so")
+        so = compile_cpp(
+            str(KERNEL_CPP),
+            out_name=f"conv1d_k{k_width}_mw{max_w}.so",
+            extra_flags=[f"-DCAUSAL_CONV_K={k_width}", f"-DCAUSAL_CONV_MAX_W={max_w}"],
+        )
         libs[(k_width, max_w)] = ctypes.CDLL(so)
     return libs
 
@@ -196,9 +154,9 @@ def test_general_k_max_w(
 
     lib = kconfig_libs[(k_width, max_w)]
     fn = (
-        lib.call_test_kernel_fp16
+        lib.call_kernel_batched
         if dtype == torch.float16
-        else lib.call_test_kernel_bf16
+        else lib.call_kernel_batched_bf16
     )
     fn.argtypes = _BATCHED_ARGS
     fn.restype = None
