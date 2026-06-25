@@ -475,6 +475,8 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
                                          uint32_t num_bsnd_heads = 0,
                                          uint32_t is_lower = 0,
                                          __gm__ int32_t* cu_seqlens = nullptr) {
+  using pto::Stride;
+
   /* Initializations */
   constexpr uint32_t TileLen = MatrixSize * MatrixSize;
   constexpr uint32_t FractalSize = 16;  // fractal size for half /bf16
