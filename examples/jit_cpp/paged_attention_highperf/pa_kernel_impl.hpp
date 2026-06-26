@@ -225,11 +225,7 @@ AICORE inline float ComputeScoreByBlock(
 
 
 constexpr int32_t PA_TILE_TOKENS = 128;
-constexpr uint8_t PA_QK_FIFO_FLAG = 0;
-constexpr uint8_t PA_P_FIFO_FLAG = 2;
-constexpr uint8_t PA_PV_FIFO_FLAG = 4;
-constexpr uint32_t PA_FIFO_DEPTH = 2;
-constexpr uint8_t PTO_PA_REDUCE_READY_DECODER = static_cast<uint8_t>(SYNC_AIV_ONLY_ALL);
+constexpr uint8_t PTO_PA_REDUCE_READY_DECODER = 14;
 constexpr uint8_t PTO_PA_RAW_QK_READY = 0;
 constexpr uint8_t PTO_PA_RAW_QK_FREE = 2;
 constexpr uint8_t PTO_PA_RAW_P_READY = 4;
@@ -294,21 +290,6 @@ AICORE inline void PtoPaInitCoreState()
     set_mask_norm();
 }
 
-AICORE inline bool SupportsPtoPagedAttentionHighPerf(__gm__ uint8_t *tilingParaGm)
-{
-    const PaTilingContext ctx = LoadPaTilingContext(tilingParaGm);
-    if (ctx.headDim != PA_TILE_TOKENS || ctx.headDimV != PA_TILE_TOKENS || ctx.blockSize != PA_TILE_TOKENS) {
-        return false;
-    }
-    if (ctx.batch <= 0 || ctx.numHeads <= 0 || ctx.kvHeads <= 0 || ctx.numHeads % ctx.kvHeads != 0) {
-        return false;
-    }
-    if (ctx.kvSplitCoreNum > 1) {
-        return false;
-    }
-    return true;
-}
-
 AICORE inline bool SupportsPtoPagedAttentionRawSplitKV(__gm__ uint8_t *tilingParaGm)
 {
     const PaTilingContext ctx = LoadPaTilingContext(tilingParaGm);
@@ -363,10 +344,6 @@ AICORE inline void PtoPaSetFloatVectorMask(uint32_t len)
     set_vector_mask(0, mask);
 }
 
-AICORE inline void PtoPaStageSync()
-{
-    SYNCALL<SyncCoreType::Mix>();
-}
 
 #ifdef __DAV_C220_VEC__
 template <typename DstTileData, typename SrcTileData>
@@ -445,239 +422,6 @@ AICORE inline void PtoPaLoadCbufToCbTranspose128Raw(DstTileData &dst, SrcTileDat
 }
 #endif
 
-#ifdef __DAV_C220_CUBE__
-AICORE inline void RunPtoPagedAttentionCubePipeline(__gm__ uint8_t *qGm, __gm__ uint8_t *kGm,
-    __gm__ uint8_t *vGm, __gm__ uint8_t *blockTablesGm, __gm__ uint8_t *sGm, __gm__ uint8_t *pGm,
-    __gm__ uint8_t *oTmpGm, __gm__ uint8_t *tilingParaGm, int64_t workerIdx, int64_t workerNum)
-{
-    constexpr int32_t kHeadDim = PA_TILE_TOKENS;
-    constexpr int32_t kTileTokens = PA_TILE_TOKENS;
-    constexpr int32_t kM = 16;
-    constexpr int32_t kN = kTileTokens;
-    constexpr int32_t kK = 256;
-
-    PtoPaInitCoreState();
-    const PaTilingContext ctx = LoadPaTilingContext(tilingParaGm);
-    if (!SupportsPtoPagedAttentionHighPerf(tilingParaGm) || workerIdx < 0 || workerNum <= 0) {
-        pipe_barrier(PIPE_ALL);
-        return;
-    }
-
-    const int32_t effectiveBatch = ctx.decoderBatch > 0 ? ctx.decoderBatch : ctx.batch;
-    const int32_t maxBlocksPerQuery = ctx.maxBlocksPerQuery > 0 ? ctx.maxBlocksPerQuery :
-                                      (ctx.maxKvSeqLen + ctx.blockSize - 1) / ctx.blockSize;
-    const int32_t headsPerKv = ctx.numHeads / ctx.kvHeads;
-    const int64_t totalRows = static_cast<int64_t>(effectiveBatch) * ctx.numHeads;
-
-    using QKPipe = TPipe<PA_QK_FIFO_FLAG, Direction::DIR_C2V, 16 * kTileTokens * sizeof(float), PA_FIFO_DEPTH>;
-    using PPipe = TPipe<PA_P_FIFO_FLAG, Direction::DIR_V2C, 256 * sizeof(half), PA_FIFO_DEPTH>;
-    using PVPipe = TPipe<PA_PV_FIFO_FLAG, Direction::DIR_C2V, 16 * kHeadDim * sizeof(float), PA_FIFO_DEPTH>;
-    using QGlobal = GlobalTensor<half, Shape<1, 1, 1, 1, kHeadDim>, Stride<kHeadDim, kHeadDim, kHeadDim, kHeadDim, 1>>;
-    using KGlobal = GlobalTensor<half, Shape<1, 1, 1, kHeadDim, kTileTokens>,
-        Stride<1, 1, 1, 1, 8 * kHeadDim>, Layout::DN>;
-    using VGlobal = GlobalTensor<half, Shape<1, 1, 1, kTileTokens, kHeadDim>,
-        Stride<kTileTokens * kHeadDim, kTileTokens * kHeadDim, kTileTokens * kHeadDim, 8 * kHeadDim, 1>>;
-    using PGlobal = GlobalTensor<half, Shape<1, 1, 1, 1, kTileTokens>,
-        Stride<kTileTokens, kTileTokens, kTileTokens, kTileTokens, 1>>;
-    using ScoreGlobal = GlobalTensor<float, Shape<1, 1, 1, 1, kTileTokens>,
-        Stride<kTileTokens, kTileTokens, kTileTokens, kTileTokens, 1>>;
-    using OTmpGlobal = GlobalTensor<float, Shape<1, 1, 1, 1, kHeadDim>,
-        Stride<kHeadDim, kHeadDim, kHeadDim, kHeadDim, 1>>;
-
-    using QMatTile = Tile<TileType::Mat, half, 1, kK, BLayout::RowMajor, 1, kHeadDim>;
-    using KMatTile = Tile<TileType::Mat, half, kK, kN, BLayout::RowMajor, kHeadDim, kTileTokens, SLayout::ColMajor, 512>;
-    using PMatTile = Tile<TileType::Mat, half, 1, kK, BLayout::RowMajor, 1, kTileTokens>;
-    using VMatTile = Tile<TileType::Mat, half, kK, kN, BLayout::ColMajor, kTileTokens, kHeadDim, SLayout::RowMajor, 512>;
-    using LeftQTile = TileLeft<half, 1, kK, 1, kHeadDim>;
-    using LeftPTile = TileLeft<half, 1, kK, 1, kTileTokens>;
-    using RightTile = TileRight<half, kK, kN, kHeadDim, kTileTokens>;
-    using AccTile = TileAcc<float, kM, kN, 1, kTileTokens>;
-
-    QMatTile qMatTile;
-    KMatTile kMatTile;
-    PMatTile pMatTile;
-    VMatTile vMatTile;
-    LeftQTile qLeftTile;
-    LeftPTile pLeftTile;
-    RightTile rightTile;
-    AccTile accTile;
-    TASSIGN(qMatTile, 0x00000);
-    TASSIGN(kMatTile, 0x20000);
-    TASSIGN(pMatTile, 0x00000);
-    TASSIGN(vMatTile, 0x20000);
-    TASSIGN(qLeftTile, 0x00000);
-    TASSIGN(pLeftTile, 0x00000);
-    TASSIGN(rightTile, 0x00000);
-    TASSIGN(accTile, 0x00000);
-
-    __gm__ uint8_t *scoreBase = sGm + workerIdx * QKPipe::RingFiFo::SLOT_SIZE * QKPipe::RingFiFo::SLOT_NUM;
-    __gm__ uint8_t *probBase = pGm + workerIdx * PPipe::RingFiFo::SLOT_SIZE * PPipe::RingFiFo::SLOT_NUM;
-    __gm__ uint8_t *outBase = oTmpGm + workerIdx * PVPipe::RingFiFo::SLOT_SIZE * PVPipe::RingFiFo::SLOT_NUM;
-    QKPipe qkPipe(reinterpret_cast<__gm__ void *>(scoreBase), 0, 0);
-    PPipe pPipe(reinterpret_cast<__gm__ void *>(probBase), 0, 0);
-    PVPipe pvPipe(reinterpret_cast<__gm__ void *>(outBase), 0, 0);
-
-    for (int64_t row = workerIdx; row < totalRows; row += workerNum) {
-        const int32_t head = static_cast<int32_t>(row % ctx.numHeads);
-        const int32_t batchSlot = static_cast<int32_t>(row / ctx.numHeads);
-        const int32_t paraBase = ResolveSortedParaBase(tilingParaGm, ctx, batchSlot);
-        const int32_t kvSeqLen = LoadTilingI32(tilingParaGm, paraBase + kParaKvSeqLen);
-        const int32_t batchIndex = LoadTilingI32(tilingParaGm, paraBase + kParaRealBatchIndex);
-        const int32_t kvHead = head / headsPerKv;
-        const int32_t tileCount = (kvSeqLen + kTileTokens - 1) / kTileTokens;
-        const int64_t qBase = (static_cast<int64_t>(batchIndex) * ctx.numHeads + head) * ctx.headDim;
-        QGlobal qGlobal(reinterpret_cast<__gm__ half *>(qGm) + qBase);
-        TLOAD(qMatTile, qGlobal);
-        pipe_barrier(PIPE_ALL);
-        TEXTRACT(qLeftTile, qMatTile, 0, 0);
-        pipe_barrier(PIPE_ALL);
-
-        for (int32_t tile = 0; tile < tileCount; ++tile) {
-            const int32_t blockId = LoadBlockTable(blockTablesGm, static_cast<int64_t>(batchIndex) * maxBlocksPerQuery + tile);
-            const int64_t kvBase = (static_cast<int64_t>(blockId) * ctx.blockSize * ctx.kvHeads + kvHead) * ctx.headDim;
-
-
-            KGlobal kGlobal(reinterpret_cast<__gm__ half *>(kGm) + kvBase);
-            TLOAD(kMatTile, kGlobal);
-            pipe_barrier(PIPE_ALL);
-            TMOV(rightTile, kMatTile);
-            pipe_barrier(PIPE_ALL);
-            TGEMV(accTile, qLeftTile, rightTile);
-            pipe_barrier(PIPE_ALL);
-            DdrBarrierBeforePtoFfts();
-            TPUSH<QKPipe, AccTile, TileSplitAxis::TILE_NO_SPLIT>(qkPipe, accTile);
-
-            TPOP<PPipe, PMatTile, TileSplitAxis::TILE_NO_SPLIT>(pPipe, pMatTile);
-            VGlobal vGlobal(reinterpret_cast<__gm__ half *>(vGm) + kvBase);
-
-            TLOAD(vMatTile, vGlobal);
-            pipe_barrier(PIPE_ALL);
-            TEXTRACT(pLeftTile, pMatTile, 0, 0);
-            TMOV(rightTile, vMatTile);
-            pipe_barrier(PIPE_ALL);
-            TGEMV(accTile, pLeftTile, rightTile);
-            pipe_barrier(PIPE_ALL);
-            DdrBarrierBeforePtoFfts();
-            TPUSH<PVPipe, AccTile, TileSplitAxis::TILE_NO_SPLIT>(pvPipe, accTile);
-        }
-    }
-    pipe_barrier(PIPE_ALL);
-}
-#endif
-
-#ifdef __DAV_C220_VEC__
-AICORE inline void RunPtoPagedAttentionVecPipeline(__gm__ uint8_t *oGm, __gm__ uint8_t *sGm,
-    __gm__ uint8_t *pGm, __gm__ uint8_t *oTmpGm, __gm__ uint8_t *tilingParaGm, int64_t workerIdx, int64_t workerNum,
-    uint32_t subBlockId)
-{
-    constexpr int32_t kHeadDim = PA_TILE_TOKENS;
-    constexpr int32_t kTileTokens = PA_TILE_TOKENS;
-    if (!SupportsPtoPagedAttentionHighPerf(tilingParaGm) || workerIdx < 0 || workerNum <= 0) {
-        pipe_barrier(PIPE_ALL);
-        return;
-    }
-
-    PtoPaInitCoreState();
-    const PaTilingContext ctx = LoadPaTilingContext(tilingParaGm);
-    const int32_t effectiveBatch = ctx.decoderBatch > 0 ? ctx.decoderBatch : ctx.batch;
-    const int64_t totalRows = static_cast<int64_t>(effectiveBatch) * ctx.numHeads;
-
-    using QKPipe = TPipe<PA_QK_FIFO_FLAG, Direction::DIR_C2V, 16 * kTileTokens * sizeof(float), PA_FIFO_DEPTH>;
-    using PPipe = TPipe<PA_P_FIFO_FLAG, Direction::DIR_V2C, 256 * sizeof(half), PA_FIFO_DEPTH>;
-    using PVPipe = TPipe<PA_PV_FIFO_FLAG, Direction::DIR_C2V, 16 * kHeadDim * sizeof(float), PA_FIFO_DEPTH>;
-    using VecFloat128 = Tile<TileType::Vec, float, 1, kHeadDim, BLayout::RowMajor, 1, kHeadDim>;
-    using VecHalf128 = Tile<TileType::Vec, half, 1, kHeadDim, BLayout::RowMajor, 1, kHeadDim>;
-    using VecHalf256 = Tile<TileType::Vec, half, 1, 256, BLayout::RowMajor, 1, kHeadDim>;
-    using VecFloat8 = Tile<TileType::Vec, float, 1, 8, BLayout::RowMajor, 1, 8>;
-    using GlobalFloat128 = GlobalTensor<float, Shape<1, 1, 1, 1, kHeadDim>, Stride<kHeadDim, kHeadDim, kHeadDim, kHeadDim, 1>>;
-    using GlobalHalf128 = GlobalTensor<half, Shape<1, 1, 1, 1, kHeadDim>, Stride<kHeadDim, kHeadDim, kHeadDim, kHeadDim, 1>>;
-
-    VecFloat128 weightedTile;
-    VecFloat128 scoreTile;
-    VecFloat128 pvTile;
-    VecHalf256 probTile;
-    VecHalf128 outHalfTile;
-    VecFloat8 scalarMathTile;
-    TASSIGN(weightedTile, 0x0000);
-    TASSIGN(scoreTile, 0x0800);
-    TASSIGN(pvTile, 0x1000);
-    TASSIGN(probTile, 0x1800);
-    TASSIGN(outHalfTile, 0x2000);
-    TASSIGN(scalarMathTile, 0x2800);
-
-    __gm__ uint8_t *scoreBase = sGm + workerIdx * QKPipe::RingFiFo::SLOT_SIZE * QKPipe::RingFiFo::SLOT_NUM;
-    __gm__ uint8_t *probBase = pGm + workerIdx * PPipe::RingFiFo::SLOT_SIZE * PPipe::RingFiFo::SLOT_NUM;
-    __gm__ uint8_t *outTmpBase = oTmpGm + workerIdx * PVPipe::RingFiFo::SLOT_SIZE * PVPipe::RingFiFo::SLOT_NUM;
-    QKPipe qkPipe(reinterpret_cast<__gm__ void *>(scoreBase), 0, 0);
-    PPipe pPipe(reinterpret_cast<__gm__ void *>(probBase), 0, 0);
-    PVPipe pvPipe(reinterpret_cast<__gm__ void *>(outTmpBase), 0, 0);
-
-    for (int64_t row = workerIdx; row < totalRows; row += workerNum) {
-        const int32_t head = static_cast<int32_t>(row % ctx.numHeads);
-        const int32_t batchSlot = static_cast<int32_t>(row / ctx.numHeads);
-        const int32_t paraBase = ResolveSortedParaBase(tilingParaGm, ctx, batchSlot);
-        const int32_t kvSeqLen = LoadTilingI32(tilingParaGm, paraBase + kParaKvSeqLen);
-        const int32_t batchIndex = LoadTilingI32(tilingParaGm, paraBase + kParaRealBatchIndex);
-        const int32_t tileCount = (kvSeqLen + kTileTokens - 1) / kTileTokens;
-        const bool doWork = subBlockId == 0;
-        float maxScore = -3.4028234663852886e38f;
-        float sumExp = 0.0f;
-        TEXPANDS(weightedTile, 0.0f);
-        pipe_barrier(PIPE_ALL);
-
-        for (int32_t tile = 0; tile < tileCount; ++tile) {
-            const int32_t validTokens = ((tile + 1) * kTileTokens <= kvSeqLen) ? kTileTokens : (kvSeqLen - tile * kTileTokens);
-            TPOP<QKPipe, VecFloat128, TileSplitAxis::TILE_NO_SPLIT>(qkPipe, scoreTile);
-            float tileMax = -3.4028234663852886e38f;
-            for (int32_t pos = 0; pos < validTokens; ++pos) {
-                const float score = scoreTile.data()[pos] * ctx.scale;
-                tileMax = score > tileMax ? score : tileMax;
-            }
-            const float newMax = tileMax > maxScore ? tileMax : maxScore;
-            const float oldScale = (tile == 0) ? 0.0f : PtoExpScalar(scalarMathTile, maxScore - newMax);
-            float tileSum = 0.0f;
-            TEXPANDS(probTile, static_cast<half>(0.0));
-            for (int32_t pos = 0; pos < kTileTokens; ++pos) {
-                float prob = 0.0f;
-                if (pos < validTokens) {
-                    prob = PtoExpScalar(scalarMathTile, scoreTile.data()[pos] * ctx.scale - newMax);
-                    tileSum += prob;
-                }
-                probTile.data()[pos] = static_cast<half>(prob);
-            }
-            sumExp = sumExp * oldScale + tileSum;
-            TMULS(weightedTile, weightedTile, oldScale);
-            pipe_barrier(PIPE_ALL);
-            maxScore = newMax;
-            DdrBarrierBeforePtoFfts();
-            TPUSH<PPipe, VecHalf256, TileSplitAxis::TILE_NO_SPLIT>(pPipe, probTile);
-
-            TPOP<PVPipe, VecFloat128, TileSplitAxis::TILE_NO_SPLIT>(pvPipe, pvTile);
-            if (doWork) {
-                pipe_barrier(PIPE_ALL);
-                TAXPY(weightedTile, pvTile, 1.0f);
-                pipe_barrier(PIPE_ALL);
-            }
-        }
-
-        if (!doWork) {
-            continue;
-        }
-        const float invSum = sumExp > 0.0f ? 1.0f / sumExp : 0.0f;
-        const int64_t outBase = (static_cast<int64_t>(batchIndex) * ctx.numHeads + head) * ctx.headDim;
-        GlobalHalf128 outGlobal(reinterpret_cast<__gm__ half *>(oGm) + outBase);
-        TMULS(weightedTile, weightedTile, invSum);
-        pipe_barrier(PIPE_ALL);
-        TCVT(outHalfTile, weightedTile, RoundMode::CAST_RINT);
-        pipe_barrier(PIPE_ALL);
-        TSTORE(outGlobal, outHalfTile);
-        pipe_barrier(PIPE_ALL);
-    }
-    pipe_barrier(PIPE_ALL);
-}
-#endif
-
-
 AICORE inline uint64_t LoadTilingOffset64(__gm__ uint8_t *tiling, int32_t base, int32_t highIdx, int32_t lowIdx)
 {
     const uint32_t high = static_cast<uint32_t>(LoadTilingI32(tiling, base + highIdx));
@@ -739,9 +483,12 @@ AICORE inline void RunPtoPagedAttentionCubePipelineSplitKV(__gm__ uint8_t *qGm, 
     LeftPTile pLeftTile;
     RightTile rightTile;
     AccTile accTile;
-    TASSIGN(qMatTile, 0x00000);
+    constexpr uint32_t kQCacheBase = 0x00000;
+    constexpr uint32_t kQGroupBytes = kM * kHeadDim * sizeof(half);
+    constexpr uint32_t kPmatBase = 0x10000;
+    TASSIGN(qMatTile, kQCacheBase);
     TASSIGN(kMatTile, 0x20000);
-    TASSIGN(pMatTile, 0x00000);
+    TASSIGN(pMatTile, kPmatBase);
     TASSIGN(vMatTile, 0x20000);
     TASSIGN(qLeftTile, 0x00000);
     TASSIGN(pLeftTile, 0x00000);
@@ -807,6 +554,21 @@ AICORE inline void RunPtoPagedAttentionCubePipelineSplitKV(__gm__ uint8_t *qGm, 
             }
         }
 
+        if (validProcess) {
+            for (int32_t headGroup = 0; headGroup < maxHeadGroups; ++headGroup) {
+                const int32_t groupHeadBase = headGroup * kHeadGroup;
+                if (groupHeadBase >= curHeadNum) {
+                    break;
+                }
+                const int32_t firstHead = startHead + groupHeadBase;
+                const int64_t qBase = (static_cast<int64_t>(batchIndex) * ctx.numHeads + firstHead) * ctx.headDim;
+                QGlobal qGlobal(reinterpret_cast<__gm__ half *>(qGm) + qBase);
+                TASSIGN(qMatTile, kQCacheBase + static_cast<uint32_t>(headGroup) * kQGroupBytes);
+                TLOAD(qMatTile, qGlobal);
+                pipe_barrier(PIPE_ALL);
+            }
+        }
+
         for (int32_t tilePairBase = 0; tilePairBase < stageTileCount; tilePairBase += 2) {
             const bool hasStage2 = (tilePairBase + 1) < stageTileCount;
             const bool activeTile0 = validProcess && tilePairBase < tileCount;
@@ -826,11 +588,7 @@ AICORE inline void RunPtoPagedAttentionCubePipelineSplitKV(__gm__ uint8_t *qGm, 
                     if (!activeGroup) {
                         continue;
                     }
-                    const int32_t firstHead = startHead + groupHeadBase;
-                    const int64_t qBase = (static_cast<int64_t>(batchIndex) * ctx.numHeads + firstHead) * ctx.headDim;
-                    QGlobal qGlobal(reinterpret_cast<__gm__ half *>(qGm) + qBase);
-                    TLOAD(qMatTile, qGlobal);
-                    pipe_barrier(PIPE_ALL);
+                    TASSIGN(qMatTile, kQCacheBase + static_cast<uint32_t>(headGroup) * kQGroupBytes);
                     const int32_t blockId = LoadBlockTable(blockTablesGm,
                         static_cast<int64_t>(batchIndex) * maxBlocksPerQuery + startTile + tile);
                     for (int32_t headInGroupBase = 0; headInGroupBase < kHeadGroup; headInGroupBase += headsPerKv) {

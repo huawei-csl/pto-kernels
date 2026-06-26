@@ -67,35 +67,24 @@ static AICORE __attribute__((always_inline)) void paged_attention_mask_body(
 #ifdef __DAV_C220_CUBE__
     const int64_t workerIdx = static_cast<int64_t>(ptoBlockIdx);
     const int64_t workerNum = static_cast<int64_t>(ptoBlockNum);
-    const PaTilingContext ctx = LoadPaTilingContext(tilingParaGm);
-    if (SupportsPtoPagedAttentionHighPerf(tilingParaGm)) {
-        RunPtoPagedAttentionCubePipeline(qGm, kGm, vGm, blockTablesGm, sGm, pGm, oTmpGm, tilingParaGm, workerIdx, workerNum);
-    } else if (SupportsPtoPagedAttentionRawSplitKV(tilingParaGm)) {
+    if (SupportsPtoPagedAttentionRawSplitKV(tilingParaGm)) {
         RunPtoPagedAttentionCubePipelineSplitKV(qGm, kGm, vGm, blockTablesGm, sGm, pGm, oTmpGm, tilingParaGm,
             workerIdx, workerNum);
-    } else if (ctx.kvSplitCoreNum > 1) {
-        pipe_barrier(PIPE_ALL);
     } else {
         pipe_barrier(PIPE_ALL);
     }
 #elif defined(__DAV_C220_VEC__)
-    if (SupportsPtoPagedAttentionHighPerf(tilingParaGm)) {
-        const int64_t workerIdx = static_cast<int64_t>(ptoBlockIdx);
-        const int64_t workerNum = static_cast<int64_t>(ptoBlockNum);
-        RunPtoPagedAttentionVecPipeline(oGm, sGm, pGm, oTmpGm, tilingParaGm, workerIdx, workerNum, ptoSubBlockId);
+    const int64_t workerIdx = static_cast<int64_t>(ptoBlockIdx) * 2 + static_cast<int64_t>(ptoSubBlockId);
+    const int64_t workerNum = static_cast<int64_t>(ptoBlockNum) * 2;
+    const PaTilingContext ctx = LoadPaTilingContext(tilingParaGm);
+    if (SupportsPtoPagedAttentionRawSplitKV(tilingParaGm)) {
+        RunPtoPagedAttentionVecPipelineSplitKV(oGm, sGm, pGm, oTmpGm, oCoreTmpGm, lGm, tilingParaGm,
+            static_cast<int64_t>(ptoBlockIdx), static_cast<int64_t>(ptoBlockNum), ptoSubBlockId);
+    } else if (ctx.kvSplitCoreNum > 1) {
+        RunPtoPagedAttentionDecodeSplitKV(qGm, kGm, vGm, blockTablesGm, oGm, oCoreTmpGm, lGm, tilingParaGm,
+            static_cast<int64_t>(ptoBlockIdx), static_cast<int64_t>(ptoBlockNum), ptoSubBlockId);
     } else {
-        const int64_t workerIdx = static_cast<int64_t>(ptoBlockIdx) * 2 + static_cast<int64_t>(ptoSubBlockId);
-        const int64_t workerNum = static_cast<int64_t>(ptoBlockNum) * 2;
-        const PaTilingContext ctx = LoadPaTilingContext(tilingParaGm);
-        if (SupportsPtoPagedAttentionRawSplitKV(tilingParaGm)) {
-            RunPtoPagedAttentionVecPipelineSplitKV(oGm, sGm, pGm, oTmpGm, oCoreTmpGm, lGm, tilingParaGm,
-                static_cast<int64_t>(ptoBlockIdx), static_cast<int64_t>(ptoBlockNum), ptoSubBlockId);
-        } else if (ctx.kvSplitCoreNum > 1) {
-            RunPtoPagedAttentionDecodeSplitKV(qGm, kGm, vGm, blockTablesGm, oGm, oCoreTmpGm, lGm, tilingParaGm,
-                static_cast<int64_t>(ptoBlockIdx), static_cast<int64_t>(ptoBlockNum), ptoSubBlockId);
-        } else {
-            RunPtoPagedAttentionDecode(qGm, kGm, vGm, blockTablesGm, oGm, tilingParaGm, workerIdx, workerNum);
-        }
+        RunPtoPagedAttentionDecode(qGm, kGm, vGm, blockTablesGm, oGm, tilingParaGm, workerIdx, workerNum);
     }
 #else
     pipe_barrier(PIPE_ALL);
