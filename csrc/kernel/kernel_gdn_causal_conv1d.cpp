@@ -10,53 +10,68 @@ for the full License text.
 #include "kernel_utils.h"
 
 using namespace pto;
+using namespace kernel_utils;
+
+// Filter width / per-tile channel width the entry points below are compiled at.
+// Default to the K=4, MAX_W=3072 production configuration; the test suite
+// recompiles this file at other widths via -DCAUSAL_CONV_K /
+// -DCAUSAL_CONV_MAX_W (see test_gdn_causal_conv1d.py), so a plain build is
+// byte-for-byte unaffected.
+#ifndef CAUSAL_CONV_K
+#define CAUSAL_CONV_K 4
+#endif
+#ifndef CAUSAL_CONV_MAX_W
+#define CAUSAL_CONV_MAX_W 3072
+#endif
 
 #define DIV_ROUNDUP(x, y) (((x) + (y) - 1) / (y))
 #define ALIGN_UP(x, y) (DIV_ROUNDUP((x), (y)) * (y))
 
 // ===========================================================================
-// DEPTHWISE fused causal conv1d + bias + (optional) SiLU  (per-channel, any K)
+// DEPTHWISE fused causal conv1d + bias + (optional) SiLU  (per-channel, any
+// K)
 //
-//   y[b,i,c] = act( bias[c] + sum_{k=max(0,K-1-i)..K-1} W[k,c] * x[b, i-K+1+k,
-//   c] ), x[<0]=0
+//   y[b,i,c] = act( bias[c] + sum_{k=max(0,K-1-i)..K-1} W[k,c] * x[b,
+//   i-K+1+k, c] ), x[<0]=0
 //
 // Per-channel K-tap filter (Mamba/GDN short conv). x,y are [batch, seqLen,
 // channels] row-major; `channels` is the lane axis, seqLen the conv axis.
-// Weights W[K,channels] + bias[channels] are fp32 GM tensors. fp16 OR bf16 I/O,
-// fp32 accumulate.
+// Weights W[K,channels] + bias[channels] are fp32 GM tensors. fp16 OR bf16
+// I/O, fp32 accumulate.
 //
-// Filter width K and per-tile channel width MAX_W are compile-time constants
-// chosen at the call site as template parameters (no preprocessor config), e.g.
+// Filter width K and per-tile channel width MAX_W are compile-time
+// constants chosen at the call site as template parameters (no preprocessor
+// config), e.g.
 //   constexpr uint32_t K = CAUSAL_CONV_K, MAX_W = CAUSAL_CONV_MAX_W;
 //   csilu::runConvSiluBatched<bfloat16_t, float, K, MAX_W>(...);
 //
 // 2-D-plus-batch work grid: workUnits = batch x sequenceChunkCount x
 // channelTileCount. Each work unit produces outputs [batchIndex] x
 // [outputRowStart,outputRowEnd) for channels
-// [channelTileBase,channelTileBase+tileChannelCount), replaying K-1 causal halo
-// rows to prime its accumulators. The grid fills all cores: batch supplies
-// parallelism first, then channel tiles, then sequence chunks; the channel-tile
-// width is widened to whole vector lanes for coalesced stores. (See
-// processWorkUnit + runConvSiluBatched.)
+// [channelTileBase,channelTileBase+tileChannelCount), replaying K-1 causal
+// halo rows to prime its accumulators. The grid fills all cores: batch
+// supplies parallelism first, then channel tiles, then sequence chunks; the
+// channel-tile width is widened to whole vector lanes for coalesced stores.
+// (See processWorkUnit + runConvSiluBatched.)
 //
-// Generic in K (filter width) and MAX_W (tile width). accumRingSize = smallest
-// power of two >= K is the accumulator ring size, so the K outputs in flight
-// map to distinct ring slots via `idx & accumRingMask` (accumRingMask =
-// accumRingSize - 1).
-// UB layout (per lane, fp32 unless noted): K weights + bias(1) + accumRingSize
-// accumulators + (K-1) partial products + input-as-fp32(1) =
-// 2*K+accumRingSize+1 fp32 tiles; then the I/O region inputTile[0..1] + output0
-// + output1 = 4 I/O tiles (input load double-buffered). A static_assert keeps
-// the total within UB_BYTES_PER_CORE for the chosen K / MAX_W / dtypes. NOTE:
-// uses the PTO tile-op API (<pto/pto-inst.hpp>); the `csilu` namespace avoids a
-// clash with pto::detail.
+// Generic in K (filter width) and MAX_W (tile width). accumRingSize =
+// smallest power of two >= K is the accumulator ring size, so the K outputs
+// in flight map to distinct ring slots via `idx & accumRingMask`
+// (accumRingMask = accumRingSize - 1). UB layout (per lane, fp32 unless
+// noted): K weights + bias(1) + accumRingSize accumulators + (K-1) partial
+// products + input-as-fp32(1) = 2*K+accumRingSize+1 fp32 tiles; then the
+// I/O region inputTile[0..1] + output0
+// + output1 = 4 I/O tiles (input load double-buffered). A static_assert
+// keeps the total within UB_BYTES_PER_CORE for the chosen K / MAX_W /
+// dtypes. NOTE: uses the PTO tile-op API (<pto/pto-inst.hpp>); the `csilu`
+// namespace avoids a clash with pto::detail.
 // ===========================================================================
 
 namespace csilu {
 
 // Unified Buffer available per AIV core (Ascend 910B2 = 192 KiB). The UB
-// static_assert in processWorkUnit checks the chosen layout fits; raise it for
-// a next-gen NPU with a larger UB.
+// static_assert in processWorkUnit checks the chosen layout fits; raise it
+// for a next-gen NPU with a larger UB.
 constexpr uint32_t UB_BYTES_PER_CORE = 192u * 1024u;
 
 // Smallest power of two >= value.
@@ -163,7 +178,8 @@ AICORE inline void processWorkUnit(
 
   // double-buffered input: two load slots with independent handshakes.
   // EVENT_ID3 is reused here (the weight load above already consumed it).
-  // events are passed by mutable value to set_flag/wait_flag, so not constexpr.
+  // events are passed by mutable value to set_flag/wait_flag, so not
+  // constexpr.
   const event_t inputBufferEvent[2] = {EVENT_ID0, EVENT_ID3};
   set_flag(PIPE_V, PIPE_MTE2,
            inputBufferEvent[0]);  // input slot 0 initially free
@@ -193,8 +209,8 @@ AICORE inline void processWorkUnit(
     TASSIGN(inputTileIo, ubInputOffset[bufferIndex]);
     TASSIGN(inputTileFp32, ubInputFp32Offset);
 
-    // (1) consume current row from buffer bufferIndex (loaded by the prologue /
-    // previous prefetch).
+    // (1) consume current row from buffer bufferIndex (loaded by the prologue
+    // / previous prefetch).
     wait_flag(PIPE_MTE2, PIPE_V, inputBufferEvent[bufferIndex]);
     TCVT(inputTileFp32, inputTileIo, pto::RoundMode::CAST_NONE);
     set_flag(PIPE_V, PIPE_MTE2,
@@ -218,14 +234,16 @@ AICORE inline void processWorkUnit(
     pipe_barrier(PIPE_V);
 
     // scatter: this input row contributes to K output rows; form each
-    // weight*input product (only for outputs in [outputRowStart,outputRowEnd)).
+    // weight*input product (only for outputs in
+    // [outputRowStart,outputRowEnd)).
     for (uint32_t tapIndex = 0; tapIndex < K; ++tapIndex) {
       const uint32_t outputRow = inputRow + (K - 1) - tapIndex;
       if (outputRow < outputRowStart || outputRow >= outputRowEnd) continue;
       AccumTile weightTile(tileChannelCount);
       TASSIGN(weightTile, tapIndex * accumTileBytes);
       if (inputRow == 0 || tapIndex == 0) {
-        // first contribution to this output's accumulator slot: initialise it.
+        // first contribution to this output's accumulator slot: initialise
+        // it.
         AccumTile accumTile(tileChannelCount);
         TASSIGN(accumTile,
                 ubAccumRingBase + (outputRow & accumRingMask) * accumTileBytes);
@@ -309,9 +327,9 @@ AICORE void runConvSiluBatched(__gm__ IoElemType* input,
   if (seqLen == 0 || batch == 0 || channels == 0) return;
 
   // ---- grid tuning knobs ----
-  // Minimum rows per sequence-chunk. Smaller chunks expose more parallelism but
-  // each replays K-1 causal halo rows, so very small chunks waste compute; 32
-  // is the balance point across the GDN sequence lengths.
+  // Minimum rows per sequence-chunk. Smaller chunks expose more parallelism
+  // but each replays K-1 causal halo rows, so very small chunks waste
+  // compute; 32 is the balance point across the GDN sequence lengths.
   constexpr uint32_t minSeqChunkLen = 32u;
   // Channels per aligned vector lane = 256 B / element size (128 for
   // fp16/bf16). Channel tiles are sized in whole lanes for coalesced
@@ -327,8 +345,8 @@ AICORE void runConvSiluBatched(__gm__ IoElemType* input,
   uint32_t maxSequenceChunks = DIV_ROUNDUP(seqLen, minSeqChunkLen);
   if (maxSequenceChunks < 1) maxSequenceChunks = 1;
 
-  // channel tiles: enough that each tile fits MAX_W, and enough (with the chunk
-  // count) to fill the per-sequence work-unit budget.
+  // channel tiles: enough that each tile fits MAX_W, and enough (with the
+  // chunk count) to fill the per-sequence work-unit budget.
   const uint32_t channelTilesForUbLimit = DIV_ROUNDUP(channels, MAX_W);
   const uint32_t channelTilesToFillCores =
       DIV_ROUNDUP(workUnitsPerSequence, maxSequenceChunks);
@@ -384,18 +402,6 @@ AICORE void runConvSiluBatched(__gm__ IoElemType* input,
 
 }  // namespace csilu
 
-// Filter width / per-tile channel width the entry points below are compiled at.
-// Default to the K=4, MAX_W=3072 production configuration; the test suite
-// recompiles this file at other widths via -DCAUSAL_CONV_K /
-// -DCAUSAL_CONV_MAX_W (see test_gdn_causal_conv1d.py), so a plain build is
-// byte-for-byte unaffected.
-#ifndef CAUSAL_CONV_K
-#define CAUSAL_CONV_K 4
-#endif
-#ifndef CAUSAL_CONV_MAX_W
-#define CAUSAL_CONV_MAX_W 3072
-#endif
-
 /**
  * @brief Single-sequence causal depthwise conv1d with optional SiLU activation
  * (fp16 I/O).
@@ -423,7 +429,7 @@ AICORE void runConvSiluBatched(__gm__ IoElemType* input,
  * @note Only compiled and executed on DAV vector cores (@c __DAV_VEC__). On
  * other targets all parameters are ignored and the kernel is a no-op.
  */
-extern "C" __global__ AICORE void gdn_causal_conv1d_kernel(
+extern "C" __global__ AICORE void gdn_causal_conv1d_fp16(
     __gm__ uint8_t* input, __gm__ uint8_t* output, __gm__ uint8_t* weights,
     __gm__ uint8_t* bias, uint32_t seqLen, uint32_t channels) {
 #if defined(__DAV_VEC__)
@@ -467,7 +473,7 @@ extern "C" __global__ AICORE void gdn_causal_conv1d_kernel(
  * @note Only compiled and executed on DAV vector cores (@c __DAV_VEC__). On
  * other targets all parameters are ignored and the kernel is a no-op.
  */
-extern "C" __global__ AICORE void gdn_causal_conv1d_batched_kernel(
+extern "C" __global__ AICORE void gdn_causal_conv1d_batched_fp16(
     __gm__ uint8_t* input, __gm__ uint8_t* output, __gm__ uint8_t* weights,
     __gm__ uint8_t* bias, uint32_t batch, uint32_t seqLen, uint32_t channels,
     uint32_t applyActivation) {
@@ -492,7 +498,7 @@ extern "C" __global__ AICORE void gdn_causal_conv1d_batched_kernel(
  * @brief Batched causal depthwise conv1d with optional SiLU activation
  * (bfloat16 I/O).
  *
- * Identical in semantics to @c gdn_causal_conv1d_batched_kernel but uses
+ * Identical in semantics to @c gdn_causal_conv1d_batched_fp16 but uses
  * bfloat16 for input and output tensors instead of fp16. Weights and bias
  * remain fp32. Filter width and maximum sequence length are fixed at compile
  * time via @c CAUSAL_CONV_K and
@@ -516,7 +522,7 @@ extern "C" __global__ AICORE void gdn_causal_conv1d_batched_kernel(
  * @note Only compiled and executed on DAV vector cores (@c __DAV_VEC__). On
  * other targets all parameters are ignored and the kernel is a no-op.
  */
-extern "C" __global__ AICORE void gdn_causal_conv1d_batched_bf16_kernel(
+extern "C" __global__ AICORE void gdn_causal_conv1d_batched_bf16(
     __gm__ uint8_t* input, __gm__ uint8_t* output, __gm__ uint8_t* weights,
     __gm__ uint8_t* bias, uint32_t batch, uint32_t seqLen, uint32_t channels,
     uint32_t applyActivation) {

@@ -11,9 +11,9 @@ for the full License text.
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
-#include "aclrtlaunch_gdn_causal_conv1d_batched_bf16_kernel.h"
-#include "aclrtlaunch_gdn_causal_conv1d_batched_kernel.h"
-#include "aclrtlaunch_gdn_causal_conv1d_kernel.h"
+#include "aclrtlaunch_gdn_causal_conv1d_batched_bf16.h"
+#include "aclrtlaunch_gdn_causal_conv1d_batched_fp16.h"
+#include "aclrtlaunch_gdn_causal_conv1d_fp16.h"
 #include "utils.h"
 
 namespace pto_isa_ops {
@@ -55,7 +55,7 @@ at::Tensor run_gdn_causal_conv1d(const at::Tensor& x, const at::Tensor& weights,
   at::Tensor output = at::empty_like(x);
   const uint32_t block_dim = GetNumVectorCores();
 
-  EXEC_KERNEL_CMD(gdn_causal_conv1d_kernel, block_dim, x, output, weights, bias,
+  EXEC_KERNEL_CMD(gdn_causal_conv1d_fp16, block_dim, x, output, weights, bias,
                   seqLen, channels);
   return output;
 }
@@ -108,10 +108,10 @@ at::Tensor run_gdn_causal_conv1d_batched(const at::Tensor& x,
   const uint32_t block_dim = GetNumVectorCores();
 
   if (x.scalar_type() == at::kHalf) {
-    EXEC_KERNEL_CMD(gdn_causal_conv1d_batched_kernel, block_dim, x, output,
+    EXEC_KERNEL_CMD(gdn_causal_conv1d_batched_fp16, block_dim, x, output,
                     weights, bias, batch, seqLen, channels, applyActivation);
   } else if (x.scalar_type() == at::kBFloat16) {
-    EXEC_KERNEL_CMD(gdn_causal_conv1d_batched_bf16_kernel, block_dim, x, output,
+    EXEC_KERNEL_CMD(gdn_causal_conv1d_batched_bf16, block_dim, x, output,
                     weights, bias, batch, seqLen, channels, applyActivation);
   }
   return output;
