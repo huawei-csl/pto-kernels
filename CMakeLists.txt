@@ -124,11 +124,12 @@ ascendc_library(
   SHARED
   csrc/kernel/kernel_tri_inv_col_sweep.cpp
   csrc/kernel/kernel_abs.cpp
-  csrc/kernel/kernel_gdn_causal_conv1d.cpp
-  csrc/kernel/kernel_chunk_cumsum.cpp
   csrc/kernel/kernel_csr_gather.cpp
-  csrc/kernel/kernel_gdn_chunk_h.cpp
+  csrc/kernel/kernel_gdn_causal_conv1d.cpp
+  csrc/kernel/kernel_gdn_chunk_cumsum.cpp
   csrc/kernel/kernel_gdn_scaled_dot_kkt.cpp
+  csrc/kernel/kernel_gdn_wy_fast.cpp
+  csrc/kernel/kernel_gdn_chunk_h.cpp
   csrc/kernel/kernel_gdn_chunk_o.cpp
   csrc/kernel/kernel_scan_ul1.cpp
   csrc/kernel/kernel_simple_matmul.cpp
@@ -136,8 +137,7 @@ ascendc_library(
   csrc/kernel/kernel_tri_inv_ns.cpp
   csrc/kernel/kernel_tri_inv_rec_unroll.cpp
   csrc/kernel/kernel_tri_inv_trick.cpp
-  csrc/kernel/kernel_swiglu.cpp
-  csrc/kernel/kernel_gdn_wy_fast.cpp)
+  csrc/kernel/kernel_swiglu.cpp)
 
 ascendc_include_directories(
   no_workspace_kernel PRIVATE ${libpto_isa_headers_SOURCE_DIR}/include

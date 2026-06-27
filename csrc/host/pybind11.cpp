@@ -11,9 +11,9 @@ for the full License text.
 
 #include "torch_abs.h"
 #include "torch_batch_matrix_square.h"
-#include "torch_chunk_cumsum.h"
 #include "torch_csr_gather.h"
 #include "torch_gdn_causal_conv1d.h"
+#include "torch_gdn_chunk_cumsum.h"
 #include "torch_gdn_chunk_h.h"
 #include "torch_gdn_chunk_o.h"
 #include "torch_gdn_scaled_dot_kkt.h"
@@ -53,8 +53,8 @@ PYBIND11_MODULE(pto_kernels_ops, m) {
         py::arg("W"), py::arg("U"), py::arg("G"),
         py::arg("cu_seqlens") = at::zeros({1}), py::arg("batch_size"),
         py::arg("seq_len"), py::arg("total_chunks"));
-  m.def("pto_chunk_cumsum", &pto_isa_ops::run_chunk_cumsum, py::arg("g"),
-        py::arg("batch_size"), py::arg("seq_len"),
+  m.def("pto_gdn_chunk_cumsum", &pto_isa_ops::run_gdn_chunk_cumsum,
+        py::arg("g"), py::arg("batch_size"), py::arg("seq_len"),
         py::arg("cu_seqlens") = at::zeros({1}));
   m.def("pto_batch_matrix_square", &pto_isa_ops::run_batch_matrix_square);
   m.def("pto_csr_gather", &pto_isa_ops::run_csr_gather);
