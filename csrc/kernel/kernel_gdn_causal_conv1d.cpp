@@ -387,7 +387,7 @@ AICORE void runConvSiluBatched(__gm__ IoElemType* input,
 // Filter width / per-tile channel width the entry points below are compiled at.
 // Default to the K=4, MAX_W=3072 production configuration; the test suite
 // recompiles this file at other widths via -DCAUSAL_CONV_K /
-// -DCAUSAL_CONV_MAX_W (see test_causal_conv1d.py), so a plain build is
+// -DCAUSAL_CONV_MAX_W (see test_gdn_causal_conv1d.py), so a plain build is
 // byte-for-byte unaffected.
 #ifndef CAUSAL_CONV_K
 #define CAUSAL_CONV_K 4
@@ -396,9 +396,34 @@ AICORE void runConvSiluBatched(__gm__ IoElemType* input,
 #define CAUSAL_CONV_MAX_W 3072
 #endif
 
-// ---- single-sequence entry (back-compat: input,output [seqLen,channels] fp16,
-// weights[K,channels]/bias[channels] fp32) ----
-extern "C" __global__ AICORE void causal_conv1d_kernel(
+/**
+ * @brief Single-sequence causal depthwise conv1d with optional SiLU activation
+ * (fp16 I/O).
+ *
+ * Back-compat entry point for single-batch inference. Activations and weights
+ * are processed with a filter width of @c CAUSAL_CONV_K and a maximum sequence
+ * length of
+ * @c CAUSAL_CONV_MAX_W (both set at compile time; defaults: K=4, MAX_W=3072).
+ *
+ * Equivalent to calling @c gdn_causal_conv1d_batched_kernel with @c batch=1 and
+ * @c applyActivation=1.
+ *
+ * @param[in]  input    Global-memory pointer to the input tensor [seqLen,
+ * channels] in fp16.
+ * @param[out] output   Global-memory pointer to the output tensor [seqLen,
+ * channels] in fp16.
+ * @param[in]  weights  Global-memory pointer to the convolution weights [K,
+ * channels] in fp32.
+ * @param[in]  bias     Global-memory pointer to the bias vector [channels] in
+ * fp32.
+ * @param[in]  seqLen   Number of time steps in the sequence.
+ * @param[in]  channels Number of channels (must be a multiple of the tile
+ * width).
+ *
+ * @note Only compiled and executed on DAV vector cores (@c __DAV_VEC__). On
+ * other targets all parameters are ignored and the kernel is a no-op.
+ */
+extern "C" __global__ AICORE void gdn_causal_conv1d_kernel(
     __gm__ uint8_t* input, __gm__ uint8_t* output, __gm__ uint8_t* weights,
     __gm__ uint8_t* bias, uint32_t seqLen, uint32_t channels) {
 #if defined(__DAV_VEC__)
@@ -416,9 +441,33 @@ extern "C" __global__ AICORE void causal_conv1d_kernel(
 #endif
 }
 
-// ---- batched fp16 entry: input,output [batch,seqLen,channels] fp16,
-// weights/bias fp32 ----
-extern "C" __global__ AICORE void causal_conv1d_batched_kernel(
+/**
+ * @brief Batched causal depthwise conv1d with optional SiLU activation (fp16
+ * I/O).
+ *
+ * Processes a batch of sequences in a single kernel launch. Filter width and
+ * maximum sequence length are fixed at compile time via @c CAUSAL_CONV_K and @c
+ * CAUSAL_CONV_MAX_W (defaults: K=4, MAX_W=3072).
+ *
+ * @param[in]  input            Global-memory pointer to the input tensor
+ *                              [batch, seqLen, channels] in fp16.
+ * @param[out] output           Global-memory pointer to the output tensor
+ *                              [batch, seqLen, channels] in fp16.
+ * @param[in]  weights          Global-memory pointer to the convolution weights
+ *                              [K, channels] in fp32.
+ * @param[in]  bias             Global-memory pointer to the bias vector
+ * [channels] in fp32.
+ * @param[in]  batch            Number of sequences in the batch.
+ * @param[in]  seqLen           Number of time steps per sequence.
+ * @param[in]  channels         Number of channels (must be a multiple of the
+ * tile width).
+ * @param[in]  applyActivation  Non-zero to apply SiLU after the convolution;
+ * zero to skip.
+ *
+ * @note Only compiled and executed on DAV vector cores (@c __DAV_VEC__). On
+ * other targets all parameters are ignored and the kernel is a no-op.
+ */
+extern "C" __global__ AICORE void gdn_causal_conv1d_batched_kernel(
     __gm__ uint8_t* input, __gm__ uint8_t* output, __gm__ uint8_t* weights,
     __gm__ uint8_t* bias, uint32_t batch, uint32_t seqLen, uint32_t channels,
     uint32_t applyActivation) {
@@ -439,9 +488,35 @@ extern "C" __global__ AICORE void causal_conv1d_batched_kernel(
 #endif
 }
 
-// ---- batched bf16 entry: input,output [batch,seqLen,channels] bf16,
-// weights/bias fp32 ----
-extern "C" __global__ AICORE void causal_conv1d_batched_bf16_kernel(
+/**
+ * @brief Batched causal depthwise conv1d with optional SiLU activation
+ * (bfloat16 I/O).
+ *
+ * Identical in semantics to @c gdn_causal_conv1d_batched_kernel but uses
+ * bfloat16 for input and output tensors instead of fp16. Weights and bias
+ * remain fp32. Filter width and maximum sequence length are fixed at compile
+ * time via @c CAUSAL_CONV_K and
+ * @c CAUSAL_CONV_MAX_W (defaults: K=4, MAX_W=3072).
+ *
+ * @param[in]  input            Global-memory pointer to the input tensor
+ *                              [batch, seqLen, channels] in bfloat16.
+ * @param[out] output           Global-memory pointer to the output tensor
+ *                              [batch, seqLen, channels] in bfloat16.
+ * @param[in]  weights          Global-memory pointer to the convolution weights
+ *                              [K, channels] in fp32.
+ * @param[in]  bias             Global-memory pointer to the bias vector
+ * [channels] in fp32.
+ * @param[in]  batch            Number of sequences in the batch.
+ * @param[in]  seqLen           Number of time steps per sequence.
+ * @param[in]  channels         Number of channels (must be a multiple of the
+ * tile width).
+ * @param[in]  applyActivation  Non-zero to apply SiLU after the convolution;
+ * zero to skip.
+ *
+ * @note Only compiled and executed on DAV vector cores (@c __DAV_VEC__). On
+ * other targets all parameters are ignored and the kernel is a no-op.
+ */
+extern "C" __global__ AICORE void gdn_causal_conv1d_batched_bf16_kernel(
     __gm__ uint8_t* input, __gm__ uint8_t* output, __gm__ uint8_t* weights,
     __gm__ uint8_t* bias, uint32_t batch, uint32_t seqLen, uint32_t channels,
     uint32_t applyActivation) {
@@ -461,31 +536,4 @@ extern "C" __global__ AICORE void causal_conv1d_batched_bf16_kernel(
   (void)channels;
   (void)applyActivation;
 #endif
-}
-
-extern "C" void call_kernel(uint32_t blockDim, void* stream, uint8_t* input,
-                            uint8_t* output, uint8_t* weights, uint8_t* bias,
-                            uint32_t seqLen, uint32_t channels) {
-  causal_conv1d_kernel<<<blockDim * 2, nullptr, stream>>>(
-      input, output, weights, bias, seqLen, channels);
-}
-
-extern "C" void call_kernel_batched(uint32_t blockDim, void* stream,
-                                    uint8_t* input, uint8_t* output,
-                                    uint8_t* weights, uint8_t* bias,
-                                    uint32_t batch, uint32_t seqLen,
-                                    uint32_t channels,
-                                    uint32_t applyActivation) {
-  causal_conv1d_batched_kernel<<<blockDim * 2, nullptr, stream>>>(
-      input, output, weights, bias, batch, seqLen, channels, applyActivation);
-}
-
-extern "C" void call_kernel_batched_bf16(uint32_t blockDim, void* stream,
-                                         uint8_t* input, uint8_t* output,
-                                         uint8_t* weights, uint8_t* bias,
-                                         uint32_t batch, uint32_t seqLen,
-                                         uint32_t channels,
-                                         uint32_t applyActivation) {
-  causal_conv1d_batched_bf16_kernel<<<blockDim * 2, nullptr, stream>>>(
-      input, output, weights, bias, batch, seqLen, channels, applyActivation);
 }

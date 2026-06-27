@@ -11,9 +11,9 @@ for the full License text.
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
-#include "aclrtlaunch_causal_conv1d_batched_bf16_kernel.h"
-#include "aclrtlaunch_causal_conv1d_batched_kernel.h"
-#include "aclrtlaunch_causal_conv1d_kernel.h"
+#include "aclrtlaunch_gdn_causal_conv1d_batched_bf16_kernel.h"
+#include "aclrtlaunch_gdn_causal_conv1d_batched_kernel.h"
+#include "aclrtlaunch_gdn_causal_conv1d_kernel.h"
 #include "utils.h"
 
 namespace pto_isa_ops {
@@ -29,24 +29,25 @@ namespace pto_isa_ops {
  * @param [in] bias    Per-channel bias [channels] fp32, contiguous.
  * @return at::Tensor  Output [seqLen, channels] fp16.
  */
-at::Tensor run_causal_conv1d(const at::Tensor& x, const at::Tensor& weights,
-                             const at::Tensor& bias) {
+at::Tensor run_gdn_causal_conv1d(const at::Tensor& x, const at::Tensor& weights,
+                                 const at::Tensor& bias) {
   TORCH_CHECK(x.device().type() == DEVICE_TYPE,
-              "causal_conv1d: x must be on NPU, got ", x.device());
+              "gdn_causal_conv1d: x must be on NPU, got ", x.device());
   TORCH_CHECK(x.scalar_type() == at::kHalf,
-              "causal_conv1d: x must be fp16, got ", x.scalar_type());
+              "gdn_causal_conv1d: x must be fp16, got ", x.scalar_type());
   TORCH_CHECK(x.dim() == 2,
-              "causal_conv1d: x must be 2D [seqLen, channels], got ", x.dim(),
-              "D");
-  TORCH_CHECK(x.is_contiguous(), "causal_conv1d: x must be contiguous");
+              "gdn_causal_conv1d: x must be 2D [seqLen, channels], got ",
+              x.dim(), "D");
+  TORCH_CHECK(x.is_contiguous(), "gdn_causal_conv1d: x must be contiguous");
   TORCH_CHECK(weights.scalar_type() == at::kFloat,
-              "causal_conv1d: weights must be fp32, got ",
+              "gdn_causal_conv1d: weights must be fp32, got ",
               weights.scalar_type());
   TORCH_CHECK(weights.is_contiguous(),
-              "causal_conv1d: weights must be contiguous");
+              "gdn_causal_conv1d: weights must be contiguous");
   TORCH_CHECK(bias.dim() == 1 && bias.scalar_type() == at::kFloat,
-              "causal_conv1d: bias must be 1D fp32");
-  TORCH_CHECK(bias.is_contiguous(), "causal_conv1d: bias must be contiguous");
+              "gdn_causal_conv1d: bias must be 1D fp32");
+  TORCH_CHECK(bias.is_contiguous(),
+              "gdn_causal_conv1d: bias must be contiguous");
 
   const uint32_t seqLen = static_cast<uint32_t>(x.size(0));
   const uint32_t channels = static_cast<uint32_t>(x.size(1));
@@ -54,7 +55,7 @@ at::Tensor run_causal_conv1d(const at::Tensor& x, const at::Tensor& weights,
   at::Tensor output = at::empty_like(x);
   const uint32_t block_dim = GetNumVectorCores();
 
-  EXEC_KERNEL_CMD(causal_conv1d_kernel, block_dim, x, output, weights, bias,
+  EXEC_KERNEL_CMD(gdn_causal_conv1d_kernel, block_dim, x, output, weights, bias,
                   seqLen, channels);
   return output;
 }
@@ -72,29 +73,31 @@ at::Tensor run_causal_conv1d(const at::Tensor& x, const at::Tensor& weights,
  * @param [in] activation Whether to apply SiLU after bias add (default true).
  * @return at::Tensor     Output same shape and dtype as x.
  */
-at::Tensor run_causal_conv1d_batched(const at::Tensor& x,
-                                     const at::Tensor& weights,
-                                     const at::Tensor& bias,
-                                     bool activation = true) {
+at::Tensor run_gdn_causal_conv1d_batched(const at::Tensor& x,
+                                         const at::Tensor& weights,
+                                         const at::Tensor& bias,
+                                         bool activation = true) {
   TORCH_CHECK(x.device().type() == DEVICE_TYPE,
-              "causal_conv1d_batched: x must be on NPU, got ", x.device());
+              "gdn_causal_conv1d_batched: x must be on NPU, got ", x.device());
   TORCH_CHECK(x.scalar_type() == at::kHalf || x.scalar_type() == at::kBFloat16,
-              "causal_conv1d_batched: x must be fp16 or bf16, got ",
+              "gdn_causal_conv1d_batched: x must be fp16 or bf16, got ",
               x.scalar_type());
-  TORCH_CHECK(x.dim() == 3,
-              "causal_conv1d_batched: x must be 3D [batch, seqLen, channels], "
-              "got ",
-              x.dim(), "D");
-  TORCH_CHECK(x.is_contiguous(), "causal_conv1d_batched: x must be contiguous");
+  TORCH_CHECK(
+      x.dim() == 3,
+      "gdn_causal_conv1d_batched: x must be 3D [batch, seqLen, channels], "
+      "got ",
+      x.dim(), "D");
+  TORCH_CHECK(x.is_contiguous(),
+              "gdn_causal_conv1d_batched: x must be contiguous");
   TORCH_CHECK(weights.scalar_type() == at::kFloat,
-              "causal_conv1d_batched: weights must be fp32, got ",
+              "gdn_causal_conv1d_batched: weights must be fp32, got ",
               weights.scalar_type());
   TORCH_CHECK(weights.is_contiguous(),
-              "causal_conv1d_batched: weights must be contiguous");
+              "gdn_causal_conv1d_batched: weights must be contiguous");
   TORCH_CHECK(bias.dim() == 1 && bias.scalar_type() == at::kFloat,
-              "causal_conv1d_batched: bias must be 1D fp32");
+              "gdn_causal_conv1d_batched: bias must be 1D fp32");
   TORCH_CHECK(bias.is_contiguous(),
-              "causal_conv1d_batched: bias must be contiguous");
+              "gdn_causal_conv1d_batched: bias must be contiguous");
 
   const uint32_t batch = static_cast<uint32_t>(x.size(0));
   const uint32_t seqLen = static_cast<uint32_t>(x.size(1));
@@ -105,10 +108,10 @@ at::Tensor run_causal_conv1d_batched(const at::Tensor& x,
   const uint32_t block_dim = GetNumVectorCores();
 
   if (x.scalar_type() == at::kHalf) {
-    EXEC_KERNEL_CMD(causal_conv1d_batched_kernel, block_dim, x, output, weights,
-                    bias, batch, seqLen, channels, applyActivation);
+    EXEC_KERNEL_CMD(gdn_causal_conv1d_batched_kernel, block_dim, x, output,
+                    weights, bias, batch, seqLen, channels, applyActivation);
   } else if (x.scalar_type() == at::kBFloat16) {
-    EXEC_KERNEL_CMD(causal_conv1d_batched_bf16_kernel, block_dim, x, output,
+    EXEC_KERNEL_CMD(gdn_causal_conv1d_batched_bf16_kernel, block_dim, x, output,
                     weights, bias, batch, seqLen, channels, applyActivation);
   }
   return output;
