@@ -45,7 +45,7 @@ def _count_total_chunks(T: int, cu_seqlens=None) -> int:
     return sum((eos - bos + C - 1) // C for bos, eos in _seq_ranges(T, cu_seqlens))
 
 
-def _chunk_cumsum(g: torch.Tensor, cu_seqlens=None) -> torch.Tensor:
+def _gdn_chunk_cumsum(g: torch.Tensor, cu_seqlens=None) -> torch.Tensor:
     """Per-chunk cumulative sum of gates (resets at sequence and chunk boundaries).
 
     g: [T, H] float32
@@ -203,7 +203,7 @@ def test_pto_gdn_chunk_o_fixed(npu_device, seq_len: int):
     w_cpu = torch.randn(T, H, D, dtype=torch.float16)
     u_cpu = torch.randn(T, H, D, dtype=torch.float16)
     g_in = F.logsigmoid(torch.randn(T, H, dtype=torch.float32))
-    g_cumsum = _chunk_cumsum(g_in)  # [T, H] fp32
+    g_cumsum = _gdn_chunk_cumsum(g_in)  # [T, H] fp32
 
     # Use CPU ref for chunk_h to generate states and v_new, then convert to fp16
     # to match the precision that the NPU kernel will operate on.
@@ -263,7 +263,7 @@ def test_pto_gdn_chunk_o_varlen(npu_device, seqlens: list):
     w_cpu = torch.randn(T, H, D, dtype=torch.float16)
     u_cpu = torch.randn(T, H, D, dtype=torch.float16)
     g_in = F.logsigmoid(torch.randn(T, H, dtype=torch.float32))
-    g_cumsum = _chunk_cumsum(g_in, cu_seqlens_list)  # [T, H] fp32
+    g_cumsum = _gdn_chunk_cumsum(g_in, cu_seqlens_list)  # [T, H] fp32
 
     h_out_f32, v_new_f32 = _ref_chunk_h(k_cpu, w_cpu, u_cpu, g_cumsum, cu_seqlens_list)
     h_out_fp16 = h_out_f32.half()
