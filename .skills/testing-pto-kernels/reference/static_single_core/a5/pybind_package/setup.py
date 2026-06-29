@@ -41,7 +41,9 @@ setup(
     version="0.0.0",
     packages=["pto_static_a5_demo"],
     package_dir={"pto_static_a5_demo": "pto_static_a5_demo"},
-    package_data={"pto_static_a5_demo": ["libstatic_add_a5.so", "libstatic_matmul_a5.so"]},
+    package_data={
+        "pto_static_a5_demo": ["libstatic_add_a5.so", "libstatic_matmul_a5.so"]
+    },
     ext_modules=[
         CppExtension(
             "pto_static_a5_demo._C",

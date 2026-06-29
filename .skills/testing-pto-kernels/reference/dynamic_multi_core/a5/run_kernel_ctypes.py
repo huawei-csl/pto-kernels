@@ -15,7 +15,14 @@ import torch_npu  # noqa: F401
 HERE = Path(__file__).resolve().parent
 
 sys.path.insert(0, str(HERE.parents[1]))
-from pto_demo_utils import assert_close, compile_kernel, configure_torch_npu, run_repeated, stream_ptr, tensor_ptr  # noqa: E402
+from pto_demo_utils import (
+    assert_close,
+    compile_kernel,
+    configure_torch_npu,
+    run_repeated,
+    stream_ptr,
+    tensor_ptr,
+)  # noqa: E402
 
 
 def npu_from_cpu(arr: np.ndarray, device: str) -> torch.Tensor:
@@ -53,10 +60,24 @@ def main() -> None:
         y = npu_from_cpu(np.zeros(args.n, dtype=np.float16), args.device)
         stream = stream_ptr()
         run_repeated(
-            lambda: lib.call_add(args.block_dim, stream, tensor_ptr(y), tensor_ptr(x), tensor_ptr(z), args.n)
+            lambda: lib.call_add(
+                args.block_dim,
+                stream,
+                tensor_ptr(y),
+                tensor_ptr(x),
+                tensor_ptr(z),
+                args.n,
+            )
         )
         assert_close(y.cpu(), torch.from_numpy((x_cpu + z_cpu).astype(np.float16)))
-        payloads.append({"kernel": "add", "n": args.n, "block_dim": args.block_dim, "result": "PASS"})
+        payloads.append(
+            {
+                "kernel": "add",
+                "n": args.n,
+                "block_dim": args.block_dim,
+                "result": "PASS",
+            }
+        )
     if args.kernel in ("matmul", "all"):
         lib = ctypes.CDLL(str(compile_kernel(HERE / "compile.sh", "matmul")))
         lib.call_matmul.argtypes = [
@@ -73,10 +94,16 @@ def main() -> None:
         b = npu_from_cpu(b_cpu, args.device)
         y = npu_from_cpu(np.zeros((16, 16), dtype=np.float32), args.device)
         stream = stream_ptr()
-        run_repeated(lambda: lib.call_matmul(1, stream, tensor_ptr(y), tensor_ptr(a), tensor_ptr(b)))
+        run_repeated(
+            lambda: lib.call_matmul(
+                1, stream, tensor_ptr(y), tensor_ptr(a), tensor_ptr(b)
+            )
+        )
         ref = torch.from_numpy(a_cpu.astype(np.float32) @ b_cpu.astype(np.float32))
         assert_close(y.cpu(), ref)
-        payloads.append({"kernel": "matmul", "shape": "16x16x16", "block_dim": 1, "result": "PASS"})
+        payloads.append(
+            {"kernel": "matmul", "shape": "16x16x16", "block_dim": 1, "result": "PASS"}
+        )
     payload = {"result": "PASS", "results": payloads}
     print(json.dumps(payload, indent=2))
     if args.output_json:

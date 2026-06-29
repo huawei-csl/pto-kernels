@@ -12,7 +12,14 @@ import torch_npu  # noqa: F401
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))
-from pto_demo_utils import assert_close, compile_kernel, configure_torch_npu, run_repeated, stream_ptr, tensor_ptr  # noqa: E402
+from pto_demo_utils import (
+    assert_close,
+    compile_kernel,
+    configure_torch_npu,
+    run_repeated,
+    stream_ptr,
+    tensor_ptr,
+)  # noqa: E402
 
 
 def run_add(device: str) -> None:
@@ -31,7 +38,9 @@ def run_add(device: str) -> None:
     z = torch.randn(64, 64, device=device, dtype=torch.float16)
     out = torch.empty_like(x)
     run_repeated(
-        lambda: lib.call_static_add(1, stream_ptr(), tensor_ptr(out), tensor_ptr(x), tensor_ptr(z))
+        lambda: lib.call_static_add(
+            1, stream_ptr(), tensor_ptr(out), tensor_ptr(x), tensor_ptr(z)
+        )
     )
     assert_close(out, x + z)
     print("PASS static_single_core/a2a3 add shape=(64,64)")
@@ -52,7 +61,9 @@ def run_matmul(device: str) -> None:
     b = torch.randn(128, 128, device=device, dtype=torch.float16)
     c = torch.empty(128, 128, device=device, dtype=torch.float16)
     run_repeated(
-        lambda: lib.call_matmul(1, stream_ptr(), tensor_ptr(a), tensor_ptr(b), tensor_ptr(c), 128)
+        lambda: lib.call_matmul(
+            1, stream_ptr(), tensor_ptr(a), tensor_ptr(b), tensor_ptr(c), 128
+        )
     )
     assert_close(c, torch.matmul(a, b))
     print("PASS static_single_core/a2a3 matmul shape=(128,128)x(128,128)")
@@ -96,7 +107,9 @@ def run_mix(device: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--kernel", choices=("add", "matmul", "matmul_add", "all"), default="all")
+    parser.add_argument(
+        "--kernel", choices=("add", "matmul", "matmul_add", "all"), default="all"
+    )
     args = parser.parse_args()
     device = os.environ.get("NPU_DEVICE", "npu:0")
     configure_torch_npu()

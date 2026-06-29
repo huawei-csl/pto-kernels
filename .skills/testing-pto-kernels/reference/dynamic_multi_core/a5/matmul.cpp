@@ -1,5 +1,5 @@
-#include <pto/pto-inst.hpp>
 #include <pto/common/pto_tile.hpp>
+#include <pto/pto-inst.hpp>
 
 using namespace pto;
 
@@ -15,7 +15,7 @@ __global__ AICORE void dynamic_matmul_kernel(__gm__ float *out, __gm__ half *a,
   using GlobalB = GlobalTensor<half, pto::Shape<1, 1, 1, K, N>,
                                pto::Stride<K * N, K * N, K * N, N, 1>>;
   using GlobalC = GlobalTensor<float, pto::Shape<1, 1, 1, M, N>,
-                                pto::Stride<M * N, M * N, M * N, N, 1>>;
+                               pto::Stride<M * N, M * N, M * N, N, 1>>;
 
   GlobalA a_g(a);
   GlobalB b_g(b);
@@ -58,6 +58,6 @@ __global__ AICORE void dynamic_matmul_kernel(__gm__ float *out, __gm__ half *a,
 extern "C" void call_matmul(uint32_t block_dim, void *stream, uint8_t *out,
                             uint8_t *a, uint8_t *b) {
   (void)block_dim;
-  dynamic_matmul_kernel<<<1, nullptr, stream>>>((__gm__ float *)out,
-                                                (__gm__ half *)a, (__gm__ half *)b);
+  dynamic_matmul_kernel<<<1, nullptr, stream>>>(
+      (__gm__ float *)out, (__gm__ half *)a, (__gm__ half *)b);
 }

@@ -16,7 +16,12 @@ HERE = Path(__file__).resolve().parent
 BUILD = HERE / "build"
 
 sys.path.insert(0, str(HERE.parents[1]))
-from pto_demo_utils import assert_close, configure_torch_npu, run_repeated, stream_as_int  # noqa: E402
+from pto_demo_utils import (
+    assert_close,
+    configure_torch_npu,
+    run_repeated,
+    stream_as_int,
+)  # noqa: E402
 
 
 def build_kernel(name: str) -> Path:
@@ -66,7 +71,9 @@ def main() -> None:
         y = npu_tensor(np.zeros(args.n, dtype=np.float16), args.device)
         run_repeated(lambda: mod.launch_add(y, x, z, args.n, args.block_dim, stream))
         assert_close(y.cpu(), torch.from_numpy((x_cpu + z_cpu).astype(np.float16)))
-        print(f"PASS dynamic_multi_core/a5 pybind add n={args.n} block_dim={args.block_dim}")
+        print(
+            f"PASS dynamic_multi_core/a5 pybind add n={args.n} block_dim={args.block_dim}"
+        )
 
     if args.kernel in ("matmul", "all"):
         rng = np.random.default_rng(1)

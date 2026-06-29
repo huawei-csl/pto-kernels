@@ -1,7 +1,8 @@
 #include <acl/acl.h>
+#include <dlfcn.h>
+
 #include <cstdint>
 #include <cstdlib>
-#include <dlfcn.h>
 #include <iostream>
 #include <vector>
 
@@ -38,12 +39,14 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  std::vector<uint16_t> x(kElems, kHalfOne), z(kElems, kHalfTwo), out(kElems, 0);
+  std::vector<uint16_t> x(kElems, kHalfOne), z(kElems, kHalfTwo),
+      out(kElems, 0);
   int device_id = 0;
   if (const char *env = std::getenv("NPU_DEVICE")) {
     std::string value(env);
     auto pos = value.find(':');
-    device_id = std::stoi(pos == std::string::npos ? value : value.substr(pos + 1));
+    device_id =
+        std::stoi(pos == std::string::npos ? value : value.substr(pos + 1));
   }
 
   check_acl(aclInit(nullptr), "aclInit");
@@ -54,13 +57,20 @@ int main(int argc, char **argv) {
   void *x_dev = nullptr, *z_dev = nullptr, *out_dev = nullptr;
   check_acl(aclrtMalloc(&x_dev, kBytes, ACL_MEM_MALLOC_HUGE_FIRST), "malloc x");
   check_acl(aclrtMalloc(&z_dev, kBytes, ACL_MEM_MALLOC_HUGE_FIRST), "malloc z");
-  check_acl(aclrtMalloc(&out_dev, kBytes, ACL_MEM_MALLOC_HUGE_FIRST), "malloc out");
-  check_acl(aclrtMemcpy(x_dev, kBytes, x.data(), kBytes, ACL_MEMCPY_HOST_TO_DEVICE), "copy x");
-  check_acl(aclrtMemcpy(z_dev, kBytes, z.data(), kBytes, ACL_MEMCPY_HOST_TO_DEVICE), "copy z");
-  call_add(1, stream, static_cast<uint8_t *>(out_dev), static_cast<uint8_t *>(x_dev),
-           static_cast<uint8_t *>(z_dev));
+  check_acl(aclrtMalloc(&out_dev, kBytes, ACL_MEM_MALLOC_HUGE_FIRST),
+            "malloc out");
+  check_acl(
+      aclrtMemcpy(x_dev, kBytes, x.data(), kBytes, ACL_MEMCPY_HOST_TO_DEVICE),
+      "copy x");
+  check_acl(
+      aclrtMemcpy(z_dev, kBytes, z.data(), kBytes, ACL_MEMCPY_HOST_TO_DEVICE),
+      "copy z");
+  call_add(1, stream, static_cast<uint8_t *>(out_dev),
+           static_cast<uint8_t *>(x_dev), static_cast<uint8_t *>(z_dev));
   check_acl(aclrtSynchronizeStream(stream), "sync");
-  check_acl(aclrtMemcpy(out.data(), kBytes, out_dev, kBytes, ACL_MEMCPY_DEVICE_TO_HOST), "copy out");
+  check_acl(aclrtMemcpy(out.data(), kBytes, out_dev, kBytes,
+                        ACL_MEMCPY_DEVICE_TO_HOST),
+            "copy out");
 
   size_t errors = 0;
   for (uint16_t v : out) errors += (v != kHalfThree);

@@ -42,7 +42,9 @@ def run_add(device: str, n: int) -> None:
     block_dim = vector_core_count(device)
     stream = stream_ptr()
     run_repeated(
-        lambda: lib.call_add(block_dim, stream, tensor_ptr(y), tensor_ptr(x), tensor_ptr(z), n)
+        lambda: lib.call_add(
+            block_dim, stream, tensor_ptr(y), tensor_ptr(x), tensor_ptr(z), n
+        )
     )
     assert_close(y, x + z)
     print(f"PASS add n={n} block_dim={block_dim}")
@@ -69,7 +71,9 @@ def run_matmul(device: str, m: int) -> None:
     block_dim = min(cube_core_count(device), max(1, m // 128))
     stream = stream_ptr()
     run_repeated(
-        lambda: lib.call_matmul(block_dim, stream, tensor_ptr(a), tensor_ptr(b), tensor_ptr(c), m)
+        lambda: lib.call_matmul(
+            block_dim, stream, tensor_ptr(a), tensor_ptr(b), tensor_ptr(c), m
+        )
     )
     assert_close(c, torch.matmul(a, b))
     print(f"PASS simple_matmul m={m} block_dim={block_dim}")

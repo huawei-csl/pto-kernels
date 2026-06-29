@@ -14,7 +14,12 @@ HERE = Path(__file__).resolve().parent
 BUILD = HERE / "build"
 
 sys.path.insert(0, str(HERE.parents[1]))
-from pto_demo_utils import assert_close, configure_torch_npu, run_repeated, stream_as_int  # noqa: E402
+from pto_demo_utils import (
+    assert_close,
+    configure_torch_npu,
+    run_repeated,
+    stream_as_int,
+)  # noqa: E402
 
 
 def build_kernel() -> Path:

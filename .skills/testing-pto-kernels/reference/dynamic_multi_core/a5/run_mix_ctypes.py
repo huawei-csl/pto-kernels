@@ -15,7 +15,14 @@ HERE = Path(__file__).resolve().parent
 TILE = 128
 
 sys.path.insert(0, str(HERE.parents[1]))
-from pto_demo_utils import assert_close, compile_kernel, configure_torch_npu, run_repeated, stream_ptr, tensor_ptr  # noqa: E402
+from pto_demo_utils import (
+    assert_close,
+    compile_kernel,
+    configure_torch_npu,
+    run_repeated,
+    stream_ptr,
+    tensor_ptr,
+)  # noqa: E402
 
 
 def npu_from_cpu(arr: np.ndarray, device: str) -> torch.Tensor:
@@ -50,7 +57,15 @@ def run_c2v(lib, device: str, block_dim: int, rounds: int) -> None:
     d = npu_from_cpu(d_cpu, device)
     c = npu_from_cpu(np.zeros((batch, TILE), dtype=np.float32), device)
     run_repeated(
-        lambda: lib.cv_matmul_add_c2v(block_dim, tensor_ptr(a), tensor_ptr(b), tensor_ptr(c), tensor_ptr(d), batch, stream_ptr())
+        lambda: lib.cv_matmul_add_c2v(
+            block_dim,
+            tensor_ptr(a),
+            tensor_ptr(b),
+            tensor_ptr(c),
+            tensor_ptr(d),
+            batch,
+            stream_ptr(),
+        )
     )
     ref = torch.from_numpy(a_cpu.astype(np.float32) @ b_cpu.astype(np.float32) + d_cpu)
     assert_close(c.cpu(), ref)
@@ -68,16 +83,30 @@ def run_v2c(lib, device: str, block_dim: int, rounds: int) -> None:
     d = npu_from_cpu(d_cpu, device)
     c = npu_from_cpu(np.zeros((batch, TILE), dtype=np.float16), device)
     run_repeated(
-        lambda: lib.cv_add_matmul_v2c(block_dim, tensor_ptr(a), tensor_ptr(b), tensor_ptr(c), tensor_ptr(d), batch, stream_ptr())
+        lambda: lib.cv_add_matmul_v2c(
+            block_dim,
+            tensor_ptr(a),
+            tensor_ptr(b),
+            tensor_ptr(c),
+            tensor_ptr(d),
+            batch,
+            stream_ptr(),
+        )
     )
-    ref = torch.from_numpy(((a_cpu + b_cpu).astype(np.float32) @ d_cpu.astype(np.float32)).astype(np.float16))
+    ref = torch.from_numpy(
+        ((a_cpu + b_cpu).astype(np.float32) @ d_cpu.astype(np.float32)).astype(
+            np.float16
+        )
+    )
     assert_close(c.cpu(), ref)
     print(f"PASS A5 add_matmul_v2c rounds={rounds} batch={batch} block_dim={block_dim}")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--kernel", choices=("matmul_add", "add_matmul", "all"), default="all")
+    parser.add_argument(
+        "--kernel", choices=("matmul_add", "add_matmul", "all"), default="all"
+    )
     parser.add_argument("--device", default=os.environ.get("NPU_DEVICE", "npu:0"))
     parser.add_argument("--block-dim", type=int, default=8)
     parser.add_argument("--rounds", type=int, default=1)

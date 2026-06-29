@@ -38,9 +38,9 @@ AICORE void run_add(__gm__ T *y, __gm__ T *x, __gm__ T *z, uint32_t n) {
   TASSIGN(y_t, Y_UB);
 
   for (uint32_t done = 0; done < remaining_core; done += ELEMS_PER_TILE) {
-    const uint32_t cols =
-        (remaining_core - done > ELEMS_PER_TILE) ? ELEMS_PER_TILE
-                                                 : (remaining_core - done);
+    const uint32_t cols = (remaining_core - done > ELEMS_PER_TILE)
+                              ? ELEMS_PER_TILE
+                              : (remaining_core - done);
     VecTile x_cur(1, cols), z_cur(1, cols), y_cur(1, cols);
     TASSIGN(x_cur, X_UB);
     TASSIGN(z_cur, Z_UB);

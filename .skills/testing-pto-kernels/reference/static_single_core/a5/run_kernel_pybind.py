@@ -15,7 +15,12 @@ HERE = Path(__file__).resolve().parent
 BUILD = HERE / "build"
 
 sys.path.insert(0, str(HERE.parents[1]))
-from pto_demo_utils import assert_close, configure_torch_npu, run_repeated, stream_as_int  # noqa: E402
+from pto_demo_utils import (
+    assert_close,
+    configure_torch_npu,
+    run_repeated,
+    stream_as_int,
+)  # noqa: E402
 
 
 def build_kernel(name: str) -> Path:
@@ -79,7 +84,10 @@ def main() -> None:
         run_repeated(lambda: pkg.matmul(mat_out, a, b, stream))
     else:
         run_repeated(lambda: mod.launch_static_matmul(mat_out, a, b, stream))
-    assert_close(mat_out.cpu(), torch.from_numpy(a_cpu.astype(np.float32) @ b_cpu.astype(np.float32)))
+    assert_close(
+        mat_out.cpu(),
+        torch.from_numpy(a_cpu.astype(np.float32) @ b_cpu.astype(np.float32)),
+    )
     print("PASS static_single_core/a5 pybind matmul")
 
 

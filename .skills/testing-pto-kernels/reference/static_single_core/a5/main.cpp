@@ -1,4 +1,5 @@
 #include <acl/acl.h>
+
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
@@ -35,16 +36,25 @@ int main() {
   void *x_dev = nullptr;
   void *z_dev = nullptr;
   void *out_dev = nullptr;
-  check_acl(aclrtMalloc(&x_dev, kBytes, ACL_MEM_MALLOC_HUGE_FIRST), "aclrtMalloc x");
-  check_acl(aclrtMalloc(&z_dev, kBytes, ACL_MEM_MALLOC_HUGE_FIRST), "aclrtMalloc z");
-  check_acl(aclrtMalloc(&out_dev, kBytes, ACL_MEM_MALLOC_HUGE_FIRST), "aclrtMalloc out");
-  check_acl(aclrtMemcpy(x_dev, kBytes, x.data(), kBytes, ACL_MEMCPY_HOST_TO_DEVICE), "copy x");
-  check_acl(aclrtMemcpy(z_dev, kBytes, z.data(), kBytes, ACL_MEMCPY_HOST_TO_DEVICE), "copy z");
+  check_acl(aclrtMalloc(&x_dev, kBytes, ACL_MEM_MALLOC_HUGE_FIRST),
+            "aclrtMalloc x");
+  check_acl(aclrtMalloc(&z_dev, kBytes, ACL_MEM_MALLOC_HUGE_FIRST),
+            "aclrtMalloc z");
+  check_acl(aclrtMalloc(&out_dev, kBytes, ACL_MEM_MALLOC_HUGE_FIRST),
+            "aclrtMalloc out");
+  check_acl(
+      aclrtMemcpy(x_dev, kBytes, x.data(), kBytes, ACL_MEMCPY_HOST_TO_DEVICE),
+      "copy x");
+  check_acl(
+      aclrtMemcpy(z_dev, kBytes, z.data(), kBytes, ACL_MEMCPY_HOST_TO_DEVICE),
+      "copy z");
 
-  call_static_add(1, stream, static_cast<uint8_t *>(out_dev), static_cast<uint8_t *>(x_dev),
-                  static_cast<uint8_t *>(z_dev));
+  call_static_add(1, stream, static_cast<uint8_t *>(out_dev),
+                  static_cast<uint8_t *>(x_dev), static_cast<uint8_t *>(z_dev));
   check_acl(aclrtSynchronizeStream(stream), "aclrtSynchronizeStream");
-  check_acl(aclrtMemcpy(out.data(), kBytes, out_dev, kBytes, ACL_MEMCPY_DEVICE_TO_HOST), "copy out");
+  check_acl(aclrtMemcpy(out.data(), kBytes, out_dev, kBytes,
+                        ACL_MEMCPY_DEVICE_TO_HOST),
+            "copy out");
 
   size_t errors = 0;
   for (uint16_t v : out) {
@@ -59,7 +69,8 @@ int main() {
   aclFinalize();
 
   if (errors != 0) {
-    std::cerr << "FAIL static A5 ACL/runtime_camodel add errors=" << errors << "\n";
+    std::cerr << "FAIL static A5 ACL/runtime_camodel add errors=" << errors
+              << "\n";
     return 1;
   }
   std::cout << "PASS static_single_core/a5 ACL runtime_camodel add\n";

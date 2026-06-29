@@ -24,7 +24,10 @@ RTOL_BY_DTYPE: dict[torch.dtype, float] = {
 DEFAULT_ATOL = 1e-5
 DEFAULT_SYNC_TIMEOUT_S = float(os.environ.get("PTO_SYNC_TIMEOUT_S", "60"))
 DEFAULT_PROCESS_TIMEOUT_S = float(
-    os.environ.get("PTO_PROCESS_TIMEOUT_S", "1800" if os.environ.get("PTO_SIMULATOR") == "1" else "60")
+    os.environ.get(
+        "PTO_PROCESS_TIMEOUT_S",
+        "1800" if os.environ.get("PTO_SIMULATOR") == "1" else "60",
+    )
 )
 
 
@@ -61,7 +64,9 @@ def compile_kernel(compile_sh: Path, kernel: str) -> Path:
 
 def cube_core_count(device: str) -> int:
     props = torch.npu.get_device_properties(device)
-    return int(getattr(props, "cube_core_num", getattr(props, "multi_processor_count", 1)))
+    return int(
+        getattr(props, "cube_core_num", getattr(props, "multi_processor_count", 1))
+    )
 
 
 def vector_core_count(device: str) -> int:

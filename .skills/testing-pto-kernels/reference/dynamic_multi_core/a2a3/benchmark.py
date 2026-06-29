@@ -60,7 +60,11 @@ def event_bench(
     repeats: int,
     flush_cache: bool,
 ) -> list[float]:
-    cache = torch.empty((256 * 1024 * 1024,), dtype=torch.int8, device="npu") if flush_cache else None
+    cache = (
+        torch.empty((256 * 1024 * 1024,), dtype=torch.int8, device="npu")
+        if flush_cache
+        else None
+    )
     for _ in range(warmup):
         fn()
     torch.npu.synchronize()
@@ -96,13 +100,22 @@ def bench_add(args, device: str, block_dim: int) -> list[dict]:
         y = torch.empty_like(x)
         # Do not spread tiny vectors across all physical cores: inactive blocks can
         # still issue with invalid tiny tile sizes on this sample kernel.
-        active_blocks = min(block_dim, max(1, (n + ADD_TILE_ELEMS - 1) // ADD_TILE_ELEMS))
+        active_blocks = min(
+            block_dim, max(1, (n + ADD_TILE_ELEMS - 1) // ADD_TILE_ELEMS)
+        )
         stream = stream_ptr()
 
         def launch() -> None:
-            lib.call_add(active_blocks, stream, tensor_ptr(y), tensor_ptr(x), tensor_ptr(z), n)
+            lib.call_add(
+                active_blocks, stream, tensor_ptr(y), tensor_ptr(x), tensor_ptr(z), n
+            )
 
-        samples = event_bench(launch, warmup=args.warmup, repeats=args.repeats, flush_cache=args.flush_cache)
+        samples = event_bench(
+            launch,
+            warmup=args.warmup,
+            repeats=args.repeats,
+            flush_cache=args.flush_cache,
+        )
         median, mean, stdev = summarize(samples)
         bytes_moved = n * 3 * 2
         rows.append(
@@ -133,9 +146,16 @@ def bench_matmul(args, device: str, max_block_dim: int) -> list[dict]:
         stream = stream_ptr()
 
         def launch() -> None:
-            lib.call_matmul(block_dim, stream, tensor_ptr(a), tensor_ptr(b), tensor_ptr(c), m)
+            lib.call_matmul(
+                block_dim, stream, tensor_ptr(a), tensor_ptr(b), tensor_ptr(c), m
+            )
 
-        samples = event_bench(launch, warmup=args.warmup, repeats=args.repeats, flush_cache=args.flush_cache)
+        samples = event_bench(
+            launch,
+            warmup=args.warmup,
+            repeats=args.repeats,
+            flush_cache=args.flush_cache,
+        )
         median, mean, stdev = summarize(samples)
         flops = 2 * m * 128 * 128
         bytes_moved = (m * 128 + 128 * 128 + m * 128) * 2
@@ -190,12 +210,16 @@ def write_csv(rows: list[dict], path: Path) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Benchmark local A2A3 PTO demo kernels")
+    parser = argparse.ArgumentParser(
+        description="Benchmark local A2A3 PTO demo kernels"
+    )
     parser.add_argument("--device", default=os.environ.get("NPU_DEVICE", "npu:0"))
     parser.add_argument("--kernel", choices=("add", "matmul", "all"), default="all")
     parser.add_argument("--warmup", type=int, default=5)
     parser.add_argument("--repeats", type=int, default=20)
-    parser.add_argument("--add-sizes", type=int, nargs="*", default=[4096, 65536, 1048576])
+    parser.add_argument(
+        "--add-sizes", type=int, nargs="*", default=[4096, 65536, 1048576]
+    )
     parser.add_argument("--matmul-m", type=int, nargs="*", default=[128, 1024, 4096])
     parser.add_argument("--flush-cache", action="store_true")
     parser.add_argument("--csv", type=Path, default=None)

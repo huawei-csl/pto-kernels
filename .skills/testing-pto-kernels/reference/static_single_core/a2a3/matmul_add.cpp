@@ -1,30 +1,34 @@
-#include <pto/pto-inst.hpp>
 #include <runtime/rt_ffts.h>
+
+#include <pto/pto-inst.hpp>
 
 using namespace pto;
 
-// Minimal static mix kernel: one Cube block computes A@B into GM workspace, then
-// two Vector subblocks add D and store C. Shape is fixed to 128x128.
+// Minimal static mix kernel: one Cube block computes A@B into GM workspace,
+// then two Vector subblocks add D and store C. Shape is fixed to 128x128.
 constexpr int TILE = 128;
 constexpr int HALF = 64;
 constexpr int VEC_NUM = 2;
 constexpr int FLAG_C2V = 6;
 
 #ifdef __CCE_AICORE__
-using Global = GlobalTensor<half, TileShape2D<half, TILE, TILE, Layout::ND>,
-                            BaseShape2D<half, TILE, TILE, Layout::ND>, Layout::ND>;
-using HalfGlobal = GlobalTensor<half, TileShape2D<half, HALF, TILE, Layout::ND>,
-                                BaseShape2D<half, HALF, TILE, Layout::ND>, Layout::ND>;
-using MatTile = Tile<TileType::Mat, half, TILE, TILE, BLayout::ColMajor, TILE, TILE,
-                     SLayout::RowMajor, 512>;
+using Global =
+    GlobalTensor<half, TileShape2D<half, TILE, TILE, Layout::ND>,
+                 BaseShape2D<half, TILE, TILE, Layout::ND>, Layout::ND>;
+using HalfGlobal =
+    GlobalTensor<half, TileShape2D<half, HALF, TILE, Layout::ND>,
+                 BaseShape2D<half, HALF, TILE, Layout::ND>, Layout::ND>;
+using MatTile = Tile<TileType::Mat, half, TILE, TILE, BLayout::ColMajor, TILE,
+                     TILE, SLayout::RowMajor, 512>;
 using Left = TileLeft<half, TILE, TILE>;
 using Right = TileRight<half, TILE, TILE>;
 using Acc = TileAcc<float, TILE, TILE>;
-using Vec = Tile<TileType::Vec, half, HALF, TILE, BLayout::RowMajor, HALF, TILE>;
+using Vec =
+    Tile<TileType::Vec, half, HALF, TILE, BLayout::RowMajor, HALF, TILE>;
 
 template <pipe_t Pipe>
 inline AICORE void Signal(int32_t flag) {
-    ffts_cross_core_sync(Pipe, 1 | (VEC_NUM << 4) | (flag << 8));
+  ffts_cross_core_sync(Pipe, 1 | (VEC_NUM << 4) | (flag << 8));
 }
 template <pipe_t Src, pipe_t Dst>
 inline AICORE void Sync(uint32_t id) {
@@ -33,8 +37,9 @@ inline AICORE void Sync(uint32_t id) {
 }
 #endif
 
-__global__ AICORE void static_matmul_add(__gm__ half *a, __gm__ half *b, __gm__ half *c,
-                                         __gm__ half *d, __gm__ half *workspace,
+__global__ AICORE void static_matmul_add(__gm__ half *a, __gm__ half *b,
+                                         __gm__ half *c, __gm__ half *d,
+                                         __gm__ half *workspace,
                                          uint64_t ffts_addr) {
 #ifdef __CCE_AICORE__
   const int vid = get_subblockid();
@@ -70,7 +75,8 @@ __global__ AICORE void static_matmul_add(__gm__ half *a, __gm__ half *b, __gm__ 
   TASSIGN(d_t, HALF * TILE * sizeof(half));
   wait_flag_dev(FLAG_C2V);
   const int row = vid * HALF;
-  HalfGlobal ws_g(workspace + row * TILE), d_g(d + row * TILE), c_g(c + row * TILE);
+  HalfGlobal ws_g(workspace + row * TILE), d_g(d + row * TILE),
+      c_g(c + row * TILE);
   TLOAD(ws_t, ws_g);
   TLOAD(d_t, d_g);
   pipe_barrier(PIPE_ALL);
@@ -83,13 +89,14 @@ __global__ AICORE void static_matmul_add(__gm__ half *a, __gm__ half *b, __gm__ 
 }
 
 extern "C" void call(uint32_t block_dim, void *stream, uint8_t *a, uint8_t *b,
-                     uint8_t *c, uint8_t *d, uint8_t *workspace, int64_t batch) {
+                     uint8_t *c, uint8_t *d, uint8_t *workspace,
+                     int64_t batch) {
   (void)block_dim;
   (void)batch;
   uint32_t ffts_len = 0;
   uint64_t ffts_addr = 0;
   rtGetC2cCtrlAddr(&ffts_addr, &ffts_len);
-  static_matmul_add<<<1, nullptr, stream>>>((__gm__ half *)a, (__gm__ half *)b,
-                                            (__gm__ half *)c, (__gm__ half *)d,
-                                            (__gm__ half *)workspace, ffts_addr);
+  static_matmul_add<<<1, nullptr, stream>>>(
+      (__gm__ half *)a, (__gm__ half *)b, (__gm__ half *)c, (__gm__ half *)d,
+      (__gm__ half *)workspace, ffts_addr);
 }

@@ -1,6 +1,6 @@
 # Verification Log
 
-Latest full reproduction: **2026-06-10** — see [`../reproduction-report-2026-06-10.md`](../reproduction-report-2026-06-10.md).  
+Latest full reproduction: **2026-06-10** — see [`../reproduction-report-2026-06-10.md`](../reproduction-report-2026-06-10.md).
 Quick re-smoke: `cd reference && NPU_DEVICE=npu:0 ./reproduce.sh`
 
 ---
@@ -430,4 +430,3 @@ The local pybind verification is covered by `A2A3 Dynamic pybind/CMake` above. I
 ## Not Verified In This Task
 
 - ACLgraph launch, vLLM/SGLang inference integration, TorchTitan/autograd integration.
-

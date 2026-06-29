@@ -14,7 +14,15 @@ HERE = Path(__file__).resolve().parent
 TILE = 128
 
 sys.path.insert(0, str(HERE.parents[1]))
-from pto_demo_utils import assert_close, compile_kernel, configure_torch_npu, cube_core_count, run_repeated, stream_ptr, tensor_ptr  # noqa: E402
+from pto_demo_utils import (
+    assert_close,
+    compile_kernel,
+    configure_torch_npu,
+    cube_core_count,
+    run_repeated,
+    stream_ptr,
+    tensor_ptr,
+)  # noqa: E402
 
 
 def load(kind: str):
@@ -48,7 +56,14 @@ def run_c2v(device: str, rounds: int) -> None:
     ws = workspace(block_dim, device)
     run_repeated(
         lambda: load("matmul_add").call(
-            block_dim, stream_ptr(), tensor_ptr(a), tensor_ptr(b), tensor_ptr(c), tensor_ptr(d), tensor_ptr(ws), batch
+            block_dim,
+            stream_ptr(),
+            tensor_ptr(a),
+            tensor_ptr(b),
+            tensor_ptr(c),
+            tensor_ptr(d),
+            tensor_ptr(ws),
+            batch,
         )
     )
     assert_close(c, (a @ b + d).to(torch.float16))
@@ -66,7 +81,14 @@ def run_v2c(device: str, rounds: int) -> None:
     ws = workspace(block_dim, device)
     run_repeated(
         lambda: load("add_matmul").call(
-            block_dim, stream_ptr(), tensor_ptr(a), tensor_ptr(b), tensor_ptr(c), tensor_ptr(d), tensor_ptr(ws), batch
+            block_dim,
+            stream_ptr(),
+            tensor_ptr(a),
+            tensor_ptr(b),
+            tensor_ptr(c),
+            tensor_ptr(d),
+            tensor_ptr(ws),
+            batch,
         )
     )
     assert_close(c, ((a + b) @ d).to(torch.float16))
@@ -75,7 +97,9 @@ def run_v2c(device: str, rounds: int) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--kernel", choices=("matmul_add", "add_matmul", "all"), default="all")
+    parser.add_argument(
+        "--kernel", choices=("matmul_add", "add_matmul", "all"), default="all"
+    )
     parser.add_argument("--rounds", type=int, default=1)
     parser.add_argument("--device", default=os.environ.get("NPU_DEVICE", "npu:0"))
     args = parser.parse_args()

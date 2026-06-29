@@ -19,7 +19,8 @@ __global__ AICORE void static_add_kernel(__gm__ half *out, __gm__ half *x,
   Global z_g(z, pto::Shape(1, 1, 1, 1, ELEMS),
              pto::Stride(ELEMS, ELEMS, ELEMS, ELEMS, 1));
 
-  using VecTile = Tile<TileType::Vec, half, 1, ELEMS, BLayout::RowMajor, -1, -1>;
+  using VecTile =
+      Tile<TileType::Vec, half, 1, ELEMS, BLayout::RowMajor, -1, -1>;
   VecTile x_t(1, ELEMS), z_t(1, ELEMS), out_t(1, ELEMS);
   TASSIGN(x_t, 0x0);
   TASSIGN(z_t, 0x8000);
@@ -40,6 +41,6 @@ __global__ AICORE void static_add_kernel(__gm__ half *out, __gm__ half *x,
 extern "C" void call_static_add(uint32_t block_dim, void *stream, uint8_t *out,
                                 uint8_t *x, uint8_t *z) {
   (void)block_dim;
-  static_add_kernel<<<1, nullptr, stream>>>((__gm__ half *)out, (__gm__ half *)x,
-                                            (__gm__ half *)z);
+  static_add_kernel<<<1, nullptr, stream>>>((__gm__ half *)out,
+                                            (__gm__ half *)x, (__gm__ half *)z);
 }

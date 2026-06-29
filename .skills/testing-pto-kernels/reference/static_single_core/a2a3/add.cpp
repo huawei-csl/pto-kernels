@@ -15,7 +15,8 @@ __global__ AICORE void static_add_kernel(__gm__ half *out, __gm__ half *x,
   using Shape5 = Shape<1, 1, 1, 1, ELEMS>;
   using Stride5 = Stride<1, 1, 1, 1, 1>;
   using Global = GlobalTensor<half, Shape5, Stride5>;
-  using VecTile = Tile<TileType::Vec, half, 1, ELEMS, BLayout::RowMajor, -1, -1>;
+  using VecTile =
+      Tile<TileType::Vec, half, 1, ELEMS, BLayout::RowMajor, -1, -1>;
 
   Global out_g(out);
   Global x_g(x);
@@ -40,6 +41,6 @@ __global__ AICORE void static_add_kernel(__gm__ half *out, __gm__ half *x,
 extern "C" void call_static_add(uint32_t block_dim, void *stream, uint8_t *out,
                                 uint8_t *x, uint8_t *z) {
   (void)block_dim;
-  static_add_kernel<<<1, nullptr, stream>>>((__gm__ half *)out, (__gm__ half *)x,
-                                            (__gm__ half *)z);
+  static_add_kernel<<<1, nullptr, stream>>>((__gm__ half *)out,
+                                            (__gm__ half *)x, (__gm__ half *)z);
 }

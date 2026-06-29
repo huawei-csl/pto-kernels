@@ -99,8 +99,10 @@ AICORE void run_simple_matmul(__gm__ half *a, __gm__ half *b, __gm__ half *c,
 
 #endif
 
-extern "C" __global__ AICORE void simple_matmul_kernel(
-    __gm__ void *a, __gm__ void *b, __gm__ void *c, uint32_t m) {
+extern "C" __global__ AICORE void simple_matmul_kernel(__gm__ void *a,
+                                                       __gm__ void *b,
+                                                       __gm__ void *c,
+                                                       uint32_t m) {
 #if defined(__CHECK_FEATURE_AT_PRECOMPILE) || \
     (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))
   run_simple_matmul((__gm__ half *)a, (__gm__ half *)b, (__gm__ half *)c, m);

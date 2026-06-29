@@ -5,10 +5,11 @@ using namespace pto;
 constexpr int TILE = 128;
 
 #if defined(__CCE_AICORE__)
-using Global = GlobalTensor<half, TileShape2D<half, TILE, TILE, Layout::ND>,
-                            BaseShape2D<half, TILE, TILE, Layout::ND>, Layout::ND>;
-using L1Tile = Tile<TileType::Mat, half, TILE, TILE, BLayout::ColMajor, TILE, TILE,
-                    SLayout::RowMajor, 512>;
+using Global =
+    GlobalTensor<half, TileShape2D<half, TILE, TILE, Layout::ND>,
+                 BaseShape2D<half, TILE, TILE, Layout::ND>, Layout::ND>;
+using L1Tile = Tile<TileType::Mat, half, TILE, TILE, BLayout::ColMajor, TILE,
+                    TILE, SLayout::RowMajor, 512>;
 using Left = TileLeft<half, TILE, TILE>;
 using Right = TileRight<half, TILE, TILE>;
 using Acc = TileAcc<float, TILE, TILE>;
@@ -51,6 +52,6 @@ extern "C" void call_matmul(uint32_t block_dim, void *stream, uint8_t *a,
                             uint8_t *b, uint8_t *c, uint32_t m) {
   (void)block_dim;
   (void)m;
-  static_matmul_kernel<<<1, nullptr, stream>>>((__gm__ half *)a, (__gm__ half *)b,
-                                               (__gm__ half *)c);
+  static_matmul_kernel<<<1, nullptr, stream>>>(
+      (__gm__ half *)a, (__gm__ half *)b, (__gm__ half *)c);
 }
