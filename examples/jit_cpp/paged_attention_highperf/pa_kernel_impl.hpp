@@ -778,7 +778,6 @@ AICORE inline void RunPtoPagedAttentionVecPipelineSplitKV(
   }
 
   const bool activeSubBlock = subBlockId < 2;
-  const bool combineSubBlock = subBlockId == 0;
   const int32_t formerHeadSplit =
       ctx.formerHeadSplit > 0 ? ctx.formerHeadSplit : 1;
   const int32_t maxHeadGroups = (formerHeadSplit + kHeadGroup - 1) / kHeadGroup;
@@ -1132,15 +1131,16 @@ AICORE inline void RunPtoPagedAttentionVecPipelineSplitKV(
   ffts_cross_core_sync(PIPE_MTE3,
                        PtoPaGetFftsMsg(0x0, PTO_PA_REDUCE_READY_DECODER));
   wait_flag_dev(PTO_PA_REDUCE_READY_DECODER);
-  if (!combineSubBlock) {
+  if (!activeSubBlock) {
     pipe_barrier(PIPE_ALL);
     return;
   }
   const int32_t effectiveBatch =
       ctx.decoderBatch > 0 ? ctx.decoderBatch : ctx.batch;
   const int64_t totalRows = static_cast<int64_t>(effectiveBatch) * ctx.numHeads;
-  const int64_t combineWorkerIdx = workerIdx;
-  const int64_t combineWorkerNum = workerNum;
+  const int64_t combineWorkerIdx =
+      workerIdx * 2 + static_cast<int64_t>(subBlockId);
+  const int64_t combineWorkerNum = workerNum * 2;
   for (int64_t row = combineWorkerIdx; row < totalRows;
        row += combineWorkerNum) {
     const int32_t head = static_cast<int32_t>(row % ctx.numHeads);
