@@ -64,6 +64,12 @@ at::Tensor run_kda_chunk_o(const at::Tensor& Q, const at::Tensor& K,
               "kda_chunk_o: G must be fp32, got ", G.scalar_type());
   TORCH_CHECK(Mask.scalar_type() == at::kFloat,
               "kda_chunk_o: Mask must be fp32, got ", Mask.scalar_type());
+  TORCH_CHECK(Q.is_contiguous(), "kda_chunk_o: Q must be contiguous");
+  TORCH_CHECK(K.is_contiguous(), "kda_chunk_o: K must be contiguous");
+  TORCH_CHECK(V_corr.is_contiguous(), "kda_chunk_o: V_corr must be contiguous");
+  TORCH_CHECK(S.is_contiguous(), "kda_chunk_o: S must be contiguous");
+  TORCH_CHECK(G.is_contiguous(), "kda_chunk_o: G must be contiguous");
+  TORCH_CHECK(Mask.is_contiguous(), "kda_chunk_o: Mask must be contiguous");
   TORCH_CHECK(Q.dim() == 3, "kda_chunk_o: Q must be 3D [HV, total_tokens, D]");
   TORCH_CHECK(K.dim() == 3, "kda_chunk_o: K must be 3D [HV, total_tokens, D]");
   TORCH_CHECK(V_corr.dim() == 3,
@@ -72,7 +78,8 @@ at::Tensor run_kda_chunk_o(const at::Tensor& Q, const at::Tensor& K,
               "kda_chunk_o: S must be 4D [total_chunks, HV, D, D]");
   TORCH_CHECK(G.dim() == 3, "kda_chunk_o: G must be 3D [HV, total_tokens, D]");
   TORCH_CHECK(Mask.dim() == 2, "kda_chunk_o: Mask must be 2D [C, C]");
-
+  TORCH_CHECK(Mask.size(0) == Mask.size(1),
+              "kda_chunk_o: Mask must be square [C, C], got ", Mask.sizes());
   const int64_t HV = Q.size(0);
   const int64_t total_tokens = Q.size(1);
   const int64_t D = Q.size(2);
