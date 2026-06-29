@@ -5,7 +5,7 @@ import os
 from dataclasses import dataclass
 
 import torch
-import torch_npu
+import torch_npu  # noqa: F401  # pylint: disable=unused-import
 
 from jit_util_pa import jit_compile_paged_attention
 from pa_tiling import make_pa_nd_decode_tiling, workspace_sizes

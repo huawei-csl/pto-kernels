@@ -266,6 +266,7 @@ def _split_core_bns_nd(
     )
 
 
+# pylint: disable-next=too-many-positional-arguments
 def make_pa_nd_decode_tiling(  # noqa: PLR0913, PLR0915
     batch: int,
     kv_seq_lens: list[int],
@@ -340,14 +341,15 @@ def make_pa_nd_decode_tiling(  # noqa: PLR0913, PLR0915
             is_long_seq,
         )
 
-    if (
+    supports_head_move = (
         head_dim % 16 == 0
         and head_dim <= EMBEDDING_LIMIT
         and head_dim_v % 16 == 0
         and head_dim_v <= EMBEDDING_LIMIT
         and kv_real == num_heads
         and not is_quant
-    ):
+    )
+    if supports_head_move:
         head_num_move = 2
     else:
         head_num_move = 1

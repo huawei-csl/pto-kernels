@@ -86,6 +86,7 @@ def load_paged_attention_lib(lib_path: str, check_type: bool = True):
         lib.call_kernel.restype = None
 
     workspace = {}
+    # pylint: disable-next=protected-access
     default_stream_ptr = torch.npu.current_stream()._as_parameter_
 
     def _alloc(device, workspace_sizes, tiling):

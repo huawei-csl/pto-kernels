@@ -187,7 +187,7 @@ def main():
         "jit_tflops_normalized",
         "jit_bandwidth_tb_s",
     ]
-    with open(args.csv, "w", newline="") as f:
+    with open(args.csv, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
