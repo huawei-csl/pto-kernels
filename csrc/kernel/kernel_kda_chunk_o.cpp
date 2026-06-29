@@ -194,8 +194,6 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
 #if defined(__DAV_CUBE__)
   TileMatL1<float, C, K_DIM, C, K_DIM> q_l1;
   TASSIGN(q_l1, 0);
-  TileMatL1<float, C, K_DIM, C, K_DIM> k_l1;
-  TASSIGN(k_l1, C * K_DIM * sizeof(float));
   TileMatL1<float, K_DIM, V_DIM, K_DIM, V_DIM> s_l1;
   TASSIGN(s_l1, (C * K_DIM + C * K_DIM) * sizeof(float));
   TileMatL1<float, C, C, C, C> qkm_l1;
@@ -203,12 +201,11 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
   TileMatL1<float, C, V_DIM, C, V_DIM> v_l1;
   TASSIGN(v_l1, (C * K_DIM + C * K_DIM + KV + C * C) * sizeof(float));
 
-  TileAcc<float, C, C, C, C> qk_l0;
-  TASSIGN(qk_l0, 0);
-  TileAcc<float, C, V_DIM, C, V_DIM> qs_l0;
-  TASSIGN(qs_l0, C * C * sizeof(float));
   TileAcc<float, C, V_DIM, C, V_DIM> qkv_l0;
   TASSIGN(qkv_l0, 0);
+  TileAcc<float, C, V_DIM, C, V_DIM> qs_l0;
+  TASSIGN(qs_l0, C * C * sizeof(float));
+
 #endif
 
 #if defined(__DAV_VEC__)
