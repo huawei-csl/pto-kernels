@@ -18,6 +18,7 @@ for the full License text.
 #include "torch_gdn_chunk_o.h"
 #include "torch_gdn_scaled_dot_kkt.h"
 #include "torch_gdn_wy_fast.h"
+#include "torch_kda_wy.h"
 #include "torch_scan_ul1.h"
 #include "torch_simple_matmul.h"
 #include "torch_swiglu.h"
@@ -81,4 +82,7 @@ PYBIND11_MODULE(pto_kernels_ops, m) {
         py::arg("V"), py::arg("Beta"), py::arg("G"), py::arg("A"),
         py::arg("batch_size"), py::arg("seq_len"),
         py::arg("cu_seqlens") = at::zeros({1}));
+  m.def("pto_kda_wy", &pto_isa_ops::run_kda_wy, py::arg("K"), py::arg("V"),
+        py::arg("G"), py::arg("Beta"), py::arg("INV"), py::arg("batch_size"),
+        py::arg("seq_len"), py::arg("cu_seqlens") = at::zeros({1}));
 }
