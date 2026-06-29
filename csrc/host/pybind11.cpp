@@ -11,13 +11,14 @@ for the full License text.
 
 #include "torch_abs.h"
 #include "torch_batch_matrix_square.h"
-#include "torch_chunk_cumsum.h"
 #include "torch_csr_gather.h"
+#include "torch_gdn_chunk_cumsum.h"
 #include "torch_gdn_chunk_h.h"
 #include "torch_gdn_chunk_o.h"
 #include "torch_gdn_scaled_dot_kkt.h"
 #include "torch_gdn_wy_fast.h"
 #include "torch_kda_gate_cumsum.h"
+#include "torch_kda_wy.h"
 #include "torch_scan_ul1.h"
 #include "torch_simple_matmul.h"
 #include "torch_swiglu.h"
@@ -48,8 +49,8 @@ PYBIND11_MODULE(pto_kernels_ops, m) {
         py::arg("W"), py::arg("U"), py::arg("G"),
         py::arg("cu_seqlens") = at::zeros({1}), py::arg("batch_size"),
         py::arg("seq_len"), py::arg("total_chunks"));
-  m.def("pto_chunk_cumsum", &pto_isa_ops::run_chunk_cumsum, py::arg("g"),
-        py::arg("batch_size"), py::arg("seq_len"),
+  m.def("pto_gdn_chunk_cumsum", &pto_isa_ops::run_gdn_chunk_cumsum,
+        py::arg("g"), py::arg("batch_size"), py::arg("seq_len"),
         py::arg("cu_seqlens") = at::zeros({1}));
   m.def("pto_kda_gate_cumsum", &pto_isa_ops::run_kda_gate_cumsum, py::arg("g"),
         py::arg("batch_size"), py::arg("seq_len"),
@@ -79,4 +80,7 @@ PYBIND11_MODULE(pto_kernels_ops, m) {
         py::arg("V"), py::arg("Beta"), py::arg("G"), py::arg("A"),
         py::arg("batch_size"), py::arg("seq_len"),
         py::arg("cu_seqlens") = at::zeros({1}));
+  m.def("pto_kda_wy", &pto_isa_ops::run_kda_wy, py::arg("K"), py::arg("V"),
+        py::arg("G"), py::arg("Beta"), py::arg("INV"), py::arg("batch_size"),
+        py::arg("seq_len"), py::arg("cu_seqlens") = at::zeros({1}));
 }

@@ -124,7 +124,7 @@ ascendc_library(
   SHARED
   csrc/kernel/kernel_tri_inv_col_sweep.cpp
   csrc/kernel/kernel_abs.cpp
-  csrc/kernel/kernel_chunk_cumsum.cpp
+  csrc/kernel/kernel_gdn_chunk_cumsum.cpp
   csrc/kernel/kernel_csr_gather.cpp
   csrc/kernel/kernel_gdn_chunk_h.cpp
   csrc/kernel/kernel_gdn_scaled_dot_kkt.cpp
@@ -137,6 +137,7 @@ ascendc_library(
   csrc/kernel/kernel_tri_inv_trick.cpp
   csrc/kernel/kernel_swiglu.cpp
   csrc/kernel/kernel_kda_gate_cumsum.cpp
+  csrc/kernel/kernel_kda_wy.cpp
   csrc/kernel/kernel_gdn_wy_fast.cpp)
 
 ascendc_include_directories(
