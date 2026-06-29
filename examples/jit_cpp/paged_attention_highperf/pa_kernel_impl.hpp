@@ -545,6 +545,7 @@ AICORE inline void RunPtoPagedAttentionCubePipelineSplitKV(
   const int64_t processRounds = (processNum + workerNum - 1) / workerNum;
   const int32_t stageTileCount =
       (ctx.kvSplitPerCore + kTileTokens - 1) / kTileTokens;
+  bool qkSlotNeedsFree[2] = {false, false};
   for (int64_t processRound = 0; processRound < processRounds; ++processRound) {
     const int64_t process = processRound * workerNum + workerIdx;
     bool validProcess = process < processNum;
@@ -621,6 +622,10 @@ AICORE inline void RunPtoPagedAttentionCubePipelineSplitKV(
         }
         const int32_t tile = tilePairBase + static_cast<int32_t>(stage);
         const uint8_t slot = static_cast<uint8_t>(stage);
+        if (qkSlotNeedsFree[slot]) {
+          wait_flag_dev(PtoPaSlotFlag(PTO_PA_RAW_PV_FREE, slot));
+          qkSlotNeedsFree[slot] = false;
+        }
         const bool activeTileStage = (stage == 0) ? activeTile0 : activeTile1;
         for (int32_t headGroup = 0; headGroup < maxHeadGroups; ++headGroup) {
           const int32_t groupHeadBase = headGroup * kHeadGroup;
@@ -746,11 +751,13 @@ AICORE inline void RunPtoPagedAttentionCubePipelineSplitKV(
         }
         DdrFenceBeforePtoAivReduce();
         PtoPaSignalFromCube(PtoPaSlotFlag(PTO_PA_RAW_PV_READY, slot));
+        qkSlotNeedsFree[slot] = true;
       }
-      wait_flag_dev(PtoPaSlotFlag(PTO_PA_RAW_PV_FREE, 0));
-      if (hasStage2) {
-        wait_flag_dev(PtoPaSlotFlag(PTO_PA_RAW_PV_FREE, 1));
-      }
+    }
+  }
+  for (uint8_t slot = 0; slot < 2; ++slot) {
+    if (qkSlotNeedsFree[slot]) {
+      wait_flag_dev(PtoPaSlotFlag(PTO_PA_RAW_PV_FREE, slot));
     }
   }
   pipe_barrier(PIPE_ALL);
