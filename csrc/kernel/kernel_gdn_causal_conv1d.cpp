@@ -93,11 +93,11 @@ template <typename TileT>
 AICORE inline void applySiluToTile(TileT& dst, TileT& src, TileT& scratch) {
   using ElemType = typename TileT::DType;
   TMULS(scratch, src, (ElemType)-1);
-  pipe_barrier(PIPE_V);
+  PipeBarrierVec();
   TEXP(scratch, scratch);
-  pipe_barrier(PIPE_V);
+  PipeBarrierVec();
   TADDS(scratch, scratch, (ElemType)1);
-  pipe_barrier(PIPE_V);
+  PipeBarrierVec();
   TDIV(dst, src, scratch);
 }
 
@@ -231,7 +231,7 @@ AICORE inline void processWorkUnit(
       set_flag(PIPE_MTE2, PIPE_V, inputBufferEvent[nextBufferIndex]);
     }
 
-    pipe_barrier(PIPE_V);
+    PipeBarrierVec();
 
     // scatter: this input row contributes to K output rows; form each
     // weight*input product (only for outputs in
@@ -254,7 +254,7 @@ AICORE inline void processWorkUnit(
         TMUL(productTile, inputTileFp32, weightTile);
       }
     }
-    pipe_barrier(PIPE_V);
+    PipeBarrierVec();
     if (inputRow != 0) {
       for (uint32_t tapIndex = 1; tapIndex < K; ++tapIndex) {
         const uint32_t outputRow = inputRow + (K - 1) - tapIndex;
@@ -267,7 +267,7 @@ AICORE inline void processWorkUnit(
         TADD(accumTile, accumTile, productTile);
       }
     }
-    pipe_barrier(PIPE_V);
+    PipeBarrierVec();
 
     if (inputRow < outputRowStart)
       continue;  // halo row: primed accumulators only
@@ -285,10 +285,10 @@ AICORE inline void processWorkUnit(
     TASSIGN(outputTile, ubOutputOffset[outputBufferIndex]);
 
     TADD(accumTile, accumTile, biasTile);
-    pipe_barrier(PIPE_V);
+    PipeBarrierVec();
     if (applyActivation) {
       applySiluToTile(accumTile, accumTile, siluScratchTile);
-      pipe_barrier(PIPE_V);
+      PipeBarrierVec();
     }
     wait_flag(PIPE_MTE3, PIPE_V, outputBufferEvent);
     TCVT(outputTile, accumTile, pto::RoundMode::CAST_NONE);

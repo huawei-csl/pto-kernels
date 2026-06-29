@@ -165,4 +165,14 @@ constexpr pto::BLayout GetOuterLayout(bool is_left) {
 #endif
 }
 
+/**
+ * @brief Pipe in-core barrier for vector core that is safe to use with A2A3 and
+ * A5. On A5, PipeBarrierVec() is a noop.
+ */
+AICORE inline void PipeBarrierVec() {
+#if __CCE_AICORE__ == 220
+  pipe_barrier(PIPE_V);
+#endif
+}
+
 }  // namespace kernel_utils
