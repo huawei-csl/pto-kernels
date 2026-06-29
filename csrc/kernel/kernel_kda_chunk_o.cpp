@@ -334,19 +334,7 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
   auto vid = get_subblockid();
   int32_t my_row_offset = static_cast<int32_t>(vid) * HalfC;
 
-  // Load this vid's HalfC rows of the causal mask once per launch.
-  {
-    TileUbDataND<float, HalfC, C, HalfC, C> mask_ub;
-    TASSIGN(mask_ub, MASK_UB_ADDR);
-    GmShape2D m_shape(HalfC, C);
-    GmStride2D m_stride(C);
-    GmTensor2D<float> m_global(
-        Mask_handle + static_cast<int64_t>(my_row_offset) * C, m_shape,
-        m_stride);
-    TLOAD(mask_ub, m_global);
-  }
-  set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
-  wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+  // NOTE: mask is read directly from GM in the Aqk loop below (per column).
 
   for (int64_t wi = 0; wi < (total_work + block_num - 1) / block_num; ++wi) {
     int64_t pid = wi * block_num + cid;
