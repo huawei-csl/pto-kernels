@@ -58,6 +58,11 @@ std::tuple<at::Tensor, at::Tensor> run_kda_chunk_h(
               U.scalar_type());
   TORCH_CHECK(G.scalar_type() == at::kFloat,
               "kda_chunk_h: G must be fp32, got ", G.scalar_type());
+  TORCH_CHECK(K.is_contiguous(), "kda_chunk_h: K must be contiguous");
+  TORCH_CHECK(W.is_contiguous(), "kda_chunk_h: W must be contiguous");
+  TORCH_CHECK(U.is_contiguous(), "kda_chunk_h: U must be contiguous");
+  TORCH_CHECK(G.is_contiguous(), "kda_chunk_h: G must be contiguous");
+  TORCH_CHECK(chunk_size > 0, "kda_chunk_h: chunk_size must be > 0");
   TORCH_CHECK(K.dim() == 3, "kda_chunk_h: K must be 3D [HV, total_tokens, D]");
   TORCH_CHECK(W.dim() == 3, "kda_chunk_h: W must be 3D [total_tokens, HV, D]");
   TORCH_CHECK(U.dim() == 3, "kda_chunk_h: U must be 3D [total_tokens, HV, D]");
