@@ -45,10 +45,8 @@ PYBIND11_MODULE(pto_kernels_ops, m) {
       pybind11::arg("device_id") = 0);
   m.def("pto_abs", &pto_isa_ops::run_abs);
   m.def("pto_gdn_causal_conv1d", &pto_isa_ops::run_gdn_causal_conv1d,
-        py::arg("x"), py::arg("weights"), py::arg("bias"));
-  m.def("pto_gdn_causal_conv1d_batched",
-        &pto_isa_ops::run_gdn_causal_conv1d_batched, py::arg("x"),
-        py::arg("weights"), py::arg("bias"), py::arg("activation") = true);
+        py::arg("x"), py::arg("weights"), py::arg("bias"),
+        py::arg("activation") = true);
   m.def("pto_chunk_h", &pto_isa_ops::run_gdn_chunk_h, py::arg("K"),
         py::arg("W"), py::arg("U"), py::arg("G"),
         py::arg("cu_seqlens") = at::zeros({1}), py::arg("batch_size"),

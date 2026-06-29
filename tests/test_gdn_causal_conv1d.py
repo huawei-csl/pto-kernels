@@ -16,7 +16,7 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-from pto_kernels import pto_gdn_causal_conv1d, pto_gdn_causal_conv1d_batched
+from pto_kernels import pto_gdn_causal_conv1d
 
 # Filter width K compiled into the wheel (matches CAUSAL_CONV_K default).
 K = 4
@@ -64,7 +64,7 @@ def test_batched_matches_reference(npu_device, dtype, activation, batch, seq, di
     w = torch.rand(K, dim, device=npu_device, dtype=torch.float32) - 0.5
     bias = torch.rand(dim, device=npu_device, dtype=torch.float32) - 0.5
 
-    y = pto_gdn_causal_conv1d_batched(x, w, bias, activation=activation)
+    y = pto_gdn_causal_conv1d(x, w, bias, activation=activation)
     torch.npu.synchronize()
 
     ref = gdn_causal_conv1d_ref(x, w, bias, activation)
@@ -72,9 +72,10 @@ def test_batched_matches_reference(npu_device, dtype, activation, batch, seq, di
     assert err <= TOL[dtype], f"max abs err {err:.3e} > tol {TOL[dtype]:.1e}"
 
 
+@pytest.mark.parametrize("dtype", DTYPES)
 @pytest.mark.parametrize("seq,dim", [(16, 256), (128, 2048), (512, 6144)])
-def test_single_fp16_entry_matches_reference(npu_device, seq, dim):
-    """The non-batched [L, W] fp16 entry (always applies SiLU)."""
+def test_2d_reshape_matches_reference(npu_device, seq, dim):
+    """2D input [L, W] is treated as batch=1 and output has the same rank."""
     x = 2 * torch.rand(seq, dim, device=npu_device, dtype=torch.float16) - 1
     w = torch.rand(K, dim, device=npu_device, dtype=torch.float32) - 0.5
     bias = torch.rand(dim, device=npu_device, dtype=torch.float32) - 0.5
@@ -82,6 +83,7 @@ def test_single_fp16_entry_matches_reference(npu_device, seq, dim):
     y = pto_gdn_causal_conv1d(x, w, bias)
     torch.npu.synchronize()
 
+    assert y.shape == x.shape
     ref = gdn_causal_conv1d_ref(x.unsqueeze(0), w, bias, activation=True)[0]
     err = (y.float() - ref).abs().max().item()
     assert err <= TOL[torch.float16], f"max abs err {err:.3e}"
