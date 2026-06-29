@@ -1,0 +1,32 @@
+# Local build products
+build/
+*.so
+*.o
+*.a
+*.core
+core
+core.*
+__pycache__/
+*.egg-info/
+.eggs/
+dist/
+
+# Simulator/profiling outputs
+outputs/
+OPPROF_*/
+cannsim_*/
+log_ca/
+camodel_log/
+extra-info/
+*.dump
+core*_summary_log
+profile_*_log*.toml
+profile_network_log*.toml
+route_table.txt
+rtb_debug.txt
+instr.bin
+.soc-version
+
+# Benchmark outputs
+*.csv
+*.png

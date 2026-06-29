@@ -66,4 +66,4 @@ wheel.packages = ["python/pto_kernels"]
 
 
 [tool.ruff]
-exclude = ["build"]
+exclude = ["build", ".skills"]
