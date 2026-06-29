@@ -1228,11 +1228,15 @@ AICORE inline void RunPtoPagedAttentionVecPipelineSplitKV(
     }
     const int64_t outBase =
         (static_cast<int64_t>(batchIndex) * ctx.numHeads + head) * ctx.headDim;
-    OutputGlobal outGlobal(reinterpret_cast<__gm__ half *>(oGm) + outBase);
-    TCVT(outHalfTile, weightedTile, RoundMode::CAST_RINT);
+    PtoPaConvF32ToF16(outHalfTile, weightedTile, 2);
     pipe_barrier(PIPE_V);
-    TSTORE(outGlobal, outHalfTile);
-    pipe_barrier(PIPE_ALL);
+    set_flag(PIPE_V, PIPE_MTE3, EVENT_ID1);
+    wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID1);
+    copy_ubuf_to_gm_align_b16(
+        reinterpret_cast<__gm__ half *>(oGm) + outBase,
+        reinterpret_cast<__ubuf__ half *>(outHalfTile.data()), 0, 1,
+        static_cast<uint32_t>(ctx.headDim * sizeof(half)), 0, 0, 0, 0);
+    pipe_barrier(PIPE_MTE3);
   }
   pipe_barrier(PIPE_ALL);
 }
