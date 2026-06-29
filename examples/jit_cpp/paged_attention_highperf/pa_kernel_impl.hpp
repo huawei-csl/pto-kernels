@@ -603,7 +603,8 @@ AICORE inline void RunPtoPagedAttentionCubePipelineSplitKV(
         TASSIGN(qMatTile,
                 kQCacheBase + static_cast<uint32_t>(headGroup) * kQGroupBytes);
         TLOAD(qMatTile, qGlobal);
-        pipe_barrier(PIPE_ALL);
+        set_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID0);
+        wait_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID0);
       }
     }
 
@@ -702,7 +703,8 @@ AICORE inline void RunPtoPagedAttentionCubePipelineSplitKV(
               probBase + static_cast<int64_t>(slot) * probSlotBytes +
               static_cast<int64_t>(headGroup) * probGroupBytes));
           TLOAD(pMatTile, probGlobal);
-          pipe_barrier(PIPE_ALL);
+          set_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID0);
+          wait_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID0);
           for (int32_t headInGroupBase = 0; headInGroupBase < kHeadGroup;
                headInGroupBase += headsPerKv) {
             const int32_t baseHeadLocal = groupHeadBase + headInGroupBase;

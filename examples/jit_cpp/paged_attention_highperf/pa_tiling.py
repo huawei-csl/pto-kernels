@@ -226,6 +226,10 @@ def _split_core_bns_nd(
 
     if is_long_seq:
         kv_block_per_core = _ceil_div(kv_seq_block_num, block_dim)
+        if block_size == KV_SEQLEN_SLICE and kv_seq_block_num <= 64:
+            kv_block_per_core = max(kv_block_per_core, 4)
+        elif block_size == KV_SEQLEN_SLICE and kv_seq_block_num <= 128:
+            kv_block_per_core = max(kv_block_per_core, 16)
     else:
         core_per_batch = _ceil_div(block_dim, decoder_batch)
         kv_block_per_core = _ceil_div(kv_seq_block_num, core_per_batch)
