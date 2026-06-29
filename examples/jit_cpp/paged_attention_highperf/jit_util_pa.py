@@ -19,7 +19,9 @@ from pathlib import Path
 
 import torch
 
-ASCEND_TOOLKIT_HOME = os.environ.get("ASCEND_TOOLKIT_HOME", "/usr/local/Ascend/cann-9.0.0")
+ASCEND_TOOLKIT_HOME = os.environ.get(
+    "ASCEND_TOOLKIT_HOME", "/usr/local/Ascend/cann-9.0.0"
+)
 PTO_LIB_PATH = os.environ.get("PTO_LIB_PATH", str(Path(__file__).resolve().parents[3]))
 
 
@@ -31,7 +33,9 @@ def _npu_arch_flag() -> str:
     return os.environ.get("NPU_ARCH", "dav-2201").strip()
 
 
-def compile_paged_attention(kernel_cpp: str, verbose: bool = False, timeout: int = 300) -> str:
+def compile_paged_attention(
+    kernel_cpp: str, verbose: bool = False, timeout: int = 300
+) -> str:
     lib_path = os.path.join(os.path.dirname(kernel_cpp), "pa_highperf_jit.so")
     example_dir = os.path.dirname(kernel_cpp)
     flags = [
@@ -86,20 +90,33 @@ def load_paged_attention_lib(lib_path: str, check_type: bool = True):
 
     def _alloc(device, workspace_sizes, tiling):
         tiling_cpu = tuple(int(x) for x in tiling.detach().cpu().tolist())
-        sizes_key = tuple(sorted((name, int(size)) for name, size in workspace_sizes.items()))
+        sizes_key = tuple(
+            sorted((name, int(size)) for name, size in workspace_sizes.items())
+        )
         key = (str(device), sizes_key, tiling_cpu)
         if workspace.get("key") == key:
             return
         workspace.clear()
         workspace["key"] = key
         for name, size in workspace_sizes.items():
-            workspace[name] = torch.empty((int(size),), device=device, dtype=torch.uint8)
+            workspace[name] = torch.empty(
+                (int(size),), device=device, dtype=torch.uint8
+            )
             if name in {"s", "p", "o_tmp", "o_core_tmp", "l"}:
                 workspace[name].zero_()
         workspace["null"] = torch.zeros((1,), device=device, dtype=torch.uint8)
         workspace["tiling"] = tiling.to(device=device, dtype=torch.int32)
 
-    def paged_attention(q, k, v, block_table, workspace_sizes, tiling, stream_ptr=default_stream_ptr, block_dim: int = 24):
+    def paged_attention(
+        q,
+        k,
+        v,
+        block_table,
+        workspace_sizes,
+        tiling,
+        stream_ptr=default_stream_ptr,
+        block_dim: int = 24,
+    ):
         _alloc(q.device, workspace_sizes, tiling)
         out = torch.empty_like(q)
         lib.call_kernel(
@@ -126,7 +143,9 @@ def load_paged_attention_lib(lib_path: str, check_type: bool = True):
     return paged_attention
 
 
-def jit_compile_paged_attention(verbose: bool = False, clean_up: bool = True, kernel_cpp: str = "pa_kernel.cpp"):
+def jit_compile_paged_attention(
+    verbose: bool = False, clean_up: bool = True, kernel_cpp: str = "pa_kernel.cpp"
+):
     kernel_path = str((Path(__file__).resolve().parent / kernel_cpp).resolve())
     lib_path = compile_paged_attention(kernel_path, verbose=verbose)
     fn = load_paged_attention_lib(lib_path)

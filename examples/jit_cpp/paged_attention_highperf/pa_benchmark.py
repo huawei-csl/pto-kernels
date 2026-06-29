@@ -8,29 +8,46 @@ import time
 import torch
 
 from jit_util_pa import jit_compile_paged_attention
-from pa_compile_and_run import PaShape, golden_attention, make_inputs, make_launch_config
+from pa_compile_and_run import (
+    PaShape,
+    golden_attention,
+    make_inputs,
+    make_launch_config,
+)
 
 NUM_ITERATIONS = 50
 WARMUP = 10
 RUN_DELAY_SECONDS = 2.0
 BATCHES = [1, 2, 4, 8, 32, 64]
 SEQ_LENS = [128, 512, 4096, 8192, 16384, 32768, 65536, 131072]
-DEFAULT_SHAPES = [PaShape(batch=batch, seq_len=seq_len) for batch in BATCHES for seq_len in SEQ_LENS]
+DEFAULT_SHAPES = [
+    PaShape(batch=batch, seq_len=seq_len) for batch in BATCHES for seq_len in SEQ_LENS
+]
 
 
 def paged_attention_flops(shape: PaShape):
     qk_and_pv = 4 * shape.batch * shape.num_heads * shape.seq_len * shape.head_dim
     scale = shape.batch * shape.num_heads * shape.seq_len
     rows = shape.batch * shape.num_heads
-    softmax = rows * ((shape.seq_len - 1) + shape.seq_len + shape.seq_len + (shape.seq_len - 1) + shape.seq_len)
+    softmax = rows * (
+        (shape.seq_len - 1)
+        + shape.seq_len
+        + shape.seq_len
+        + (shape.seq_len - 1)
+        + shape.seq_len
+    )
     return qk_and_pv + scale + softmax
 
 
 def tensor_bytes(shape: PaShape):
     dtype_bytes = 2
     q_bytes = shape.batch * shape.num_heads * shape.head_dim * dtype_bytes
-    k_bytes = shape.batch * shape.seq_len * shape.num_kv_heads * shape.head_dim * dtype_bytes
-    v_bytes = shape.batch * shape.seq_len * shape.num_kv_heads * shape.head_dim * dtype_bytes
+    k_bytes = (
+        shape.batch * shape.seq_len * shape.num_kv_heads * shape.head_dim * dtype_bytes
+    )
+    v_bytes = (
+        shape.batch * shape.seq_len * shape.num_kv_heads * shape.head_dim * dtype_bytes
+    )
     out_bytes = shape.batch * shape.num_heads * shape.head_dim * dtype_bytes
     blocks_per_batch = (shape.seq_len + shape.block_size - 1) // shape.block_size
     block_table_bytes = shape.batch * blocks_per_batch * 4
@@ -81,8 +98,17 @@ def run_shape(pa, shape, device, iters, warmup, check):
     if check:
         out = pa(q, k, v, block_table, ws, tiling, block_dim=shape.block_dim)
         torch.npu.synchronize()
-        torch.testing.assert_close(out.float(), golden_attention(q, k, v, block_table, shape), rtol=5e-3, atol=2e-2)
-    ms = time_npu(lambda: pa(q, k, v, block_table, ws, tiling, block_dim=shape.block_dim), iters, warmup)
+        torch.testing.assert_close(
+            out.float(),
+            golden_attention(q, k, v, block_table, shape),
+            rtol=5e-3,
+            atol=2e-2,
+        )
+    ms = time_npu(
+        lambda: pa(q, k, v, block_table, ws, tiling, block_dim=shape.block_dim),
+        iters,
+        warmup,
+    )
     flops = paged_attention_flops(shape)
     bytes_total = tensor_bytes(shape)
     perf = tflops(flops, ms)
@@ -104,20 +130,41 @@ def main():
     parser.add_argument("--csv", default="pa_highperf_jit_bench.csv")
     parser.add_argument("--iters", type=int, default=NUM_ITERATIONS)
     parser.add_argument("--warmup", type=int, default=WARMUP)
-    parser.add_argument("--run-delay", type=float, default=RUN_DELAY_SECONDS,
-                        help="Seconds to wait between benchmark shapes; set to 0 to disable.")
+    parser.add_argument(
+        "--run-delay",
+        type=float,
+        default=RUN_DELAY_SECONDS,
+        help="Seconds to wait between benchmark shapes; set to 0 to disable.",
+    )
     parser.add_argument("--device", default="npu:0")
-    parser.add_argument("--shape", action="append", help="Shape override, e.g. b=2,s=8192 or batch=4,seq=512")
-    parser.add_argument("--check", action="store_true", help="Run correctness check before timing each shape.")
+    parser.add_argument(
+        "--shape",
+        action="append",
+        help="Shape override, e.g. b=2,s=8192 or batch=4,seq=512",
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Run correctness check before timing each shape.",
+    )
     parser.add_argument("--no-check", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     torch.npu.set_device(args.device)
-    shapes = [parse_shape(item) for item in args.shape] if args.shape else DEFAULT_SHAPES
+    shapes = (
+        [parse_shape(item) for item in args.shape] if args.shape else DEFAULT_SHAPES
+    )
     pa = jit_compile_paged_attention(verbose=False)
     rows = []
     for idx, shape in enumerate(shapes):
-        row = run_shape(pa, shape, args.device, args.iters, args.warmup, args.check and not args.no_check)
+        row = run_shape(
+            pa,
+            shape,
+            args.device,
+            args.iters,
+            args.warmup,
+            args.check and not args.no_check,
+        )
         rows.append(row)
         print(
             f"paged_attention_highperf_jit {row['shape']}: {row['jit_time_us']} us/iter, "
@@ -131,8 +178,14 @@ def main():
             time.sleep(args.run_delay)
 
     fieldnames = [
-        "shape", "batch", "seq_len", "block_dim", "jit_time_us", "jit_tflops",
-        "jit_tflops_normalized", "jit_bandwidth_tb_s"
+        "shape",
+        "batch",
+        "seq_len",
+        "block_dim",
+        "jit_time_us",
+        "jit_tflops",
+        "jit_tflops_normalized",
+        "jit_bandwidth_tb_s",
     ]
     with open(args.csv, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)

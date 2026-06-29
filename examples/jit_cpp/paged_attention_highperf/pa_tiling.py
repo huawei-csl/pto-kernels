@@ -108,7 +108,9 @@ def _u32_to_i32(v: int) -> int:
     return v - 0x100000000 if v & 0x80000000 else v
 
 
-def _calcu_head_nd(num_heads: int, kv_heads: int, former_head_split: int, tail_head_split: int):
+def _calcu_head_nd(
+    num_heads: int, kv_heads: int, former_head_split: int, tail_head_split: int
+):
     """CalcuHeadNd: compute group move factors."""
     kv_real = kv_heads if kv_heads > 0 else num_heads
     group_num = num_heads // kv_real
@@ -116,14 +118,18 @@ def _calcu_head_nd(num_heads: int, kv_heads: int, former_head_split: int, tail_h
     former_group_move = 1
     if former_head_split % group_num == 0:
         former_group_move = group_num
-    elif former_head_split < group_num and (kv_real == 1 or group_num % former_head_split == 0):
+    elif former_head_split < group_num and (
+        kv_real == 1 or group_num % former_head_split == 0
+    ):
         former_group_move = former_head_split
 
     tail_group_move = 1
     if tail_head_split > 0:
         if tail_head_split % group_num == 0:
             tail_group_move = group_num
-        elif tail_head_split < group_num and (kv_real == 1 or group_num % tail_head_split == 0):
+        elif tail_head_split < group_num and (
+            kv_real == 1 or group_num % tail_head_split == 0
+        ):
             tail_group_move = tail_head_split
 
     return group_num, former_group_move, tail_group_move
@@ -143,7 +149,11 @@ def _split_core_bn_nd(
     kv_real = kv_heads if kv_heads > 0 else num_heads
     core_per_batch = _ceil_div(block_dim, decoder_batch)
 
-    if block_dim * SPLITKV_RATIO <= decoder_batch <= block_dim and is_quant and kv_real == 1:
+    if (
+        block_dim * SPLITKV_RATIO <= decoder_batch <= block_dim
+        and is_quant
+        and kv_real == 1
+    ):
         core_per_batch = 1
 
     head_split = _ceil_div(num_heads, core_per_batch)
@@ -183,7 +193,9 @@ def _split_core_bn_nd(
     kv_split_per_core = _round_up(max_kv_seq_len, block_size)
     kv_split_core_num = 1
 
-    group_num, former_gm, tail_gm = _calcu_head_nd(num_heads, kv_real, former_head_split, tail_head_split)
+    group_num, former_gm, tail_gm = _calcu_head_nd(
+        num_heads, kv_real, former_head_split, tail_head_split
+    )
     return (
         eff_block_dim,
         former_batch,
@@ -237,7 +249,9 @@ def _split_core_bns_nd(
     former_head_split = head_split
     tail_head_split = 0
 
-    group_num, former_gm, tail_gm = _calcu_head_nd(num_heads, kv_real, former_head_split, tail_head_split)
+    group_num, former_gm, tail_gm = _calcu_head_nd(
+        num_heads, kv_real, former_head_split, tail_head_split
+    )
     return (
         eff_block_dim,
         former_batch,
@@ -290,7 +304,9 @@ def make_pa_nd_decode_tiling(  # noqa: PLR0913, PLR0915
     """
     kv_real = kv_heads if kv_heads > 0 else num_heads
     max_kv = max(kv_seq_lens)
-    is_mla = head_dim > MLA_THRESHOLD or head_dim_v > MLA_THRESHOLD or head_dim != head_dim_v
+    is_mla = (
+        head_dim > MLA_THRESHOLD or head_dim_v > MLA_THRESHOLD or head_dim != head_dim_v
+    )
     is_quant = False  # fp16/bf16 only
 
     indices: list[int] = sorted(range(batch), key=lambda i: kv_seq_lens[i])
@@ -298,7 +314,9 @@ def make_pa_nd_decode_tiling(  # noqa: PLR0913, PLR0915
     decoder_batch = batch
     is_long_seq = max_kv >= KV_SEQLEN_SLICE_512 * 8
 
-    use_bn = is_mla or (decoder_batch * num_heads >= block_dim * SPLITKV_RATIO and not is_long_seq)
+    use_bn = is_mla or (
+        decoder_batch * num_heads >= block_dim * SPLITKV_RATIO and not is_long_seq
+    )
 
     if use_bn:
         (eff_bd, fB, fH, tB, tH, kvSplit, kvCN, gN, fGM, tGM) = _split_core_bn_nd(
@@ -336,8 +354,16 @@ def make_pa_nd_decode_tiling(  # noqa: PLR0913, PLR0915
 
     head_dim_k_split = min(head_dim, MLA_THRESHOLD)
     head_dim_v_split = min(head_dim_v, MLA_THRESHOLD)
-    head_dim_v_split_former = min(head_dim_v, MLA_THRESHOLD) if fGM <= 64 else min(head_dim_v, EMBEDDING_LIMIT)
-    head_dim_v_split_tail = min(head_dim_v, MLA_THRESHOLD) if tGM <= 64 else min(head_dim_v, EMBEDDING_LIMIT)
+    head_dim_v_split_former = (
+        min(head_dim_v, MLA_THRESHOLD)
+        if fGM <= 64
+        else min(head_dim_v, EMBEDDING_LIMIT)
+    )
+    head_dim_v_split_tail = (
+        min(head_dim_v, MLA_THRESHOLD)
+        if tGM <= 64
+        else min(head_dim_v, EMBEDDING_LIMIT)
+    )
 
     if (
         block_size <= KV_SEQLEN_SLICE // 2
@@ -345,14 +371,20 @@ def make_pa_nd_decode_tiling(  # noqa: PLR0913, PLR0915
         and block_size * 2 * head_dim_v_split <= BLOCK_LIMIT
     ):
         block_size_calc = block_size * 2
-    elif block_size >= KV_SEQLEN_SLICE and head_dim == KV_SEQLEN_SLICE_256 and head_dim_v == KV_SEQLEN_SLICE_256:
+    elif (
+        block_size >= KV_SEQLEN_SLICE
+        and head_dim == KV_SEQLEN_SLICE_256
+        and head_dim_v == KV_SEQLEN_SLICE_256
+    ):
         block_size_calc = KV_SEQLEN_SLICE
     else:
         block_size_calc = block_size
 
     is_split_key = int(kvCN > 1)
     is_split_block = int(
-        block_size >= KV_SEQLEN_SLICE and head_dim == KV_SEQLEN_SLICE_256 and head_dim_v == KV_SEQLEN_SLICE_256
+        block_size >= KV_SEQLEN_SLICE
+        and head_dim == KV_SEQLEN_SLICE_256
+        and head_dim_v == KV_SEQLEN_SLICE_256
     )
     type_key = 0 if dtype == torch.float16 else 1
     tiling_key = (is_split_block << 7) + (is_split_key << 4) + type_key
@@ -412,7 +444,9 @@ def make_pa_nd_decode_tiling(  # noqa: PLR0913, PLR0915
         q_seqlen = 1
 
         q_aligned = _round_up(q_seqlen, BLOCK_SIZE_ALIGN)
-        m_raw = (PP_BLOCK_BUFFER_SIZE // max(head_dim, block_size) // BLOCK_SIZE_ALIGN) * BLOCK_SIZE_ALIGN
+        m_raw = (
+            PP_BLOCK_BUFFER_SIZE // max(head_dim, block_size) // BLOCK_SIZE_ALIGN
+        ) * BLOCK_SIZE_ALIGN
         m_ubd = min(m_raw, q_aligned)
         m_ubd = max(m_ubd, BLOCK_SIZE_ALIGN)
         m_idx = min(7, max(0, m_ubd // 16 - 1))
