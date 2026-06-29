@@ -94,6 +94,8 @@ def load_paged_attention_lib(lib_path: str, check_type: bool = True):
         workspace["key"] = key
         for name, size in workspace_sizes.items():
             workspace[name] = torch.empty((int(size),), device=device, dtype=torch.uint8)
+            if name in {"s", "p", "o_tmp", "o_core_tmp", "l"}:
+                workspace[name].zero_()
         workspace["null"] = torch.zeros((1,), device=device, dtype=torch.uint8)
         workspace["tiling"] = tiling.to(device=device, dtype=torch.int32)
 

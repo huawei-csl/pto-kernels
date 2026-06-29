@@ -3,6 +3,7 @@
 import argparse
 import csv
 import gc
+import time
 
 import torch
 
@@ -11,6 +12,7 @@ from pa_compile_and_run import PaShape, golden_attention, make_inputs, make_laun
 
 NUM_ITERATIONS = 50
 WARMUP = 10
+RUN_DELAY_SECONDS = 2.0
 BATCHES = [1, 2, 4, 8, 32, 64]
 SEQ_LENS = [128, 512, 4096, 8192, 16384, 32768, 65536, 131072]
 DEFAULT_SHAPES = [PaShape(batch=batch, seq_len=seq_len) for batch in BATCHES for seq_len in SEQ_LENS]
@@ -102,6 +104,8 @@ def main():
     parser.add_argument("--csv", default="pa_highperf_jit_bench.csv")
     parser.add_argument("--iters", type=int, default=NUM_ITERATIONS)
     parser.add_argument("--warmup", type=int, default=WARMUP)
+    parser.add_argument("--run-delay", type=float, default=RUN_DELAY_SECONDS,
+                        help="Seconds to wait between benchmark shapes; set to 0 to disable.")
     parser.add_argument("--device", default="npu:0")
     parser.add_argument("--shape", action="append", help="Shape override, e.g. b=2,s=8192 or batch=4,seq=512")
     parser.add_argument("--check", action="store_true", help="Run correctness check before timing each shape.")
@@ -112,7 +116,7 @@ def main():
     shapes = [parse_shape(item) for item in args.shape] if args.shape else DEFAULT_SHAPES
     pa = jit_compile_paged_attention(verbose=False)
     rows = []
-    for shape in shapes:
+    for idx, shape in enumerate(shapes):
         row = run_shape(pa, shape, args.device, args.iters, args.warmup, args.check and not args.no_check)
         rows.append(row)
         print(
@@ -120,6 +124,11 @@ def main():
             f"{row['jit_tflops']} TFLOPS logical, {row['jit_tflops_normalized']} TFLOPS normalized, "
             f"{row['jit_bandwidth_tb_s']} TB/s, block_dim={row['block_dim']}"
         )
+        torch.npu.synchronize()
+        gc.collect()
+        torch.npu.empty_cache()
+        if args.run_delay > 0 and idx + 1 < len(shapes):
+            time.sleep(args.run_delay)
 
     fieldnames = [
         "shape", "batch", "seq_len", "block_dim", "jit_time_us", "jit_tflops",

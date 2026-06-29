@@ -288,6 +288,9 @@ AICORE inline void PtoPaInitCoreState()
 #endif
     set_atomic_none();
     set_mask_norm();
+#if defined(__DAV_C220_VEC__)
+    set_vector_mask(static_cast<uint64_t>(-1), static_cast<uint64_t>(-1));
+#endif
 }
 
 AICORE inline bool SupportsPtoPagedAttentionRawSplitKV(__gm__ uint8_t *tilingParaGm)
