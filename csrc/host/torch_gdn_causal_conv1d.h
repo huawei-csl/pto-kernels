@@ -24,11 +24,10 @@ for the full License text.
 
 // Forward-declare all 12 (6 ring sizes × 2 dtypes) launch stubs instead of
 // includes.
-// clang-format off
-#define DECLARE_BATCHED_STUB(rs, mw, dtype)                                             \
-  extern "C" uint32_t aclrtlaunch_gdn_causal_conv1d_ ## dtype ## _rs ## rs(             \
-      uint32_t, aclrtStream, void*, void*, void*, void*, void*,                         \
-      uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
+#define DECLARE_BATCHED_STUB(rs, mw, dtype)                               \
+  extern "C" uint32_t aclrtlaunch_gdn_causal_conv1d_##dtype##_rs##rs(     \
+      uint32_t, aclrtStream, void*, void*, void*, void*, void*, uint32_t, \
+      uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
 #define DECLARE_BATCHED_STUB_FP16(rs, mw) DECLARE_BATCHED_STUB(rs, mw, fp16)
 #define DECLARE_BATCHED_STUB_BF16(rs, mw) DECLARE_BATCHED_STUB(rs, mw, bf16)
 
@@ -38,7 +37,6 @@ FOR_EACH_RING_SIZE(DECLARE_BATCHED_STUB_BF16)
 #undef DECLARE_BATCHED_STUB_BF16
 #undef DECLARE_BATCHED_STUB_FP16
 #undef DECLARE_BATCHED_STUB
-// clang-format on
 
 #include "utils.h"
 
