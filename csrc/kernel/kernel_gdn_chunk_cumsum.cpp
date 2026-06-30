@@ -61,6 +61,7 @@ for the full License text.
 #include "kernel_utils.h"
 
 using namespace pto;
+using namespace kernel_utils;
 
 // GDN_H, GDN_C: Compile-time constants injected by the build system.
 //   GDN_H = number of attention heads (e.g., 16)
@@ -107,7 +108,6 @@ AICORE void cumsum_kernel_varlen(__gm__ float* g_ptr, __gm__ float* g_sum_ptr,
   // within the core.
   //   Each AI core has 2 Vec sub-blocks that can run in parallel.
   auto cid = get_block_idx();
-  auto block_num = get_block_num();
   auto vid = get_subblockid();
 
   // #if defined(__DAV_VEC__): This block only compiles for the Vec core
@@ -159,9 +159,9 @@ AICORE void cumsum_kernel_varlen(__gm__ float* g_ptr, __gm__ float* g_sum_ptr,
   // This is equivalent to:
   //   g_gm = torch.as_strided(g_ptr, size=[valid, NumHeads], stride=[NumHeads,
   //   1])
-  using GmShape = Shape<1, 1, 1, DYNAMIC, DYNAMIC>;
-  using GmStride = Stride<1, 1, 1, NumHeads, 1>;
-  using GmFloat = GlobalTensor<float, GmShape, GmStride>;
+  using GmShape = pto::Shape<1, 1, 1, DYNAMIC, DYNAMIC>;
+  using GmStride = pto::Stride<1, 1, 1, NumHeads, 1>;
+  using GmFloat = pto::GlobalTensor<float, GmShape, GmStride>;
 
   // Pre-assign row accumulator at fixed UB address
   // TASSIGN(tile, address): Binds a tile descriptor to a fixed byte address in
@@ -212,34 +212,34 @@ AICORE void cumsum_kernel_varlen(__gm__ float* g_ptr, __gm__ float* g_sum_ptr,
         UbND<float, 1, HTC> g_row_0;
         TASSIGN(g_row_0, GUbAddr);
         TMOV(acc_ub, g_row_0);
-        pipe_barrier(PIPE_V);
+        PipeBarrierVec();
 
         UbND<float, 1, HTC> s_row_0;
         TASSIGN(s_row_0, SUbAddr);
         TMOV(s_row_0, acc_ub);
-        pipe_barrier(PIPE_V);
+        PipeBarrierVec();
 
         // acc += g[i]; g_sum[i] = acc
         for (int32_t i = 1; i < valid; ++i) {
           UbND<float, 1, HTC> g_row_i;
           TASSIGN(g_row_i, GUbAddr + i * RowBytes);
           TADD(acc_ub, acc_ub, g_row_i);
-          pipe_barrier(PIPE_V);
+          PipeBarrierVec();
 
           UbND<float, 1, HTC> s_row_i;
           TASSIGN(s_row_i, SUbAddr + i * RowBytes);
           TMOV(s_row_i, acc_ub);
-          pipe_barrier(PIPE_V);
+          PipeBarrierVec();
         }
 
         // Zero-fill padding rows
         TEXPANDS(acc_ub, 0.0f);
-        pipe_barrier(PIPE_V);
+        PipeBarrierVec();
         for (int32_t i = valid; i < ChunkSize; ++i) {
           UbND<float, 1, HTC> s_row_i;
           TASSIGN(s_row_i, SUbAddr + i * RowBytes);
           TMOV(s_row_i, acc_ub);
-          pipe_barrier(PIPE_V);
+          PipeBarrierVec();
         }
 
         // Store g_sum to GM
@@ -328,9 +328,9 @@ AICORE void cumsum_kernel_static(__gm__ float* g_ptr, __gm__ float* g_sum_ptr,
   // This is equivalent to:
   //   g_gm = torch.as_strided(g_ptr, size=[valid, NumHeads],
   //   stride=[NumHeads, 1])
-  using GmShape = Shape<1, 1, 1, DYNAMIC, DYNAMIC>;
-  using GmStride = Stride<1, 1, 1, NumHeads, 1>;
-  using GmFloat = GlobalTensor<float, GmShape, GmStride>;
+  using GmShape = pto::Shape<1, 1, 1, DYNAMIC, DYNAMIC>;
+  using GmStride = pto::Stride<1, 1, 1, NumHeads, 1>;
+  using GmFloat = pto::GlobalTensor<float, GmShape, GmStride>;
 
   // Pre-assign row accumulator at fixed UB address
   // TASSIGN(tile, address): Binds a tile descriptor to a fixed byte address
@@ -414,12 +414,12 @@ AICORE void cumsum_kernel_static(__gm__ float* g_ptr, __gm__ float* g_sum_ptr,
     // are pipelined and may not finish in order. Think of it as a local
     // __syncthreads() for the Vec engine only. Much lighter than
     // set_flag/wait_flag (which sync across different hardware units).
-    pipe_barrier(PIPE_V);
+    PipeBarrierVec();
 
     UbND<float, 1, HTC> s_row_0;
     TASSIGN(s_row_0, SUbAddr);
     TMOV(s_row_0, acc_ub);
-    pipe_barrier(PIPE_V);
+    PipeBarrierVec();
 
     // Rows 1..valid-1:  acc[h] += g[i,h];  g_sum[i,h] = acc[h]
     for (int32_t i = 1; i < valid; ++i) {
@@ -428,24 +428,24 @@ AICORE void cumsum_kernel_static(__gm__ float* g_ptr, __gm__ float* g_sum_ptr,
       // TADD(dst, a, b): Element-wise add, like dst = a + b. All in UB.
       // Operates on all HTC elements in parallel (SIMD).
       TADD(acc_ub, acc_ub, g_row_i);
-      pipe_barrier(PIPE_V);
+      PipeBarrierVec();
 
       UbND<float, 1, HTC> s_row_i;
       TASSIGN(s_row_i, SUbAddr + i * RowBytes);
       TMOV(s_row_i, acc_ub);
-      pipe_barrier(PIPE_V);
+      PipeBarrierVec();
     }
 
     // Zero-fill rows beyond valid (tail padding for downstream kernels)
     // TEXPANDS(tile, scalar): Fill entire tile with a scalar value.
     // Equivalent to: tile[:] = scalar  (like torch.full_like(tile, scalar))
     TEXPANDS(acc_ub, 0.0f);
-    pipe_barrier(PIPE_V);
+    PipeBarrierVec();
     for (int32_t i = valid; i < ChunkSize; ++i) {
       UbND<float, 1, HTC> s_row_i;
       TASSIGN(s_row_i, SUbAddr + i * RowBytes);
       TMOV(s_row_i, acc_ub);
-      pipe_barrier(PIPE_V);
+      PipeBarrierVec();
     }
 
     // ── DMA: store g_sum from UB → GM (MTE3 pipe) ────────────────────

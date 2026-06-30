@@ -39,6 +39,7 @@ for the full License text.
 #include "kernel_utils.h"
 
 using namespace pto;
+using namespace kernel_utils;
 
 // ── Compile-time configuration (overridable at build time via -D flags) ──
 #ifndef GDN_H
@@ -202,7 +203,8 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
         Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
         _gs.shape[3] = valid_rows;
         _gs.shape[4] = HiddenSize;
-        GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, BSND_QK_STRIDE, 1>>
+        GlobalTensor<half, decltype(_gs),
+                     pto::Stride<1, 1, 1, BSND_QK_STRIDE, 1>>
             _gm(K_handle + k_offset, _gs);
         TLOAD(_l1, _gm);
         if (valid_rows != ChunkSize) TFILLPAD(_l1, _l1);
@@ -240,10 +242,10 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
         Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
         _gs.shape[3] = ChunkSize;
         _gs.shape[4] = ChunkSize;
-        GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, ChunkSize, 1>> _gm(
-            workspace_handle +
-                (static_cast<int64_t>(cid) * 2 + slot) * ChunkSquare,
-            _gs);
+        GlobalTensor<half, decltype(_gs), pto::Stride<1, 1, 1, ChunkSize, 1>>
+            _gm(workspace_handle +
+                    (static_cast<int64_t>(cid) * 2 + slot) * ChunkSquare,
+                _gs);
         TSTORE(_gm, _l0);
       }
 
@@ -268,7 +270,7 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
     Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
     _gs.shape[3] = HalfChunk;
     _gs.shape[4] = ChunkSize;
-    GlobalTensor<float, decltype(_gs), Stride<1, 1, 1, ChunkSize, 1>> _gm(
+    GlobalTensor<float, decltype(_gs), pto::Stride<1, 1, 1, ChunkSize, 1>> _gm(
         Msk_handle + static_cast<int64_t>(vid) * HalfChunk * ChunkSize, _gs);
     UbND<float, HalfChunk, ChunkSize, DYNAMIC, DYNAMIC, PadValue::Zero> _ld(
         HalfChunk, ChunkSize);
@@ -321,7 +323,7 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
           Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
           _gs.shape[3] = 1;
           _gs.shape[4] = valid_rows;
-          GlobalTensor<float, decltype(_gs), Stride<1, 1, 1, 1, 1>> _gm(
+          GlobalTensor<float, decltype(_gs), pto::Stride<1, 1, 1, 1, 1>> _gm(
               G_handle + static_cast<int64_t>(head_idx) * total_tokens +
                   (bos + chunk_start),
               _gs);
@@ -340,7 +342,7 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
           Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
           _gs.shape[3] = 1;
           _gs.shape[4] = local_valid;
-          GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, 1, 1>> _gm(
+          GlobalTensor<half, decltype(_gs), pto::Stride<1, 1, 1, 1, 1>> _gm(
               Beta_handle + static_cast<int64_t>(head_idx) * total_tokens +
                   (bos + chunk_start + row_offset),
               _gs);
@@ -368,25 +370,25 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
         TASSIGN(g_ub_temp,
                 GUbAddr + row_offset * static_cast<int32_t>(sizeof(float)));
         TMOV(g_v_ub, g_ub_temp);
-        pipe_barrier(PIPE_V);
+        PipeBarrierVec();
 
         TLOG(beta_ub, beta_ub);
-        pipe_barrier(PIPE_V);
+        PipeBarrierVec();
         TADD(g_v_ub, g_v_ub, beta_ub);
-        pipe_barrier(PIPE_V);
+        PipeBarrierVec();
         TMOV(g_r_ub, g_v_ub);
         TMOV(g_c_ub, g_ub);
-        pipe_barrier(PIPE_V);
+        PipeBarrierVec();
 
         UbDN<float, HalfChunk, 1, HalfChunk, 1> g_r_ub_temp;
         TASSIGN(g_r_ub_temp, GRUbAddr);
         TROWEXPAND(g_r_2d_ub, g_r_ub_temp);
         TCOLEXPAND(g_c_2d_ub, g_c_ub);
-        pipe_barrier(PIPE_V);
+        PipeBarrierVec();
         TSUB(coeff_ub, g_r_2d_ub, g_c_2d_ub);
-        pipe_barrier(PIPE_V);
+        PipeBarrierVec();
         TMINS(coeff_ub, coeff_ub, 0.0f);
-        pipe_barrier(PIPE_V);
+        PipeBarrierVec();
         TEXP(coeff_ub, coeff_ub);
 
         set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
@@ -397,11 +399,11 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
           Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
           _gs.shape[3] = HalfChunk;
           _gs.shape[4] = ChunkSize;
-          GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, ChunkSize, 1>> _gm(
-              workspace_handle +
-                  (static_cast<int64_t>(cid) * 2 + slot) * ChunkSquare +
-                  static_cast<int64_t>(vid) * HalfChunk * ChunkSize,
-              _gs);
+          GlobalTensor<half, decltype(_gs), pto::Stride<1, 1, 1, ChunkSize, 1>>
+              _gm(workspace_handle +
+                      (static_cast<int64_t>(cid) * 2 + slot) * ChunkSquare +
+                      static_cast<int64_t>(vid) * HalfChunk * ChunkSize,
+                  _gs);
           UbND<half, HalfChunk, ChunkSize, DYNAMIC, DYNAMIC, PadValue::Zero>
               _ld(HalfChunk, ChunkSize);
           TASSIGN(_ld, AUbHalfAddr);
@@ -431,7 +433,7 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
           _gs.shape[3] = local_valid;
           _gs.shape[4] = ChunkSize;
           GlobalTensor<half, decltype(_gs),
-                       Stride<1, 1, 1, NumHeads * ChunkSize, 1>>
+                       pto::Stride<1, 1, 1, NumHeads * ChunkSize, 1>>
               _gm(A_handle + a_gm_offset, _gs);
           UbND<half, HalfChunk, ChunkSize, DYNAMIC, DYNAMIC> _st(local_valid,
                                                                  ChunkSize);
