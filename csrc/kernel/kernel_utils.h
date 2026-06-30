@@ -157,7 +157,7 @@ AICORE inline void SyncAll() {
  * @param is_left Whether the matrix is on the left side (L0A) or not (L0B).
  * @return The appropriate @c BLayout for the target architecture.
  */
-constexpr pto::BLayout GetOuterLayout(bool is_left) {
+constexpr inline pto::BLayout GetOuterLayout(bool is_left) {
 #ifdef __DAV_C310__
   return is_left ? pto::BLayout::ColMajor : pto::BLayout::RowMajor;
 #else
@@ -169,7 +169,7 @@ constexpr pto::BLayout GetOuterLayout(bool is_left) {
  * @brief Pipe in-core barrier for vector core.
  *
  */
-AICORE void PipeBarrierVec() {
+AICORE inline void PipeBarrierVec() {
 #if __CCE_AICORE__ == 220
   pipe_barrier(PIPE_V);
 #endif
