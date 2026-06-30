@@ -89,8 +89,7 @@ AICORE inline void kda_kkt_kernel(__gm__ half* k_ptr, __gm__ float* g_cs_ptr,
   // and fold the per-chunk row half into the work item so both halves of every
   // (seq, head) are covered regardless of how many lanes are launched.
   const uint32_t num_lanes = get_block_num() * get_subblockdim();
-  const uint32_t lane =
-      get_block_idx() * get_subblockdim() + get_subblockid();
+  const uint32_t lane = get_block_idx() * get_subblockdim() + get_subblockid();
 
   constexpr int32_t HalfChunk = ChunkSize / 2;
   constexpr int32_t KTC = ((KDim + 7) / 8) * 8;
