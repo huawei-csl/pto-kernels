@@ -160,34 +160,33 @@ at::Tensor run_gdn_causal_conv1d(const at::Tensor& x, const at::Tensor& weights,
   // ---- kernel launch ----
   const at::Tensor biasArg = has_bias ? *bias : at::empty({0}, x.options());
 
-  // When has_initial_state is false, later sequence chunks with large K (K >
+  // When hasConvStates is false, later sequence chunks with large K (K >
   // 32) can still have jstart < 0 and read from conv_states. Provide zeros so
   // those halo reads return the correct zero-pad value without dereferencing an
   // invalid pointer.
   at::Tensor convStatesArg;
-  uint32_t hasConvStates, stateLen;
+  uint32_t hasConvStates;
+  const uint32_t stateLen = K - 1u;
   if (use_states) {
     convStatesArg = was2d ? conv_states->unsqueeze(0) : *conv_states;
     hasConvStates = 1u;
-    stateLen = K - 1u;
   } else {
     convStatesArg = at::zeros(
         {(int64_t)batch, (int64_t)(K - 1), (int64_t)channels}, x.options());
     hasConvStates = 0u;
-    stateLen = K - 1u;
   }
 
   const uint32_t applyActivation = activation ? 1u : 0u;
   const uint32_t hasBias = has_bias ? 1u : 0u;
   const uint32_t ringSize = roundUpToPow2(K);
-  const uint32_t block_dim = GetNumVectorCores();
+  const uint32_t blockDim = GetNumVectorCores();
 
   at::Tensor output = at::empty_like(x3d);
 
   // clang-format off
 #define DISPATCH_DTYPE(rs, mw, dtype)                                             \
   case rs:                                                                        \
-    EXEC_KERNEL_CMD(gdn_causal_conv1d_ ## dtype ## _rs ## rs, block_dim,          \
+    EXEC_KERNEL_CMD(gdn_causal_conv1d_ ## dtype ## _rs ## rs, blockDim,           \
                     x3d, output, weights, biasArg, convStatesArg,                 \
                     batch, seqLen, channels, stateLen, K,                         \
                     applyActivation, hasBias, hasConvStates);                     \

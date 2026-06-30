@@ -57,8 +57,8 @@ AICORE inline void applySiluToTile(TileT& dst, TileT& src, TileT& scratch) {
 // [channelTileBase, channelTileBase+tileChannelCount) of one batch element.
 //
 // K is the runtime filter width (<= RS). Weights/bias are IoElemType (native
-// dtype) and are cast to fp32 on device in a staging area. When hasInit is set,
-// history rows (j < 0) are read from convStates at seqConvStatesOffset.
+// dtype) and are cast to fp32 on device in a staging area. When hasConvStates
+// is set, history rows (j < 0) are read from convStates at seqConvStatesOffset.
 template <typename IoElemType, uint32_t RS, uint32_t MAX_W>
 AICORE inline void processWorkUnit(
     __gm__ IoElemType* input, __gm__ IoElemType* output,
@@ -67,7 +67,7 @@ AICORE inline void processWorkUnit(
     uint64_t sequenceRowOffset, uint64_t seqConvStatesOffset,
     uint32_t channelTileBase, int32_t tileChannelCount, uint32_t outputRowStart,
     uint32_t outputRowEnd, uint32_t K, uint32_t applyActivation,
-    uint32_t hasBias, uint32_t hasInit) {
+    uint32_t hasBias, uint32_t hasConvStates) {
   using GlobalShape = pto::Shape<1, 1, 1, 1, DYNAMIC>;
   using GlobalStride = pto::Stride<1, 1, 1, 1, 1>;
   using GlobalIoTensor =
@@ -80,14 +80,13 @@ AICORE inline void processWorkUnit(
   constexpr uint32_t accumTileBytes = MAX_W * sizeof(float);
   constexpr uint32_t ioTileBytes = MAX_W * sizeof(IoElemType);
 
-  // UB layout (all offsets compile-time):
-  //   [0 .. RS-1]           RS weight tiles (fp32)        → k * accumTileBytes
-  //   [RS]                  1 bias tile (fp32)            → ubBiasOffset
-  //   [RS+1 .. 2*RS]        RS accumulator ring (fp32)    → ubAccumRingBase +
-  //   slot*AT [2*RS+1 .. 3*RS-1]    RS-1 partial-product tiles    →
-  //   ubProductBase + (k-1)*AT [3*RS]                1 input-fp32 scratch →
-  //   ubInputFp32 I/O region:           4 × ioTileBytes (double-buffered input
-  //   + 2 output slots)
+  // UB layout (all offsets compile-time; AT = accumTileBytes):
+  //   [0 .. RS-1]           RS fp32 weight tiles              → k * AT
+  //   [RS]                  1 fp32 bias tile                  → ubBiasOffset
+  //   [RS+1 .. 2*RS]        RS fp32 accumulator ring          → ubAccumRingBase + slot * AT
+  //   [2*RS+1 .. 3*RS-1]    RS-1 fp32 partial-product tiles   → ubProductBase + (k-1) * AT
+  //   [3*RS]                1 fp32 input scratch              → ubInputFp32
+  //   I/O region (4 × ioTileBytes): in[0], out[0], out[1], in[1] → ubIoBase + {0,1,2,3} * ioTileBytes
   constexpr uint32_t ubBiasOffset = RS * accumTileBytes;
   constexpr uint32_t ubAccumRingBase = (RS + 1u) * accumTileBytes;
   constexpr uint32_t ubProductBase = (2u * RS + 1u) * accumTileBytes;
@@ -97,9 +96,6 @@ AICORE inline void processWorkUnit(
       ubIoBase + 4u * ioTileBytes <= UB_BYTES_PER_CORE,
       "conv1d UB exceeds UB_BYTES_PER_CORE: lower RS/MAX_W or raise it");
 
-  // NOTE: keep these `const`, NOT `constexpr`. Indexing a constexpr array with
-  // a runtime value causes the CCE compiler to emit ~5x slower device code.
-  // TODO check this claim
   const uint32_t ubOutputOffset[2] = {ubIoBase + ioTileBytes,
                                       ubIoBase + 2u * ioTileBytes};
   const uint32_t ubInputOffset[2] = {ubIoBase, ubIoBase + 3u * ioTileBytes};
@@ -139,17 +135,17 @@ AICORE inline void processWorkUnit(
   // Cast weight and bias to fp32 in their final UB positions.
   for (uint32_t k = 0; k < K; ++k) {
     IoTile wStage(tileChannelCount);
-    AccumTile wT(tileChannelCount);
+    AccumTile wFp32(tileChannelCount);
     TASSIGN(wStage, ubStageBase + k * ioTileBytes);
-    TASSIGN(wT, k * accumTileBytes);
-    TCVT(wT, wStage, pto::RoundMode::CAST_NONE);
+    TASSIGN(wFp32, k * accumTileBytes);
+    TCVT(wFp32, wStage, pto::RoundMode::CAST_NONE);
   }
   if (hasBias) {
     IoTile bStage(tileChannelCount);
-    AccumTile bT(tileChannelCount);
+    AccumTile bFp32(tileChannelCount);
     TASSIGN(bStage, ubStageBase + K * ioTileBytes);
-    TASSIGN(bT, ubBiasOffset);
-    TCVT(bT, bStage, pto::RoundMode::CAST_NONE);
+    TASSIGN(bFp32, ubBiasOffset);
+    TCVT(bFp32, bStage, pto::RoundMode::CAST_NONE);
   }
   // The cast TCVTs (V) finish before the first TMUL/TCVT in the loop reuses
   // this region — the double-buffer event flags below enforce the ordering.
@@ -170,10 +166,10 @@ AICORE inline void processWorkUnit(
   // zeroPad: when there is no initial state, the first K-1 "history" positions
   // are zero; we start the loop at j=0 and treat the accumulators as starting
   // fresh (the startAll shortcut below initialises all of them from j=0).
-  const bool zeroPad = (outputRowStart == 0u) && !hasInit;
+  const bool zeroPad = (outputRowStart == 0u) && !hasConvStates;
   int32_t jstart;
   if (outputRowStart == 0u)
-    jstart = hasInit ? -halo : 0;
+    jstart = hasConvStates ? -halo : 0;
   else
     jstart = (int32_t)outputRowStart - halo;
 
@@ -188,11 +184,11 @@ AICORE inline void processWorkUnit(
                            {tileChannelCount});
       TLOAD(prologueTile, rowGm);
     } else {
-      const int32_t hi = halo + jstart;
-      GlobalIoTensor hisGm(convStates + seqConvStatesOffset +
-                               (uint64_t)hi * channels + channelTileBase,
+      const int32_t stateRow = halo + jstart;
+      GlobalIoTensor stateGm(convStates + seqConvStatesOffset +
+                               (uint64_t)stateRow * channels + channelTileBase,
                            {tileChannelCount});
-      TLOAD(prologueTile, hisGm);
+      TLOAD(prologueTile, stateGm);
     }
     set_flag(PIPE_MTE2, PIPE_V, inputBufferEvent[0]);
   }
@@ -223,11 +219,12 @@ AICORE inline void processWorkUnit(
                              {tileChannelCount});
         TLOAD(nextTile, rowGm);
       } else {
-        const int32_t hi = halo + jnext;
-        GlobalIoTensor hisGm(convStates + seqConvStatesOffset +
-                                 (uint64_t)hi * channels + channelTileBase,
+        const int32_t stateRow = halo + jnext;
+        GlobalIoTensor stateGm(convStates + seqConvStatesOffset +
+                                 (uint64_t)stateRow * channels +
+                                 channelTileBase,
                              {tileChannelCount});
-        TLOAD(nextTile, hisGm);
+        TLOAD(nextTile, stateGm);
       }
       set_flag(PIPE_MTE2, PIPE_V, inputBufferEvent[nextBuf]);
     }
@@ -282,13 +279,13 @@ AICORE inline void processWorkUnit(
     AccumTile siluScratch(tileChannelCount);
     IoTile outputTile(tileChannelCount);
     TASSIGN(accumTile, ubAccumRingBase + accumRingSlot * accumTileBytes);
-    TASSIGN(siluScratch, ubProductBase);
+    TASSIGN(siluScratch, ubProductBase);  // reuses product slot 0 — safe: scatter loop is done
     TASSIGN(outputTile, ubOutputOffset[outputBufIndex]);
 
     if (hasBias) {
-      AccumTile bT(tileChannelCount);
-      TASSIGN(bT, ubBiasOffset);
-      TADD(accumTile, accumTile, bT);
+      AccumTile bFp32(tileChannelCount);
+      TASSIGN(bFp32, ubBiasOffset);
+      TADD(accumTile, accumTile, bFp32);
       PipeBarrierVec();
     }
     if (applyActivation) {
@@ -339,7 +336,6 @@ AICORE void runConvSiluBatched(
   if (workUnitsPerSequence < 1) workUnitsPerSequence = 1;
 
   uint32_t maxSequenceChunks = DIV_ROUNDUP(seqLen, minSeqChunkLen);
-  if (maxSequenceChunks < 1) maxSequenceChunks = 1;
 
   const uint32_t channelTilesForUbLimit = DIV_ROUNDUP(channels, MAX_W);
   const uint32_t channelTilesToFillCores =
@@ -351,7 +347,6 @@ AICORE void runConvSiluBatched(
   const uint32_t maxChannelTilesByLane = DIV_ROUNDUP(channels, channelsPerLane);
   if (channelTileCount > maxChannelTilesByLane)
     channelTileCount = maxChannelTilesByLane;
-  if (channelTileCount < 1) channelTileCount = 1;
 
   uint32_t channelTileWidth =
       ALIGN_UP(DIV_ROUNDUP(channels, channelTileCount), channelsPerLane);
@@ -362,20 +357,18 @@ AICORE void runConvSiluBatched(
   channelTileCount = DIV_ROUNDUP(channels, channelTileWidth);
   uint32_t sequenceChunkCount =
       DIV_ROUNDUP(workUnitsPerSequence, channelTileCount);
-  if (sequenceChunkCount < 1) sequenceChunkCount = 1;
   if (sequenceChunkCount > maxSequenceChunks)
     sequenceChunkCount = maxSequenceChunks;
 
   const uint32_t sequenceChunkLength = DIV_ROUNDUP(seqLen, sequenceChunkCount);
-  const uint32_t hasInit = hasConvStates;
   const uint32_t totalWorkUnits = batch * channelTileCount * sequenceChunkCount;
 
   for (uint32_t workUnitIndex = coreIndex; workUnitIndex < totalWorkUnits;
        workUnitIndex += coreCount) {
     const uint32_t sequenceChunkIndex = workUnitIndex % sequenceChunkCount;
-    const uint32_t tileBatchIndex = workUnitIndex / sequenceChunkCount;
-    const uint32_t channelTileIndex = tileBatchIndex % channelTileCount;
-    const uint32_t batchIndex = tileBatchIndex / channelTileCount;
+    const uint32_t channelBatchIndex = workUnitIndex / sequenceChunkCount;
+    const uint32_t channelTileIndex = channelBatchIndex % channelTileCount;
+    const uint32_t batchIndex = channelBatchIndex / channelTileCount;
 
     const uint32_t channelTileBase = channelTileIndex * channelTileWidth;
     const uint32_t remainingChannels = channels - channelTileBase;
@@ -394,7 +387,7 @@ AICORE void runConvSiluBatched(
     processWorkUnit<IoElemType, RS, MAX_W>(
         input, output, weights, bias, convStates, channels, sequenceRowOffset,
         seqConvStatesOffset, channelTileBase, tileChannelCount, outputRowStart,
-        outputRowEnd, K, applyActivation, hasBias, hasInit);
+        outputRowEnd, K, applyActivation, hasBias, hasConvStates);
   }
 }
 
