@@ -66,7 +66,7 @@ AICORE inline void processWorkUnit(
     __gm__ IoElemType* convStates, uint32_t channels,
     uint64_t sequenceRowOffset, uint64_t seqConvStatesOffset,
     uint32_t channelTileBase, int32_t tileChannelCount, uint32_t outputRowStart,
-    uint32_t outputRowEnd, uint32_t stateLen, uint32_t K,
+    uint32_t outputRowEnd, uint32_t K,
     uint32_t applyActivation, uint32_t hasBias, uint32_t hasInit) {
   using GlobalShape = pto::Shape<1, 1, 1, 1, DYNAMIC>;
   using GlobalStride = pto::Stride<1, 1, 1, 1, 1>;
@@ -331,7 +331,7 @@ AICORE void runConvSiluBatched(
 
   // Minimum rows per sequence chunk. Smaller values expose more parallelism but
   // each chunk replays K-1 halo rows; 32 balances the two effects.
-  constexpr uint32_t minSeqChunkLen = 32u;
+  constexpr uint32_t minSeqChunkLen = 32u < RS ? RS : 32u;
   // One aligned vector lane = 256 bytes / element size (128 for fp16/bf16).
   constexpr uint32_t channelsPerLane = 256u / sizeof(IoElemType);
 
@@ -394,7 +394,7 @@ AICORE void runConvSiluBatched(
     processWorkUnit<IoElemType, RS, MAX_W>(
         input, output, weights, bias, convStates, channels, sequenceRowOffset,
         seqConvStatesOffset, channelTileBase, tileChannelCount, outputRowStart,
-        outputRowEnd, stateLen, K, applyActivation, hasBias, hasInit);
+        outputRowEnd, K, applyActivation, hasBias, hasInit);
   }
 }
 

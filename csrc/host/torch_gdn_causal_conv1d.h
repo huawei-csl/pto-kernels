@@ -64,8 +64,8 @@ constexpr bool isSupportedWidth(uint32_t w) { return w >= 2u && w <= 64u; }
  * @brief Depthwise causal conv1d + per-channel bias + optional SiLU.
  *
  * Computes y[b,i,c] = act( bias[c] + sum_{k} W[k,c] * x_ext[b, i-K+1+k, c] )
- * where x_ext[-K+1..-1] = conv_states[b, 0..K-2, c] (when has_initial_state)
- * or zero (default), and x_ext[0..L-1] = x[b, ..., c].
+ * where x_ext[-K+1..-1] = conv_states[b, 0..K-2, c] (last K-1 rows, when
+ * conv_states is provided) or zero (default), and x_ext[0..L-1] = x[b,...,c].
  *
  * K is deduced from weights.shape[0] and must be in [2..64].
  * Weights and bias must have the same dtype as x (fp16 or bf16).
@@ -75,8 +75,9 @@ constexpr bool isSupportedWidth(uint32_t w) { return w >= 2u && w <= 64u; }
  * @param [in] weights            Filter [K, C], same dtype as x, contiguous.
  * @param [in] bias               Bias [C], same dtype as x, contiguous; or
  *                                None (no bias).
- * @param [in] conv_states        History [B, stateLen, C], same dtype as x,
- *                                contiguous; or None (zero-padding).
+ * @param [in] conv_states        History [K-1, C] or [B, K-1, C] (same rank
+ *                                as x), same dtype as x, contiguous; or
+ *                                None (zero-padding).
  * @param [in] activation         Apply SiLU after bias add. Default true.
  * @return at::Tensor             Output, same shape and dtype as x.
  */
@@ -140,19 +141,12 @@ at::Tensor run_gdn_causal_conv1d(const at::Tensor& x, const at::Tensor& weights,
 
   const bool use_states = conv_states.has_value();
   if (use_states) {
-    TORCH_CHECK(
-        conv_states->dim() == 3,
-        "gdn_causal_conv1d: conv_states must be 3D [B, stateLen, C], got ",
-        conv_states->dim(), "D");
-    TORCH_CHECK(conv_states->size(0) == static_cast<int64_t>(batch),
-                "gdn_causal_conv1d: conv_states.shape[0] (",
-                conv_states->size(0), ") must equal batch size (", batch, ")");
-    TORCH_CHECK(conv_states->size(2) == static_cast<int64_t>(channels),
-                "gdn_causal_conv1d: conv_states.shape[2] (",
-                conv_states->size(2), ") must equal channels (", channels, ")");
-    TORCH_CHECK(conv_states->size(1) >= static_cast<int64_t>(K - 1),
-                "gdn_causal_conv1d: conv_states.shape[1] (",
-                conv_states->size(1), ") must be >= K-1 (", K - 1, ")");
+    const std::vector<int64_t> expected_sizes =
+        was2d ? std::vector<int64_t>{(int64_t)(K - 1), (int64_t)channels}
+              : std::vector<int64_t>{(int64_t)batch, (int64_t)(K - 1), (int64_t)channels};
+    TORCH_CHECK(conv_states->sizes() == at::IntArrayRef(expected_sizes),
+                "gdn_causal_conv1d: conv_states must have shape ", at::IntArrayRef(expected_sizes),
+                " (same rank as x, middle dim K-1), got ", conv_states->sizes());
     TORCH_CHECK(conv_states->scalar_type() == dtype,
                 "gdn_causal_conv1d: conv_states dtype must match x dtype (",
                 dtype, "), got ", conv_states->scalar_type());
@@ -170,9 +164,9 @@ at::Tensor run_gdn_causal_conv1d(const at::Tensor& x, const at::Tensor& weights,
   at::Tensor convStatesArg;
   uint32_t hasConvStates, stateLen;
   if (use_states) {
-    convStatesArg = *conv_states;
+    convStatesArg = was2d ? conv_states->unsqueeze(0) : *conv_states;
     hasConvStates = 1u;
-    stateLen = static_cast<uint32_t>(conv_states->size(1));
+    stateLen = K - 1u;
   } else {
     convStatesArg = at::zeros(
         {(int64_t)batch, (int64_t)(K - 1), (int64_t)channels}, x.options());
