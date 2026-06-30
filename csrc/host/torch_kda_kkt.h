@@ -62,7 +62,9 @@ at::Tensor run_kda_kkt(const at::Tensor& K, const at::Tensor& G_cs,
   // GDN_C compile-time constant — matches kernel default build
   constexpr int64_t CHUNK_C = 128;
 
-  const int64_t total_work = batch_size * num_heads;
+  // The Vec-only kernel splits each (seq, head) chunk into two row halves, so
+  // there are 2 work items per (seq, head).  Launch up to that many AIV lanes.
+  const int64_t total_work = batch_size * num_heads * 2;
   uint32_t block_dim = GetNumCubeCores();
   if (static_cast<int64_t>(block_dim) > total_work) {
     block_dim = static_cast<uint32_t>(total_work);

@@ -83,15 +83,21 @@ AICORE inline void kda_kkt_kernel(__gm__ half* k_ptr, __gm__ float* g_cs_ptr,
                                   __gm__ int32_t* cu_seqlens,
                                   int64_t batch_size, int64_t seq_len,
                                   int64_t total_tokens) {
-  const auto cid = get_block_idx();
-  const auto block_num = get_block_num();
-  const auto vid = get_subblockid();
+  // This is a Vec-only kernel (no Cube branch), so bisheng compiles it as a
+  // pure-AIV kernel where get_subblockid() is always 0.  Enumerate the launched
+  // AIV lanes flatly (same idiom as kernel_swiglu / kernel_tri_inv_col_sweep)
+  // and fold the per-chunk row half into the work item so both halves of every
+  // (seq, head) are covered regardless of how many lanes are launched.
+  const uint32_t num_lanes = get_block_num() * get_subblockdim();
+  const uint32_t lane =
+      get_block_idx() * get_subblockdim() + get_subblockid();
 
   constexpr int32_t HalfChunk = ChunkSize / 2;
   constexpr int32_t KTC = ((KDim + 7) / 8) * 8;
 
   const int64_t num_seqs = batch_size;
-  const int64_t total_work = num_seqs * NumHeads;
+  // 2 work items per (seq, head): half=0 -> rows [0, C/2), half=1 -> [C/2, C).
+  const int64_t total_work = num_seqs * NumHeads * 2;
 
   // ── GM type aliases (head-major [HV, T, K]) ──────────────────────────────
   using GmShapeDyn = Shape<1, 1, 1, DYNAMIC, DYNAMIC>;
@@ -141,16 +147,18 @@ AICORE inline void kda_kkt_kernel(__gm__ half* k_ptr, __gm__ float* g_cs_ptr,
   constexpr int32_t MSKC_ADDR =
       BETAH_ADDR + HalfChunk * 2;  // [1, HalfChunk] fp32 (mask col)
 
-  int32_t my_off = static_cast<int32_t>(vid) * HalfChunk;
-
   for (int64_t work_idx = 0;
-       work_idx < (total_work + block_num - 1) / block_num; ++work_idx) {
+       work_idx < (total_work + num_lanes - 1) / num_lanes; ++work_idx) {
     int64_t pid =
-        work_idx * static_cast<int64_t>(block_num) + static_cast<int64_t>(cid);
+        work_idx * static_cast<int64_t>(num_lanes) + static_cast<int64_t>(lane);
     if (pid >= total_work) continue;
 
-    int32_t head_idx = static_cast<int32_t>(pid % NumHeads);
-    int64_t seq_idx = pid / NumHeads;
+    // Decode work item: (seq_idx, head_idx, row_half).
+    int32_t row_half = static_cast<int32_t>(pid % 2);
+    int64_t hs = pid / 2;
+    int32_t head_idx = static_cast<int32_t>(hs % NumHeads);
+    int64_t seq_idx = hs / NumHeads;
+    int32_t my_off = row_half * HalfChunk;
 
     int64_t bos, slen;
     if (cu_seqlens != nullptr) {

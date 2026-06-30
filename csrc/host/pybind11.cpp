@@ -17,12 +17,9 @@ for the full License text.
 #include "torch_gdn_chunk_o.h"
 #include "torch_gdn_scaled_dot_kkt.h"
 #include "torch_gdn_wy_fast.h"
-<<<<<<< HEAD
 #include "torch_kda_gate_cumsum.h"
-#include "torch_kda_wy.h"
-    =======
 #include "torch_kda_kkt.h"
-    >>>>>>> 55445c2 ((KDA) kkt)
+#include "torch_kda_wy.h"
 #include "torch_scan_ul1.h"
 #include "torch_simple_matmul.h"
 #include "torch_swiglu.h"
@@ -31,7 +28,7 @@ for the full License text.
 #include "torch_tri_inv_rec_unroll.h"
 #include "torch_tri_inv_trick.h"
 
-    using namespace pto_isa_ops;
+using namespace pto_isa_ops;
 
 /**
  * @brief Pybind11 module.
