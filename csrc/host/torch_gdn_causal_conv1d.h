@@ -190,7 +190,7 @@ at::Tensor run_gdn_causal_conv1d(const at::Tensor& x, const at::Tensor& weights,
   // clang-format off
 #define DISPATCH_DTYPE(rs, mw, dtype)                                             \
   case rs:                                                                        \
-    EXEC_KERNEL_CMD(gdn_causal_conv1d_batched_ ## dtype ## _rs ## rs, block_dim,  \
+    EXEC_KERNEL_CMD(gdn_causal_conv1d_ ## dtype ## _rs ## rs, block_dim,          \
                     x3d, output, weights, biasArg, convStatesArg,                 \
                     batch, seqLen, channels, stateLen, K,                         \
                     applyActivation, hasBias, hasConvStates);                     \

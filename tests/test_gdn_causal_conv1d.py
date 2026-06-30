@@ -141,7 +141,7 @@ def test_no_bias(npu_device, dtype):
 
 
 # ---------------------------------------------------------------------------
-# conv_states — has_initial_state=True
+# conv_states — history from prior tokens
 # ---------------------------------------------------------------------------
 
 
@@ -157,7 +157,7 @@ def test_conv_states_matches_reference(npu_device, dtype, K):
     conv_states = 2 * torch.rand(batch, K - 1, dim, device=npu_device, dtype=dtype) - 1
 
     y = pto_gdn_causal_conv1d(
-        x, w, bias, conv_states=conv_states, has_initial_state=True, activation=True
+        x, w, bias, conv_states=conv_states, activation=True
     )
     torch.npu.synchronize()
 
@@ -169,29 +169,24 @@ def test_conv_states_matches_reference(npu_device, dtype, K):
 
 
 # ---------------------------------------------------------------------------
-# conv_states ignored when has_initial_state=False
+# No conv_states → zero-padding
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("dtype", DTYPES)
-def test_conv_states_ignored_when_flag_false(npu_device, dtype):
-    """Non-empty conv_states must be ignored when has_initial_state=False."""
+def test_no_conv_states_uses_zero_padding(npu_device, dtype):
+    """Omitting conv_states (or passing empty tensor) must use zero-padding."""
     K, batch, seq, dim = 4, 2, 64, 256
     x = 2 * torch.rand(batch, seq, dim, device=npu_device, dtype=dtype) - 1
     w = torch.rand(K, dim, device=npu_device, dtype=dtype) - 0.5
     bias = torch.rand(dim, device=npu_device, dtype=dtype) - 0.5
-    # Provide a non-empty conv_states that should NOT be used.
-    conv_states = torch.ones(batch, K - 1, dim, device=npu_device, dtype=dtype) * 999
 
-    y = pto_gdn_causal_conv1d(
-        x, w, bias, conv_states=conv_states, has_initial_state=False, activation=True
-    )
+    y = pto_gdn_causal_conv1d(x, w, bias, activation=True)
     torch.npu.synchronize()
 
-    # Reference: zero-padding (conv_states ignored).
     ref = _ref(x, w, bias, activation=True, conv_states=None)
     err = (y.float() - ref).abs().max().item()
-    assert err <= TOL[dtype], f"flag-false max abs err {err:.3e}"
+    assert err <= TOL[dtype], f"no-conv_states max abs err {err:.3e}"
 
 
 # ---------------------------------------------------------------------------
@@ -210,7 +205,7 @@ def test_large_K_multiChunk(npu_device, dtype):
     conv_states = 2 * torch.rand(batch, K - 1, dim, device=npu_device, dtype=dtype) - 1
 
     y = pto_gdn_causal_conv1d(
-        x, w, bias, conv_states=conv_states, has_initial_state=True, activation=False
+        x, w, bias, conv_states=conv_states, activation=False
     )
     torch.npu.synchronize()
 
