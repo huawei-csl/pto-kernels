@@ -19,24 +19,23 @@ import torch.nn.functional as F
 from pto_kernels import pto_gdn_causal_conv1d
 
 K_VALUES = [2, 3, 4, 5, 7, 12, 13, 23, 29, 47, 64]
-
 DTYPES = [torch.float16, torch.bfloat16]
-
-# (batch, seq, dim): small general shapes + the GDN prefill regime
-# (dim 2048 = H*D, 6144 = q+k+v; seq 128..512).
-TEST_CASES = [
-    (1, 16, 256),
-    (2, 31, 256),
-    (1, 128, 2048),
-    (8, 128, 2048),
-    (1, 256, 2048),
-    (8, 384, 2048),
-    (1, 512, 2048),
-    (8, 512, 2048),
-    (1, 128, 6144),
-    (8, 256, 6144),
-    (1, 384, 6144),
-    (8, 512, 6144),
+X_SHAPES = [
+    # nd, B, L, C
+    (3, 2, 64, 512),
+    (3, 1, 97, 256),
+    (3, 2, 83, 256),
+    (3, 2, 71, 512),
+    (2, None, 67, 256),
+    (3, 2, 89, 256),
+    (3, 4, 127, 256),
+    (3, 2, 61, 512),
+    (2, None, 53, 256),
+    (3, 1, 7, 16),
+    (3, 8, 128, 2048),
+    (3, 1, 1009, 256),
+    (2, None, 48, 80),
+    (3, 1, 384, 6144),
 ]
 
 # max abs error tolerance vs the fp32 reference (dtype rounding only).
@@ -53,180 +52,107 @@ def _ref(x, w, bias, activation, conv_states=None):
 
     x: [B, L, C]  w: [K, C]  bias: [C] or None  conv_states: [B, K-1, C] or None
     -> [B, L, C] (fp32)
-
-    If conv_states is given, it is prepended as history; otherwise zero-padding.
     """
     B, L, C = x.shape
     K = w.shape[0]
-    xf = x.float()
-    wf = w.float()
-
-    if conv_states is not None:
-        pad = conv_states.float()  # [B, K-1, C]
-    else:
-        pad = torch.zeros((B, K - 1, C), device=x.device, dtype=torch.float32)
+    xf, wf = x.float(), w.float()
+    pad = (
+        conv_states.float()
+        if conv_states is not None
+        else torch.zeros(B, K - 1, C, device=x.device, dtype=torch.float32)
+    )
     xe = torch.cat([pad, xf], dim=1)  # [B, L+K-1, C]
-
     acc = sum(xe[:, k : k + L] * wf[k] for k in range(K))
     if bias is not None:
         acc = acc + bias.float()
     return F.silu(acc) if activation else acc
 
 
-# ---------------------------------------------------------------------------
-# Ring-size variants — one K per RS
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("dtype", DTYPES)
 @pytest.mark.parametrize("K", K_VALUES)
-def test_ring_size_variants(npu_device, dtype, K):
-    """Each K value exercises a distinct ring-size (RS = roundUpToPow2(K)) variant."""
-    batch, seq, dim = 2, 64, 512
-    x = 2 * torch.rand(batch, seq, dim, device=npu_device, dtype=dtype) - 1
-    w = torch.rand(K, dim, device=npu_device, dtype=dtype) - 0.5
-    bias = torch.rand(dim, device=npu_device, dtype=dtype) - 0.5
-
-    y = pto_gdn_causal_conv1d(x, w, bias, activation=True)
-    torch.npu.synchronize()
-
-    ref = _ref(x, w, bias, activation=True)
-    err = (y.float() - ref).abs().max().item()
-    assert (
-        err <= TOL[dtype]
-    ), f"K={K} dtype={dtype} max abs err {err:.3e} > tol {TOL[dtype]:.1e}"
-
-
-# ---------------------------------------------------------------------------
-# Standard batched convolution
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("dtype", DTYPES)
+@pytest.mark.parametrize("has_bias", [True, False])
+@pytest.mark.parametrize("has_conv_states", [True, False])
 @pytest.mark.parametrize("activation", [True, False])
-@pytest.mark.parametrize("batch,seq,dim", TEST_CASES)
-def test_batched_matches_reference(npu_device, dtype, activation, batch, seq, dim):
+@pytest.mark.parametrize(
+    "ndim, batch, seq, channels",
+    X_SHAPES,
+)
+def test_gdn_causal_conv1d(
+    npu_device,
+    K,
+    dtype,
+    has_bias,
+    has_conv_states,
+    activation,
+    ndim,
+    batch,
+    seq,
+    channels,
+):
+    """Parametrized correctness sweep: all K values × all option/shape combinations."""
+    if ndim == 2:
+        x = 2 * torch.rand(seq, channels, device=npu_device, dtype=dtype) - 1
+        x_ref = x.unsqueeze(0)
+        cs = (
+            2 * torch.rand(K - 1, channels, device=npu_device, dtype=dtype) - 1
+            if has_conv_states
+            else None
+        )
+        cs_ref = cs.unsqueeze(0) if cs is not None else None
+    else:
+        x = 2 * torch.rand(batch, seq, channels, device=npu_device, dtype=dtype) - 1
+        x_ref = x
+        cs = (
+            2 * torch.rand(batch, K - 1, channels, device=npu_device, dtype=dtype) - 1
+            if has_conv_states
+            else None
+        )
+        cs_ref = cs
+
+    w = torch.rand(K, channels, device=npu_device, dtype=dtype) - 0.5
+    bias = (
+        torch.rand(channels, device=npu_device, dtype=dtype) - 0.5 if has_bias else None
+    )
+
+    y = pto_gdn_causal_conv1d(x, w, bias, conv_states=cs, activation=activation)
+    torch.npu.synchronize()
+
+    if ndim == 2:
+        assert y.shape == x.shape
+
+    ref = _ref(x_ref, w, bias, activation, conv_states=cs_ref)
+    if ndim == 2:
+        ref = ref[0]
+
+    err = (y.float() - ref).abs().max().item()
+    assert err <= TOL[dtype], (
+        f"K={K} {dtype} bias={has_bias} states={has_conv_states} act={activation} "
+        f"ndim={ndim} shape={tuple(x.shape)} max_abs_err={err:.3e} tol={TOL[dtype]:.1e}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Invalid-input tests (expected failures)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("K", [1, 65, 100, 128])
+@pytest.mark.parametrize("dtype", DTYPES)
+def test_invalid_k(npu_device, dtype, K):
+    """K outside [2..64] must raise RuntimeError."""
+    dim = 256
+    x = torch.rand(1, 16, dim, device=npu_device, dtype=dtype)
+    w = torch.rand(K, dim, device=npu_device, dtype=dtype)
+    with pytest.raises(RuntimeError, match="filter width K must be in"):
+        pto_gdn_causal_conv1d(x, w)
+
+
+@pytest.mark.parametrize("channels", [1, 8, 9, 15, 17, 100, 130])
+@pytest.mark.parametrize("dtype", DTYPES)
+def test_invalid_channel_alignment(npu_device, dtype, channels):
+    """channels not divisible by 16 must raise RuntimeError."""
     K = 4
-    x = 2 * torch.rand(batch, seq, dim, device=npu_device, dtype=dtype) - 1
-    w = torch.rand(K, dim, device=npu_device, dtype=dtype) - 0.5
-    bias = torch.rand(dim, device=npu_device, dtype=dtype) - 0.5
-
-    y = pto_gdn_causal_conv1d(x, w, bias, activation=activation)
-    torch.npu.synchronize()
-
-    ref = _ref(x, w, bias, activation)
-    err = (y.float() - ref).abs().max().item()
-    assert err <= TOL[dtype], f"max abs err {err:.3e} > tol {TOL[dtype]:.1e}"
-
-
-# ---------------------------------------------------------------------------
-# Bias-less case
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("dtype", DTYPES)
-def test_no_bias(npu_device, dtype):
-    """bias=None → hasBias=0 path; reference omits bias term."""
-    K, batch, seq, dim = 4, 2, 64, 256
-    x = 2 * torch.rand(batch, seq, dim, device=npu_device, dtype=dtype) - 1
-    w = torch.rand(K, dim, device=npu_device, dtype=dtype) - 0.5
-
-    y = pto_gdn_causal_conv1d(x, w, activation=True)
-    torch.npu.synchronize()
-
-    ref = _ref(x, w, bias=None, activation=True)
-    err = (y.float() - ref).abs().max().item()
-    assert err <= TOL[dtype], f"no-bias max abs err {err:.3e}"
-
-
-# ---------------------------------------------------------------------------
-# conv_states — history from prior tokens
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("dtype", DTYPES)
-@pytest.mark.parametrize("K", [2, 4, 8])
-def test_conv_states_matches_reference(npu_device, dtype, K):
-    """History from conv_states is used instead of zero-padding."""
-    batch, seq, dim = 2, 64, 256
-    x = 2 * torch.rand(batch, seq, dim, device=npu_device, dtype=dtype) - 1
-    w = torch.rand(K, dim, device=npu_device, dtype=dtype) - 0.5
-    bias = torch.rand(dim, device=npu_device, dtype=dtype) - 0.5
-    # conv_states: [B, K-1, C] — the K-1 history rows
-    conv_states = 2 * torch.rand(batch, K - 1, dim, device=npu_device, dtype=dtype) - 1
-
-    y = pto_gdn_causal_conv1d(x, w, bias, conv_states=conv_states, activation=True)
-    torch.npu.synchronize()
-
-    ref = _ref(x, w, bias, activation=True, conv_states=conv_states)
-    err = (y.float() - ref).abs().max().item()
-    assert (
-        err <= TOL[dtype]
-    ), f"K={K} dtype={dtype} conv_states max abs err {err:.3e} > tol {TOL[dtype]:.1e}"
-
-
-# ---------------------------------------------------------------------------
-# No conv_states → zero-padding
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("dtype", DTYPES)
-def test_no_conv_states_uses_zero_padding(npu_device, dtype):
-    """Omitting conv_states (or passing empty tensor) must use zero-padding."""
-    K, batch, seq, dim = 4, 2, 64, 256
-    x = 2 * torch.rand(batch, seq, dim, device=npu_device, dtype=dtype) - 1
-    w = torch.rand(K, dim, device=npu_device, dtype=dtype) - 0.5
-    bias = torch.rand(dim, device=npu_device, dtype=dtype) - 0.5
-
-    y = pto_gdn_causal_conv1d(x, w, bias, activation=True)
-    torch.npu.synchronize()
-
-    ref = _ref(x, w, bias, activation=True, conv_states=None)
-    err = (y.float() - ref).abs().max().item()
-    assert err <= TOL[dtype], f"no-conv_states max abs err {err:.3e}"
-
-
-# ---------------------------------------------------------------------------
-# Multi-chunk with conv_states (large K, small seq forces second chunk jstart<0)
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("dtype", DTYPES)
-def test_large_K_multiChunk(npu_device, dtype):
-    """K=32, seq=48 forces seqChunks>1; second chunk's jstart is negative and
-    must read history rows from conv_states rather than from x."""
-    K, batch, seq, dim = 32, 1, 48, 512
-    x = 2 * torch.rand(batch, seq, dim, device=npu_device, dtype=dtype) - 1
-    w = torch.rand(K, dim, device=npu_device, dtype=dtype) - 0.5
-    bias = torch.rand(dim, device=npu_device, dtype=dtype) - 0.5
-    conv_states = 2 * torch.rand(batch, K - 1, dim, device=npu_device, dtype=dtype) - 1
-
-    y = pto_gdn_causal_conv1d(x, w, bias, conv_states=conv_states, activation=False)
-    torch.npu.synchronize()
-
-    ref = _ref(x, w, bias, activation=False, conv_states=conv_states)
-    err = (y.float() - ref).abs().max().item()
-    assert err <= TOL[dtype], f"large-K multi-chunk max abs err {err:.3e}"
-
-
-# ---------------------------------------------------------------------------
-# 2D input reshape
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("dtype", DTYPES)
-@pytest.mark.parametrize("seq,dim", [(16, 256), (128, 2048), (512, 6144)])
-def test_2d_reshape_matches_reference(npu_device, dtype, seq, dim):
-    """2D input [L, C] is treated as batch=1 and output has the same rank."""
-    K = 4
-    x = 2 * torch.rand(seq, dim, device=npu_device, dtype=dtype) - 1
-    w = torch.rand(K, dim, device=npu_device, dtype=dtype) - 0.5
-    bias = torch.rand(dim, device=npu_device, dtype=dtype) - 0.5
-
-    y = pto_gdn_causal_conv1d(x, w, bias, activation=True)
-    torch.npu.synchronize()
-
-    assert y.shape == x.shape
-    ref = _ref(x.unsqueeze(0), w, bias, activation=True)[0]
-    err = (y.float() - ref).abs().max().item()
-    assert err <= TOL[dtype], f"2D reshape max abs err {err:.3e}"
+    x = torch.rand(1, 16, channels, device=npu_device, dtype=dtype)
+    w = torch.rand(K, channels, device=npu_device, dtype=dtype)
+    with pytest.raises(RuntimeError, match="channels must be a multiple of 16"):
+        pto_gdn_causal_conv1d(x, w)
