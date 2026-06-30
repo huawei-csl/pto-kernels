@@ -65,9 +65,9 @@ AICORE inline void processWorkUnit(
     __gm__ IoElemType* weights, __gm__ IoElemType* bias,
     __gm__ IoElemType* convStates, uint32_t channels,
     uint64_t sequenceRowOffset, uint64_t seqConvStatesOffset,
-    uint32_t channelTileBase, int32_t tileChannelCount, uint32_t outputRowStart,
-    uint32_t outputRowEnd, uint32_t K, uint32_t applyActivation,
-    uint32_t hasBias, uint32_t hasConvStates) {
+    uint32_t channelTileBase, uint32_t tileChannelCount,
+    uint32_t outputRowStart, uint32_t outputRowEnd, uint32_t K,
+    uint32_t applyActivation, uint32_t hasBias, uint32_t hasConvStates) {
   using GlobalShape = pto::Shape<1, 1, 1, 1, DYNAMIC>;
   using GlobalStride = pto::Stride<1, 1, 1, 1, 1>;
   using GlobalIoTensor =
@@ -381,9 +381,9 @@ AICORE void runConvSiluBatched(
 
     const uint32_t channelTileBase = channelTileIndex * channelTileWidth;
     const uint32_t remainingChannels = channels - channelTileBase;
-    const int32_t tileChannelCount =
-        (int32_t)(remainingChannels > channelTileWidth ? channelTileWidth
-                                                       : remainingChannels);
+    const uint32_t tileChannelCount = remainingChannels > channelTileWidth
+                                          ? channelTileWidth
+                                          : remainingChannels;
     const uint32_t outputRowStart = sequenceChunkIndex * sequenceChunkLength;
     if (outputRowStart >= seqLen) continue;
     uint32_t outputRowEnd = outputRowStart + sequenceChunkLength;
