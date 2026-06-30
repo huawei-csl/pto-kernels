@@ -183,13 +183,11 @@ at::Tensor run_gdn_causal_conv1d(const at::Tensor& x, const at::Tensor& weights,
 
   at::Tensor output = at::empty_like(x3d);
 
-  // clang-format off
-#define DISPATCH_DTYPE(rs, mw, dtype)                                             \
-  case rs:                                                                        \
-    EXEC_KERNEL_CMD(gdn_causal_conv1d_ ## dtype ## _rs ## rs, blockDim,           \
-                    x3d, output, weights, biasArg, convStatesArg,                 \
-                    batch, seqLen, channels, stateLen, K,                         \
-                    applyActivation, hasBias, hasConvStates);                     \
+#define DISPATCH_DTYPE(rs, mw, dtype)                                          \
+  case rs:                                                                     \
+    EXEC_KERNEL_CMD(gdn_causal_conv1d_##dtype##_rs##rs, blockDim, x3d, output, \
+                    weights, biasArg, convStatesArg, batch, seqLen, channels,  \
+                    stateLen, K, applyActivation, hasBias, hasConvStates);     \
     break;
 #define DISPATCH_FP16(rs, mw) DISPATCH_DTYPE(rs, mw, fp16)
 #define DISPATCH_BF16(rs, mw) DISPATCH_DTYPE(rs, mw, bf16)
@@ -216,7 +214,6 @@ at::Tensor run_gdn_causal_conv1d(const at::Tensor& x, const at::Tensor& weights,
 #undef DISPATCH_BF16
 #undef DISPATCH_FP16
 #undef DISPATCH_DTYPE
-  // clang-format on
 
   return was2d ? output.squeeze(0) : output;
 }

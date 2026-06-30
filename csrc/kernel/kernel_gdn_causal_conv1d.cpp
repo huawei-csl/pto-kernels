@@ -81,12 +81,18 @@ AICORE inline void processWorkUnit(
   constexpr uint32_t ioTileBytes = MAX_W * sizeof(IoElemType);
 
   // UB layout (all offsets compile-time; AT = accumTileBytes):
-  //   [0 .. RS-1]           RS fp32 weight tiles              → k * AT
-  //   [RS]                  1 fp32 bias tile                  → ubBiasOffset
-  //   [RS+1 .. 2*RS]        RS fp32 accumulator ring          → ubAccumRingBase + slot * AT
-  //   [2*RS+1 .. 3*RS-1]    RS-1 fp32 partial-product tiles   → ubProductBase + (k-1) * AT
-  //   [3*RS]                1 fp32 input scratch              → ubInputFp32
-  //   I/O region (4 × ioTileBytes): in[0], out[0], out[1], in[1] → ubIoBase + {0,1,2,3} * ioTileBytes
+  //   [0 .. RS-1]           RS fp32 weight tiles
+  //                                        → k * AT
+  //   [RS]                  1 fp32 bias tile
+  //                                        → ubBiasOffset
+  //   [RS+1 .. 2*RS]        RS fp32 accumulator ring
+  //                                        → ubAccumRingBase + slot * AT
+  //   [2*RS+1 .. 3*RS-1]    RS-1 fp32 partial-product tiles
+  //                                        → ubProductBase + (k-1) * AT
+  //   [3*RS]                1 fp32 input scratch
+  //                                        → ubInputFp32
+  //   I/O region (4 × ioTileBytes): in[0], out[0], out[1], in[1]
+  //                                        → ubIoBase + {0,1,2,3} * ioTileBytes
   constexpr uint32_t ubBiasOffset = RS * accumTileBytes;
   constexpr uint32_t ubAccumRingBase = (RS + 1u) * accumTileBytes;
   constexpr uint32_t ubProductBase = (2u * RS + 1u) * accumTileBytes;
@@ -186,8 +192,9 @@ AICORE inline void processWorkUnit(
     } else {
       const int32_t stateRow = halo + jstart;
       GlobalIoTensor stateGm(convStates + seqConvStatesOffset +
-                               (uint64_t)stateRow * channels + channelTileBase,
-                           {tileChannelCount});
+                                 (uint64_t)stateRow * channels +
+                                 channelTileBase,
+                             {tileChannelCount});
       TLOAD(prologueTile, stateGm);
     }
     set_flag(PIPE_MTE2, PIPE_V, inputBufferEvent[0]);
@@ -221,9 +228,9 @@ AICORE inline void processWorkUnit(
       } else {
         const int32_t stateRow = halo + jnext;
         GlobalIoTensor stateGm(convStates + seqConvStatesOffset +
-                                 (uint64_t)stateRow * channels +
-                                 channelTileBase,
-                             {tileChannelCount});
+                                   (uint64_t)stateRow * channels +
+                                   channelTileBase,
+                               {tileChannelCount});
         TLOAD(nextTile, stateGm);
       }
       set_flag(PIPE_MTE2, PIPE_V, inputBufferEvent[nextBuf]);
@@ -279,7 +286,9 @@ AICORE inline void processWorkUnit(
     AccumTile siluScratch(tileChannelCount);
     IoTile outputTile(tileChannelCount);
     TASSIGN(accumTile, ubAccumRingBase + accumRingSlot * accumTileBytes);
-    TASSIGN(siluScratch, ubProductBase);  // reuses product slot 0 — safe: scatter loop is done
+    TASSIGN(
+        siluScratch,
+        ubProductBase);  // reuses product slot 0 — safe: scatter loop is done
     TASSIGN(outputTile, ubOutputOffset[outputBufIndex]);
 
     if (hasBias) {
@@ -393,11 +402,9 @@ AICORE void runConvSiluBatched(
 
 }  // namespace csilu
 
-// clang-format off
 #ifndef GM_ADDR
 #define GM_ADDR __gm__ uint8_t*
 #endif
-// clang-format on
 
 // Kernel entry parameters: 5 GM pointers + 8 uint32 scalars.
 #define BATCHED_PARAMS                                                        \
@@ -420,17 +427,15 @@ AICORE void runConvSiluBatched(
       (void)applyActivation, (void)hasBias, (void)hasConvStates
 #endif
 
-// clang-format off
-#define DEF_ENTRY(SUF, T, RS, MW)                                               \
-  extern "C" __global__ AICORE void gdn_causal_conv1d_##SUF(BATCHED_PARAMS) {   \
-    BATCHED_BODY(T, RS, MW);                                                    \
+#define DEF_ENTRY(SUF, T, RS, MW)                                             \
+  extern "C" __global__ AICORE void gdn_causal_conv1d_##SUF(BATCHED_PARAMS) { \
+    BATCHED_BODY(T, RS, MW);                                                  \
   }
-#define DEFINE_ENTRIES(ringSize, maxTileWidth)                        \
-  DEF_ENTRY(fp16_rs##ringSize, half,        ringSize, maxTileWidth)   \
-  DEF_ENTRY(bf16_rs##ringSize, bfloat16_t,  ringSize, maxTileWidth)
+#define DEFINE_ENTRIES(ringSize, maxTileWidth)               \
+  DEF_ENTRY(fp16_rs##ringSize, half, ringSize, maxTileWidth) \
+  DEF_ENTRY(bf16_rs##ringSize, bfloat16_t, ringSize, maxTileWidth)
 FOR_EACH_RING_SIZE(DEFINE_ENTRIES)
 #undef DEFINE_ENTRIES
 #undef DEF_ENTRY
 #undef BATCHED_BODY
 #undef BATCHED_PARAMS
-// clang-format on
