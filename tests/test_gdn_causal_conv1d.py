@@ -126,13 +126,12 @@ def test_batched_matches_reference(npu_device, dtype, activation, batch, seq, di
 
 @pytest.mark.parametrize("dtype", DTYPES)
 def test_no_bias(npu_device, dtype):
-    """Empty bias tensor → hasBias=0 path; reference omits bias term."""
+    """bias=None → hasBias=0 path; reference omits bias term."""
     K, batch, seq, dim = 4, 2, 64, 256
     x = 2 * torch.rand(batch, seq, dim, device=npu_device, dtype=dtype) - 1
     w = torch.rand(K, dim, device=npu_device, dtype=dtype) - 0.5
-    empty_bias = torch.empty(0, device=npu_device, dtype=dtype)
 
-    y = pto_gdn_causal_conv1d(x, w, empty_bias, activation=True)
+    y = pto_gdn_causal_conv1d(x, w, activation=True)
     torch.npu.synchronize()
 
     ref = _ref(x, w, bias=None, activation=True)

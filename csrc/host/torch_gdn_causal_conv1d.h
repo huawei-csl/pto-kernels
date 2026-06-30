@@ -74,16 +74,16 @@ constexpr bool isSupportedWidth(uint32_t w) { return w >= 2u && w <= 64u; }
  *                                contiguous.
  * @param [in] weights            Filter [K, C], same dtype as x, contiguous.
  * @param [in] bias               Bias [C], same dtype as x, contiguous; or
- *                                empty (no bias).
+ *                                None / empty tensor (no bias).
  * @param [in] conv_states        History [B, stateLen, C], same dtype as x,
  *                                contiguous; or empty.
  * @param [in] activation         Apply SiLU after bias add. Default true.
  * @return at::Tensor             Output, same shape and dtype as x.
  */
 at::Tensor run_gdn_causal_conv1d(const at::Tensor& x, const at::Tensor& weights,
-                                 const at::Tensor& bias,
-                                 const at::Tensor& conv_states = at::Tensor{},
-                                 bool activation = true) {
+                                 const c10::optional<at::Tensor>& bias,
+                                 const c10::optional<at::Tensor>& conv_states,
+                                 bool activation) {
   // ---- input validation ----
   TORCH_CHECK(x.device().type() == DEVICE_TYPE,
               "gdn_causal_conv1d: x must be on NPU, got ", x.device());
@@ -125,43 +125,43 @@ at::Tensor run_gdn_causal_conv1d(const at::Tensor& x, const at::Tensor& weights,
       "vector alignment, got ",
       channels);
 
-  const bool has_bias = bias.numel() > 0;
+  const bool has_bias = bias.has_value() && bias->numel() > 0;
   if (has_bias) {
     TORCH_CHECK(
-        bias.dim() == 1 && bias.size(0) == static_cast<int64_t>(channels),
+        bias->dim() == 1 && bias->size(0) == static_cast<int64_t>(channels),
         "gdn_causal_conv1d: bias must be 1D [C] with C=", channels,
-        ", got shape ", bias.sizes());
-    TORCH_CHECK(bias.scalar_type() == dtype,
+        ", got shape ", bias->sizes());
+    TORCH_CHECK(bias->scalar_type() == dtype,
                 "gdn_causal_conv1d: bias dtype must match x dtype (", dtype,
-                "), got ", bias.scalar_type());
-    TORCH_CHECK(bias.is_contiguous(),
+                "), got ", bias->scalar_type());
+    TORCH_CHECK(bias->is_contiguous(),
                 "gdn_causal_conv1d: bias must be contiguous");
   }
 
-  const bool use_states = conv_states.numel() > 0;
+  const bool use_states = conv_states.has_value() && conv_states->numel() > 0;
   if (use_states) {
     TORCH_CHECK(
-        conv_states.dim() == 3,
+        conv_states->dim() == 3,
         "gdn_causal_conv1d: conv_states must be 3D [B, stateLen, C], got ",
-        conv_states.dim(), "D");
-    TORCH_CHECK(conv_states.size(0) == static_cast<int64_t>(batch),
+        conv_states->dim(), "D");
+    TORCH_CHECK(conv_states->size(0) == static_cast<int64_t>(batch),
                 "gdn_causal_conv1d: conv_states.shape[0] (",
-                conv_states.size(0), ") must equal batch size (", batch, ")");
-    TORCH_CHECK(conv_states.size(2) == static_cast<int64_t>(channels),
+                conv_states->size(0), ") must equal batch size (", batch, ")");
+    TORCH_CHECK(conv_states->size(2) == static_cast<int64_t>(channels),
                 "gdn_causal_conv1d: conv_states.shape[2] (",
-                conv_states.size(2), ") must equal channels (", channels, ")");
-    TORCH_CHECK(conv_states.size(1) >= static_cast<int64_t>(K - 1),
+                conv_states->size(2), ") must equal channels (", channels, ")");
+    TORCH_CHECK(conv_states->size(1) >= static_cast<int64_t>(K - 1),
                 "gdn_causal_conv1d: conv_states.shape[1] (",
-                conv_states.size(1), ") must be >= K-1 (", K - 1, ")");
-    TORCH_CHECK(conv_states.scalar_type() == dtype,
+                conv_states->size(1), ") must be >= K-1 (", K - 1, ")");
+    TORCH_CHECK(conv_states->scalar_type() == dtype,
                 "gdn_causal_conv1d: conv_states dtype must match x dtype (",
-                dtype, "), got ", conv_states.scalar_type());
-    TORCH_CHECK(conv_states.is_contiguous(),
+                dtype, "), got ", conv_states->scalar_type());
+    TORCH_CHECK(conv_states->is_contiguous(),
                 "gdn_causal_conv1d: conv_states must be contiguous");
   }
 
   // ---- kernel launch ----
-  const at::Tensor biasArg = has_bias ? bias : at::empty({0}, x.options());
+  const at::Tensor biasArg = has_bias ? *bias : at::empty({0}, x.options());
 
   // When has_initial_state is false, later sequence chunks with large K (K >
   // 32) can still have jstart < 0 and read from conv_states. Provide zeros so
@@ -170,9 +170,9 @@ at::Tensor run_gdn_causal_conv1d(const at::Tensor& x, const at::Tensor& weights,
   at::Tensor convStatesArg;
   uint32_t hasConvStates, stateLen;
   if (use_states) {
-    convStatesArg = conv_states;
+    convStatesArg = *conv_states;
     hasConvStates = 1u;
-    stateLen = static_cast<uint32_t>(conv_states.size(1));
+    stateLen = static_cast<uint32_t>(conv_states->size(1));
   } else {
     convStatesArg = at::zeros(
         {(int64_t)batch, (int64_t)(K - 1), (int64_t)channels}, x.options());
