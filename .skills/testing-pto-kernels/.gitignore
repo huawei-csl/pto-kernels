@@ -1,0 +1,9 @@
+# Build artifacts from bisheng / pybind extension builds
+reference/**/build/
+
+# Simulator and profiler outputs (msprof, cannsim, benchmark CSV)
+reference/**/outputs/
+
+# Python cache
+**/__pycache__/
+*.py[cod]
