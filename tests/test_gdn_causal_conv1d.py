@@ -227,7 +227,7 @@ def test_2d_reshape_matches_reference(npu_device, dtype, seq, dim):
     w = torch.rand(K, dim, device=npu_device, dtype=dtype) - 0.5
     bias = torch.rand(dim, device=npu_device, dtype=dtype) - 0.5
 
-    y = pto_gdn_causal_conv1d(x, w, bias)
+    y = pto_gdn_causal_conv1d(x, w, bias, activation=True)
     torch.npu.synchronize()
 
     assert y.shape == x.shape

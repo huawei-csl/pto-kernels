@@ -74,9 +74,9 @@ constexpr bool isSupportedWidth(uint32_t w) { return w >= 2u && w <= 64u; }
  *                                contiguous.
  * @param [in] weights            Filter [K, C], same dtype as x, contiguous.
  * @param [in] bias               Bias [C], same dtype as x, contiguous; or
- *                                None / empty tensor (no bias).
+ *                                None (no bias).
  * @param [in] conv_states        History [B, stateLen, C], same dtype as x,
- *                                contiguous; or empty.
+ *                                contiguous; or None (zero-padding).
  * @param [in] activation         Apply SiLU after bias add. Default true.
  * @return at::Tensor             Output, same shape and dtype as x.
  */
@@ -125,7 +125,7 @@ at::Tensor run_gdn_causal_conv1d(const at::Tensor& x, const at::Tensor& weights,
       "vector alignment, got ",
       channels);
 
-  const bool has_bias = bias.has_value() && bias->numel() > 0;
+  const bool has_bias = bias.has_value();
   if (has_bias) {
     TORCH_CHECK(
         bias->dim() == 1 && bias->size(0) == static_cast<int64_t>(channels),
@@ -138,7 +138,7 @@ at::Tensor run_gdn_causal_conv1d(const at::Tensor& x, const at::Tensor& weights,
                 "gdn_causal_conv1d: bias must be contiguous");
   }
 
-  const bool use_states = conv_states.has_value() && conv_states->numel() > 0;
+  const bool use_states = conv_states.has_value();
   if (use_states) {
     TORCH_CHECK(
         conv_states->dim() == 3,

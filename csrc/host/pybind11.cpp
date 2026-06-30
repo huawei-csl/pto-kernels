@@ -48,7 +48,7 @@ PYBIND11_MODULE(pto_kernels_ops, m) {
         py::arg("x"), py::arg("weights"),
         py::arg("bias") = py::none(),
         py::arg("conv_states") = py::none(),
-        py::arg("activation") = true);
+        py::arg("activation") = false);
   m.def("pto_chunk_h", &pto_isa_ops::run_gdn_chunk_h, py::arg("K"),
         py::arg("W"), py::arg("U"), py::arg("G"),
         py::arg("cu_seqlens") = at::zeros({1}), py::arg("batch_size"),
