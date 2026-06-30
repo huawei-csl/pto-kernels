@@ -138,7 +138,9 @@ ascendc_library(
   csrc/kernel/kernel_tri_inv_rec_unroll.cpp
   csrc/kernel/kernel_tri_inv_trick.cpp
   csrc/kernel/kernel_swiglu.cpp
-  csrc/kernel/kernel_kda_wy.cpp)
+  csrc/kernel/kernel_kda_gate_cumsum.cpp
+  csrc/kernel/kernel_kda_wy.cpp
+  csrc/kernel/kernel_gdn_wy_fast.cpp)
 
 ascendc_include_directories(
   no_workspace_kernel PRIVATE ${libpto_isa_headers_SOURCE_DIR}/include
