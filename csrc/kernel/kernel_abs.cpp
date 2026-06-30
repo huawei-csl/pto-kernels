@@ -131,6 +131,16 @@ extern "C" __global__ AICORE void vabs_fp32(GM_ADDR x, GM_ADDR z,
 }
 
 extern "C" void call_vabs_fp16(uint32_t blockDim, void* stream, uint8_t* x,
-                               uint8_t* y, uint32_t in_length) {
-  vabs_fp16<<<blockDim * 2, nullptr, stream>>>(x, y, in_length);
+                               uint8_t* z, uint32_t in_length) {
+#ifndef __CPU_SIM
+  vabs_fp16<<<blockDim * 2, nullptr, stream>>>(x, z, in_length);
+#else
+  set_block_num(blockDim);
+  for (uint32_t i = 0; i < blockDim; ++i) {
+    {
+      pto::cpu_sim::ScopedExecutionContext ctx(i, 0, 2);
+      vabs_fp16(x, z, in_length);
+    }
+  }
+#endif
 }

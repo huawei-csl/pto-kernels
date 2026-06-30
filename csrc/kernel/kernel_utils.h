@@ -8,8 +8,33 @@ for the full License text.
 */
 #pragma once
 
+#include <cstdint>
 #include <pto/pto-inst.hpp>
 #include <type_traits>
+
+#ifdef __CPU_SIM
+
+#define __DAV_C220_VEC__
+#define __DAV_C220_CUBE__
+
+/**
+ *  * @brief Thread-local variables to store block information for CPU
+ * simulation.
+ *   */
+inline thread_local uint32_t g_block_num = 1;
+
+/**
+ * @brief Global accessor for block number in CPU simulation.
+ *
+ * We need this function because pto/common/cpu_stub.hpp doesn't define it.
+ */
+extern "C" uint32_t get_block_num() { return g_block_num; }
+
+/**
+ * @brief Set the number of blocks.
+ */
+extern "C" void set_block_num(uint32_t block_num) { g_block_num = block_num; }
+#endif
 
 // clang-format off: so it does not get wrongfully flagged by linter
 #ifndef GM_ADDR
