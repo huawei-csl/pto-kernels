@@ -157,12 +157,13 @@ AICORE inline void processWorkUnit(
   // Double-buffered input: two load slots with independent events.
   // EVENT_ID3 is reused here (the weight/bias load above consumed it already).
   const event_t inputBufferEvent[2] = {EVENT_ID0, EVENT_ID3};
+  const event_t outputBufferEvent[2] = {EVENT_ID1, EVENT_ID2};
   // input slots are initially free
   set_flag(PIPE_V, PIPE_MTE2, inputBufferEvent[0]);
   set_flag(PIPE_V, PIPE_MTE2, inputBufferEvent[1]);
-  // TODO why are these flags set
-  set_flag(PIPE_MTE3, PIPE_V, EVENT_ID1);
-  set_flag(PIPE_MTE3, PIPE_V, EVENT_ID2);
+  // output slots are initially free
+  set_flag(PIPE_MTE3, PIPE_V, outputBufferEvent[0]);
+  set_flag(PIPE_MTE3, PIPE_V, outputBufferEvent[1]);
 
   // Signed loop variable: j < 0 indexes into conv_states (history rows).
   const int32_t halo = (int32_t)K - 1;
@@ -277,7 +278,6 @@ AICORE inline void processWorkUnit(
 
     const uint32_t accumRingSlot = (uint32_t)j & (RS - 1u);
     const uint32_t outputBufIndex = (uint32_t)j & 1u;
-    const event_t outputEvent = (event_t)(1u + outputBufIndex);
     AccumTile accumTile(tileChannelCount);
     AccumTile siluScratch(tileChannelCount);
     IoTile outputTile(tileChannelCount);
@@ -295,21 +295,21 @@ AICORE inline void processWorkUnit(
       applySiluToTile(accumTile, accumTile, siluScratch);
       PipeBarrierVec();
     }
-    wait_flag(PIPE_MTE3, PIPE_V, outputEvent);
+    wait_flag(PIPE_MTE3, PIPE_V, outputBufferEvent[outputBufIndex]);
     TCVT(outputTile, accumTile, pto::RoundMode::CAST_NONE);
     GlobalIoTensor outGm(
         output + sequenceRowOffset + (uint64_t)j * channels + channelTileBase,
         {tileChannelCount});
-    set_flag(PIPE_V, PIPE_MTE3, outputEvent);
-    wait_flag(PIPE_V, PIPE_MTE3, outputEvent);
+    set_flag(PIPE_V, PIPE_MTE3, outputBufferEvent[outputBufIndex]);
+    wait_flag(PIPE_V, PIPE_MTE3, outputBufferEvent[outputBufIndex]);
     TSTORE(outGm, outputTile);
-    set_flag(PIPE_MTE3, PIPE_V, outputEvent);
+    set_flag(PIPE_MTE3, PIPE_V, outputBufferEvent[outputBufIndex]);
   }
 
   wait_flag(PIPE_V, PIPE_MTE2, inputBufferEvent[0]);
   wait_flag(PIPE_V, PIPE_MTE2, inputBufferEvent[1]);
-  wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID1);
-  wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID2);
+  wait_flag(PIPE_MTE3, PIPE_V, outputBufferEvent[0]);
+  wait_flag(PIPE_MTE3, PIPE_V, outputBufferEvent[1]);
 }
 
 // Batched driver: assigns work units to cores and calls processWorkUnit.
