@@ -66,8 +66,8 @@ AICORE inline void processWorkUnit(
     __gm__ IoElemType* convStates, uint32_t channels,
     uint64_t sequenceRowOffset, uint64_t seqConvStatesOffset,
     uint32_t channelTileBase, int32_t tileChannelCount, uint32_t outputRowStart,
-    uint32_t outputRowEnd, uint32_t K,
-    uint32_t applyActivation, uint32_t hasBias, uint32_t hasInit) {
+    uint32_t outputRowEnd, uint32_t K, uint32_t applyActivation,
+    uint32_t hasBias, uint32_t hasInit) {
   using GlobalShape = pto::Shape<1, 1, 1, 1, DYNAMIC>;
   using GlobalStride = pto::Stride<1, 1, 1, 1, 1>;
   using GlobalIoTensor =

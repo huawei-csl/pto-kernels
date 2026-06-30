@@ -143,10 +143,13 @@ at::Tensor run_gdn_causal_conv1d(const at::Tensor& x, const at::Tensor& weights,
   if (use_states) {
     const std::vector<int64_t> expected_sizes =
         was2d ? std::vector<int64_t>{(int64_t)(K - 1), (int64_t)channels}
-              : std::vector<int64_t>{(int64_t)batch, (int64_t)(K - 1), (int64_t)channels};
+              : std::vector<int64_t>{(int64_t)batch, (int64_t)(K - 1),
+                                     (int64_t)channels};
     TORCH_CHECK(conv_states->sizes() == at::IntArrayRef(expected_sizes),
-                "gdn_causal_conv1d: conv_states must have shape ", at::IntArrayRef(expected_sizes),
-                " (same rank as x, middle dim K-1), got ", conv_states->sizes());
+                "gdn_causal_conv1d: conv_states must have shape ",
+                at::IntArrayRef(expected_sizes),
+                " (same rank as x, middle dim K-1), got ",
+                conv_states->sizes());
     TORCH_CHECK(conv_states->scalar_type() == dtype,
                 "gdn_causal_conv1d: conv_states dtype must match x dtype (",
                 dtype, "), got ", conv_states->scalar_type());

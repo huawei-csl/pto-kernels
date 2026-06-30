@@ -155,9 +155,7 @@ def test_conv_states_matches_reference(npu_device, dtype, K):
     # conv_states: [B, K-1, C] — the K-1 history rows
     conv_states = 2 * torch.rand(batch, K - 1, dim, device=npu_device, dtype=dtype) - 1
 
-    y = pto_gdn_causal_conv1d(
-        x, w, bias, conv_states=conv_states, activation=True
-    )
+    y = pto_gdn_causal_conv1d(x, w, bias, conv_states=conv_states, activation=True)
     torch.npu.synchronize()
 
     ref = _ref(x, w, bias, activation=True, conv_states=conv_states)
@@ -203,9 +201,7 @@ def test_large_K_multiChunk(npu_device, dtype):
     bias = torch.rand(dim, device=npu_device, dtype=dtype) - 0.5
     conv_states = 2 * torch.rand(batch, K - 1, dim, device=npu_device, dtype=dtype) - 1
 
-    y = pto_gdn_causal_conv1d(
-        x, w, bias, conv_states=conv_states, activation=False
-    )
+    y = pto_gdn_causal_conv1d(x, w, bias, conv_states=conv_states, activation=False)
     torch.npu.synchronize()
 
     ref = _ref(x, w, bias, activation=False, conv_states=conv_states)
