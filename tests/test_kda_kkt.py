@@ -25,7 +25,7 @@ import torch.nn.functional as F
 
 from pto_kernels import pto_kda_kkt
 
-# Compile-time kernel constants (default build: GDN_H=4, GDN_D=128, GDN_C=128)
+# Compile-time kernel constants (default build: KDA_KKT_H=4, KDA_KKT_D=128, KDA_KKT_C=128)
 C = 128  # chunk size
 D = 128  # head dimension
 H = 4  # number of heads

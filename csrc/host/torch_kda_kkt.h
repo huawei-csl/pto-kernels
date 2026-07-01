@@ -59,7 +59,7 @@ at::Tensor run_kda_kkt(const at::Tensor& K, const at::Tensor& G_cs,
   // total_tokens]
   const int64_t num_heads = K.size(0);
   const int64_t total_tokens = K.size(1);
-  // GDN_C compile-time constant — matches kernel default build
+  // KDA_KKT_C compile-time constant — matches kernel default build
   constexpr int64_t CHUNK_C = 128;
 
   // The Vec-only kernel splits each (seq, head) chunk into two row halves, so

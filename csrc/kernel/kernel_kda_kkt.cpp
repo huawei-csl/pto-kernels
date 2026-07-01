@@ -43,23 +43,23 @@
 //   ws_out  [block_dim*2, C, C]    float32  — (unused; kept for ABI stability)
 //   L_out   [total_tokens, HV, C]  float16  — strictly-lower-tri L (BSND)
 //
-// Template parameters: GDN_H = HV, GDN_D = K, GDN_C = C
+// Template parameters: KDA_KKT_H = HV, KDA_KKT_D = K, KDA_KKT_C = C
 // ============================================================================
 
 #include "kernel_utils.h"
 
 using namespace pto;
 
-#ifndef GDN_H
-#define GDN_H 4
+#ifndef KDA_KKT_H
+#define KDA_KKT_H 4
 #endif
 
-#ifndef GDN_D
-#define GDN_D 128
+#ifndef KDA_KKT_D
+#define KDA_KKT_D 128
 #endif
 
-#ifndef GDN_C
-#define GDN_C 128
+#ifndef KDA_KKT_C
+#define KDA_KKT_C 128
 #endif
 
 #ifdef __CCE_AICORE__
@@ -368,7 +368,7 @@ extern "C" __global__ AICORE void kda_kkt(
     __gm__ uint8_t* cu_seqlens, int64_t batch_size, int64_t seq_len,
     int64_t total_tokens) {
 #if defined(__DAV_VEC__)
-  kda_kkt_kernel<GDN_H, GDN_D, GDN_C>(
+  kda_kkt_kernel<KDA_KKT_H, KDA_KKT_D, KDA_KKT_C>(
       reinterpret_cast<__gm__ half*>(k_ptr),
       reinterpret_cast<__gm__ float*>(g_cs_ptr),
       reinterpret_cast<__gm__ half*>(beta_ptr),
