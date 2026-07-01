@@ -4,7 +4,7 @@ default:
 stages:
    - build_in_docker
    - test
-   - test_aarch64_910B2_py3.11
+   - test_aarch64_910B2_py3.12
 
 
 # Define the workflow rules manually to make sure only a single pipeline
@@ -22,7 +22,7 @@ workflow:
 
 
 .build_config: &build_config
-  image: quay.io/ascend/cann:9.0.0-${NPU}-ubuntu22.04-py3.11
+  image: quay.io/ascend/cann:9.1.0-beta.1-${NPU}-ubuntu22.04-py3.12
   parallel:
     matrix:
       - {NPU: 910b}
@@ -41,7 +41,7 @@ build_docker:
     - make wheel
 
 build_and_test_x86_910B4:
-  image: quay.io/ascend/cann:9.0.0-910b-ubuntu22.04-py3.11
+  image: quay.io/ascend/cann:9.1.0-beta.1-910b-ubuntu22.04-py3.12
   tags:
     - docker_npu # Build and test on-device NPU (x86-64 / 910B4)
   before_script:
@@ -54,9 +54,9 @@ build_and_test_x86_910B4:
     - pip install pto_kernels*.whl
     - python3 -m pytest -v tests/
 
-build_and_test_aarch64_910B2_py3.11:
-  image: quay.io/ascend/cann:9.0.0-910b-ubuntu22.04-py3.11
-  stage: test_aarch64_910B2_py3.11
+build_and_test_aarch64_910B2_py3.12:
+  image: quay.io/ascend/cann:9.1.0-beta.1-910b-ubuntu22.04-py3.12
+  stage: test_aarch64_910B2_py3.12
   tags:
     - docker_npu_910B2 # Build and test on-device (aarch64 / 910B2)
   before_script:
@@ -109,7 +109,7 @@ test_pypi_aarch64_910B2_py3.11:
 # On-device test of examples/jit_cpp #
 ######################################
 test_examples_on_x86_910B4:
-  image: quay.io/ascend/cann:9.0.0-910b-ubuntu22.04-py3.11
+  image: quay.io/ascend/cann:9.1.0-beta.1-910b-ubuntu22.04-py3.12
   tags:
     - docker_npu # Build and test on-device NPU (x86-64 / 910B4)
   parallel:
