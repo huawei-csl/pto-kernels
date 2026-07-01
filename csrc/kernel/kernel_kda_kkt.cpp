@@ -148,16 +148,16 @@ AICORE inline void kda_kkt_kernel(__gm__ half* k_ptr, __gm__ float* g_cs_ptr,
 
   for (int64_t work_idx = 0;
        work_idx < (total_work + num_lanes - 1) / num_lanes; ++work_idx) {
-    int64_t pid =
+    const int64_t pid =
         work_idx * static_cast<int64_t>(num_lanes) + static_cast<int64_t>(lane);
     if (pid >= total_work) continue;
 
     // Decode work item: (seq_idx, head_idx, row_half).
-    int32_t row_half = static_cast<int32_t>(pid % 2);
-    int64_t hs = pid / 2;
-    int32_t head_idx = static_cast<int32_t>(hs % NumHeads);
-    int64_t seq_idx = hs / NumHeads;
-    int32_t my_off = row_half * HalfChunk;
+    const int32_t row_half = static_cast<int32_t>(pid % 2);
+    const int64_t hs = pid / 2;
+    const int32_t head_idx = static_cast<int32_t>(hs % NumHeads);
+    const int64_t seq_idx = hs / NumHeads;
+    const int32_t my_off = row_half * HalfChunk;
 
     int64_t bos, slen;
     if (cu_seqlens != nullptr) {
@@ -170,23 +170,24 @@ AICORE inline void kda_kkt_kernel(__gm__ half* k_ptr, __gm__ float* g_cs_ptr,
     const int64_t num_chunks = (slen + ChunkSize - 1) / ChunkSize;
 
     for (int64_t ci = 0; ci < num_chunks; ++ci) {
-      int64_t chunk_start = ci * ChunkSize;
-      int64_t remaining = slen - chunk_start;
-      int32_t valid_rows =
+      const int64_t chunk_start = ci * ChunkSize;
+      const int64_t remaining = slen - chunk_start;
+      const int32_t valid_rows =
           static_cast<int32_t>(remaining < ChunkSize ? remaining : ChunkSize);
 
       // This vid's row range within the chunk: [my_off, my_off + my_rows).
-      int32_t my_rows = valid_rows - my_off;
-      if (my_rows > HalfChunk) my_rows = HalfChunk;
+      const int32_t my_rows_raw = valid_rows - my_off;
+      const int32_t my_rows = my_rows_raw > HalfChunk ? HalfChunk : my_rows_raw;
       if (my_rows <= 0) continue;  // no rows for this vid in this chunk
 
       // Columns this vid must cover: c in [0, col_end).  A row r is kept
       // for column c only if global_row(r) > c, so the largest column any
       // of my rows touches is (my_off + my_rows - 1).
-      int32_t col_end = my_off + my_rows;  // exclusive upper bound for c
+      const int32_t col_end = my_off + my_rows;  // exclusive upper bound for c
 
-      int64_t hbase = static_cast<int64_t>(head_idx) * total_tokens * KDim;
-      int64_t my_first =
+      const int64_t hbase =
+          static_cast<int64_t>(head_idx) * total_tokens * KDim;
+      const int64_t my_first =
           bos + chunk_start + my_off;  // global row index of my row 0
 
       // ── Load my rows' g_cs (fp32) and k (fp16 -> fp32) ───────────────
@@ -254,7 +255,7 @@ AICORE inline void kda_kkt_kernel(__gm__ half* k_ptr, __gm__ float* g_cs_ptr,
       // ── Column loop ──────────────────────────────────────────────────
       for (int32_t c = 0; c < col_end; ++c) {
         // Load column c's g_cs (fp32) and k (fp16 -> fp32) — [1, K].
-        int64_t col_off = hbase + (bos + chunk_start + c) * KDim;
+        const int64_t col_off = hbase + (bos + chunk_start + c) * KDim;
         {
           GmShapeDyn gs;
           gs.shape[3] = 1;
@@ -339,7 +340,7 @@ AICORE inline void kda_kkt_kernel(__gm__ half* k_ptr, __gm__ float* g_cs_ptr,
         set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
         wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
         {
-          int64_t l_off =
+          const int64_t l_off =
               my_first * static_cast<int64_t>(NumHeads) * ChunkSize +
               static_cast<int64_t>(head_idx) * ChunkSize + c;
           GmShapeDyn gs;
