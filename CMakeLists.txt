@@ -14,7 +14,7 @@
 cmake_minimum_required(VERSION 3.16.0)
 project(pto-kernels)
 set(LINUX TRUE)
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -124,8 +124,10 @@ ascendc_library(
   SHARED
   csrc/kernel/kernel_tri_inv_col_sweep.cpp
   csrc/kernel/kernel_abs.cpp
-  csrc/kernel/kernel_chunk_cumsum.cpp
+  csrc/kernel/kernel_gdn_chunk_cumsum.cpp
   csrc/kernel/kernel_csr_gather.cpp
+  csrc/kernel/kernel_kda_chunk_h.cpp
+  csrc/kernel/kernel_kda_chunk_o.cpp
   csrc/kernel/kernel_gdn_chunk_h.cpp
   csrc/kernel/kernel_gdn_scaled_dot_kkt.cpp
   csrc/kernel/kernel_gdn_chunk_o.cpp
@@ -136,7 +138,10 @@ ascendc_library(
   csrc/kernel/kernel_tri_inv_rec_unroll.cpp
   csrc/kernel/kernel_tri_inv_trick.cpp
   csrc/kernel/kernel_swiglu.cpp
-  csrc/kernel/kernel_gdn_wy_fast.cpp)
+  csrc/kernel/kernel_kda_gate_cumsum.cpp
+  csrc/kernel/kernel_kda_wy.cpp
+  csrc/kernel/kernel_gdn_wy_fast.cpp
+  csrc/kernel/kernel_kda_kkt.cpp)
 
 ascendc_include_directories(
   no_workspace_kernel PRIVATE ${libpto_isa_headers_SOURCE_DIR}/include
@@ -153,6 +158,9 @@ else()
 endif()
 
 pybind11_add_module(pto_kernels_ops csrc/host/pybind11.cpp)
+# pybind11 does not work with C++20, so we set C++17 for the pybind11 module
+# target
+set_target_properties(pto_kernels_ops PROPERTIES CXX_STANDARD 17)
 
 target_link_libraries(pto_kernels_ops PRIVATE ${TORCH_LIBRARIES} c10 torch_cpu
                                               torch_npu no_workspace_kernel)

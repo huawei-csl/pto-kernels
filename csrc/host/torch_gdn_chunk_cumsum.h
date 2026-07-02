@@ -11,7 +11,7 @@ for the full License text.
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
-#include "aclrtlaunch_chunk_cumsum_fp32.h"
+#include "aclrtlaunch_gdn_chunk_cumsum_fp32.h"
 #include "utils.h"
 
 namespace pto_isa_ops {
@@ -36,22 +36,22 @@ namespace pto_isa_ops {
  * @return at::Tensor Float32 output tensor with shape [total_tokens, H]
  *                    containing the per-chunk prefix sums.
  */
-at::Tensor run_chunk_cumsum(const at::Tensor& g, int64_t batch_size,
-                            int64_t seq_len,
-                            const at::Tensor& cu_seqlens = at::zeros({1})) {
+at::Tensor run_gdn_chunk_cumsum(const at::Tensor& g, int64_t batch_size,
+                                int64_t seq_len,
+                                const at::Tensor& cu_seqlens = at::zeros({1})) {
   TORCH_CHECK(g.device().type() == DEVICE_TYPE,
-              "pto_chunk_cumsum: tensor must be on NPU, got ", g.device());
+              "pto_gdn_chunk_cumsum: tensor must be on NPU, got ", g.device());
   TORCH_CHECK(g.scalar_type() == at::kFloat,
-              "pto_chunk_cumsum: g must be float32, got ", g.scalar_type());
+              "pto_gdn_chunk_cumsum: g must be float32, got ", g.scalar_type());
   TORCH_CHECK(g.dim() == 2,
-              "pto_chunk_cumsum: g must be 2D [total_tokens, H], got ", g.dim(),
-              "D");
-  TORCH_CHECK(g.is_contiguous(), "pto_chunk_cumsum: g must be contiguous");
+              "pto_gdn_chunk_cumsum: g must be 2D [total_tokens, H], got ",
+              g.dim(), "D");
+  TORCH_CHECK(g.is_contiguous(), "pto_gdn_chunk_cumsum: g must be contiguous");
   TORCH_CHECK(batch_size > 0,
-              "pto_chunk_cumsum: batch_size must be positive, got ",
+              "pto_gdn_chunk_cumsum: batch_size must be positive, got ",
               batch_size);
   TORCH_CHECK(cu_seqlens.numel() > 1 || seq_len > 0,
-              "pto_chunk_cumsum: seq_len must be positive if no cu_seqlens "
+              "pto_gdn_chunk_cumsum: seq_len must be positive if no cu_seqlens "
               "provided, got ",
               seq_len);
 
@@ -64,7 +64,7 @@ at::Tensor run_chunk_cumsum(const at::Tensor& g, int64_t batch_size,
     cu_seqlens_ptr = ConvertType(cu_seqlens);
   }
 
-  EXEC_KERNEL_CMD(chunk_cumsum_fp32, block_dim, g, g_sum, cu_seqlens_ptr,
+  EXEC_KERNEL_CMD(gdn_chunk_cumsum_fp32, block_dim, g, g_sum, cu_seqlens_ptr,
                   batch_size, seq_len);
 
   return g_sum;

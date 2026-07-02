@@ -1,11 +1,11 @@
-name: Multi-platform Manylinux wheels
+name: Multi-platform (x86,aarch64) Manylinux wheels
 
 on:
   workflow_dispatch:
 
 jobs:
   manylinux-wheels-build:
-    name: manylinux build (py${{ matrix.py_ver }})
+    name: manylinux build (${{ matrix.arch }}, py${{ matrix.py_ver }})
 
     continue-on-error: true
 
@@ -29,11 +29,15 @@ jobs:
             arch: aarch64
             python_version: py3.11
             py_ver: "311"
+          - os: ubuntu-22.04-arm
+            arch: aarch64
+            python_version: py3.12
+            py_ver: "312"
 
     runs-on: ${{ matrix.os }}
 
     container:
-      image: quay.io/ascend/manylinux:8.5.1-910b-manylinux_2_28-${{ matrix.python_version }}
+      image: quay.io/ascend/manylinux:9.0.0-910b-manylinux_2_28-${{ matrix.python_version }}
 
     steps:
       - name: Checkout
@@ -50,8 +54,7 @@ jobs:
           export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/Ascend/ascend-toolkit/latest/`uname -i`-linux/devlib # to avoid libascend_hal.so issue
           pip3 install pyyaml setuptools pytest packaging pybind11[global]
           pip3 install -r requirements.txt
-          pip3 install torch-npu==2.8.0.post2 --extra-index-url https://download.pytorch.org/whl/cpu
-          make clean build_wheel
+          make clean wheel
 
       - name: Install built wheel
         run: pip install pto_kernels-*.whl
@@ -80,6 +83,15 @@ jobs:
             --exclude libhccl.so \
             --exclude libprofapi.so \
             --exclude libtorch_npu.so \
+            --exclude libascend*.so \
+            --exclude libc_sec.so \
+            --exclude liberror_manager.so \
+            --exclude libmmpa.so \
+            --exclude libmsprofiler.so \
+            --exclude libplatform.so \
+            --exclude libruntime.so \
+            --exclude libruntime_common.so \
+            --exclude libunified_dlog.so \
             pto_kernels*.whl \
             -w wheelhouse/
 

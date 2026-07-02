@@ -8,7 +8,8 @@ for the full License text.
 */
 
 // ============================================================================
-// kernel_chunk_cumsum.cpp — Prefix sum of gate values G along time dimension
+// kernel_gdn_chunk_cumsum.cpp — Prefix sum of gate values G along time
+// dimension
 //
 // Mathematical operation (per chunk of C tokens, independently per head h):
 //   g_sum[t, h] = Σ_{i=0}^{t} g[i, h]    for t = 0 .. valid-1
@@ -109,10 +110,10 @@ AICORE void cumsum_kernel_varlen(__gm__ float* g_ptr, __gm__ float* g_sum_ptr,
   auto block_num = get_block_num();
   auto vid = get_subblockid();
 
-  // #if defined(__DAV_C220_VEC__): This block only compiles for the Vec core
+  // #if defined(__DAV_VEC__): This block only compiles for the Vec core
   // pass. The bisheng compiler makes 3 passes over the same source file:
-  //   Pass 1: __DAV_C220_VEC__  defined → compiles Vec (SIMD) code
-  //   Pass 2: __DAV_C220_CUBE__ defined → compiles Cube (matrix) code
+  //   Pass 1: __DAV_VEC__  defined → compiles Vec (SIMD) code
+  //   Pass 2: __DAV_CUBE__ defined → compiles Cube (matrix) code
   //   Pass 3: neither defined → compiles host (CPU) launcher code
   // Using these guards lets us put Vec, Cube, and host code in one file.
   if (vid != 0) return;
@@ -276,10 +277,10 @@ AICORE void cumsum_kernel_static(__gm__ float* g_ptr, __gm__ float* g_sum_ptr,
   auto block_num = get_block_num();
   auto vid = get_subblockid();
 
-  // #if defined(__DAV_C220_VEC__): This block only compiles for the Vec core
+  // #if defined(__DAV_VEC__): This block only compiles for the Vec core
   // pass. The bisheng compiler makes 3 passes over the same source file:
-  //   Pass 1: __DAV_C220_VEC__  defined → compiles Vec (SIMD) code
-  //   Pass 2: __DAV_C220_CUBE__ defined → compiles Cube (matrix) code
+  //   Pass 1: __DAV_VEC__  defined → compiles Vec (SIMD) code
+  //   Pass 2: __DAV_CUBE__ defined → compiles Cube (matrix) code
   //   Pass 3: neither defined → compiles host (CPU) launcher code
   // Using these guards lets us put Vec, Cube, and host code in one file.
   if (vid != 0) return;
@@ -485,12 +486,10 @@ AICORE void cumsum_kernel_static(__gm__ float* g_ptr, __gm__ float* g_sum_ptr,
 //   function.
 // Parameters are passed as uint8_t* (raw bytes) and reinterpret_cast'd to
 // typed pointers — this is the standard NPU kernel calling convention.
-extern "C" __global__ AICORE void chunk_cumsum_fp32(__gm__ uint8_t* g_ptr,
-                                                    __gm__ uint8_t* g_sum_ptr,
-                                                    __gm__ uint8_t* cu_seqlens,
-                                                    int64_t batch_size,
-                                                    int64_t seq_len) {
-#if defined(__DAV_C220_VEC__)
+extern "C" __global__ AICORE void gdn_chunk_cumsum_fp32(
+    __gm__ uint8_t* g_ptr, __gm__ uint8_t* g_sum_ptr,
+    __gm__ uint8_t* cu_seqlens, int64_t batch_size, int64_t seq_len) {
+#if defined(__DAV_VEC__)
 
   if (cu_seqlens == nullptr) {
     cumsum_kernel_static<GDN_H, GDN_C>(

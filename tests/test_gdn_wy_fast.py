@@ -40,7 +40,7 @@ def _seq_ranges(T: int, cu_seqlens=None):
     return [(cu[i], cu[i + 1]) for i in range(len(cu) - 1)]
 
 
-def _chunk_cumsum(g: torch.Tensor, cu_seqlens=None) -> torch.Tensor:
+def _gdn_chunk_cumsum(g: torch.Tensor, cu_seqlens=None) -> torch.Tensor:
     """Per-chunk cumulative sum of gates (resets at sequence and chunk boundaries).
 
     g: [T, H] float32
@@ -137,7 +137,7 @@ def test_pto_gdn_wy_fast_fixed(npu_device, seq_len: int):
     beta_cpu = torch.rand(T, H, dtype=torch.float16)
     A_cpu = torch.randn(T, H, C, dtype=torch.float16)
     g_in = F.logsigmoid(torch.randn(T, H, dtype=torch.float32))
-    g_cumsum = _chunk_cumsum(g_in)  # [T, H] fp32
+    g_cumsum = _gdn_chunk_cumsum(g_in)  # [T, H] fp32
 
     # Kernel expects Beta and G pre-transposed to [H, T]
     Beta_npu = beta_cpu.T.contiguous().to(npu_device)  # [H, T] fp16
@@ -188,7 +188,7 @@ def test_pto_gdn_wy_fast_varlen(npu_device, seqlens: list):
     beta_cpu = torch.rand(T, H, dtype=torch.float16)
     A_cpu = torch.randn(T, H, C, dtype=torch.float16)
     g_in = F.logsigmoid(torch.randn(T, H, dtype=torch.float32))
-    g_cumsum = _chunk_cumsum(g_in, cu_seqlens_list)  # [T, H] fp32
+    g_cumsum = _gdn_chunk_cumsum(g_in, cu_seqlens_list)  # [T, H] fp32
 
     Beta_npu = beta_cpu.T.contiguous().to(npu_device)  # [H, T] fp16
     G_npu = g_cumsum.T.contiguous().to(npu_device)  # [H, T] fp32

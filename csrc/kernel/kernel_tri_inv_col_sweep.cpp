@@ -35,7 +35,6 @@ AICORE void runTTriInv(__gm__ T* vec_in, __gm__ T* vec_out,
   const uint32_t num_tiles_per_aiv =
       kernel_utils::CeilDiv(total_length, (tile_len * num_aiv_cores));
   const uint32_t b_size = S * sizeof(T);
-  const uint32_t diff_size = S * sizeof(T);
 
   // UB zero address
   constexpr unsigned UB_ZERO_ADDR = 0x0;
@@ -57,13 +56,10 @@ AICORE void runTTriInv(__gm__ T* vec_in, __gm__ T* vec_out,
   TASSIGN(b, UB_ZERO_ADDR + matrix_in_size);
 
   TileData inv_matrix_out(S, S);
-  const uint32_t out_start_ub_addr = matrix_in_size + b_size + diff_size;
+  const uint32_t out_start_ub_addr = matrix_in_size + b_size;
   TASSIGN(inv_matrix_out, out_start_ub_addr);
 
   TileVecData x(1, S);
-  // TODO (anastasios) only first k elements must be updated
-  TileVecData diff(1, S);
-  TASSIGN(diff, UB_ZERO_ADDR + matrix_in_size + b_size);
   TileVecData A_k(1, S);
 
   set_flag(PIPE_MTE3, PIPE_MTE2, EVENT_ID0);
@@ -93,6 +89,7 @@ AICORE void runTTriInv(__gm__ T* vec_in, __gm__ T* vec_out,
     // Find inverse by doing back-sub for each basis vector b_j
     // Solve A x = e_j for vector x
     for (int32_t j = S - 1; j >= 0; j--) {
+      // Set b to the j-th basis vector e_j
       TEXPANDS(b, static_cast<T>(0));
       set_flag(PIPE_V, PIPE_S, EVENT_ID0);
       wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
@@ -106,40 +103,31 @@ AICORE void runTTriInv(__gm__ T* vec_in, __gm__ T* vec_out,
       }
 
       TASSIGN(A_k, j * S * sizeof(T));
-      TMULS(diff, A_k, static_cast<T>(1));
-      set_flag(PIPE_V, PIPE_S, EVENT_ID1);
-
-      pipe_barrier(PIPE_V);
-      TSUB(b, b, diff);
+      set_flag(PIPE_S, PIPE_V, EVENT_ID0);
+      wait_flag(PIPE_S, PIPE_V, EVENT_ID0);
+      TAXPY(b, A_k, static_cast<T>(-1));
       set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-
-      wait_flag(PIPE_V, PIPE_S, EVENT_ID1);
-      // Scalar core only supports fp32 arithmetic, so use float rather than T
-      float xk = -static_cast<float>(diff.GetValue(j - 1));
+      wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
+      float xk = static_cast<float>(b.GetValue(j - 1));
       float xkp1 = 1.0f;
+      set_flag(PIPE_V, PIPE_S, EVENT_ID0);
+      wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
 
       for (int32_t k = j - 1; k >= 1; --k) {
         TASSIGN(A_k, k * S * sizeof(T));
 
-        // Keep one x lane buffered so the scalar write from the previous
-        // step overlaps the current vector update.
-        TMULS(diff, A_k, static_cast<T>(xk));
-        set_flag(PIPE_V, PIPE_S, EVENT_ID1);
-
-        x.SetValue(k + 1, static_cast<T>(xkp1));
-        wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-        const float bkm1 = static_cast<float>(b.GetValue(k - 1));
         pipe_barrier(PIPE_V);
-        TSUB(b, b, diff);
+        set_flag(PIPE_S, PIPE_V, EVENT_ID0);
+        wait_flag(PIPE_S, PIPE_V, EVENT_ID0);
+        TAXPY(b, A_k, static_cast<T>(-xk));
+
         set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-
+        wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
+        x.SetValue(k + 1, static_cast<T>(xkp1));
         xkp1 = xk;
-
-        wait_flag(PIPE_V, PIPE_S, EVENT_ID1);
-        xk = bkm1 - static_cast<float>(diff.GetValue(k - 1));
+        xk = static_cast<float>(b.GetValue(k - 1));
       }
 
-      wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
       x.SetValue(1, static_cast<T>(xkp1));
       x.SetValue(0, static_cast<T>(xk));
     }
@@ -156,7 +144,7 @@ AICORE void runTTriInv(__gm__ T* vec_in, __gm__ T* vec_out,
 
 extern "C" __global__ AICORE void triv_inv_col_sweep_fp16(
     GM_ADDR x, GM_ADDR z, uint32_t in_length, uint32_t matrix_size) {
-#if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
+#if defined(__DAV_VEC__)
 
   if (matrix_size == 16) {
     runTTriInv<half, 16>((__gm__ half*)x, (__gm__ half*)z, in_length);
@@ -172,7 +160,7 @@ extern "C" __global__ AICORE void triv_inv_col_sweep_fp16(
 
 extern "C" __global__ AICORE void triv_inv_col_sweep_fp32(
     GM_ADDR x, GM_ADDR z, uint32_t in_length, uint32_t matrix_size) {
-#if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
+#if defined(__DAV_VEC__)
 
   if (matrix_size == 16) {
     runTTriInv<float, 16>((__gm__ float*)x, (__gm__ float*)z, in_length);

@@ -209,7 +209,7 @@ static AICORE void chunk_o_kernel(
 // =====================================================================
 // CUBE CORE — Three GEMMs per chunk: QK, QS, QKV
 // =====================================================================
-#if defined(__DAV_C220_CUBE__)
+#if defined(__DAV_CUBE__)
   if (cu_seqlens == nullptr) {
     int64_t chunks_per_seq = (seq_len + ChunkSize - 1) / ChunkSize;
     int64_t global_chunk_base = 0;
@@ -688,7 +688,7 @@ static AICORE void chunk_o_kernel(
 // =====================================================================
 // VEC CORE — Gating, element-wise ops, output assembly
 // =====================================================================
-#if defined(__DAV_C220_VEC__)
+#if defined(__DAV_VEC__)
   set_mask_norm();
   set_vector_mask(-1, -1);
 
