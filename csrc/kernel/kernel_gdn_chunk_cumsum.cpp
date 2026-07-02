@@ -274,7 +274,6 @@ AICORE void cumsum_kernel_static(__gm__ float* g_ptr, __gm__ float* g_sum_ptr,
   // within the core.
   //   Each AI core has 2 Vec sub-blocks that can run in parallel.
   auto cid = get_block_idx();
-  auto block_num = get_block_num();
   auto vid = get_subblockid();
 
   // #if defined(__DAV_VEC__): This block only compiles for the Vec core

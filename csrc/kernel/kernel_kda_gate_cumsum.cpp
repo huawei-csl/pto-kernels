@@ -67,7 +67,6 @@ AICORE inline void kda_gate_cumsum_kernel(__gm__ half* g_ptr,
   using kernel_utils::PipeBarrierVec;
   using pto::Stride;
   auto cid = get_block_idx();
-  auto block_num = get_block_num();
   auto vid = get_subblockid();
 
 #if defined(__DAV_VEC__)

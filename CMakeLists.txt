@@ -21,7 +21,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(PIP_INSTALL "True if building via pip" OFF)
 
 set(BASE_MODE
-    "MEMORY"
+    "REGISTER"
     CACHE STRING "Base addressing mode: MEMORY or REGISTER")
 set_property(CACHE BASE_MODE PROPERTY STRINGS "MEMORY" "REGISTER")
 
