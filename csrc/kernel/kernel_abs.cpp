@@ -37,6 +37,11 @@ AICORE void runTAbs(__gm__ T* x, __gm__ T* z, uint32_t total_size) {
   const uint32_t num_aiv_cores = get_block_num();
   const uint32_t aiv_core_id = get_block_idx();
 
+  if (get_subblockid() != 0) {
+    // Only subblock 0 is used in this kernel
+    return;
+  }
+
   constexpr uint32_t UB_ZERO_ADDR = 0;
   constexpr uint32_t TILE_SIZE_IN_BYTES = TILE_SIZE * sizeof(T);
   const uint32_t num_tiles = (total_size + TILE_SIZE - 1) / TILE_SIZE;
@@ -132,5 +137,5 @@ extern "C" __global__ AICORE void vabs_fp32(GM_ADDR x, GM_ADDR z,
 
 extern "C" void call_vabs_fp16(uint32_t blockDim, void* stream, uint8_t* x,
                                uint8_t* y, uint32_t in_length) {
-  vabs_fp16<<<blockDim * 2, nullptr, stream>>>(x, y, in_length);
+  vabs_fp16<<<blockDim, nullptr, stream>>>(x, y, in_length);
 }
