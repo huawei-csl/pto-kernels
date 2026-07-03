@@ -217,3 +217,5 @@ at::Tensor run_gdn_causal_conv1d(const at::Tensor& x, const at::Tensor& weights,
 }
 
 }  // namespace pto_isa_ops
+
+#undef FOR_EACH_RING_SIZE
