@@ -65,7 +65,8 @@
 #include "kernel_utils.h"
 
 using namespace pto;
-
+using namespace kernel_utils;
+using kernel_utils::GetOuterLayout;
 #ifndef GDN_H
 #define GDN_H 16
 #endif
@@ -116,15 +117,17 @@ using TileMatL1ZN = pto::Tile<pto::TileType::Mat, T, Rows, Cols,
 
 template <typename T, int Rows, int Cols, int RowValid = Rows,
           int ColValid = Cols>
-using TileMatL0A = pto::Tile<pto::TileType::Left, T, Rows, Cols,
-                             pto::BLayout::RowMajor, RowValid, ColValid,
-                             pto::SLayout::RowMajor, 512, pto::PadValue::Zero>;
+using TileMatL0A =
+    pto::Tile<pto::TileType::Left, T, Rows, Cols,
+              GetOuterLayout(/* isLeft*/ true), RowValid, ColValid,
+              pto::SLayout::RowMajor, 512, pto::PadValue::Zero>;
 
 template <typename T, int Rows, int Cols, int RowValid = Rows,
           int ColValid = Cols>
-using TileMatL0B = pto::Tile<pto::TileType::Right, T, Rows, Cols,
-                             pto::BLayout::RowMajor, RowValid, ColValid,
-                             pto::SLayout::ColMajor, 512, pto::PadValue::Zero>;
+using TileMatL0B =
+    pto::Tile<pto::TileType::Right, T, Rows, Cols,
+              GetOuterLayout(/* isLeft*/ false), RowValid, ColValid,
+              pto::SLayout::ColMajor, 512, pto::PadValue::Zero>;
 
 template <typename T, int Rows, int Cols, int RowValid = Rows,
           int ColValid = Cols, pto::PadValue PadVal = pto::PadValue::Null>
@@ -441,7 +444,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               // Fully empty lower-half stripe: emit zeros so the workspace tile
               // for this sub-block stays well-defined.
               TEXPANDS(a2_ub, 0.0f);
-              pipe_barrier(PIPE_V);
+              PipeBarrierVec();
               TCVT(a2_ub_half, a2_ub, pto::RoundMode::CAST_NONE);
             }
 
@@ -450,12 +453,12 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 
             if (local_rows > 0) {
               TCVT(beta_r_ub, beta_ub, pto::RoundMode::CAST_NONE);
-              pipe_barrier(PIPE_V);
+              PipeBarrierVec();
               TileUbDataND<half, HalfChunk, ChunkSize, HalfChunk, ChunkSize>
                   a_stg_cvt;
               TASSIGN(a_stg_cvt, A2HalfUbAddr);
               TCVT(inv_ub, a_stg_cvt, pto::RoundMode::CAST_NONE);
-              pipe_barrier(PIPE_V);
+              PipeBarrierVec();
               // Replicate beta_j across rows: beta_2d[i,j] = beta[j].
               TCOLEXPAND(beta_2d_ub, beta_r_ub);
               // A2 = INV * beta_2d (column-scale).
@@ -511,7 +514,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
                     k_stg_cvt;
                 TASSIGN(k_stg_cvt, KeffHalfUbAddr);
                 TCVT(k_ub, k_stg_cvt, pto::RoundMode::CAST_NONE);
-                pipe_barrier(PIPE_V);
+                PipeBarrierVec();
               }
               {
                 GmShape2D g_shape(local_rows, HiddenSize);
@@ -534,13 +537,13 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
               // exp(g_cs) in-place over gcs_ub, then K_eff = k * exp(g_cs).
               TEXP(gcs_ub, gcs_ub);
-              pipe_barrier(PIPE_V);
+              PipeBarrierVec();
               TMUL(keff_ub, k_ub, gcs_ub);
-              pipe_barrier(PIPE_V);
+              PipeBarrierVec();
               TCVT(keff_ub_half, keff_ub, pto::RoundMode::CAST_NONE);
             } else {
               TEXPANDS(keff_ub, 0.0f);
-              pipe_barrier(PIPE_V);
+              PipeBarrierVec();
               TCVT(keff_ub_half, keff_ub, pto::RoundMode::CAST_NONE);
             }
 
@@ -630,7 +633,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               }
             } else {
               TEXPANDS(a2_ub, 0.0f);
-              pipe_barrier(PIPE_V);
+              PipeBarrierVec();
               TCVT(a2_ub_half, a2_ub, pto::RoundMode::CAST_NONE);
             }
 
@@ -639,12 +642,12 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 
             if (local_rows > 0) {
               TCVT(beta_r_ub, beta_ub, pto::RoundMode::CAST_NONE);
-              pipe_barrier(PIPE_V);
+              PipeBarrierVec();
               TileUbDataND<half, HalfChunk, ChunkSize, HalfChunk, ChunkSize>
                   a_stg_cvt;
               TASSIGN(a_stg_cvt, A2HalfUbAddr);
               TCVT(inv_ub, a_stg_cvt, pto::RoundMode::CAST_NONE);
-              pipe_barrier(PIPE_V);
+              PipeBarrierVec();
               TCOLEXPAND(beta_2d_ub, beta_r_ub);
               TMUL(a2_ub, inv_ub, beta_2d_ub);
               TCVT(a2_ub_half, a2_ub, pto::RoundMode::CAST_NONE);
@@ -696,7 +699,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
                     k_stg_cvt;
                 TASSIGN(k_stg_cvt, KeffHalfUbAddr);
                 TCVT(k_ub, k_stg_cvt, pto::RoundMode::CAST_NONE);
-                pipe_barrier(PIPE_V);
+                PipeBarrierVec();
               }
               {
                 GmShape2D g_shape(local_rows, HiddenSize);
@@ -718,13 +721,13 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
               wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
               TEXP(gcs_ub, gcs_ub);
-              pipe_barrier(PIPE_V);
+              PipeBarrierVec();
               TMUL(keff_ub, k_ub, gcs_ub);
-              pipe_barrier(PIPE_V);
+              PipeBarrierVec();
               TCVT(keff_ub_half, keff_ub, pto::RoundMode::CAST_NONE);
             } else {
               TEXPANDS(keff_ub, 0.0f);
-              pipe_barrier(PIPE_V);
+              PipeBarrierVec();
               TCVT(keff_ub_half, keff_ub, pto::RoundMode::CAST_NONE);
             }
 
