@@ -47,7 +47,7 @@ compile_a5_%:
 		$(CSRC_KERNEL_DIR)/kernel_$*.cpp \
 		-o build/lib/libkernel_$*.so
 
-compile_all_a5: compile_a5_abs compile_a5_batch_matrix_square compile_a5_chunk_cumsum \
+compile_all_a5: compile_a5_abs compile_a5_batch_matrix_square compile_a5_gdn_chunk_cumsum \
 	compile_a5_csr_gather compile_a5_gdn_chunk_h compile_a5_gdn_chunk_o \
 	compile_a5_gdn_scaled_dot_kkt compile_a5_gdn_wy_fast compile_a5_scan_ul1 \
 	compile_a5_simple_matmul compile_a5_swiglu compile_a5_tri_inv_col_sweep \
