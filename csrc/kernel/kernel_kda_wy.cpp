@@ -365,11 +365,16 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
   set_mask_norm();
   set_vector_mask(-1, -1);
 
-  // Global all-core barrier at kernel start: drains any stale FFTS counters
-  // left by previous launches (this kernel's Cube emits flags 3/4 N times
-  // per block while Vec only waits N-1 times, so without this entry/exit
-  // pair the trailing signal would leak into the next launch).
+// Global all-core barrier at kernel start: drains any stale FFTS counters
+// left by previous launches (this kernel's Cube emits flags 3/4 N times
+// per block while Vec only waits N-1 times, so without this entry/exit
+// pair the trailing signal would leak into the next launch).
+#if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
   sync_all();
+#else
+// TODO(anastasios): uncomment on v9.1.0
+// SYNCALL<SyncCoreType::Mix>();
+#endif
 
   // Vec prepares the two workspaces (ws_a2 holding A2 = INV*beta_2d, and
   // ws_keff holding K_eff = k*exp(g_cs)) that the Cube phase then consumes.
@@ -466,7 +471,13 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TCVT(a2_ub_half, a2_ub, pto::RoundMode::CAST_NONE);
             }
 
-            if (!first_iter) wait_flag_dev(12);
+            if (!first_iter) {
+#if __CCE_AICORE__ == 220
+              wait_flag_dev(12);
+#else
+              wait_intra_block(PIPE_MTE3, 12);
+#endif
+            }
             set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             {
@@ -547,7 +558,13 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TCVT(keff_ub_half, keff_ub, pto::RoundMode::CAST_NONE);
             }
 
-            if (!first_iter) wait_flag_dev(13);
+            if (!first_iter) {
+#if __CCE_AICORE__ == 220
+              wait_flag_dev(13);
+#else
+              wait_intra_block(PIPE_MTE3, 13);
+#endif
+            }
             set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             {
@@ -653,7 +670,13 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TCVT(a2_ub_half, a2_ub, pto::RoundMode::CAST_NONE);
             }
 
-            if (!first_iter) wait_flag_dev(12);
+            if (!first_iter) {
+#if __CCE_AICORE__ == 220
+              wait_flag_dev(12);
+#else
+              wait_intra_block(PIPE_MTE3, 12);
+#endif
+            }
             set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             {
@@ -731,7 +754,13 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TCVT(keff_ub_half, keff_ub, pto::RoundMode::CAST_NONE);
             }
 
-            if (!first_iter) wait_flag_dev(13);
+            if (!first_iter) {
+#if __CCE_AICORE__ == 220
+              wait_flag_dev(13);
+#else
+              wait_intra_block(PIPE_MTE3, 13);
+#endif
+            }
             set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             {
@@ -759,18 +788,33 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
   // flags 3 and 4 (because the in-loop wait is gated by `!first_iter`), and
   // that stale count corrupts the next launch's first non-first-iter wait.
   if (!first_iter) {
+#if __CCE_AICORE__ == 220
     wait_flag_dev(12);
     wait_flag_dev(13);
+#else
+    wait_intra_block(PIPE_MTE3, 12);
+    wait_intra_block(PIPE_MTE3, 13);
+#endif
   }
 
-  // Global all-core barrier at kernel exit: matches the entry sync_all so
-  // the next launch starts with clean FFTS state.
+// Global all-core barrier at kernel exit: matches the entry sync_all so
+// the next launch starts with clean FFTS state.
+#if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
   sync_all();
+#else
+// TODO(anastasios): uncomment on v9.1.0
+// SYNCALL<SyncCoreType::Mix>();
+#endif
 #endif
 
 #if defined(__DAV_CUBE__)
-  // Global all-core barrier at kernel start (matches Vec side).
+// Global all-core barrier at kernel start (matches Vec side).
+#if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
   sync_all();
+#else
+// TODO(anastasios): uncomment on v9.1.0
+// SYNCALL<SyncCoreType::Mix>();
+#endif
 
   // Cube reads V from BSND and the two Vec-produced workspaces, then issues
   // U = A2 @ V and W = A2 @ K_eff.  a2_l1 stays resident in L1 across both
@@ -809,7 +853,11 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               }
             }
 
+#if __CCE_AICORE__ == 220
             wait_flag_dev(10);
+#else
+            wait_intra_block(PIPE_MTE3, 10);
+#endif
             {
               GmShape2D a2_shape(ChunkSize, ChunkSize);
               GmStride2D a2_stride(ChunkSize);
@@ -837,7 +885,11 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
             }
             ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (12 << 8));
 
+#if __CCE_AICORE__ == 220
             wait_flag_dev(11);
+#else
+            wait_intra_block(PIPE_MTE3, 11);
+#endif
             {
               GmShape2D keff_shape(ChunkSize, HiddenSize);
               GmStride2D keff_stride(HiddenSize);
@@ -905,7 +957,11 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               }
             }
 
+#if __CCE_AICORE__ == 220
             wait_flag_dev(10);
+#else
+            wait_intra_block(PIPE_MTE3, 10);
+#endif
             {
               GmShape2D a2_shape(ChunkSize, ChunkSize);
               GmStride2D a2_stride(ChunkSize);
@@ -932,7 +988,11 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
             }
             ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (12 << 8));
 
+#if __CCE_AICORE__ == 220
             wait_flag_dev(11);
+#else
+            wait_intra_block(PIPE_MTE3, 11);
+#endif
             {
               GmShape2D keff_shape(ChunkSize, HiddenSize);
               GmStride2D keff_stride(HiddenSize);
@@ -966,8 +1026,13 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
     }
   }
 
-  // Global all-core barrier at kernel exit (matches Vec side).
+// Global all-core barrier at kernel exit (matches Vec side).
+#if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
   sync_all();
+#else
+// TODO(anastasios): uncomment on v9.1.0
+// SYNCALL<SyncCoreType::Mix>();
+#endif
 #endif
 }
 
