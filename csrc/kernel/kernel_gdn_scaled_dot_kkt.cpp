@@ -180,8 +180,12 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
 
     for (int64_t ci = 0; ci < num_chunks; ++ci) {
       int32_t slot = static_cast<int32_t>(ci & 1);
-      // Wait for Vec to free this workspace slot
+// Wait for Vec to free this workspace slot
+#if __CCE_AICORE__ == 220
       wait_flag_dev(2 + slot);
+#else
+      wait_intra_block(PIPE_MTE3, 2 + slot);
+#endif
       pipe_barrier(PIPE_ALL);
 
       int64_t chunk_start = ci * ChunkSize;
@@ -359,7 +363,11 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
       }
 
       // Wait for Cube to finish writing KK^T for this slot
+#if __CCE_AICORE__ == 220
       wait_flag_dev(slot);
+#else
+      wait_intra_block(PIPE_MTE3, slot);
+#endif
       pipe_barrier(PIPE_ALL);
 
       if (local_valid > 0) {
