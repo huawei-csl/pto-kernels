@@ -13,7 +13,7 @@ for the full License text.
 #include "torch_batch_matrix_square.h"
 #include "torch_csr_gather.h"
 #include "torch_gdn_chunk_cumsum.h"
-// #include "torch_gdn_chunk_h.h"
+#include "torch_gdn_chunk_h.h"
 // #include "torch_gdn_chunk_o.h"
 // #include "torch_gdn_scaled_dot_kkt.h"
 // #include "torch_gdn_wy_fast.h"
@@ -45,10 +45,10 @@ PYBIND11_MODULE(pto_kernels_ops, m) {
       },
       pybind11::arg("device_id") = 0);
   m.def("pto_abs", &pto_isa_ops::run_abs);
-  // m.def("pto_chunk_h", &pto_isa_ops::run_gdn_chunk_h, py::arg("K"),
-  //       py::arg("W"), py::arg("U"), py::arg("G"),
-  //       py::arg("cu_seqlens") = at::zeros({1}), py::arg("batch_size"),
-  //       py::arg("seq_len"), py::arg("total_chunks"));
+  m.def("pto_chunk_h", &pto_isa_ops::run_gdn_chunk_h, py::arg("K"),
+        py::arg("W"), py::arg("U"), py::arg("G"),
+        py::arg("cu_seqlens") = at::zeros({1}), py::arg("batch_size"),
+        py::arg("seq_len"), py::arg("total_chunks"));
   m.def("pto_gdn_chunk_cumsum", &pto_isa_ops::run_gdn_chunk_cumsum,
         py::arg("g"), py::arg("batch_size"), py::arg("seq_len"),
         py::arg("cu_seqlens") = at::zeros({1}));
