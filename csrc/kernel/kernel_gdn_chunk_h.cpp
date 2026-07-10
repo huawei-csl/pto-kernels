@@ -434,7 +434,12 @@ AICORE void chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
     //   WS_KV : k_tilde^T @ v_i_new
 
     for (int32_t ci = 0; ci < num_chunks; ++ci) {
+#if __CCE_AICORE__ == 220
+      wait_flag_dev(3);
+#else
+      // TODO(anastasios): double-check if PIPE_MTE3 is correct
       wait_intra_block(PIPE_MTE3, 3);
+#endif
 
       int64_t chunk_start = bos + static_cast<int64_t>(ci) * C;
       int64_t valid = slen - static_cast<int64_t>(ci) * C;
@@ -482,8 +487,11 @@ AICORE void chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
       }
       ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (0 << 8));
 
+#if __CCE_AICORE__ == 220
+      wait_flag_dev(1);
+#else
       wait_intra_block(PIPE_MTE3, 1);
-
+#endif
       {
         GmShape2D k_shape(D, C);
         GmStride2D k_stride(C);
@@ -533,7 +541,8 @@ AICORE void chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
   set_mask_norm();
   set_vector_mask(-1, -1);
 
-  // Vec owns the running recurrent state S_i and updates it after every chunk.
+  // Vec owns the running recurrent state S_i and updates it after every
+  // chunk.
   for (int64_t wi = 0; wi < (total_work + block_num - 1) / block_num; ++wi) {
     int64_t pid = wi * block_num + cid;
     if (pid >= total_work) break;
@@ -589,9 +598,10 @@ AICORE void chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
     int64_t chunk_start_0 = bos;
     int64_t valid0 = slen;
     if (valid0 > C) valid0 = C;
-    // Vec work is split by row stripe, not by individual token.  For the first
-    // chunk we compute exactly how many live rows belong to this sub-block's
-    // HalfC stripe so short tails do not overrun the packed BSND input.
+    // Vec work is split by row stripe, not by individual token.  For the
+    // first chunk we compute exactly how many live rows belong to this
+    // sub-block's HalfC stripe so short tails do not overrun the packed
+    // BSND input.
     int32_t valid_rows_0 =
         static_cast<int32_t>(valid0 - static_cast<int64_t>(vid) * HalfC);
     if (valid_rows_0 < 0) valid_rows_0 = 0;
@@ -610,9 +620,9 @@ AICORE void chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
         TFILLPAD_INPLACE(k_ub_half, k_load);
       }
     } else {
-      // Empty stripe (typically vid=1 on a very short tail chunk): synthesize
-      // a zero tile so later full-width vector math and workspace stores still
-      // observe proper padding semantics.
+      // Empty stripe (typically vid=1 on a very short tail chunk):
+      // synthesize a zero tile so later full-width vector math and
+      // workspace stores still observe proper padding semantics.
       TEXPANDS(k_ub, 0.0f);
       TCVT(k_ub_half, k_ub, pto::RoundMode::CAST_NONE);
     }
@@ -642,10 +652,11 @@ AICORE void chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
           static_cast<int32_t>(valid - static_cast<int64_t>(vid) * HalfC);
       if (valid_rows < 0) valid_rows = 0;
       if (valid_rows > HalfC) valid_rows = HalfC;
-      // Each Vec subblock owns one contiguous HalfC-row stripe of the chunk.
-      // For short tail chunks, `valid_rows` may be smaller or even zero.  This
-      // is the key fix that keeps ragged tails and dense varlen boundary mixes
-      // from reading or writing beyond the live rows in this stripe.
+      // Each Vec subblock owns one contiguous HalfC-row stripe of the
+      // chunk. For short tail chunks, `valid_rows` may be smaller or even
+      // zero.  This is the key fix that keeps ragged tails and dense varlen
+      // boundary mixes from reading or writing beyond the live rows in this
+      // stripe.
 
       int64_t u_offset =
           (chunk_start * H + head) * D + vid * HalfC * BSND_QKV_STRIDE;
@@ -661,8 +672,9 @@ AICORE void chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
         }
       } else {
         // No live rows for this stripe in the current chunk; keep the tile
-        // explicitly zero-padded so the remainder of the recurrence logic can
-        // run in full-tile form without special-casing every later step.
+        // explicitly zero-padded so the remainder of the recurrence logic
+        // can run in full-tile form without special-casing every later
+        // step.
         TEXPANDS(u_ub, 0.0f);
         TCVT(u_ub_half, u_ub, pto::RoundMode::CAST_NONE);
       }
@@ -695,7 +707,8 @@ AICORE void chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
       TASSIGN(coeff_col_ub, COEFF_UB);
       TileUbDataND<float, HalfC, D, HalfC, D> coeff_2d_ub;
       TASSIGN(coeff_2d_ub, WS_UB);
-      // Broadcast one decay scalar per token row across the D feature columns:
+      // Broadcast one decay scalar per token row across the D feature
+      // columns:
       //   coeff_2d[row, :] = coeff[row]
       TROWEXPAND(coeff_2d_ub, coeff_col_ub);
       PipeBarrierVec();
@@ -703,7 +716,11 @@ AICORE void chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
       TMUL(k_ub, k_ub, coeff_2d_ub);
       PipeBarrierVec();
 
-      wait_intra_block(PIPE_MTE3, 0);
+#if __CCE_AICORE__ == 220
+      wait_flag_dev(1);
+#else
+      wait_intra_block(PIPE_FIX, 0);
+#endif
       {
         GmShape2D ws_shape(HalfC, D);
         GmStride2D ws_stride(D);
@@ -757,8 +774,8 @@ AICORE void chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
       set_flag(PIPE_MTE3, PIPE_S, EVENT_ID0);
       wait_flag(PIPE_MTE3, PIPE_S, EVENT_ID0);
       float exp_g_last = g_ub.GetValue(static_cast<int32_t>(valid) - 1);
-      // Carry the recurrence across chunks: S_{i+1} = exp(g_last) * S_i + K_i^T
-      // V_i.
+      // Carry the recurrence across chunks: S_{i+1} = exp(g_last) * S_i +
+      // K_i^T V_i.
       TMULS(s_ub, s_ub, exp_g_last);
 
       set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
@@ -786,9 +803,9 @@ AICORE void chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
             TFILLPAD_INPLACE(k_ub_half, k_load);
           }
         } else {
-          // Same tail-safe zero materialization for the prefetch path: the next
-          // chunk may have no rows in this stripe even though the other stripe
-          // is still active.
+          // Same tail-safe zero materialization for the prefetch path: the
+          // next chunk may have no rows in this stripe even though the
+          // other stripe is still active.
           TEXPANDS(k_ub, 0.0f);
           TCVT(k_ub_half, k_ub, pto::RoundMode::CAST_NONE);
         }
@@ -808,7 +825,11 @@ AICORE void chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
         }
       }
 
-      wait_intra_block(PIPE_MTE3, 2);
+#if __CCE_AICORE__ == 220
+      wait_flag_dev(2);
+#else
+      wait_intra_block(PIPE_FIX, 2);
+#endif
       {
         GmShape2D kv_shape(HalfC, D);
         GmStride2D kv_stride(D);
@@ -844,8 +865,8 @@ AICORE void chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
           TSTORE(s_global, s_store);
         }
 
-        // Expose the post-chunk state so the next chunk (and debug/verification
-        // outputs) can see S_{i+1}. Conceptually:
+        // Expose the post-chunk state so the next chunk (and
+        // debug/verification outputs) can see S_{i+1}. Conceptually:
         //   S_handle[chunk_idx + 1, head] = S_{i+1}
         int64_t s_out_offset = ((chunk_offset + ci + 1) * H + head) * DD;
         {
