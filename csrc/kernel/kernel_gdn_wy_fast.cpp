@@ -413,7 +413,13 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
             TMUL(a2_ub, a1_ub, beta_2d_ub);
             TCVT(a2_ub_half, a2_ub, pto::RoundMode::CAST_NONE);
 
-            if (!first_iter) wait_flag_dev(3);
+            if (!first_iter) {
+#if __CCE_AICORE__ == 220
+              wait_flag_dev(3);
+#else
+              wait_intra_block(PIPE_MTE3, 3);
+#endif
+            }
             set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             {
@@ -460,7 +466,13 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
             TMUL(a1_ub, a1_ub, g_2d_ub);
             TCVT(a1_ub_half, a1_ub, pto::RoundMode::CAST_NONE);
 
-            if (!first_iter) wait_flag_dev(4);
+            if (!first_iter) {
+#if __CCE_AICORE__ == 220
+              wait_flag_dev(4);
+#else
+              wait_intra_block(PIPE_MTE3, 4);
+#endif
+            }
             set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             {
@@ -561,7 +573,13 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
             TMUL(a2_ub, a1_ub, beta_2d_ub);
             TCVT(a2_ub_half, a2_ub, pto::RoundMode::CAST_NONE);
 
-            if (!first_iter_v) wait_flag_dev(3);
+            if (!first_iter_v) {
+#if __CCE_AICORE__ == 220
+              wait_flag_dev(3);
+#else
+              wait_intra_block(PIPE_MTE3, 3);
+#endif
+            }
             set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             {
@@ -598,16 +616,22 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 
             // A1 = A * (exp(g)*beta)_2d
             TEXP(g_ub, g_ub);
-            pipe_barrier(PIPE_V);
+            PipeBarrierVec();
             TMUL(g_ub, g_ub, beta_ub);
-            pipe_barrier(PIPE_V);
+            PipeBarrierVec();
             TMOV(g_r_ub, g_ub);
-            pipe_barrier(PIPE_V);
+            PipeBarrierVec();
             TCOLEXPAND(g_2d_ub, g_r_ub);
             TMUL(a1_ub, a1_ub, g_2d_ub);
             TCVT(a1_ub_half, a1_ub, pto::RoundMode::CAST_NONE);
 
-            if (!first_iter_v) wait_flag_dev(4);
+            if (!first_iter_v) {
+#if __CCE_AICORE__ == 220
+              wait_flag_dev(4);
+#else
+              wait_intra_block(PIPE_MTE3, 4);
+#endif
+            }
             set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             {
@@ -686,7 +710,11 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
             }
 
             // Wait Vec: A2 ready (flag 2), then GEMM U = A2 @ V
+#if __CCE_AICORE__ == 220
             wait_flag_dev(2);
+#else
+            wait_intra_block(PIPE_MTE3, 2);
+#endif
             {
               GmShape2D a2_shape(ChunkSize, ChunkSize);
               GmStride2D a2_stride(ChunkSize);
@@ -714,8 +742,12 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
             // Signal Vec: A2 slot free (flag 3)
             ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (3 << 8));
 
-            // Wait Vec: A1 ready (flag 1), then GEMM W = A1 @ K
+// Wait Vec: A1 ready (flag 1), then GEMM W = A1 @ K
+#if __CCE_AICORE__ == 220
             wait_flag_dev(1);
+#else
+            wait_intra_block(PIPE_MTE3, 1);
+#endif
             {
               GmShape2D a1_shape(ChunkSize, ChunkSize);
               GmStride2D a1_stride(ChunkSize);
@@ -800,7 +832,11 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               }
             }
 
+#if __CCE_AICORE__ == 220
             wait_flag_dev(2);
+#else
+            wait_intra_block(PIPE_MTE3, 2);
+#endif
             {
               GmShape2D a2_shape(ChunkSize, ChunkSize);
               GmStride2D a2_stride(ChunkSize);
@@ -827,7 +863,11 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
             }
             ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (3 << 8));
 
+#if __CCE_AICORE__ == 220
             wait_flag_dev(1);
+#else
+            wait_intra_block(PIPE_MTE3, 1);
+#endif
             {
               GmShape2D a1_shape(ChunkSize, ChunkSize);
               GmStride2D a1_stride(ChunkSize);
