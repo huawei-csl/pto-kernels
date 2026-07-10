@@ -434,7 +434,7 @@ AICORE void chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
     //   WS_KV : k_tilde^T @ v_i_new
 
     for (int32_t ci = 0; ci < num_chunks; ++ci) {
-      wait_flag_dev(3);
+      wait_intra_block(PIPE_MTE3, 3);
 
       int64_t chunk_start = bos + static_cast<int64_t>(ci) * C;
       int64_t valid = slen - static_cast<int64_t>(ci) * C;
@@ -482,7 +482,7 @@ AICORE void chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
       }
       ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (0 << 8));
 
-      wait_flag_dev(1);
+      wait_intra_block(PIPE_MTE3, 1);
 
       {
         GmShape2D k_shape(D, C);
@@ -703,7 +703,7 @@ AICORE void chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
       TMUL(k_ub, k_ub, coeff_2d_ub);
       PipeBarrierVec();
 
-      wait_flag_dev(0);
+      wait_intra_block(PIPE_MTE3, 0);
       {
         GmShape2D ws_shape(HalfC, D);
         GmStride2D ws_stride(D);
@@ -808,7 +808,7 @@ AICORE void chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
         }
       }
 
-      wait_flag_dev(2);
+      wait_intra_block(PIPE_MTE3, 2);
       {
         GmShape2D kv_shape(HalfC, D);
         GmStride2D kv_stride(D);
