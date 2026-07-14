@@ -224,10 +224,6 @@ else()
   message(FATAL_ERROR "BASE_MODE must be MEMORY or REGISTER, got: ${BASE_MODE}")
 endif()
 
-# The host wrappers reach the kernels through the pto_launch_* shims declared in
-# csrc/host/kernel_launchers.h, which keep the `<<<>>>` launches inside the
-# kernel translation units. The extension therefore stays plain C++ and builds
-# unchanged under either toolchain.
 pybind11_add_module(pto_kernels_ops csrc/host/pybind11.cpp)
 # pybind11 does not work with C++20, so we set C++17 for the pybind11 module
 # target
