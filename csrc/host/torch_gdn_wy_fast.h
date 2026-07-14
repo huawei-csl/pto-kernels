@@ -13,8 +13,19 @@ for the full License text.
 
 #include <vector>
 
-#include "aclrtlaunch_gdn_wy_fast.h"
 #include "utils.h"
+
+extern "C" {
+
+void pto_launch_gdn_wy_fast(uint32_t blockDim, void* stream, void* K_handle,
+                            void* V_handle, void* Beta_handle, void* G_handle,
+                            void* A_handle, void* workspace_a1_handle,
+                            void* workspace_a2_handle, void* W_handle,
+                            void* U_handle, void* cu_seqlens,
+                            int64_t batch_size, int64_t seq_len,
+                            int64_t total_tokens);
+
+}  // extern "C"
 
 namespace pto_isa_ops {
 

@@ -11,9 +11,19 @@ for the full License text.
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
-#include "aclrtlaunch_csr_gather_fp16.h"
-#include "aclrtlaunch_csr_gather_fp32.h"
 #include "utils.h"
+
+extern "C" {
+
+void pto_launch_csr_gather_fp16(uint32_t blockDim, void* stream, void* values,
+                                void* indices, void* x, void* z,
+                                uint32_t x_size, uint32_t indices_size);
+
+void pto_launch_csr_gather_fp32(uint32_t blockDim, void* stream, void* values,
+                                void* indices, void* x, void* z,
+                                uint32_t x_size, uint32_t indices_size);
+
+}  // extern "C"
 
 namespace pto_isa_ops {
 

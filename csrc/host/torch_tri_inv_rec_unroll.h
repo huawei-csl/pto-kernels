@@ -11,9 +11,21 @@ for the full License text.
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
-#include "aclrtlaunch_tri_inv_rec_unroll_bf16.h"
-#include "aclrtlaunch_tri_inv_rec_unroll_fp16.h"
 #include "utils.h"
+
+extern "C" {
+
+void pto_launch_tri_inv_rec_unroll_bf16(
+    uint32_t blockDim, void* stream, void* tensor_out, void* tensor_in,
+    void* minus_eye_in, uint32_t matrix_size, uint32_t num_matrices,
+    uint32_t num_bsnd_heads, uint32_t is_lower, void* cu_seqlens);
+
+void pto_launch_tri_inv_rec_unroll_fp16(
+    uint32_t blockDim, void* stream, void* tensor_out, void* tensor_in,
+    void* minus_eye_in, uint32_t matrix_size, uint32_t num_matrices,
+    uint32_t num_bsnd_heads, uint32_t is_lower, void* cu_seqlens);
+
+}  // extern "C"
 
 namespace pto_isa_ops {
 

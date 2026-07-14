@@ -11,8 +11,15 @@ for the full License text.
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
-#include "aclrtlaunch_kda_gate_cumsum.h"
 #include "utils.h"
+
+extern "C" {
+
+void pto_launch_kda_gate_cumsum(uint32_t blockDim, void* stream, void* g_ptr,
+                                void* g_sum_ptr, void* cu_seqlens,
+                                int64_t batch_size, int64_t seq_len);
+
+}  // extern "C"
 
 namespace pto_isa_ops {
 

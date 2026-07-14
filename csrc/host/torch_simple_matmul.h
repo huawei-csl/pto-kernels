@@ -11,10 +11,20 @@ for the full License text.
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
-#include "aclrtlaunch_simple_matmul_bf16.h"
-#include "aclrtlaunch_simple_matmul_fp16.h"
-#include "aclrtlaunch_simple_matmul_fp32.h"
 #include "utils.h"
+
+extern "C" {
+
+void pto_launch_simple_matmul_bf16(uint32_t blockDim, void* stream, void* a,
+                                   void* b, void* c, uint32_t matrix_size);
+
+void pto_launch_simple_matmul_fp16(uint32_t blockDim, void* stream, void* a,
+                                   void* b, void* c, uint32_t matrix_size);
+
+void pto_launch_simple_matmul_fp32(uint32_t blockDim, void* stream, void* a,
+                                   void* b, void* c, uint32_t matrix_size);
+
+}  // extern "C"
 
 namespace pto_isa_ops {
 
