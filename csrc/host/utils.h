@@ -15,7 +15,8 @@ full text of the License.
 #include <acl/acl.h>
 #include <torch/library.h>
 
-#include "kernel_launchers.h"
+#include <cstdint>
+
 #include "torch_npu/csrc/core/npu/NPUStream.h"
 #include "torch_npu/csrc/framework/OpCommand.h"
 

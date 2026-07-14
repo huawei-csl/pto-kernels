@@ -26,10 +26,10 @@ option(PIP_INSTALL "True if building via pip" OFF)
 # CANN >= 9.0 and ASCEND_HOME_PATH on the environment. OFF           legacy
 # ascendc.cmake, kept for comparison until the ASC path has had more mileage.
 #
-# Both paths reach the kernels through the pto_launch_* shims (see
-# csrc/host/kernel_launchers.h), so the host code is identical either way and
-# neither path depends on the code-generated aclrtlaunch_<kernel>.h headers that
-# only the legacy toolchain emits.
+# Both paths reach the kernels through the pto_launch_* shims (declared in the
+# csrc/host/torch_*.h header that uses them), so the host code is identical
+# either way and neither path depends on the code-generated
+# aclrtlaunch_<kernel>.h headers that only the legacy toolchain emits.
 option(USE_ASC_LANGUAGE
        "Compile kernels with the ASC language toolchain (CANN >= 9.0)" ON)
 
