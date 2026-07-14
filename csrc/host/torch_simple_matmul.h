@@ -13,9 +13,6 @@ for the full License text.
 
 #include "utils.h"
 
-// Declarations of the launch shims defined alongside the kernel in
-// csrc/kernel/. They wrap the `<<<>>>` launch so that this host code can stay
-// plain C++ and build under either kernel toolchain (see USE_ASC_LANGUAGE).
 extern "C" {
 
 void pto_launch_simple_matmul_bf16(uint32_t blockDim, void* stream, void* a,
