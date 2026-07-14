@@ -11,9 +11,6 @@ for the full License text.
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
-#include "aclrtlaunch_simple_matmul_bf16.h"
-#include "aclrtlaunch_simple_matmul_fp16.h"
-#include "aclrtlaunch_simple_matmul_fp32.h"
 #include "utils.h"
 
 namespace pto_isa_ops {

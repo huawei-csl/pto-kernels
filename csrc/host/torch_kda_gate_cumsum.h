@@ -11,7 +11,6 @@ for the full License text.
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
-#include "aclrtlaunch_kda_gate_cumsum.h"
 #include "utils.h"
 
 namespace pto_isa_ops {

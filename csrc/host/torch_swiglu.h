@@ -13,7 +13,6 @@ for the full License text.
 
 #include <limits>
 
-#include "aclrtlaunch_swiglu_fp16.h"
 #include "utils.h"
 
 namespace pto_isa_ops {

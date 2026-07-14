@@ -20,6 +20,19 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(PIP_INSTALL "True if building via pip" OFF)
 
+# Kernel toolchain selection.
+#
+# ON (default)  ASC language (find_package(ASC)), as in cann/ops-sparse. Needs
+# CANN >= 9.0 and ASCEND_HOME_PATH on the environment. OFF           legacy
+# ascendc.cmake, kept for comparison until the ASC path has had more mileage.
+#
+# Both paths reach the kernels through the pto_launch_* shims (see
+# csrc/host/kernel_launchers.h), so the host code is identical either way and
+# neither path depends on the code-generated aclrtlaunch_<kernel>.h headers that
+# only the legacy toolchain emits.
+option(USE_ASC_LANGUAGE
+       "Compile kernels with the ASC language toolchain (CANN >= 9.0)" ON)
+
 set(BASE_MODE
     "MEMORY"
     CACHE STRING "Base addressing mode: MEMORY or REGISTER")
@@ -53,6 +66,23 @@ elseif(DEFINED ENV{ASCEND_HOME_PATH})
       CACHE PATH "ASCEND CANN package installation directory" FORCE)
 endif()
 
+# SOC_VERSION -> NPU_ARCH: the ASC compiler takes the target architecture
+# instead of SOC_VERSION.
+string(TOLOWER "${SOC_VERSION}" SOC_VERSION_LOWER)
+if(SOC_VERSION_LOWER MATCHES "^ascend910b" OR SOC_VERSION_LOWER MATCHES
+                                              "^ascend910_93")
+  set(NPU_ARCH "dav-2201")
+elseif(SOC_VERSION_LOWER MATCHES "^ascend950")
+  set(NPU_ARCH "dav-3510")
+elseif(SOC_VERSION_LOWER MATCHES "^ascend310p")
+  set(NPU_ARCH "dav-2002")
+else()
+  message(
+    FATAL_ERROR
+      "Unsupported SOC_VERSION: ${SOC_VERSION}. Supported: ascend910b*, ascend910_93*, ascend950*, ascend310p*"
+  )
+endif()
+
 set(ASCEND_DRIVER_PATH /usr/local/Ascend/driver)
 set(CMAKE_COMPILER bisheng)
 set(CMAKE_C_COMPILER ${CMAKE_COMPILER})
@@ -69,23 +99,46 @@ set(CMAKE_CPP_COMPILE_OPTIONS -xc++ "SHELL:-include stdint.h"
 include_directories(${ASCEND_HOME_PATH}/include
                     ${ASCEND_DRIVER_PATH}/kernel/inc)
 
-if(EXISTS ${ASCEND_CANN_PACKAGE_PATH}/tools/tikcpp/ascendc_kernel_cmake)
-  set(ASCENDC_CMAKE_DIR
-      ${ASCEND_CANN_PACKAGE_PATH}/tools/tikcpp/ascendc_kernel_cmake)
-elseif(EXISTS ${ASCEND_CANN_PACKAGE_PATH}/compiler/tikcpp/ascendc_kernel_cmake)
-  set(ASCENDC_CMAKE_DIR
-      ${ASCEND_CANN_PACKAGE_PATH}/compiler/tikcpp/ascendc_kernel_cmake)
-elseif(EXISTS ${ASCEND_CANN_PACKAGE_PATH}/ascendc_devkit/tikcpp/samples/cmake)
-  set(ASCENDC_CMAKE_DIR
-      ${ASCEND_CANN_PACKAGE_PATH}/ascendc_devkit/tikcpp/samples/cmake)
-else()
-  message(
-    FATAL_ERROR
-      "ascendc_kernel_cmake does not exist, please check whether the cann package is installed."
-  )
-endif()
+if(USE_ASC_LANGUAGE)
+  # find_package(ASC) provides the ASC language plus ASC-flavoured
+  # ascendc_library / ascendc_compile_definitions / ascendc_include_directories.
+  # enable_language(ASC) only resolves once find_package has put the ASC plugin
+  # on CMAKE_MODULE_PATH.
+  if(NOT DEFINED ENV{ASCEND_HOME_PATH})
+    message(
+      FATAL_ERROR
+        "USE_ASC_LANGUAGE requires ASCEND_HOME_PATH, source <cann>/set_env.sh first."
+    )
+  endif()
+  find_package(ASC REQUIRED)
+  enable_language(ASC)
 
-include(${ASCENDC_CMAKE_DIR}/ascendc.cmake)
+  # CMakeASCInformation.cmake derives CMAKE_ASC_CREATE_SHARED_MODULE from
+  # CMAKE_ASC_CREATE_SHARED_LIBRARY before that one is defined, so it ends up
+  # empty and MODULE targets (the pybind11 extension) fail to generate.
+  if(NOT CMAKE_ASC_CREATE_SHARED_MODULE)
+    set(CMAKE_ASC_CREATE_SHARED_MODULE "${CMAKE_ASC_CREATE_SHARED_LIBRARY}")
+  endif()
+else()
+  if(EXISTS ${ASCEND_CANN_PACKAGE_PATH}/tools/tikcpp/ascendc_kernel_cmake)
+    set(ASCENDC_CMAKE_DIR
+        ${ASCEND_CANN_PACKAGE_PATH}/tools/tikcpp/ascendc_kernel_cmake)
+  elseif(EXISTS
+         ${ASCEND_CANN_PACKAGE_PATH}/compiler/tikcpp/ascendc_kernel_cmake)
+    set(ASCENDC_CMAKE_DIR
+        ${ASCEND_CANN_PACKAGE_PATH}/compiler/tikcpp/ascendc_kernel_cmake)
+  elseif(EXISTS ${ASCEND_CANN_PACKAGE_PATH}/ascendc_devkit/tikcpp/samples/cmake)
+    set(ASCENDC_CMAKE_DIR
+        ${ASCEND_CANN_PACKAGE_PATH}/ascendc_devkit/tikcpp/samples/cmake)
+  else()
+    message(
+      FATAL_ERROR
+        "ascendc_kernel_cmake does not exist, please check whether the cann package is installed."
+    )
+  endif()
+
+  include(${ASCENDC_CMAKE_DIR}/ascendc.cmake)
+endif()
 
 include(FetchContent)
 
@@ -114,6 +167,8 @@ string(REPLACE "path string is NULL" "" TORCH_NPU_PATH "${TORCH_NPU_PATH}")
 
 message("***********************************************************")
 message("* ASCEND_CANN_PACKAGE_PATH : ${ASCEND_CANN_PACKAGE_PATH}")
+message("* USE_ASC_LANGUAGE         : ${USE_ASC_LANGUAGE}")
+message("* SOC_VERSION / NPU_ARCH   : ${SOC_VERSION} / ${NPU_ARCH}")
 message("* TORCH_INSTALL_PREFIX     : ${TORCH_INSTALL_PREFIX}")
 message("* TORCH_NPU_PATH           : ${TORCH_NPU_PATH}")
 message("* TORCH_LIBRARIES          : ${TORCH_LIBRARIES}")
@@ -147,6 +202,18 @@ ascendc_include_directories(
   no_workspace_kernel PRIVATE ${libpto_isa_headers_SOURCE_DIR}/include
   ${libpto_isa_headers_SOURCE_DIR}/include/pto/common)
 
+if(USE_ASC_LANGUAGE)
+  # pto_kernels_ops is linked with RUNPATH $ORIGIN/build/lib, so the kernel
+  # library has to land there whichever toolchain built it.
+  set_target_properties(no_workspace_kernel PROPERTIES LIBRARY_OUTPUT_DIRECTORY
+                                                       ${CMAKE_BINARY_DIR}/lib)
+  target_compile_options(
+    no_workspace_kernel
+    PRIVATE $<$<COMPILE_LANGUAGE:ASC>:--npu-arch=${NPU_ARCH}>)
+  target_link_libraries(no_workspace_kernel PRIVATE tiling_api platform
+                                                    ascendalog)
+endif()
+
 if(BASE_MODE STREQUAL "MEMORY")
   message(STATUS "BASE_MODE is MEMORY")
   ascendc_compile_definitions(no_workspace_kernel PRIVATE -DMEMORY_BASE)
@@ -157,6 +224,10 @@ else()
   message(FATAL_ERROR "BASE_MODE must be MEMORY or REGISTER, got: ${BASE_MODE}")
 endif()
 
+# The host wrappers reach the kernels through the pto_launch_* shims declared in
+# csrc/host/kernel_launchers.h, which keep the `<<<>>>` launches inside the
+# kernel translation units. The extension therefore stays plain C++ and builds
+# unchanged under either toolchain.
 pybind11_add_module(pto_kernels_ops csrc/host/pybind11.cpp)
 # pybind11 does not work with C++20, so we set C++17 for the pybind11 module
 # target

@@ -13,7 +13,6 @@ for the full License text.
 
 #include <cmath>
 
-#include "aclrtlaunch_tri_inv_ns_fp16.h"
 #include "utils.h"
 
 namespace pto_isa_ops {

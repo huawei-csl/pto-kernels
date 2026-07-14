@@ -232,3 +232,24 @@ extern "C" __global__ AICORE void csr_gather_fp32(GM_ADDR values,
       (__gm__ float*)z, x_size, indices_size);
 #endif
 }
+
+// Host-callable launch shims: the `<<<>>>` syntax is only
+// understood by the kernel compiler, so the launch lives here
+// rather than in the host wrappers under csrc/host/.
+extern "C" void pto_launch_csr_gather_fp16(uint32_t blockDim, void* stream,
+                                           void* values, void* indices, void* x,
+                                           void* z, uint32_t x_size,
+                                           uint32_t indices_size) {
+  csr_gather_fp16<<<blockDim, nullptr, stream>>>(
+      (GM_ADDR)values, (GM_ADDR)indices, (GM_ADDR)x, (GM_ADDR)z, x_size,
+      indices_size);
+}
+
+extern "C" void pto_launch_csr_gather_fp32(uint32_t blockDim, void* stream,
+                                           void* values, void* indices, void* x,
+                                           void* z, uint32_t x_size,
+                                           uint32_t indices_size) {
+  csr_gather_fp32<<<blockDim, nullptr, stream>>>(
+      (GM_ADDR)values, (GM_ADDR)indices, (GM_ADDR)x, (GM_ADDR)z, x_size,
+      indices_size);
+}

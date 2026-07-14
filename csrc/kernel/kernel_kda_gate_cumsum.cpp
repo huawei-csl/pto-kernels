@@ -319,3 +319,15 @@ extern "C" __global__ AICORE void kda_gate_cumsum(__gm__ uint8_t* g_ptr,
       reinterpret_cast<__gm__ int32_t*>(cu_seqlens), batch_size, seq_len);
 #endif
 }
+
+// Host-callable launch shims: the `<<<>>>` syntax is only
+// understood by the kernel compiler, so the launch lives here
+// rather than in the host wrappers under csrc/host/.
+extern "C" void pto_launch_kda_gate_cumsum(uint32_t blockDim, void* stream,
+                                           void* g_ptr, void* g_sum_ptr,
+                                           void* cu_seqlens, int64_t batch_size,
+                                           int64_t seq_len) {
+  kda_gate_cumsum<<<blockDim, nullptr, stream>>>(
+      (__gm__ uint8_t*)g_ptr, (__gm__ uint8_t*)g_sum_ptr,
+      (__gm__ uint8_t*)cu_seqlens, batch_size, seq_len);
+}

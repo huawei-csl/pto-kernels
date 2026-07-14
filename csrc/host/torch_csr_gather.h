@@ -11,8 +11,6 @@ for the full License text.
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
-#include "aclrtlaunch_csr_gather_fp16.h"
-#include "aclrtlaunch_csr_gather_fp32.h"
 #include "utils.h"
 
 namespace pto_isa_ops {

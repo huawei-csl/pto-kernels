@@ -13,7 +13,6 @@ for the full License text.
 
 #include <vector>
 
-#include "aclrtlaunch_gdn_wy_fast.h"
 #include "utils.h"
 
 namespace pto_isa_ops {

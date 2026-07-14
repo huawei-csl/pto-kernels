@@ -11,7 +11,6 @@ for the full License text.
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
-#include "aclrtlaunch_tri_inv_trick_fp16.h"
 #include "utils.h"
 
 namespace pto_isa_ops {
