@@ -708,11 +708,13 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               }
             }
 
-            // Wait Vec: A2 ready (flag 2), then GEMM U = A2 @ V
+            // Cube Waits Vec: A2 ready (flag 2), then GEMM U = A2 @ V
+            // The wait must block MTE2: the consuming op is the GM->L1 TLOAD.
 #if __CCE_AICORE__ == 220
             wait_flag_dev(2);
 #else
-            wait_intra_block(PIPE_MTE3, 2);
+            wait_intra_block(PIPE_MTE2, 2);
+            pipe_barrier(PIPE_ALL);
 #endif
             {
               GmShape2D a2_shape(ChunkSize, ChunkSize);
@@ -741,11 +743,13 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
             // Signal Vec: A2 slot free (flag 3)
             ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (3 << 8));
 
-// Wait Vec: A1 ready (flag 1), then GEMM W = A1 @ K
+// Cube Waits Vec: A1 ready (flag 1), then GEMM W = A1 @ K
+// The wait must block MTE2: the consuming op is the GM->L1 TLOAD.
 #if __CCE_AICORE__ == 220
             wait_flag_dev(1);
 #else
-            wait_intra_block(PIPE_MTE3, 1);
+            wait_intra_block(PIPE_MTE2, 1);
+            pipe_barrier(PIPE_ALL);
 #endif
             {
               GmShape2D a1_shape(ChunkSize, ChunkSize);
@@ -831,10 +835,13 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               }
             }
 
+            // Cube Waits Vec: A2 ready (flag 2), then GEMM U = A2 @ V
+            // The wait must block MTE2: the consuming op is the GM->L1 TLOAD.
 #if __CCE_AICORE__ == 220
             wait_flag_dev(2);
 #else
-            wait_intra_block(PIPE_MTE3, 2);
+            wait_intra_block(PIPE_MTE2, 2);
+            pipe_barrier(PIPE_ALL);
 #endif
             {
               GmShape2D a2_shape(ChunkSize, ChunkSize);
@@ -862,10 +869,13 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
             }
             ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (3 << 8));
 
+            // Cube Waits Vec: A1 ready (flag 1), then GEMM W = A1 @ K
+            // The wait must block MTE2: the consuming op is the GM->L1 TLOAD.
 #if __CCE_AICORE__ == 220
             wait_flag_dev(1);
 #else
-            wait_intra_block(PIPE_MTE3, 1);
+            wait_intra_block(PIPE_MTE2, 1);
+            pipe_barrier(PIPE_ALL);
 #endif
             {
               GmShape2D a1_shape(ChunkSize, ChunkSize);
@@ -891,6 +901,7 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TASSIGN(w_store, 65536);
               TSTORE(w_global, w_store);
             }
+            // Signal Vec: A1 slot free (flag 4)
             ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (4 << 8));
           }
           gi++;
