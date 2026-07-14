@@ -371,8 +371,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 #if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
   sync_all();
 #else
-// TODO(anastasios): uncomment on v9.1.0
-// SYNCALL<SyncCoreType::Mix>();
+  SYNCALL<SyncCoreType::Mix>();
 #endif
 
   // Vec prepares the two workspaces (ws_a2 holding A2 = INV*beta_2d, and
@@ -801,8 +800,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 #if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
   sync_all();
 #else
-// TODO(anastasios): uncomment on v9.1.0
-// SYNCALL<SyncCoreType::Mix>();
+  SYNCALL<SyncCoreType::Mix>();
 #endif
 #endif
 
@@ -811,8 +809,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 #if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
   sync_all();
 #else
-// TODO(anastasios): uncomment on v9.1.0
-// SYNCALL<SyncCoreType::Mix>();
+  SYNCALL<SyncCoreType::Mix>();
 #endif
 
   // Cube reads V from BSND and the two Vec-produced workspaces, then issues
@@ -1029,8 +1026,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 #if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
   sync_all();
 #else
-// TODO(anastasios): uncomment on v9.1.0
-// SYNCALL<SyncCoreType::Mix>();
+  SYNCALL<SyncCoreType::Mix>();
 #endif
 #endif
 }
