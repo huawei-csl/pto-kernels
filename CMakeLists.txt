@@ -210,8 +210,6 @@ if(USE_ASC_LANGUAGE)
   target_compile_options(
     no_workspace_kernel
     PRIVATE $<$<COMPILE_LANGUAGE:ASC>:--npu-arch=${NPU_ARCH}>)
-  target_link_libraries(no_workspace_kernel PRIVATE tiling_api platform
-                                                    ascendalog)
 endif()
 
 if(BASE_MODE STREQUAL "MEMORY")
