@@ -174,7 +174,6 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
                                __gm__ int32_t* cu_seqlens, int64_t batch_size,
                                int64_t seq_len, int64_t total_tokens) {
   auto cid = get_block_idx();
-  auto block_num = get_block_num();
 
   constexpr int32_t K_DIM = HiddenSize;
   constexpr int32_t V_DIM = HiddenSize;

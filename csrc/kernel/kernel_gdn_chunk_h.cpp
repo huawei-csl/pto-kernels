@@ -319,7 +319,6 @@ AICORE void chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
   //   Cube forms the two matmuls (`W_i @ S_i` and `K_i^T @ V_i_new`).
   //   Vec does the elementwise gating/decay and carries the running state.
   auto cid = get_block_idx();
-  auto block_num = get_block_num();
 
   constexpr int32_t D = HiddenSize;
   constexpr int32_t C = ChunkSize;

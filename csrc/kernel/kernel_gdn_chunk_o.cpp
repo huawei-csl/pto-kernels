@@ -152,7 +152,6 @@ static AICORE void chunk_o_kernel(
   constexpr int32_t OUbAddr = QKUbAddr;
 
   auto cid = get_block_idx();
-  auto block_num = get_block_num();
   auto vid = get_subblockid();
 
   int64_t num_seqs = batch_size;
