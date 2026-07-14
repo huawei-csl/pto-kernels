@@ -43,9 +43,9 @@ compile_a5_%:
 	bisheng -fPIC -shared -xcce -DREGISTER_BASE -O2 -std=gnu++17 \
 		-I$(CSRC_KERNEL_DIR) \
 		-I$(PTO_LIB_PATH)/include \
-	        -I${ASCEND_TOOLKIT_HOME}/pkg_inc
-		-I${ASCEND_TOOLKIT_HOME}/pkg_inc/runtime
-		-I${ASCEND_TOOLKIT_HOME}/pkg_inc/profiling
+	        -I${ASCEND_TOOLKIT_HOME}/pkg_inc \
+		-I${ASCEND_TOOLKIT_HOME}/pkg_inc/runtime \
+		-I${ASCEND_TOOLKIT_HOME}/pkg_inc/profiling \
 		--cce-aicore-arch=dav-c310 \
 		-mllvm -cce-aicore-stack-size=0x8000 \
 		-mllvm -cce-aicore-function-stack-size=0x8000 \
