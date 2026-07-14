@@ -117,7 +117,6 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
   constexpr int32_t AUbHalfAddr = GR2dUbAddr;
 
   auto cid = get_block_idx();
-  auto block_num = get_block_num();
   auto vid = get_subblockid();
 
   int64_t num_seqs = batch_size;
