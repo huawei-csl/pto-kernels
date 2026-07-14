@@ -1056,3 +1056,23 @@ extern "C" __global__ AICORE void kda_wy(
       reinterpret_cast<__gm__ int32_t*>(cu_seqlens), batch_size, seq_len,
       total_tokens);
 }
+
+// Host-callable launch shims: the `<<<>>>` syntax is only
+// understood by the kernel compiler, so the launch lives here
+// rather than in the host wrappers under csrc/host/.
+extern "C" void pto_launch_kda_wy(uint32_t blockDim, void* stream,
+                                  void* K_handle, void* V_handle,
+                                  void* Beta_handle, void* G_handle,
+                                  void* A_handle, void* workspace_a2_handle,
+                                  void* workspace_keff_handle, void* U_handle,
+                                  void* W_handle, void* cu_seqlens,
+                                  int64_t batch_size, int64_t seq_len,
+                                  int64_t total_tokens) {
+  kda_wy<<<blockDim, nullptr, stream>>>(
+      (__gm__ uint8_t*)K_handle, (__gm__ uint8_t*)V_handle,
+      (__gm__ uint8_t*)Beta_handle, (__gm__ uint8_t*)G_handle,
+      (__gm__ uint8_t*)A_handle, (__gm__ uint8_t*)workspace_a2_handle,
+      (__gm__ uint8_t*)workspace_keff_handle, (__gm__ uint8_t*)U_handle,
+      (__gm__ uint8_t*)W_handle, (__gm__ uint8_t*)cu_seqlens, batch_size,
+      seq_len, total_tokens);
+}

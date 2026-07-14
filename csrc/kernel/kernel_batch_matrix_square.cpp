@@ -124,3 +124,22 @@ extern "C" __global__ AICORE void batch_matrix_square_fp32(
   (void)matrix_size;
 #endif
 }
+
+// Host-callable launch shims: the `<<<>>>` syntax is only
+// understood by the kernel compiler, so the launch lives here
+// rather than in the host wrappers under csrc/host/.
+extern "C" void pto_launch_batch_matrix_square_fp16(uint32_t blockDim,
+                                                    void* stream, void* z,
+                                                    void* x,
+                                                    uint32_t matrix_size) {
+  batch_matrix_square_fp16<<<blockDim, nullptr, stream>>>(
+      (__gm__ void*)z, (__gm__ void*)x, matrix_size);
+}
+
+extern "C" void pto_launch_batch_matrix_square_fp32(uint32_t blockDim,
+                                                    void* stream, void* z,
+                                                    void* x,
+                                                    uint32_t matrix_size) {
+  batch_matrix_square_fp32<<<blockDim, nullptr, stream>>>(
+      (__gm__ void*)z, (__gm__ void*)x, matrix_size);
+}

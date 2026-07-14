@@ -11,8 +11,17 @@ for the full License text.
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
-#include "aclrtlaunch_kda_chunk_h.h"
 #include "utils.h"
+
+extern "C" {
+
+void pto_launch_kda_chunk_h(uint32_t blockDim, void* stream, void* K, void* W,
+                            void* U, void* G, void* S, void* V_corr,
+                            void* workspace, void* cu_seqlens,
+                            int64_t batch_size, int64_t seq_len,
+                            int64_t total_tokens);
+
+}  // extern "C"
 
 namespace pto_isa_ops {
 

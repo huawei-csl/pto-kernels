@@ -922,3 +922,18 @@ extern "C" __global__ AICORE void gdn_chunk_h(
       reinterpret_cast<__gm__ int32_t*>(cu_seqlens), batch_size, seq_len,
       total_tokens);
 }
+
+// Host-callable launch shims: the `<<<>>>` syntax is only
+// understood by the kernel compiler, so the launch lives here
+// rather than in the host wrappers under csrc/host/.
+extern "C" void pto_launch_gdn_chunk_h(uint32_t blockDim, void* stream, void* K,
+                                       void* W, void* U, void* G, void* S,
+                                       void* V, void* FS, void* workspace,
+                                       void* cu_seqlens, int64_t batch_size,
+                                       int64_t seq_len, int64_t total_tokens) {
+  gdn_chunk_h<<<blockDim, nullptr, stream>>>(
+      (__gm__ uint8_t*)K, (__gm__ uint8_t*)W, (__gm__ uint8_t*)U,
+      (__gm__ uint8_t*)G, (__gm__ uint8_t*)S, (__gm__ uint8_t*)V,
+      (__gm__ uint8_t*)FS, (__gm__ uint8_t*)workspace,
+      (__gm__ uint8_t*)cu_seqlens, batch_size, seq_len, total_tokens);
+}

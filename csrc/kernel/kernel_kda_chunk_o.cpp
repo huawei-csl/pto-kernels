@@ -762,3 +762,18 @@ extern "C" __global__ AICORE void kda_chunk_o(
       reinterpret_cast<__gm__ int32_t*>(cu_seqlens), batch_size, seq_len,
       total_tokens);
 }
+
+// Host-callable launch shims: the `<<<>>>` syntax is only
+// understood by the kernel compiler, so the launch lives here
+// rather than in the host wrappers under csrc/host/.
+extern "C" void pto_launch_kda_chunk_o(uint32_t blockDim, void* stream, void* Q,
+                                       void* K, void* V_corr, void* S, void* G,
+                                       void* Mask, void* workspace, void* O,
+                                       void* cu_seqlens, int64_t batch_size,
+                                       int64_t seq_len, int64_t total_tokens) {
+  kda_chunk_o<<<blockDim, nullptr, stream>>>(
+      (__gm__ uint8_t*)Q, (__gm__ uint8_t*)K, (__gm__ uint8_t*)V_corr,
+      (__gm__ uint8_t*)S, (__gm__ uint8_t*)G, (__gm__ uint8_t*)Mask,
+      (__gm__ uint8_t*)workspace, (__gm__ uint8_t*)O,
+      (__gm__ uint8_t*)cu_seqlens, batch_size, seq_len, total_tokens);
+}

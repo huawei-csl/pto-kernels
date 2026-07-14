@@ -502,3 +502,14 @@ extern "C" __global__ AICORE void gdn_chunk_cumsum_fp32(
   }
 #endif
 }
+
+// Host-callable launch shims: the `<<<>>>` syntax is only
+// understood by the kernel compiler, so the launch lives here
+// rather than in the host wrappers under csrc/host/.
+extern "C" void pto_launch_gdn_chunk_cumsum_fp32(
+    uint32_t blockDim, void* stream, void* g_ptr, void* g_sum_ptr,
+    void* cu_seqlens, int64_t batch_size, int64_t seq_len) {
+  gdn_chunk_cumsum_fp32<<<blockDim, nullptr, stream>>>(
+      (__gm__ uint8_t*)g_ptr, (__gm__ uint8_t*)g_sum_ptr,
+      (__gm__ uint8_t*)cu_seqlens, batch_size, seq_len);
+}

@@ -843,3 +843,26 @@ extern "C" __global__ AICORE void tri_inv_rec_unroll_fp16(
       _tensor_out, _tensor_in, _minus_eye_in, matrix_size, num_matrices,
       num_bsnd_heads, is_lower, _cu_seqlens);
 }
+
+// Host-callable launch shims: the `<<<>>>` syntax is only
+// understood by the kernel compiler, so the launch lives here
+// rather than in the host wrappers under csrc/host/.
+extern "C" void pto_launch_tri_inv_rec_unroll_bf16(
+    uint32_t blockDim, void* stream, void* tensor_out, void* tensor_in,
+    void* minus_eye_in, uint32_t matrix_size, uint32_t num_matrices,
+    uint32_t num_bsnd_heads, uint32_t is_lower, void* cu_seqlens) {
+  tri_inv_rec_unroll_bf16<<<blockDim, nullptr, stream>>>(
+      (__gm__ void*)tensor_out, (__gm__ void*)tensor_in,
+      (__gm__ void*)minus_eye_in, matrix_size, num_matrices, num_bsnd_heads,
+      is_lower, (__gm__ void*)cu_seqlens);
+}
+
+extern "C" void pto_launch_tri_inv_rec_unroll_fp16(
+    uint32_t blockDim, void* stream, void* tensor_out, void* tensor_in,
+    void* minus_eye_in, uint32_t matrix_size, uint32_t num_matrices,
+    uint32_t num_bsnd_heads, uint32_t is_lower, void* cu_seqlens) {
+  tri_inv_rec_unroll_fp16<<<blockDim, nullptr, stream>>>(
+      (__gm__ void*)tensor_out, (__gm__ void*)tensor_in,
+      (__gm__ void*)minus_eye_in, matrix_size, num_matrices, num_bsnd_heads,
+      is_lower, (__gm__ void*)cu_seqlens);
+}

@@ -380,3 +380,18 @@ extern "C" __global__ AICORE void kda_kkt(
       total_tokens);
 #endif
 }
+
+// Host-callable launch shims: the `<<<>>>` syntax is only
+// understood by the kernel compiler, so the launch lives here
+// rather than in the host wrappers under csrc/host/.
+extern "C" void pto_launch_kda_kkt(uint32_t blockDim, void* stream, void* k_ptr,
+                                   void* g_cs_ptr, void* beta_ptr,
+                                   void* mask_ptr, void* L_out_ptr,
+                                   void* cu_seqlens, int64_t batch_size,
+                                   int64_t seq_len, int64_t total_tokens) {
+  kda_kkt<<<blockDim, nullptr, stream>>>(
+      (__gm__ uint8_t*)k_ptr, (__gm__ uint8_t*)g_cs_ptr,
+      (__gm__ uint8_t*)beta_ptr, (__gm__ uint8_t*)mask_ptr,
+      (__gm__ uint8_t*)L_out_ptr, (__gm__ uint8_t*)cu_seqlens, batch_size,
+      seq_len, total_tokens);
+}
