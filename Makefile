@@ -30,6 +30,9 @@ compile_%:
 	bisheng -fPIC -shared -xcce -DMEMORY_BASE -O2 -std=c++17 \
 		-I$(CSRC_KERNEL_DIR) \
 		-I$(PTO_LIB_PATH)/include \
+	        -I${ASCEND_TOOLKIT_HOME}/pkg_inc \
+		-I${ASCEND_TOOLKIT_HOME}/pkg_inc/runtime \
+		-I${ASCEND_TOOLKIT_HOME}/pkg_inc/profiling \
 		--npu-arch=dav-2201 \
 		-Wno-ignored-attributes \
 		$(CSRC_KERNEL_DIR)/kernel_$*.cpp \
@@ -40,6 +43,9 @@ compile_a5_%:
 	bisheng -fPIC -shared -xcce -DREGISTER_BASE -O2 -std=gnu++17 \
 		-I$(CSRC_KERNEL_DIR) \
 		-I$(PTO_LIB_PATH)/include \
+	        -I${ASCEND_TOOLKIT_HOME}/pkg_inc
+		-I${ASCEND_TOOLKIT_HOME}/pkg_inc/runtime
+		-I${ASCEND_TOOLKIT_HOME}/pkg_inc/profiling
 		--cce-aicore-arch=dav-c310 \
 		-mllvm -cce-aicore-stack-size=0x8000 \
 		-mllvm -cce-aicore-function-stack-size=0x8000 \
