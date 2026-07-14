@@ -15,6 +15,16 @@ for the full License text.
 
 #include "utils.h"
 
+// Declaration of the launch shim defined alongside the kernel in
+// csrc/kernel/. It wraps the `<<<>>>` launch so that this host code can stay
+// plain C++ and build under either kernel toolchain (see USE_ASC_LANGUAGE).
+extern "C" {
+
+void pto_launch_swiglu_fp16(uint32_t blockDim, void* stream, void* x, void* y,
+                            uint32_t batch, uint32_t input_n);
+
+}  // extern "C"
+
 namespace pto_isa_ops {
 
 /**

@@ -13,6 +13,21 @@ for the full License text.
 
 #include "utils.h"
 
+// Declaration of the launch shim defined alongside the kernel in
+// csrc/kernel/. It wraps the `<<<>>>` launch so that this host code can stay
+// plain C++ and build under either kernel toolchain (see USE_ASC_LANGUAGE).
+extern "C" {
+
+void pto_launch_gdn_chunk_o(uint32_t blockDim, void* stream, void* Q_handle,
+                            void* K_handle, void* V_handle, void* S_handle,
+                            void* G_handle, void* Msk_handle,
+                            void* workspace_qk, void* workspace_qs_qkv,
+                            void* workspace_qk_gated, void* O_handle,
+                            void* cu_seqlens, int64_t batch_size,
+                            int64_t seq_len, int64_t total_tokens);
+
+}  // extern "C"
+
 namespace pto_isa_ops {
 
 /**
