@@ -441,7 +441,7 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 #if __CCE_AICORE__ == 220
               wait_flag_dev(3);
 #else
-              wait_intra_block(PIPE_MTE3, 3);
+              wait_intra_block(PIPE_V, 3);
 #endif
             }
             set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
@@ -495,7 +495,7 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 #if __CCE_AICORE__ == 220
               wait_flag_dev(4);
 #else
-              wait_intra_block(PIPE_MTE3, 4);
+              wait_intra_block(PIPE_V, 4);
 #endif
             }
             set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
@@ -604,7 +604,7 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 #if __CCE_AICORE__ == 220
               wait_flag_dev(3);
 #else
-              wait_intra_block(PIPE_MTE3, 3);
+              wait_intra_block(PIPE_V, 3);
 #endif
             }
             set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
@@ -623,7 +623,7 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 #if __CCE_AICORE__ == 220
             SetCrossFlag<PIPE_MTE3>(2);
 #else
-            set_intra_block(PIPE_MTE3, 2);
+            set_intra_block(PIPE_V, 2);
 #endif
 
             // Load G
@@ -661,7 +661,7 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 #if __CCE_AICORE__ == 220
               wait_flag_dev(4);
 #else
-              wait_intra_block(PIPE_MTE3, 4);
+              wait_intra_block(PIPE_V, 4);
 #endif
             }
             set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
@@ -680,7 +680,7 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 #if __CCE_AICORE__ == 220
             SetCrossFlag<PIPE_MTE3>(1);
 #else
-            set_intra_block(PIPE_MTE3, 1);
+            set_intra_block(PIPE_V, 1);
 #endif
             first_iter_v = false;
           }
@@ -926,6 +926,7 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
             // The wait must block MTE2: the consuming op is the GM->L1 TLOAD.
 #if __CCE_AICORE__ == 220
             wait_flag_dev(1);
+            pipe_barrier(PIPE_ALL);
 #else
             WaitBothVecOnA5<PIPE_MTE2>(1);
             pipe_barrier(PIPE_ALL);
