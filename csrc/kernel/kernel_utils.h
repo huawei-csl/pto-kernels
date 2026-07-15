@@ -175,4 +175,28 @@ AICORE inline void PipeBarrierVec() {
 #endif
 }
 
+template <pipe_t Pipe>
+AICORE inline void SetCrossFlag(int32_t flag) {
+  constexpr int32_t VEC_NUM = 2;
+  ffts_cross_core_sync(Pipe, 1 | (VEC_NUM << 4) | (flag << 8));
+}
+
+template <pipe_t Pipe>
+AICORE inline void SignalBothVecOnA5(uint16_t flag) {
+  // A5: the flag offset is 16 on new core.
+  constexpr uint16_t VEC_FLAG_OFFSET = 16;
+
+  set_intra_block(Pipe, flag);
+  set_intra_block(Pipe, flag + VEC_FLAG_OFFSET);
+}
+
+template <pipe_t Pipe>
+AICORE inline void WaitBothVecOnA5(uint16_t flag) {
+  // A5: the flag offset is 16 on new core.
+  constexpr uint16_t VEC_FLAG_OFFSET = 16;
+
+  wait_intra_block(Pipe, flag);
+  wait_intra_block(Pipe, flag + VEC_FLAG_OFFSET);
+}
+
 }  // namespace kernel_utils

@@ -57,32 +57,7 @@ using namespace kernel_utils;
 #define GDN_C 128
 #endif
 
-// A5: the flag offset is 16 on new core.
-constexpr uint16_t VEC_FLAG_OFFSET = 16;
-
-constexpr int32_t FLAG_C2V = 0;  // Cube → Vec: workspace tile written
-constexpr int32_t FLAG_V2C = 1;  // Vec → Cube: workspace tile consumed
-
-#define VEC_NUM 2  // Vec sub-blocks per Cube core
-
 #ifdef __CCE_AICORE__
-
-template <pipe_t Pipe>
-AICORE inline void SetCrossFlag(int32_t flag) {
-  ffts_cross_core_sync(Pipe, 1 | (VEC_NUM << 4) | (flag << 8));
-}
-
-template <pipe_t Pipe>
-AICORE inline void SignalBothVecOnA5(uint16_t flag) {
-  set_intra_block(Pipe, flag);
-  set_intra_block(Pipe, flag + VEC_FLAG_OFFSET);
-}
-
-template <pipe_t Pipe>
-AICORE inline void WaitBothVecOnA5(uint16_t flag) {
-  wait_intra_block(Pipe, flag);
-  wait_intra_block(Pipe, flag + VEC_FLAG_OFFSET);
-}
 
 namespace {
 
