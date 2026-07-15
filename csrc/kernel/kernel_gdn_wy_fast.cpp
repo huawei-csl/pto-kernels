@@ -57,7 +57,32 @@ using namespace kernel_utils;
 #define GDN_C 128
 #endif
 
+// A5: the flag offset is 16 on new core.
+constexpr uint16_t VEC_FLAG_OFFSET = 16;
+
+constexpr int32_t FLAG_C2V = 0;  // Cube → Vec: workspace tile written
+constexpr int32_t FLAG_V2C = 1;  // Vec → Cube: workspace tile consumed
+
+#define VEC_NUM 2  // Vec sub-blocks per Cube core
+
 #ifdef __CCE_AICORE__
+
+template <pipe_t Pipe>
+AICORE inline void SetCrossFlag(int32_t flag) {
+  ffts_cross_core_sync(Pipe, 1 | (VEC_NUM << 4) | (flag << 8));
+}
+
+template <pipe_t Pipe>
+AICORE inline void SignalBothVecOnA5(uint16_t flag) {
+  set_intra_block(Pipe, flag);
+  set_intra_block(Pipe, flag + VEC_FLAG_OFFSET);
+}
+
+template <pipe_t Pipe>
+AICORE inline void WaitBothVecOnA5(uint16_t flag) {
+  wait_intra_block(Pipe, flag);
+  wait_intra_block(Pipe, flag + VEC_FLAG_OFFSET);
+}
 
 namespace {
 
@@ -432,7 +457,8 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
             }
             pipe_barrier(PIPE_ALL);
             // Signal Cube: A2 workspace ready (flag 2)
-            ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (2 << 8));
+            // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (2 << 8));
+            SetCrossFlag<PIPE_MTE3>(2);
 
             // Load G [1 × valid_rows] from [H, total_tokens]
             {
@@ -485,7 +511,9 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
             }
             pipe_barrier(PIPE_ALL);
             // Signal Cube: A1 workspace ready (flag 1)
-            ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (1 << 8));
+            // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (1 << 8));
+            SetCrossFlag<PIPE_MTE3>(1);
+
             first_iter = false;
           }
           gi++;
@@ -591,7 +619,12 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TSTORE(workspace_a2_global, a2_ub_half);
             }
             pipe_barrier(PIPE_ALL);
-            ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (2 << 8));
+// ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (2 << 8));
+#if __CCE_AICORE__ == 220
+            SetCrossFlag<PIPE_MTE3>(2);
+#else
+            set_intra_block(PIPE_MTE3, 2);
+#endif
 
             // Load G
             {
@@ -643,7 +676,12 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TSTORE(workspace_a1_global, a1_ub_half);
             }
             pipe_barrier(PIPE_ALL);
-            ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (1 << 8));
+// ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (1 << 8));
+#if __CCE_AICORE__ == 220
+            SetCrossFlag<PIPE_MTE3>(1);
+#else
+            set_intra_block(PIPE_MTE3, 1);
+#endif
             first_iter_v = false;
           }
           gi++;
@@ -740,15 +778,20 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TASSIGN(u_store, 0);
               TSTORE(u_global, u_store);
             }
-            // Signal Vec: A2 slot free (flag 3)
-            ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (3 << 8));
+// Cube Signal Vec: A2 slot free (flag 3)
+// ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (3 << 8));
+#if __CCE_AICORE__ == 220
+            SetCrossFlag<PIPE_FIX>(3);
+#else
+            SignalBothVecOnA5<PIPE_FIX>(3);
+#endif
 
 // Cube Waits Vec: A1 ready (flag 1), then GEMM W = A1 @ K
 // The wait must block MTE2: the consuming op is the GM->L1 TLOAD.
 #if __CCE_AICORE__ == 220
             wait_flag_dev(1);
 #else
-            wait_intra_block(PIPE_MTE2, 1);
+            WaitBothVecOnA5<PIPE_MTE2>(1);
             pipe_barrier(PIPE_ALL);
 #endif
             {
@@ -775,8 +818,12 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TASSIGN(w_store, 65536);
               TSTORE(w_global, w_store);
             }
-            // Signal Vec: A1 slot free (flag 4)
-            ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (4 << 8));
+// Cube Signal Vec: A1 slot free (flag 4)
+#if __CCE_AICORE__ == 220
+            SetCrossFlag<PIPE_FIX>(4);
+#else
+            SignalBothVecOnA5<PIPE_FIX>(4);
+#endif
           }
           gi++;
         }
@@ -839,8 +886,9 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
             // The wait must block MTE2: the consuming op is the GM->L1 TLOAD.
 #if __CCE_AICORE__ == 220
             wait_flag_dev(2);
+            pipe_barrier(PIPE_ALL);
 #else
-            wait_intra_block(PIPE_MTE2, 2);
+            WaitBothVecOnA5<PIPE_MTE2>(2);
             pipe_barrier(PIPE_ALL);
 #endif
             {
@@ -867,14 +915,19 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TASSIGN(u_store, 0);
               TSTORE(u_global, u_store);
             }
-            ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (3 << 8));
+// ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (3 << 8));
+#if __CCE_AICORE__ == 220
+            SetCrossFlag<PIPE_FIX>(3);
+#else
+            SignalBothVecOnA5<PIPE_FIX>(3);
+#endif
 
             // Cube Waits Vec: A1 ready (flag 1), then GEMM W = A1 @ K
             // The wait must block MTE2: the consuming op is the GM->L1 TLOAD.
 #if __CCE_AICORE__ == 220
             wait_flag_dev(1);
 #else
-            wait_intra_block(PIPE_MTE2, 1);
+            WaitBothVecOnA5<PIPE_MTE2>(1);
             pipe_barrier(PIPE_ALL);
 #endif
             {
@@ -901,8 +954,14 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TASSIGN(w_store, 65536);
               TSTORE(w_global, w_store);
             }
-            // Signal Vec: A1 slot free (flag 4)
-            ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (4 << 8));
+
+            // Signal both Vecs: A1 slot free (flag 4)
+// ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (4 << 8));
+#if __CCE_AICORE__ == 220
+            SetCrossFlag<PIPE_FIX>(4);
+#else
+            SignalBothVecOnA5<PIPE_FIX>(4);
+#endif
           }
           gi++;
         }
