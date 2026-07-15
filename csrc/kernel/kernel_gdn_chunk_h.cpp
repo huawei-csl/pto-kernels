@@ -436,8 +436,8 @@ AICORE void chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
 #if __CCE_AICORE__ == 220
       wait_flag_dev(3);
 #else
-      // TODO(anastasios): double-check if PIPE_MTE3 is correct
-      wait_intra_block(PIPE_MTE3, 3);
+      WaitBothVecOnA5<PIPE_MTE2>(3);
+      pipe_barrier(PIPE_ALL);
 #endif
 
       int64_t chunk_start = bos + static_cast<int64_t>(ci) * C;
@@ -484,12 +484,19 @@ AICORE void chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
         // Save ws_i so the Vec phase can do `v_new = U_i - ws_i`.
         TSTORE(ws_global, ws_store);
       }
-      ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (0 << 8));
+      // Signal Vec: WS workspace ready (flag 0)
+      // ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (0 << 8));
+#if __CCE_AICORE__ == 220
+      SetCrossFlag<PIPE_FIX>(0);
+#else
+      SignalBothVecOnA5<PIPE_FIX>(0);
+#endif
 
 #if __CCE_AICORE__ == 220
       wait_flag_dev(1);
 #else
-      wait_intra_block(PIPE_MTE3, 1);
+      WaitBothVecOnA5<PIPE_MTE2>(1);
+      pipe_barrier(PIPE_ALL);
 #endif
       {
         GmShape2D k_shape(D, C);
@@ -532,7 +539,13 @@ AICORE void chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
         // Save kv = k_tilde^T @ v_i_new so Vec can finish the state update.
         TSTORE(kv_global, kv_store);
       }
-      ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (2 << 8));
+      // Signal Vec: KV workspace ready (flag 2)
+      // ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (2 << 8));
+#if __CCE_AICORE__ == 220
+      SetCrossFlag<PIPE_FIX>(2);
+#else
+      SignalBothVecOnA5<PIPE_FIX>(2);
+#endif
     }
   }
 #endif
@@ -592,7 +605,13 @@ AICORE void chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
       TASSIGN(s_store, S_UB_HALF);
       TSTORE(s_global, s_store);
     }
-    ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (3 << 8));
+    // Signal Cube: S workspace ready (flag 3)
+    // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (3 << 8));
+#if __CCE_AICORE__ == 220
+    SetCrossFlag<PIPE_MTE3>(3);
+#else
+    set_intra_block(PIPE_MTE3, 3);
+#endif
 
     int64_t chunk_start_0 = bos;
     int64_t valid0 = slen;
@@ -768,7 +787,13 @@ AICORE void chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
         TSTORE(k_global, k_store);
       }
 
-      ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (1 << 8));
+      // Signal Cube: K workspace ready (flag 1)
+      // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (1 << 8));
+#if __CCE_AICORE__ == 220
+      SetCrossFlag<PIPE_MTE3>(1);
+#else
+      set_intra_block(PIPE_MTE3, 1);
+#endif
 
       set_flag(PIPE_MTE3, PIPE_S, EVENT_ID0);
       wait_flag(PIPE_MTE3, PIPE_S, EVENT_ID0);
@@ -878,7 +903,13 @@ AICORE void chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
           TASSIGN(s_out_store, S_UB_HALF);
           TSTORE(s_out_global, s_out_store);
         }
-        ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (3 << 8));
+        // Signal Cube: S workspace ready (flag 3)
+        // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (3 << 8));
+#if __CCE_AICORE__ == 220
+        SetCrossFlag<PIPE_MTE3>(3);
+#else
+        set_intra_block(PIPE_MTE3, 3);
+#endif
       }
 
       if (ci + 1 < static_cast<int32_t>(num_chunks)) {

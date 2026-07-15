@@ -134,5 +134,7 @@ if __name__ == "__main__":
         print(f"V is all close? {torch.allclose(v_act, v_ref, rtol=1e-2, atol=1e-2)}")
         print(s_act[0, 0, 0, :8])
         print(s_ref[0, 0, 0, :8])
+        print(f"Norm: {torch.norm(s_act)}")
+        print(f"Norm: {torch.norm(s_ref)}")
     finally:
         del lib  # triggers dlclose in CPython
