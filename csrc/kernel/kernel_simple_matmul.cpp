@@ -154,3 +154,27 @@ extern "C" __global__ AICORE void simple_matmul_fp32(__gm__ void* a,
                            matrix_size);
 #endif
 }
+
+// Host-callable launch shims: the `<<<>>>` syntax is only
+// understood by the kernel compiler, so the launch lives here
+// rather than in the host wrappers under csrc/host/.
+extern "C" void pto_launch_simple_matmul_bf16(uint32_t blockDim, void* stream,
+                                              void* a, void* b, void* c,
+                                              uint32_t matrix_size) {
+  simple_matmul_bf16<<<blockDim, nullptr, stream>>>(
+      (__gm__ void*)a, (__gm__ void*)b, (__gm__ void*)c, matrix_size);
+}
+
+extern "C" void pto_launch_simple_matmul_fp16(uint32_t blockDim, void* stream,
+                                              void* a, void* b, void* c,
+                                              uint32_t matrix_size) {
+  simple_matmul_fp16<<<blockDim, nullptr, stream>>>(
+      (__gm__ void*)a, (__gm__ void*)b, (__gm__ void*)c, matrix_size);
+}
+
+extern "C" void pto_launch_simple_matmul_fp32(uint32_t blockDim, void* stream,
+                                              void* a, void* b, void* c,
+                                              uint32_t matrix_size) {
+  simple_matmul_fp32<<<blockDim, nullptr, stream>>>(
+      (__gm__ void*)a, (__gm__ void*)b, (__gm__ void*)c, matrix_size);
+}

@@ -173,3 +173,22 @@ extern "C" __global__ AICORE void triv_inv_col_sweep_fp32(
   }
 #endif
 }
+
+// Host-callable launch shims: the `<<<>>>` syntax is only
+// understood by the kernel compiler, so the launch lives here
+// rather than in the host wrappers under csrc/host/.
+extern "C" void pto_launch_triv_inv_col_sweep_fp16(uint32_t blockDim,
+                                                   void* stream, void* x,
+                                                   void* z, uint32_t in_length,
+                                                   uint32_t matrix_size) {
+  triv_inv_col_sweep_fp16<<<blockDim, nullptr, stream>>>(
+      (GM_ADDR)x, (GM_ADDR)z, in_length, matrix_size);
+}
+
+extern "C" void pto_launch_triv_inv_col_sweep_fp32(uint32_t blockDim,
+                                                   void* stream, void* x,
+                                                   void* z, uint32_t in_length,
+                                                   uint32_t matrix_size) {
+  triv_inv_col_sweep_fp32<<<blockDim, nullptr, stream>>>(
+      (GM_ADDR)x, (GM_ADDR)z, in_length, matrix_size);
+}

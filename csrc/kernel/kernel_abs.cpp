@@ -134,3 +134,16 @@ extern "C" void call_vabs_fp16(uint32_t blockDim, void* stream, uint8_t* x,
                                uint8_t* y, uint32_t in_length) {
   vabs_fp16<<<blockDim * 2, nullptr, stream>>>(x, y, in_length);
 }
+
+// Host-callable launch shims: the `<<<>>>` syntax is only
+// understood by the kernel compiler, so the launch lives here
+// rather than in the host wrappers under csrc/host/.
+extern "C" void pto_launch_vabs_fp16(uint32_t blockDim, void* stream, void* x,
+                                     void* z, uint32_t in_length) {
+  vabs_fp16<<<blockDim, nullptr, stream>>>((GM_ADDR)x, (GM_ADDR)z, in_length);
+}
+
+extern "C" void pto_launch_vabs_fp32(uint32_t blockDim, void* stream, void* x,
+                                     void* z, uint32_t in_length) {
+  vabs_fp32<<<blockDim, nullptr, stream>>>((GM_ADDR)x, (GM_ADDR)z, in_length);
+}

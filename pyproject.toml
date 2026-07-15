@@ -21,7 +21,7 @@ ASCEND_CANN_PACKAGE_PATH = {env="ASCEND_CANN_PACKAGE_PATH", default="/usr/local/
 
 [project]
 name = "pto-kernels"
-version = "0.1.4"
+version = "0.1.5"
 description="PTO kernels"
 readme = "README.md"
 authors = [
@@ -66,4 +66,4 @@ wheel.packages = ["python/pto_kernels"]
 
 
 [tool.ruff]
-exclude = ["build"]
+exclude = ["build", ".skills"]

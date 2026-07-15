@@ -11,8 +11,18 @@ for the full License text.
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
-#include "aclrtlaunch_gdn_scaled_dot_kkt.h"
 #include "utils.h"
+
+extern "C" {
+
+void pto_launch_gdn_scaled_dot_kkt(uint32_t blockDim, void* stream,
+                                   void* K_handle, void* Beta_handle,
+                                   void* G_handle, void* Msk_handle,
+                                   void* workspace_handle, void* A_handle,
+                                   void* cu_seqlens, int64_t batch_size,
+                                   int64_t seq_len, int64_t total_tokens);
+
+}  // extern "C"
 
 namespace pto_isa_ops {
 

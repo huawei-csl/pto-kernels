@@ -13,8 +13,12 @@ for the full License text.
 
 #include <cmath>
 
-#include "aclrtlaunch_tri_inv_ns_fp16.h"
 #include "utils.h"
+
+extern "C" void pto_launch_tri_inv_ns_fp16(
+    uint32_t blockDim, void* stream, void* tensor_out, void* tensor_in,
+    void* identity_neg_in, void* identity_over_n_in, uint32_t matrix_size,
+    uint32_t num_iters, uint32_t num_matrices);
 
 namespace pto_isa_ops {
 

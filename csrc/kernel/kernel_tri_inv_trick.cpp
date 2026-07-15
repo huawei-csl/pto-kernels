@@ -210,3 +210,16 @@ extern "C" __global__ AICORE void tri_inv_trick_fp16(__gm__ void* tensor_out,
                           (__gm__ half*)identity_in, matrix_size,
                           max_block_size);
 }
+
+// Host-callable launch shims: the `<<<>>>` syntax is only
+// understood by the kernel compiler, so the launch lives here
+// rather than in the host wrappers under csrc/host/.
+extern "C" void pto_launch_tri_inv_trick_fp16(uint32_t blockDim, void* stream,
+                                              void* tensor_out, void* tensor_in,
+                                              void* identity_in,
+                                              uint32_t matrix_size,
+                                              uint32_t max_block_size) {
+  tri_inv_trick_fp16<<<blockDim, nullptr, stream>>>(
+      (__gm__ void*)tensor_out, (__gm__ void*)tensor_in,
+      (__gm__ void*)identity_in, matrix_size, max_block_size);
+}
