@@ -456,9 +456,13 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TSTORE(workspace_a2_global, a2_ub_half);
             }
             pipe_barrier(PIPE_ALL);
-            // Signal Cube: A2 workspace ready (flag 2)
-            // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (2 << 8));
+// Signal Cube: A2 workspace ready (flag 2)
+// ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (2 << 8));
+#ifdef __CCE_AICORE__ == 220
             SetCrossFlag<PIPE_MTE3>(2);
+#else
+            set_intra_block(PIPE_MTE3, 2);
+#endif
 
             // Load G [1 × valid_rows] from [H, total_tokens]
             {
@@ -510,9 +514,13 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TSTORE(workspace_a1_global, a1_ub_half);
             }
             pipe_barrier(PIPE_ALL);
-            // Signal Cube: A1 workspace ready (flag 1)
-            // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (1 << 8));
+// Signal Cube: A1 workspace ready (flag 1)
+// ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (1 << 8));
+#if __CCE_AICORE__ == 220
             SetCrossFlag<PIPE_MTE3>(1);
+#else
+            set_intra_block(PIPE_MTE3, 1);
+#endif
 
             first_iter = false;
           }
