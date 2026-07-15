@@ -458,7 +458,7 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
             pipe_barrier(PIPE_ALL);
 // Signal Cube: A2 workspace ready (flag 2)
 // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (2 << 8));
-#ifdef __CCE_AICORE__ == 220
+#if __CCE_AICORE__ == 220
             SetCrossFlag<PIPE_MTE3>(2);
 #else
             set_intra_block(PIPE_MTE3, 2);
