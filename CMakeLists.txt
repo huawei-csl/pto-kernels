@@ -96,8 +96,7 @@ add_link_options(-s -Wl,-z,relro -Wl,-z,now)
 set(CMAKE_CPP_COMPILE_OPTIONS -xc++ "SHELL:-include stdint.h"
                               "SHELL:-include stddef.h")
 
-include_directories(${ASCEND_HOME_PATH}/include
-                    ${ASCEND_DRIVER_PATH}/kernel/inc)
+include_directories(${ASCEND_DRIVER_PATH}/kernel/inc)
 
 if(USE_ASC_LANGUAGE)
   # find_package(ASC) provides the ASC language plus ASC-flavoured
@@ -183,8 +182,8 @@ ascendc_library(
   csrc/kernel/kernel_kda_gate_cumsum.cpp
   csrc/kernel/kernel_kda_wy.cpp
   csrc/kernel/kernel_gdn_wy_fast.cpp
-    csrc/kernel/kernel_kda_kkt.cpp
-    csrc/kernel/kernel_fa.cpp)
+  csrc/kernel/kernel_kda_kkt.cpp
+  csrc/kernel/kernel_fa.cpp)
 
 if(USE_ASC_LANGUAGE)
   # pto_kernels_ops is linked with RUNPATH $ORIGIN/build/lib, so the kernel
