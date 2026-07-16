@@ -371,7 +371,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 #if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
   sync_all();
 #else
-  SYNCALL<SyncCoreType::Mix>();
+  // SYNCALL<SyncCoreType::Mix>();
 #endif
 
   // Vec prepares the two workspaces (ws_a2 holding A2 = INV*beta_2d, and
@@ -488,7 +488,12 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TSTORE(workspace_a2_global, a2_ub_half);
             }
             pipe_barrier(PIPE_ALL);
-            ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (10 << 8));
+// ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (10 << 8));
+#if __CCE_AICORE__ == 220
+            SetCrossFlag<PIPE_MTE3>(10);
+#else
+            set_intra_block(PIPE_MTE3, 10);
+#endif
 
             // ─── Phase 2: build K_eff = k * exp(g_cs) ──────────────────────
             // k and g_cs are head-major [HV, total_tokens, K] fp16; per-head
@@ -576,7 +581,12 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TSTORE(workspace_keff_global, keff_ub_half);
             }
             pipe_barrier(PIPE_ALL);
-            ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (11 << 8));
+// ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (11 << 8));
+#if __CCE_AICORE__ == 220
+            SetCrossFlag<PIPE_MTE3>(11);
+#else
+            set_intra_block(PIPE_MTE3, 11);
+#endif
             first_iter = false;
           }
           gi++;
@@ -687,7 +697,12 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TSTORE(workspace_a2_global, a2_ub_half);
             }
             pipe_barrier(PIPE_ALL);
-            ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (10 << 8));
+// ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (10 << 8));
+#if __CCE_AICORE__ == 220
+            SetCrossFlag<PIPE_MTE3>(10);
+#else
+            set_intra_block(PIPE_MTE3, 10);
+#endif
 
             // ─── Phase 2: build K_eff = k * exp(g_cs) ──────────────────────
             if (local_rows > 0) {
@@ -772,7 +787,12 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TSTORE(workspace_keff_global, keff_ub_half);
             }
             pipe_barrier(PIPE_ALL);
-            ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (11 << 8));
+// ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (11 << 8));
+#if __CCE_AICORE__ == 220
+            SetCrossFlag<PIPE_MTE3>(11);
+#else
+            set_intra_block(PIPE_MTE3, 11);
+#endif
             first_iter = false;
           }
           gi++;
@@ -800,7 +820,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 #if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
   sync_all();
 #else
-  SYNCALL<SyncCoreType::Mix>();
+  // SYNCALL<SyncCoreType::Mix>();
 #endif
 #endif
 
@@ -809,7 +829,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 #if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
   sync_all();
 #else
-  SYNCALL<SyncCoreType::Mix>();
+  // SYNCALL<SyncCoreType::Mix>();
 #endif
 
   // Cube reads V from BSND and the two Vec-produced workspaces, then issues
@@ -852,7 +872,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 #if __CCE_AICORE__ == 220
             wait_flag_dev(10);
 #else
-            wait_intra_block(PIPE_MTE3, 10);
+            WaitBothVecOnA5<PIPE_MTE3>(10);
 #endif
             {
               GmShape2D a2_shape(ChunkSize, ChunkSize);
@@ -879,12 +899,17 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TASSIGN(u_store, 0);
               TSTORE(u_global, u_store);
             }
-            ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (12 << 8));
+// ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (12 << 8));
+#if __CCE_AICORE__ == 220
+            SetCrossFlag<PIPE_FIX>(12);
+#else
+            SignalBothVecOnA5<PIPE_FIX>(12);
+#endif
 
 #if __CCE_AICORE__ == 220
             wait_flag_dev(11);
 #else
-            wait_intra_block(PIPE_MTE3, 11);
+            WaitBothVecOnA5<PIPE_MTE3>(11);
 #endif
             {
               GmShape2D keff_shape(ChunkSize, HiddenSize);
@@ -912,7 +937,12 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TASSIGN(w_store, 65536);
               TSTORE(w_global, w_store);
             }
-            ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (13 << 8));
+// ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (13 << 8));
+#if __CCE_AICORE__ == 220
+            SetCrossFlag<PIPE_FIX>(13);
+#else
+            SignalBothVecOnA5<PIPE_FIX>(13);
+#endif
           }
           gi++;
         }
@@ -956,7 +986,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 #if __CCE_AICORE__ == 220
             wait_flag_dev(10);
 #else
-            wait_intra_block(PIPE_MTE3, 10);
+            WaitBothVecOnA5<PIPE_MTE3>(10);
 #endif
             {
               GmShape2D a2_shape(ChunkSize, ChunkSize);
@@ -982,12 +1012,17 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TASSIGN(u_store, 0);
               TSTORE(u_global, u_store);
             }
-            ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (12 << 8));
+// ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (12 << 8));
+#if __CCE_AICORE__ == 220
+            SetCrossFlag<PIPE_FIX>(12);
+#else
+            SignalBothVecOnA5<PIPE_FIX>(12);
+#endif
 
 #if __CCE_AICORE__ == 220
             wait_flag_dev(11);
 #else
-            wait_intra_block(PIPE_MTE3, 11);
+            WaitBothVecOnA5<PIPE_MTE3>(11);
 #endif
             {
               GmShape2D keff_shape(ChunkSize, HiddenSize);
@@ -1014,7 +1049,13 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TASSIGN(w_store, 65536);
               TSTORE(w_global, w_store);
             }
-            ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (13 << 8));
+
+// ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (13 << 8));
+#if __CCE_AICORE__ == 220
+            SetCrossFlag<PIPE_FIX>(13);
+#else
+            SignalBothVecOnA5<PIPE_FIX>(13);
+#endif
           }
           gi++;
         }
@@ -1026,7 +1067,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 #if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
   sync_all();
 #else
-  SYNCALL<SyncCoreType::Mix>();
+  // SYNCALL<SyncCoreType::Mix>();
 #endif
 #endif
 }

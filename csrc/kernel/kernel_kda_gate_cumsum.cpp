@@ -69,7 +69,6 @@ AICORE inline void kda_gate_cumsum_kernel(__gm__ half* g_ptr,
   auto cid = get_block_idx();
   auto vid = get_subblockid();
 
-#if defined(__DAV_VEC__)
   if (vid != 0) return;
 
   set_mask_norm();
@@ -306,7 +305,6 @@ AICORE inline void kda_gate_cumsum_kernel(__gm__ half* g_ptr,
       }
     }
   }
-#endif  // __DAV_VEC__
 }
 
 extern "C" __global__ AICORE void kda_gate_cumsum(__gm__ uint8_t* g_ptr,

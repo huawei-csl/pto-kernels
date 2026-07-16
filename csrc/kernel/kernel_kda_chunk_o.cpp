@@ -212,13 +212,7 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
 #endif
 
 #if defined(__DAV_VEC__)
-  // ── Vec UB address plan (192 KB budget) ──────────────────────────────────
-  // MASK_UB [HalfC, C] fp32 — loaded once; used in every chunk.
-  constexpr int32_t MASK_UB_ADDR = 0;
-  constexpr int32_t SLOT_A_ADDR = MASK_UB_ADDR + HalfC * C * sizeof(float);
-  constexpr int32_t SLOT_B_ADDR = SLOT_A_ADDR + HalfC * K_DIM * sizeof(float);
-  constexpr int32_t SLOT_C_ADDR = SLOT_B_ADDR + HalfC * K_DIM * sizeof(float);
-  constexpr int32_t SLOT_D_ADDR = SLOT_C_ADDR + HalfC * K_DIM * sizeof(float);
+
 #endif
 
   int64_t num_seqs = batch_size;
@@ -344,14 +338,22 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
 #endif
 
 #if defined(__DAV_VEC__)
+
+  // ── Vec UB address plan (192 KB budget) ──────────────────────────────────
+  // MASK_UB [HalfC, C] fp32 — loaded once; used in every chunk.
+  constexpr int32_t MASK_UB_ADDR = 0;
+  constexpr int32_t SLOT_A_ADDR = MASK_UB_ADDR + HalfC * C * sizeof(float);
+  constexpr int32_t SLOT_B_ADDR = SLOT_A_ADDR + HalfC * K_DIM * sizeof(float);
+  constexpr int32_t SLOT_C_ADDR = SLOT_B_ADDR + HalfC * K_DIM * sizeof(float);
+  constexpr int32_t SLOT_D_ADDR = SLOT_C_ADDR + HalfC * K_DIM * sizeof(float);
   set_mask_norm();
   set_vector_mask(-1, -1);
 
 #if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
   kernel_utils::SyncAll<false>();
 #else
-// TODO(anastasios): uncomment on v9.1.0
-// SYNCALL<SyncCoreType::Mix>();
+  // TODO(anastasios): uncomment on v9.1.0
+  SYNCALL<SyncCoreType::Mix>();
 #endif
 
   auto vid = get_subblockid();
