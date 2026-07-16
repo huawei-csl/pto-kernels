@@ -56,6 +56,9 @@
 using namespace pto;
 using kernel_utils::GetOuterLayout;
 using kernel_utils::PipeBarrierVec;
+using kernel_utils::SetCrossFlag;
+using kernel_utils::SignalBothVecOnA5;
+using kernel_utils::WaitBothVecOnA5;
 
 #ifndef GDN_H
 #define GDN_H 16
@@ -218,9 +221,9 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
   int64_t num_seqs = batch_size;
   int64_t total_work = num_seqs * H;
 
-#if defined(__DAV_CUBE__)
-
   SYNCALL<SyncCoreType::Mix>();
+
+#if defined(__DAV_CUBE__)
 
   for (int64_t wi = 0; wi < (total_work + block_num - 1) / block_num; ++wi) {
     int64_t pid = wi * block_num + cid;
@@ -246,7 +249,7 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
 #if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
       wait_flag_dev(0);
 #else
-      wait_intra_block(PIPE_MTE3, 0);
+      WaitBothVecOnA5<PIPE_MTE3>(0);
 #endif
 
       {
@@ -320,7 +323,13 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
         TASSIGN(qkv_store, 0);
         TSTORE(qkv_global, qkv_store);
       }
-      ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (1 << 8));
+
+      // ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (1 << 8));
+#if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
+      SetCrossFlag<PIPE_FIX>(1);
+#else
+      SignalBothVecOnA5<PIPE_FIX>(1);
+#endif
     }
   }
 
@@ -338,8 +347,6 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
   constexpr int32_t SLOT_D_ADDR = SLOT_C_ADDR + HalfC * K_DIM * sizeof(float);
   set_mask_norm();
   set_vector_mask(-1, -1);
-
-  SYNCALL<SyncCoreType::Mix>();
 
   auto vid = get_subblockid();
   int32_t my_row_offset = static_cast<int32_t>(vid) * HalfC;
