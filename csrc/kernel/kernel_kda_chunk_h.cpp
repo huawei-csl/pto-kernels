@@ -320,8 +320,6 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
 
 #if defined(__DAV_CUBE__)
 
-  SYNCALL<SyncCoreType::Mix>();
-
   for (int64_t wi = 0; wi < (total_work + block_num - 1) / block_num; ++wi) {
     int64_t pid = wi * block_num + cid;
     if (pid >= total_work) break;
@@ -345,8 +343,7 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
 #if __CCE_AICORE__ == 220
       wait_flag_dev(3);
 #else
-      // TODO(anastasios): double-check if PIPE_MTE3 is correct
-      wait_intra_block(PIPE_MTE3, 3);
+      WaitBothVecOnA5<PIPE_MTE3>(3);
 #endif
 
       int64_t chunk_start = bos + static_cast<int64_t>(ci) * C;
@@ -395,8 +392,7 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
 #if __CCE_AICORE__ == 220
       wait_flag_dev(1);
 #else
-      // TODO(anastasios): double-check if PIPE_MTE3 is correct
-      wait_intra_block(PIPE_MTE3, 1);
+      WaitBothVecOnA5<PIPE_MTE3>(1);
 #endif
 
       {
@@ -439,15 +435,11 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
     }
   }
 
-  SYNCALL<SyncCoreType::Mix>();
-
 #endif
 
 #if defined(__DAV_VEC__)
   set_mask_norm();
   set_vector_mask(-1, -1);
-
-  SYNCALL<SyncCoreType::Mix>();
 
   for (int64_t wi = 0; wi < (total_work + block_num - 1) / block_num; ++wi) {
     int64_t pid = wi * block_num + cid;
@@ -763,8 +755,6 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
       }
     }
   }
-
-  SYNCALL<SyncCoreType::Mix>();
 
 #endif
 }
