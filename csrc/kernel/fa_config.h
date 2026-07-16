@@ -27,10 +27,10 @@ constexpr int VEC_CORES = 2;
 constexpr std::size_t kFaWorkspaceAlignment = 512;
 
 struct FaScratch {
-  void* p_tile_fifo;
-  void* exp_max_ififo;
-  void* qk_tile_fifo;
-  void* pv_tile_fifo;
+  void* p_tile_fifo;    ///< fp16 softmax-probability (P) tile FIFO
+  void* exp_max_ififo;  ///< fp32 per-row running exp-max FIFO
+  void* qk_tile_fifo;   ///< fp32 QK^T score tile FIFO
+  void* pv_tile_fifo;   ///< fp32 PV partial-output tile FIFO
 };
 
 constexpr std::size_t FaAlignUp(std::size_t value) {

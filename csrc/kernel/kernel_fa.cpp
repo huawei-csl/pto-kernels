@@ -132,8 +132,8 @@ AICORE inline constexpr layout_t deduce_layout() {
 }
 
 struct MatmulCallConfig {
-  bool useAcc;     // true -> TMATMUL_UF_ACC, false -> TMATMUL_UF
-  AccPhase phase;  // UF mapping
+  bool useAcc;     ///< true -> TMATMUL_UF_ACC, false -> TMATMUL_UF
+  AccPhase phase;  ///< UF phase mapping (Unknown / Partial / Final)
 };
 
 AICORE inline MatmulCallConfig resolve_acc_mode(AccMode mode, bool isFirstSlice,

@@ -39,6 +39,14 @@ namespace pto_isa_ops {
  * Q is [B, Nq, S0, 128], while K and V are [B, Nkv, S1, 128].
  * Nkv must divide Nq. S0 must be a multiple of 128 and S1 a multiple
  * of 512. The returned tensor is fp32 with the same shape as Q.
+ *
+ * @param q Query tensor, fp16 BNSD [B, Nq, S0, 128].
+ * @param k Key tensor, fp16 BNSD [B, Nkv, S1, 128].
+ * @param v Value tensor, fp16 BNSD [B, Nkv, S1, 128].
+ * @param causal If true, apply the causal (lower-triangular) attention mask.
+ * @param qk_preload QK pipeline warmup depth; must be in [kFaMinQkPreload,
+ *                   kFaCvFifoSize].
+ * @return fp32 attention output with the same shape as @p q.
  */
 at::Tensor run_fa(const at::Tensor& q, const at::Tensor& k, const at::Tensor& v,
                   bool causal = false, int64_t qk_preload = kFaQkPreload) {
