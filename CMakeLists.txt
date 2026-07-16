@@ -140,19 +140,6 @@ else()
   include(${ASCENDC_CMAKE_DIR}/ascendc.cmake)
 endif()
 
-include(FetchContent)
-
-# certain operations need newer pto-isa header, not CANN 8.5.0 default (pin
-# commit on 2026/03/16
-# https://gitcode.com/cann/pto-isa/commit/313817be696792a4e16a7ea5994ec98e34391613?ref=master)
-# to use default CANN 8.5.0 headers set GIT_TAG "8.5.0"
-FetchContent_Declare(
-  libpto_isa_headers
-  GIT_REPOSITORY https://gitcode.com/cann/pto-isa.git
-  GIT_TAG v9.1.0.pre)
-
-FetchContent_Populate(libpto_isa_headers)
-
 # TORCH_NPU_PATH is the location where PyTorch Ascend Adapter (torch_npu) is
 # installed.
 execute_process(
@@ -197,10 +184,6 @@ ascendc_library(
   csrc/kernel/kernel_kda_gate_cumsum.cpp
   csrc/kernel/kernel_kda_wy.cpp
   csrc/kernel/kernel_kda_kkt.cpp)
-
-ascendc_include_directories(
-  no_workspace_kernel PRIVATE ${libpto_isa_headers_SOURCE_DIR}/include
-  ${libpto_isa_headers_SOURCE_DIR}/include/pto/common)
 
 if(USE_ASC_LANGUAGE)
   # pto_kernels_ops is linked with RUNPATH $ORIGIN/build/lib, so the kernel
