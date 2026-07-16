@@ -46,6 +46,7 @@
 using namespace pto;
 using kernel_utils::GetOuterLayout;
 using kernel_utils::PipeBarrierVec;
+using kernel_utils::SetCrossFlag;
 using kernel_utils::WaitBothVecOnA5;
 
 #ifndef GDN_H
@@ -432,7 +433,13 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
         TASSIGN(kv_store, C * V_DIM * static_cast<int32_t>(sizeof(float)));
         TSTORE(kv_global, kv_store);
       }
-      ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (2 << 8));
+
+      // ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (2 << 8));
+#if __CCE_AICORE__ == 220
+      SetCrossFlag<PIPE_FIX>(2);
+#else
+      set_intra_block(PIPE_FIX, 2);
+#endif
     }
   }
 
@@ -488,7 +495,12 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
       TASSIGN(s_store, S_UB_HALF);
       TSTORE(s_global, s_store);
     }
-    ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (3 << 8));
+    // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (3 << 8));
+#if __CCE_AICORE__ == 220
+    SetCrossFlag<PIPE_MTE3>(3);
+#else
+    set_intra_block(PIPE_MTE3, 3);
+#endif
 
     for (int32_t ci = 0; ci < static_cast<int32_t>(num_chunks); ++ci) {
       int64_t chunk_start = bos + static_cast<int64_t>(ci) * C;
@@ -629,7 +641,6 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
 #if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
       wait_flag_dev(0);
 #else
-      // TODO(anastasios): double-check if PIPE_MTE3 is correct
       wait_intra_block(PIPE_MTE3, 0);
 #endif
       {
@@ -687,7 +698,13 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
         TASSIGN(k_store, K_UB_HALF);
         TSTORE(k_global, k_store);
       }
-      ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (1 << 8));
+
+      // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (1 << 8));
+#if __CCE_AICORE__ == 220
+      SetCrossFlag<PIPE_MTE3>(1);
+#else
+      set_intra_block(PIPE_MTE3, 1);
+#endif
 
       // ── 7. State decay: S *= exp(g_total) (per-K row, broadcast over V) ──
       set_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
@@ -752,7 +769,13 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
           TASSIGN(s_store, S_UB_HALF);
           TSTORE(s_global, s_store);
         }
-        ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (3 << 8));
+
+        // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (3 << 8));
+#if __CCE_AICORE__ == 220
+        SetCrossFlag<PIPE_MTE3>(3);
+#else
+        set_intra_block(PIPE_MTE3, 3);
+#endif
       }
     }
   }
