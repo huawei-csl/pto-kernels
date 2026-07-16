@@ -737,7 +737,7 @@ AICORE void chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
 #if __CCE_AICORE__ == 220
       wait_flag_dev(0);
 #else
-      wait_intra_block(PIPE_MTE3, 0);
+      wait_intra_block(PIPE_FIX, 0);
 #endif
       {
         GmShape2D ws_shape(HalfC, D);
@@ -852,7 +852,7 @@ AICORE void chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
 #if __CCE_AICORE__ == 220
       wait_flag_dev(2);
 #else
-      wait_intra_block(PIPE_MTE3, 2);
+      wait_intra_block(PIPE_FIX, 2);
 #endif
       {
         GmShape2D kv_shape(HalfC, D);
