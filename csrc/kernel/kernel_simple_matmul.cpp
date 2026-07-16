@@ -129,8 +129,7 @@ extern "C" __global__ AICORE void simple_matmul_fp16(__gm__ void* a,
                                                      __gm__ void* b,
                                                      __gm__ void* c,
                                                      uint32_t matrix_size) {
-#if (__CHECK_FEATURE_AT_PRECOMPILE) || \
-    (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))
+#if defined(__DAV_CUBE__)
   run_simple_matmul<half>((__gm__ half*)a, (__gm__ half*)b, (__gm__ float*)c,
                           matrix_size);
 #endif
@@ -140,8 +139,7 @@ extern "C" __global__ AICORE void simple_matmul_bf16(__gm__ void* a,
                                                      __gm__ void* b,
                                                      __gm__ void* c,
                                                      uint32_t matrix_size) {
-#if (__CHECK_FEATURE_AT_PRECOMPILE) || \
-    (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))
+#if defined(__DAV_CUBE__)
   run_simple_matmul<bfloat16_t>((__gm__ bfloat16_t*)a, (__gm__ bfloat16_t*)b,
                                 (__gm__ float*)c, matrix_size);
 #endif
@@ -151,9 +149,32 @@ extern "C" __global__ AICORE void simple_matmul_fp32(__gm__ void* a,
                                                      __gm__ void* b,
                                                      __gm__ void* c,
                                                      uint32_t matrix_size) {
-#if (__CHECK_FEATURE_AT_PRECOMPILE) || \
-    (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))
+#if defined(__DAV_CUBE__)
   run_simple_matmul<float>((__gm__ float*)a, (__gm__ float*)b, (__gm__ float*)c,
                            matrix_size);
 #endif
+}
+
+// Host-callable launch shims: the `<<<>>>` syntax is only
+// understood by the kernel compiler, so the launch lives here
+// rather than in the host wrappers under csrc/host/.
+extern "C" void pto_launch_simple_matmul_bf16(uint32_t blockDim, void* stream,
+                                              void* a, void* b, void* c,
+                                              uint32_t matrix_size) {
+  simple_matmul_bf16<<<blockDim, nullptr, stream>>>(
+      (__gm__ void*)a, (__gm__ void*)b, (__gm__ void*)c, matrix_size);
+}
+
+extern "C" void pto_launch_simple_matmul_fp16(uint32_t blockDim, void* stream,
+                                              void* a, void* b, void* c,
+                                              uint32_t matrix_size) {
+  simple_matmul_fp16<<<blockDim, nullptr, stream>>>(
+      (__gm__ void*)a, (__gm__ void*)b, (__gm__ void*)c, matrix_size);
+}
+
+extern "C" void pto_launch_simple_matmul_fp32(uint32_t blockDim, void* stream,
+                                              void* a, void* b, void* c,
+                                              uint32_t matrix_size) {
+  simple_matmul_fp32<<<blockDim, nullptr, stream>>>(
+      (__gm__ void*)a, (__gm__ void*)b, (__gm__ void*)c, matrix_size);
 }

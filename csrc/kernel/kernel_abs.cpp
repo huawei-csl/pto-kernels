@@ -107,7 +107,7 @@ AICORE void runTAbs(__gm__ T* x, __gm__ T* z, uint32_t total_size) {
 
 extern "C" __global__ AICORE void vabs_fp16(GM_ADDR x, GM_ADDR z,
                                             uint32_t in_length) {
-#if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
+#if defined(__DAV_VEC__)
   constexpr uint32_t TILE_LEN = 128;
   runTAbs<half, TILE_LEN>((__gm__ half*)x, (__gm__ half*)z, in_length);
 #else
@@ -119,7 +119,7 @@ extern "C" __global__ AICORE void vabs_fp16(GM_ADDR x, GM_ADDR z,
 
 extern "C" __global__ AICORE void vabs_fp32(GM_ADDR x, GM_ADDR z,
                                             uint32_t in_length) {
-#if __CCE_AICORE__ == 220 && defined(__DAV_C220_VEC__)
+#if defined(__DAV_VEC__)
 
   constexpr uint32_t TILE_LEN = 128;
   runTAbs<float, TILE_LEN>((__gm__ float*)x, (__gm__ float*)z, in_length);
@@ -133,4 +133,17 @@ extern "C" __global__ AICORE void vabs_fp32(GM_ADDR x, GM_ADDR z,
 extern "C" void call_vabs_fp16(uint32_t blockDim, void* stream, uint8_t* x,
                                uint8_t* y, uint32_t in_length) {
   vabs_fp16<<<blockDim * 2, nullptr, stream>>>(x, y, in_length);
+}
+
+// Host-callable launch shims: the `<<<>>>` syntax is only
+// understood by the kernel compiler, so the launch lives here
+// rather than in the host wrappers under csrc/host/.
+extern "C" void pto_launch_vabs_fp16(uint32_t blockDim, void* stream, void* x,
+                                     void* z, uint32_t in_length) {
+  vabs_fp16<<<blockDim, nullptr, stream>>>((GM_ADDR)x, (GM_ADDR)z, in_length);
+}
+
+extern "C" void pto_launch_vabs_fp32(uint32_t blockDim, void* stream, void* x,
+                                     void* z, uint32_t in_length) {
+  vabs_fp32<<<blockDim, nullptr, stream>>>((GM_ADDR)x, (GM_ADDR)z, in_length);
 }

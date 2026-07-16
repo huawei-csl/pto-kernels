@@ -11,9 +11,19 @@ for the full License text.
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
-#include "aclrtlaunch_batch_matrix_square_fp16.h"
-#include "aclrtlaunch_batch_matrix_square_fp32.h"
 #include "utils.h"
+
+extern "C" {
+
+void pto_launch_batch_matrix_square_fp16(uint32_t blockDim, void* stream,
+                                         void* z, void* x,
+                                         uint32_t matrix_size);
+
+void pto_launch_batch_matrix_square_fp32(uint32_t blockDim, void* stream,
+                                         void* z, void* x,
+                                         uint32_t matrix_size);
+
+}  // extern "C"
 
 namespace pto_isa_ops {
 

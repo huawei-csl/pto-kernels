@@ -330,7 +330,7 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 // =====================================================================
 // VEC PHASE: Build A2 = A*beta_2d and A1 = A*(exp(g)*beta)_2d in workspace
 // =====================================================================
-#if defined(__DAV_C220_VEC__)
+#if defined(__DAV_VEC__)
   set_mask_norm();
   set_vector_mask(-1, -1);
 
@@ -632,7 +632,7 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 // =====================================================================
 // CUBE PHASE: U = A2 @ V and W = A1 @ K using Vec-prepared workspaces
 // =====================================================================
-#if defined(__DAV_C220_CUBE__)
+#if defined(__DAV_CUBE__)
   if (cu_seqlens == nullptr) {
     int64_t gi = 0;
     for (int64_t seq_idx = 0; seq_idx < num_seqs; ++seq_idx) {
@@ -881,4 +881,22 @@ extern "C" __global__ AICORE void gdn_wy_fast(
       reinterpret_cast<__gm__ half*>(U_handle),
       reinterpret_cast<__gm__ int32_t*>(cu_seqlens), batch_size, seq_len,
       total_tokens);
+}
+
+// Host-callable launch shims: the `<<<>>>` syntax is only
+// understood by the kernel compiler, so the launch lives here
+// rather than in the host wrappers under csrc/host/.
+extern "C" void pto_launch_gdn_wy_fast(
+    uint32_t blockDim, void* stream, void* K_handle, void* V_handle,
+    void* Beta_handle, void* G_handle, void* A_handle,
+    void* workspace_a1_handle, void* workspace_a2_handle, void* W_handle,
+    void* U_handle, void* cu_seqlens, int64_t batch_size, int64_t seq_len,
+    int64_t total_tokens) {
+  gdn_wy_fast<<<blockDim, nullptr, stream>>>(
+      (__gm__ uint8_t*)K_handle, (__gm__ uint8_t*)V_handle,
+      (__gm__ uint8_t*)Beta_handle, (__gm__ uint8_t*)G_handle,
+      (__gm__ uint8_t*)A_handle, (__gm__ uint8_t*)workspace_a1_handle,
+      (__gm__ uint8_t*)workspace_a2_handle, (__gm__ uint8_t*)W_handle,
+      (__gm__ uint8_t*)U_handle, (__gm__ uint8_t*)cu_seqlens, batch_size,
+      seq_len, total_tokens);
 }

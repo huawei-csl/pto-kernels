@@ -101,8 +101,7 @@ AICORE void run_batch_matrix_square(__gm__ float* z, __gm__ InputT* x,
 
 extern "C" __global__ AICORE void batch_matrix_square_fp16(
     __gm__ void* z, __gm__ void* x, uint32_t matrix_size) {
-#if (__CHECK_FEATURE_AT_PRECOMPILE) || \
-    (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))  // AIC
+#if defined(__DAV_CUBE__)  // AIC
   run_batch_matrix_square<half>((__gm__ float*)z, (__gm__ half*)x, matrix_size);
 #else
   // Nothing to do on AIV
@@ -114,8 +113,7 @@ extern "C" __global__ AICORE void batch_matrix_square_fp16(
 
 extern "C" __global__ AICORE void batch_matrix_square_fp32(
     __gm__ void* z, __gm__ void* x, uint32_t matrix_size) {
-#if (__CHECK_FEATURE_AT_PRECOMPILE) || \
-    (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))  // AIC
+#if defined(__DAV_CUBE__)  // AIC
 
   run_batch_matrix_square<float>((__gm__ float*)z, (__gm__ float*)x,
                                  matrix_size);
@@ -125,4 +123,23 @@ extern "C" __global__ AICORE void batch_matrix_square_fp32(
   (void)x;
   (void)matrix_size;
 #endif
+}
+
+// Host-callable launch shims: the `<<<>>>` syntax is only
+// understood by the kernel compiler, so the launch lives here
+// rather than in the host wrappers under csrc/host/.
+extern "C" void pto_launch_batch_matrix_square_fp16(uint32_t blockDim,
+                                                    void* stream, void* z,
+                                                    void* x,
+                                                    uint32_t matrix_size) {
+  batch_matrix_square_fp16<<<blockDim, nullptr, stream>>>(
+      (__gm__ void*)z, (__gm__ void*)x, matrix_size);
+}
+
+extern "C" void pto_launch_batch_matrix_square_fp32(uint32_t blockDim,
+                                                    void* stream, void* z,
+                                                    void* x,
+                                                    uint32_t matrix_size) {
+  batch_matrix_square_fp32<<<blockDim, nullptr, stream>>>(
+      (__gm__ void*)z, (__gm__ void*)x, matrix_size);
 }

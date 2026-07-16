@@ -209,8 +209,7 @@ template <typename InputT, typename OutputT, uint32_t MatrixSize,
 AICORE void runKernelTriInvNS(__gm__ OutputT* M_inv, __gm__ InputT* M,
                               __gm__ InputT* I_neg, __gm__ InputT* I_scaled,
                               uint32_t num_iters, uint32_t total_tiles) {
-#if (__CHECK_FEATURE_AT_PRECOMPILE) || \
-    (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))  // Cube compilation
+#if defined(__DAV_CUBE__)  // Cube compilation
 
   constexpr uint32_t TileLen = MatrixSize * MatrixSize;
   const uint32_t global_index = get_block_idx() * TileLen;
@@ -407,4 +406,17 @@ extern "C" __global__ AICORE void tri_inv_ns_fp16(
                             (__gm__ half*)identity_over_n_in, matrix_size,
                             num_iters, num_matrices);
   }
+}
+
+// Host-callable launch shims: the `<<<>>>` syntax is only
+// understood by the kernel compiler, so the launch lives here
+// rather than in the host wrappers under csrc/host/.
+extern "C" void pto_launch_tri_inv_ns_fp16(
+    uint32_t blockDim, void* stream, void* tensor_out, void* tensor_in,
+    void* identity_neg_in, void* identity_over_n_in, uint32_t matrix_size,
+    uint32_t num_iters, uint32_t num_matrices) {
+  tri_inv_ns_fp16<<<blockDim, nullptr, stream>>>(
+      (__gm__ void*)tensor_out, (__gm__ void*)tensor_in,
+      (__gm__ void*)identity_neg_in, (__gm__ void*)identity_over_n_in,
+      matrix_size, num_iters, num_matrices);
 }

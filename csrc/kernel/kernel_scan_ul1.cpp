@@ -37,8 +37,7 @@ template <typename InputT, typename OutputT, uint32_t matrix_size>
 AICORE void runKernelScanUl1(__gm__ InputT* x, __gm__ InputT* o,
                              __gm__ InputT* u, __gm__ InputT* l,
                              __gm__ OutputT* s) {
-#if (__CHECK_FEATURE_AT_PRECOMPILE) || \
-    (__CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__))
+#if defined(__DAV_CUBE__)
 
   // Type definitions for different memory levels
   // GM
@@ -231,4 +230,23 @@ extern "C" __global__ AICORE void scan_ul1_fp32(__gm__ void* x, __gm__ void* o,
                                                 uint32_t matrix_size) {
   run_scan_ul1((__gm__ float*)x, (__gm__ float*)o, (__gm__ float*)u,
                (__gm__ float*)l, (__gm__ float*)s, matrix_size);
+}
+
+// Host-callable launch shims: the `<<<>>>` syntax is only
+// understood by the kernel compiler, so the launch lives here
+// rather than in the host wrappers under csrc/host/.
+extern "C" void pto_launch_scan_ul1_fp16(uint32_t blockDim, void* stream,
+                                         void* x, void* o, void* u, void* l,
+                                         void* s, uint32_t matrix_size) {
+  scan_ul1_fp16<<<blockDim, nullptr, stream>>>((__gm__ void*)x, (__gm__ void*)o,
+                                               (__gm__ void*)u, (__gm__ void*)l,
+                                               (__gm__ void*)s, matrix_size);
+}
+
+extern "C" void pto_launch_scan_ul1_fp32(uint32_t blockDim, void* stream,
+                                         void* x, void* o, void* u, void* l,
+                                         void* s, uint32_t matrix_size) {
+  scan_ul1_fp32<<<blockDim, nullptr, stream>>>((__gm__ void*)x, (__gm__ void*)o,
+                                               (__gm__ void*)u, (__gm__ void*)l,
+                                               (__gm__ void*)s, matrix_size);
 }

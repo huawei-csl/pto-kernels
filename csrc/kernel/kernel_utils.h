@@ -100,4 +100,69 @@ AICORE inline BSNDVarlenTileInfo GetBSNDVarlenTileInfoFromCuSeqlens(
   }
 }
 
+// ─── SyncAll: full cross-core barrier ────────────────────────
+constexpr uint16_t SYNC_AIV_FLAG = 12;
+constexpr uint16_t SYNC_AIC_FLAG = 11;
+constexpr uint16_t SYNC_AIC_AIV_FLAG = 13;
+constexpr uint16_t SYNC_AIV_ONLY_ALL = 14;
+constexpr uint16_t SYNC_MODE_SHIFT_VALUE = 4;
+constexpr uint16_t SYNC_FLAG_SHIFT_VALUE = 8;
+
+/**
+ * @brief Gets the FFTS message for cross-core synchronization.
+ *
+ * @param mode The synchronization mode.
+ * @param flagId The event id to sync for.
+ * @return The FFTS message.
+ */
+AICORE inline uint16_t GetffstMsg(uint16_t mode, uint16_t flagId) {
+  return (0x1 + ((mode & 0x3) << SYNC_MODE_SHIFT_VALUE) +
+          ((flagId & 0xf) << SYNC_FLAG_SHIFT_VALUE));
+}
+
+/**
+ * @brief Synchronizes all cores.
+ *
+ * @tparam isAIVOnly Whether to synchronize only AIV cores.
+ */
+template <bool isAIVOnly = true>
+AICORE inline void SyncAll() {
+  pipe_barrier(PIPE_ALL);
+  if constexpr (isAIVOnly) {
+    ffts_cross_core_sync(PIPE_MTE3, GetffstMsg(0x0, SYNC_AIV_ONLY_ALL));
+    wait_flag_dev(SYNC_AIV_ONLY_ALL);
+    return;
+  }
+#if defined(__DAV_CUBE__)
+  wait_flag_dev(SYNC_AIV_FLAG);
+  ffts_cross_core_sync(PIPE_FIX, GetffstMsg(0x0, SYNC_AIC_FLAG));
+  wait_flag_dev(SYNC_AIC_FLAG);
+  ffts_cross_core_sync(PIPE_MTE3, GetffstMsg(0x02, SYNC_AIC_AIV_FLAG));
+#elif defined(__DAV_VEC__)
+  ffts_cross_core_sync(PIPE_MTE3, GetffstMsg(0x02, SYNC_AIV_FLAG));
+  wait_flag_dev(SYNC_AIC_AIV_FLAG);
+#endif
+}
+
+/**
+ * @brief Returns the outer matrix layout based on the target architecture and
+ * matrix orientation.
+ *
+ * On DAV C310 targets, the layout depends on whether the matrix is "left-sided"
+ * (L0A). DAV C310: L0A is NZ, L0B is ZN. Older: L0A is ZZ, L0B is ZN.
+ *
+ * Link:
+ * https://pto-isa.github.io/docs/isa/cube/nz-fractal-layout/#per-buffer-nz-layouts
+ *
+ * @param is_left Whether the matrix is on the left side (L0A) or not (L0B).
+ * @return The appropriate @c BLayout for the target architecture.
+ */
+constexpr pto::BLayout GetOuterLayout(bool is_left) {
+#ifdef __DAV_C310__
+  return is_left ? pto::BLayout::ColMajor : pto::BLayout::RowMajor;
+#else
+  return pto::BLayout::RowMajor;
+#endif
+}
+
 }  // namespace kernel_utils

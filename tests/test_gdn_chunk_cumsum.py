@@ -6,7 +6,7 @@
 # for the full License text.
 # --------------------------------------------------------------------------------
 #
-# Tests for pto_chunk_cumsum — chunked prefix-sum of gate values G along the
+# Tests for pto_gdn_chunk_cumsum — chunked prefix-sum of gate values G along the
 # time dimension, independently per head h:
 #   g_sum[t, h] = Σ_{i=0}^{t} g[i, h]   for t = 0 .. valid-1
 #
@@ -19,7 +19,7 @@ import random
 import pytest
 import torch
 
-from pto_kernels import pto_chunk_cumsum
+from pto_kernels import pto_gdn_chunk_cumsum
 
 # Compile-time constants — must match GDN_H and GDN_C baked into the kernel binary.
 GDN_H = 16  # number of attention heads
@@ -29,7 +29,7 @@ random.seed(42)
 torch.manual_seed(42)
 
 
-def ref_chunk_cumsum(
+def ref_gdn_chunk_cumsum(
     g: torch.Tensor,
     chunk_size: int,
     cu_seqlens=None,
@@ -96,16 +96,16 @@ def _rand_cu_aligned(n_seq: int, total: int, chunk_size: int) -> list[int]:
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("T", [128, 256, 385, 512, 1024])
 @pytest.mark.parametrize("H", [GDN_H])
-def test_chunk_cumsum_fixed_length(T: int, H: int):
+def test_gdn_chunk_cumsum_fixed_length(T: int, H: int):
     """Single batch, fixed sequence length T — exercises the cu_seqlens==nullptr path."""
     torch.manual_seed(42)
     g_cpu = torch.randn(T, H, dtype=torch.float32)
     g_npu = g_cpu.npu()
 
-    result = pto_chunk_cumsum(g_npu, batch_size=1, seq_len=T).cpu()
+    result = pto_gdn_chunk_cumsum(g_npu, batch_size=1, seq_len=T).cpu()
     torch.npu.synchronize()
 
-    expected = ref_chunk_cumsum(g_cpu, chunk_size=GDN_C, batch_size=1, seq_len=T)
+    expected = ref_gdn_chunk_cumsum(g_cpu, chunk_size=GDN_C, batch_size=1, seq_len=T)
     torch.testing.assert_close(result, expected, atol=1e-5, rtol=1e-4)
 
 
@@ -132,7 +132,7 @@ _VARLEN_SEQLENS = [
     ids=[str(s) for s in _VARLEN_SEQLENS],
 )
 @pytest.mark.parametrize("H", [GDN_H])
-def test_chunk_cumsum_varlen(seqlens: list[int], H: int):
+def test_gdn_chunk_cumsum_varlen(seqlens: list[int], H: int):
     """Variable-length sequences via cu_seqlens — exercises the non-null cu_seqlens path."""
     cu_list = _cu_from_seqlens(seqlens)
     total_tokens = cu_list[-1]
@@ -143,12 +143,12 @@ def test_chunk_cumsum_varlen(seqlens: list[int], H: int):
     g_npu = g_cpu.npu()
     cu_npu = torch.tensor(cu_list, dtype=torch.int32).npu()
 
-    result = pto_chunk_cumsum(
+    result = pto_gdn_chunk_cumsum(
         g_npu, batch_size=N_seq, seq_len=0, cu_seqlens=cu_npu
     ).cpu()
     torch.npu.synchronize()
 
-    expected = ref_chunk_cumsum(g_cpu, chunk_size=GDN_C, cu_seqlens=cu_list)
+    expected = ref_gdn_chunk_cumsum(g_cpu, chunk_size=GDN_C, cu_seqlens=cu_list)
     torch.testing.assert_close(result, expected, atol=1e-5, rtol=1e-4)
 
 
@@ -169,7 +169,7 @@ _BOUNDARY_SEQLENS = [
     ids=[f"boundary_{i}" for i in range(len(_BOUNDARY_SEQLENS))],
 )
 @pytest.mark.parametrize("H", [GDN_H])
-def test_chunk_cumsum_boundary(seqlens: list[int], H: int):
+def test_gdn_chunk_cumsum_boundary(seqlens: list[int], H: int):
     """Sequences with lengths that straddle chunk boundaries and include single-token seqs."""
     cu_list = _cu_from_seqlens(seqlens)
     total_tokens = cu_list[-1]
@@ -180,12 +180,12 @@ def test_chunk_cumsum_boundary(seqlens: list[int], H: int):
     g_npu = g_cpu.npu()
     cu_npu = torch.tensor(cu_list, dtype=torch.int32).npu()
 
-    result = pto_chunk_cumsum(
+    result = pto_gdn_chunk_cumsum(
         g_npu, batch_size=N_seq, seq_len=0, cu_seqlens=cu_npu
     ).cpu()
     torch.npu.synchronize()
 
-    expected = ref_chunk_cumsum(g_cpu, chunk_size=GDN_C, cu_seqlens=cu_list)
+    expected = ref_gdn_chunk_cumsum(g_cpu, chunk_size=GDN_C, cu_seqlens=cu_list)
     torch.testing.assert_close(result, expected, atol=1e-5, rtol=1e-4)
 
 
@@ -212,7 +212,7 @@ _RAND_VARLEN_CU = [
     ],
 )
 @pytest.mark.parametrize("H", [GDN_H])
-def test_chunk_cumsum_random_varlen(cu_list: list[int], H: int):
+def test_gdn_chunk_cumsum_random_varlen(cu_list: list[int], H: int):
     """Randomly-generated chunk-aligned varlen shapes (seed=42, 3/7/10 sequences)."""
     total_tokens = cu_list[-1]
     N_seq = len(cu_list) - 1
@@ -222,10 +222,10 @@ def test_chunk_cumsum_random_varlen(cu_list: list[int], H: int):
     g_npu = g_cpu.npu()
     cu_npu = torch.tensor(cu_list, dtype=torch.int32).npu()
 
-    result = pto_chunk_cumsum(
+    result = pto_gdn_chunk_cumsum(
         g_npu, batch_size=N_seq, seq_len=0, cu_seqlens=cu_npu
     ).cpu()
     torch.npu.synchronize()
 
-    expected = ref_chunk_cumsum(g_cpu, chunk_size=GDN_C, cu_seqlens=cu_list)
+    expected = ref_gdn_chunk_cumsum(g_cpu, chunk_size=GDN_C, cu_seqlens=cu_list)
     torch.testing.assert_close(result, expected, atol=1e-5, rtol=1e-4)

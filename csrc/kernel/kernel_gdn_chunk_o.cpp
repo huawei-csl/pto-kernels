@@ -209,7 +209,7 @@ static AICORE void chunk_o_kernel(
 // =====================================================================
 // CUBE CORE — Three GEMMs per chunk: QK, QS, QKV
 // =====================================================================
-#if defined(__DAV_C220_CUBE__)
+#if defined(__DAV_CUBE__)
   if (cu_seqlens == nullptr) {
     int64_t chunks_per_seq = (seq_len + ChunkSize - 1) / ChunkSize;
     int64_t global_chunk_base = 0;
@@ -688,7 +688,7 @@ static AICORE void chunk_o_kernel(
 // =====================================================================
 // VEC CORE — Gating, element-wise ops, output assembly
 // =====================================================================
-#if defined(__DAV_C220_VEC__)
+#if defined(__DAV_VEC__)
   set_mask_norm();
   set_vector_mask(-1, -1);
 
@@ -1167,4 +1167,22 @@ extern "C" __global__ AICORE void gdn_chunk_o(
       reinterpret_cast<__gm__ half*>(O_handle),
       reinterpret_cast<__gm__ int32_t*>(cu_seqlens), batch_size, seq_len,
       total_tokens);
+}
+
+// Host-callable launch shims: the `<<<>>>` syntax is only
+// understood by the kernel compiler, so the launch lives here
+// rather than in the host wrappers under csrc/host/.
+extern "C" void pto_launch_gdn_chunk_o(
+    uint32_t blockDim, void* stream, void* Q_handle, void* K_handle,
+    void* V_handle, void* S_handle, void* G_handle, void* Msk_handle,
+    void* workspace_qk, void* workspace_qs_qkv, void* workspace_qk_gated,
+    void* O_handle, void* cu_seqlens, int64_t batch_size, int64_t seq_len,
+    int64_t total_tokens) {
+  gdn_chunk_o<<<blockDim, nullptr, stream>>>(
+      (__gm__ uint8_t*)Q_handle, (__gm__ uint8_t*)K_handle,
+      (__gm__ uint8_t*)V_handle, (__gm__ uint8_t*)S_handle,
+      (__gm__ uint8_t*)G_handle, (__gm__ uint8_t*)Msk_handle,
+      (__gm__ uint8_t*)workspace_qk, (__gm__ uint8_t*)workspace_qs_qkv,
+      (__gm__ uint8_t*)workspace_qk_gated, (__gm__ uint8_t*)O_handle,
+      (__gm__ uint8_t*)cu_seqlens, batch_size, seq_len, total_tokens);
 }

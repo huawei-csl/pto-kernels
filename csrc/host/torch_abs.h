@@ -11,9 +11,17 @@ for the full License text.
 #include <ATen/ATen.h>
 #include <torch/library.h>
 
-#include "aclrtlaunch_vabs_fp16.h"
-#include "aclrtlaunch_vabs_fp32.h"
 #include "utils.h"
+
+extern "C" {
+
+void pto_launch_vabs_fp16(uint32_t blockDim, void* stream, void* x, void* z,
+                          uint32_t in_length);
+
+void pto_launch_vabs_fp32(uint32_t blockDim, void* stream, void* x, void* z,
+                          uint32_t in_length);
+
+}  // extern "C"
 
 namespace pto_isa_ops {
 
