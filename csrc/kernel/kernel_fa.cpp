@@ -131,6 +131,7 @@ AICORE inline constexpr layout_t deduce_layout() {
   return layout_t::NONE;
 }
 
+/// Resolved TMATMUL call configuration for a single accumulation slice.
 struct MatmulCallConfig {
   bool useAcc;     ///< true -> TMATMUL_UF_ACC, false -> TMATMUL_UF
   AccPhase phase;  ///< UF phase mapping (Unknown / Partial / Final)

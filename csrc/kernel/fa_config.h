@@ -26,6 +26,7 @@ constexpr int kFaMaxCores = 24;
 constexpr int VEC_CORES = 2;
 constexpr std::size_t kFaWorkspaceAlignment = 512;
 
+/// Device-side scratch FIFO pointers carved out of the FA workspace.
 struct FaScratch {
   void* p_tile_fifo;    ///< fp16 softmax-probability (P) tile FIFO
   void* exp_max_ififo;  ///< fp32 per-row running exp-max FIFO
