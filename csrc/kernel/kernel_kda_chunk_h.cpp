@@ -46,6 +46,7 @@
 using namespace pto;
 using kernel_utils::GetOuterLayout;
 using kernel_utils::PipeBarrierVec;
+using kernel_utils::WaitBothVecOnA5;
 
 #ifndef GDN_H
 #define GDN_H 16
