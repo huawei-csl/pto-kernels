@@ -183,7 +183,7 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
 #if __CCE_AICORE__ == 220
       wait_flag_dev(2 + slot);
 #else
-      wait_intra_block(PIPE_MTE3, 2 + slot);
+      WaitBothVecOnA5<PIPE_MTE3>(2 + slot);
 #endif
       pipe_barrier(PIPE_ALL);
 
@@ -253,7 +253,12 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
       }
 
       // Signal Vec: this slot's KK^T is ready (flag 0 or 1)
-      ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (slot << 8));
+      // ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (slot << 8));
+#if __CCE_AICORE__ == 220
+      SetCrossFlag<PIPE_FIX>(slot);
+#else
+      SignalBothVecOnA5<PIPE_FIX>(slot);
+#endif
     }
   }
 #endif
@@ -284,8 +289,16 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
   wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
   // Release both workspace slots so Cube can start writing immediately
-  ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (2 << 8));
-  ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (3 << 8));
+
+#if __CCE_AICORE__ == 220
+  //  ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (2 << 8));
+  ///  ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (3 << 8));
+  SetCrossFlag<PIPE_MTE3>(2);
+  SetCrossFlag<PIPE_MTE3>(3);
+#else
+  set_intra_block(PIPE_MTE3, 2);
+  set_intra_block(PIPE_MTE3, 3);
+#endif
 
   for (int64_t work_idx = 0;
        work_idx < (total_work + block_num - 1) / block_num; ++work_idx) {
@@ -450,8 +463,14 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
       }
 
       pipe_barrier(PIPE_ALL);
+
       // Signal Cube that this workspace slot is free for reuse
-      ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | ((2 + slot) << 8));
+      // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | ((2 + slot) << 8));
+#if __CCE_AICORE__ == 220
+      SetCrossFlag<PIPE_MTE3>(2 + slot);
+#else
+      set_intra_block(PIPE_MTE3, 2 + slot);
+#endif
     }
   }
 #endif
