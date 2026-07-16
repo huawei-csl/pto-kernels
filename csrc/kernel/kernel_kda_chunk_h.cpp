@@ -22,8 +22,8 @@
 //   - v_corr (fp16 copy) lives in a dedicated workspace slot (WS_V) so the
 //     Cube K_rest^T @ V_corr GEMM has an fp16 source — the BSND output is fp16.
 //
-// Cross-core sync: same data-flow flags as GDN chunk_h (0-3), plus SyncAll
-// on entry/exit via kernel_utils::SyncAll<false>().
+// Cross-core sync: same data-flow flags as GDN chunk_h (0-3), plus a
+// full mix-core barrier on entry/exit via SYNCALL<SyncCoreType::Mix>().
 //
 // Inputs:
 //   K   [HV, T, K]              fp16  — keys (head-major)
@@ -319,12 +319,8 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
   int64_t total_work = num_seqs * H;
 
 #if defined(__DAV_CUBE__)
-#if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
-  kernel_utils::SyncAll<false>();
-#else
-// TODO(anastasios): uncomment on v9.1.0
-// SYNCALL<SyncCoreType::Mix>();
-#endif
+
+  SYNCALL<SyncCoreType::Mix>();
 
   for (int64_t wi = 0; wi < (total_work + block_num - 1) / block_num; ++wi) {
     int64_t pid = wi * block_num + cid;
@@ -443,12 +439,7 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
     }
   }
 
-#if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
-  kernel_utils::SyncAll<false>();
-#else
-// TODO(anastasios): uncomment on v9.1.0
-// SYNCALL<SyncCoreType::Mix>();
-#endif
+  SYNCALL<SyncCoreType::Mix>();
 
 #endif
 
@@ -456,12 +447,7 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
   set_mask_norm();
   set_vector_mask(-1, -1);
 
-#if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
-  kernel_utils::SyncAll<false>();
-#else
-// TODO(anastasios): uncomment on v9.1.0
-// SYNCALL<SyncCoreType::Mix>();
-#endif
+  SYNCALL<SyncCoreType::Mix>();
 
   for (int64_t wi = 0; wi < (total_work + block_num - 1) / block_num; ++wi) {
     int64_t pid = wi * block_num + cid;
@@ -778,12 +764,7 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
     }
   }
 
-#if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
-  kernel_utils::SyncAll<false>();
-#else
-// TODO(anastasios): uncomment on v9.1.0
-// SYNCALL<SyncCoreType::Mix>();
-#endif
+  SYNCALL<SyncCoreType::Mix>();
 
 #endif
 }

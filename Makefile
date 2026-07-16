@@ -5,8 +5,7 @@
 # https://github.com/huawei-csl/pto-kernels/
 # for the full License text.
 # --------------------------------------------------------------------------------
-#PTO_LIB_PATH    ?= $(ASCEND_TOOLKIT_HOME) # Uncomment to use the PTO-ISA version bundled into CANN
-PTO_LIB_PATH    ?= $(shell pwd)/build/_deps/libpto_isa_headers-src
+PTO_LIB_PATH    ?= $(ASCEND_TOOLKIT_HOME)
 CSRC_KERNEL_DIR := csrc/kernel
 
 .PHONY: clean setup_once build wheel install docs test test_tri_inv compile_all_a5

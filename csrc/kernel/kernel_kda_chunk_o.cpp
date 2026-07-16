@@ -29,8 +29,8 @@
 // its own s_snapshots entry).  Cube/Vec still process them sequentially per
 // work item to keep the per-core 4-flag protocol simple.
 //
-// Cross-core sync: same data-flow flags as kda_chunk_h (0-3), plus SyncAll
-// on entry/exit via kernel_utils::SyncAll<false>().
+// Cross-core sync: same data-flow flags as kda_chunk_h (0-3), plus a
+// full mix-core barrier on entry/exit via SYNCALL<SyncCoreType::Mix>().
 //
 // Inputs:
 //   Q       [HV, T, K]               fp16  — queries (head-major)
@@ -220,12 +220,7 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
 
 #if defined(__DAV_CUBE__)
 
-#if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
-  kernel_utils::SyncAll<false>();
-#else
-// TODO(anastasios): uncomment on v9.1.0
-// SYNCALL<SyncCoreType::Mix>();
-#endif
+  SYNCALL<SyncCoreType::Mix>();
 
   for (int64_t wi = 0; wi < (total_work + block_num - 1) / block_num; ++wi) {
     int64_t pid = wi * block_num + cid;
@@ -329,12 +324,7 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
     }
   }
 
-#if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
-  kernel_utils::SyncAll<false>();
-#else
-// TODO(anastasios): uncomment on v9.1.0
-// SYNCALL<SyncCoreType::Mix>();
-#endif
+  SYNCALL<SyncCoreType::Mix>();
 #endif
 
 #if defined(__DAV_VEC__)
@@ -349,12 +339,7 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
   set_mask_norm();
   set_vector_mask(-1, -1);
 
-#if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
-  kernel_utils::SyncAll<false>();
-#else
-  // TODO(anastasios): uncomment on v9.1.0
   SYNCALL<SyncCoreType::Mix>();
-#endif
 
   auto vid = get_subblockid();
   int32_t my_row_offset = static_cast<int32_t>(vid) * HalfC;
@@ -740,12 +725,7 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
     }
   }
 
-#if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
-  kernel_utils::SyncAll<false>();
-#else
-// TODO(anastasios): uncomment on v9.1.0
-// SYNCALL<SyncCoreType::Mix>();
-#endif
+  SYNCALL<SyncCoreType::Mix>();
 #endif
 }
 
