@@ -389,7 +389,13 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
         TASSIGN(ws_store, 0);
         TSTORE(ws_global, ws_store);
       }
-      ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (0 << 8));
+
+      // ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (0 << 8));
+#if __CCE_AICORE__ == 220
+      SetCrossFlag<PIPE_FIX>(0);
+#else
+      set_intra_block(PIPE_FIX, 0);
+#endif
 
 #if __CCE_AICORE__ == 220
       wait_flag_dev(1);
