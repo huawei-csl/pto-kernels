@@ -394,7 +394,7 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
 #if __CCE_AICORE__ == 220
       SetCrossFlag<PIPE_FIX>(0);
 #else
-      set_intra_block(PIPE_FIX, 0);
+      SignalBothVecOnA5<PIPE_FIX>(0);
 #endif
 
 #if __CCE_AICORE__ == 220
@@ -444,7 +444,7 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
 #if __CCE_AICORE__ == 220
       SetCrossFlag<PIPE_FIX>(2);
 #else
-      set_intra_block(PIPE_FIX, 2);
+      SignalBothVecOnA5<PIPE_FIX>(2);
 #endif
     }
   }
