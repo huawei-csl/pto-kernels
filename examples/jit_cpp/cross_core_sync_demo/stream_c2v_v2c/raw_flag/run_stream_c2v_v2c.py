@@ -29,11 +29,11 @@ os.environ["NPU_DEVICE"] = _DEVICE
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from jit_util_stream import load_stream_c2v, load_stream_v2c, BLOCK_DIM  # noqa: E402
 
-TILE_SIZE  = 128
-DTYPE      = torch.float16
-KW         = dict(dtype=DTYPE, device=_DEVICE)
+TILE_SIZE = 128
+DTYPE = torch.float16
+KW = dict(dtype=DTYPE, device=_DEVICE)
 
-WARMUP  = 5
+WARMUP = 5
 REPEATS = 20
 
 
@@ -45,7 +45,7 @@ def workspace_roundtrip_bytes(num_iters: int) -> int:
 def _time_kernel(fn, *args, num_iters: int) -> float:
     """Return median duration in µs for one call of fn(*args)."""
     start = torch.npu.Event(enable_timing=True)
-    end   = torch.npu.Event(enable_timing=True)
+    end = torch.npu.Event(enable_timing=True)
     start.record()
     for _ in range(REPEATS):
         fn(*args, num_iters)
@@ -56,6 +56,7 @@ def _time_kernel(fn, *args, num_iters: int) -> float:
 
 # ── stream_c2v ────────────────────────────────────────────────────────────────
 
+
 def run_c2v(kernel) -> None:
     print("=" * 60)
     print("stream_c2v  (Cube L0C → workspace → Vec UB)")
@@ -65,14 +66,14 @@ def run_c2v(kernel) -> None:
     print("-" * len(header))
 
     wave_rows = BLOCK_DIM * TILE_SIZE
-    A  = torch.randn(wave_rows, TILE_SIZE, **KW)
-    B  = torch.randn(TILE_SIZE, TILE_SIZE, **KW)
+    A = torch.randn(wave_rows, TILE_SIZE, **KW)
+    B = torch.randn(TILE_SIZE, TILE_SIZE, **KW)
     ws = torch.empty(wave_rows, TILE_SIZE, **KW)
 
     # Smoke check: run once with a few iterations, no crash = pass
     kernel(A, B, ws, 4)
     torch.npu.synchronize()
-    print(f"  smoke (num_iters=4): OK")
+    print("  smoke (num_iters=4): OK")
     print()
 
     records = []
@@ -89,11 +90,14 @@ def run_c2v(kernel) -> None:
 
     peak_bw = max(r[2] for r in records)
     peak_ni = max(records, key=lambda r: r[2])[0]
-    print(f"\nPeak: {peak_bw:.1f} GB/s at num_iters={peak_ni}  "
-          f"(910B2 HBM roofline ≈ 1500 GB/s)\n")
+    print(
+        f"\nPeak: {peak_bw:.1f} GB/s at num_iters={peak_ni}  "
+        f"(910B2 HBM roofline ≈ 1500 GB/s)\n"
+    )
 
 
 # ── stream_v2c ────────────────────────────────────────────────────────────────
+
 
 def run_v2c(kernel) -> None:
     print("=" * 60)
@@ -111,7 +115,7 @@ def run_v2c(kernel) -> None:
     D_smoke = torch.randn(4 * wave_rows, TILE_SIZE, **KW)
     kernel(A_smoke, D_smoke, ws, 4)
     torch.npu.synchronize()
-    print(f"  smoke (num_iters=4): OK")
+    print("  smoke (num_iters=4): OK")
     print()
 
     records = []
@@ -132,8 +136,10 @@ def run_v2c(kernel) -> None:
 
     peak_bw = max(r[2] for r in records)
     peak_ni = max(records, key=lambda r: r[2])[0]
-    print(f"\nPeak: {peak_bw:.1f} GB/s at num_iters={peak_ni}  "
-          f"(910B2 HBM roofline ≈ 1500 GB/s)\n")
+    print(
+        f"\nPeak: {peak_bw:.1f} GB/s at num_iters={peak_ni}  "
+        f"(910B2 HBM roofline ≈ 1500 GB/s)\n"
+    )
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

@@ -32,8 +32,11 @@ os.environ["NPU_DEVICE"] = _DEVICE
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from jit_util import (  # noqa: E402
-    load_matmul_add_c2v, load_add_matmul_v2c,
-    BLOCK_DIM, TILE_SIZE, FIFO_ELEMS_PER_CORE,
+    load_matmul_add_c2v,
+    load_add_matmul_v2c,
+    BLOCK_DIM,
+    TILE_SIZE,
+    FIFO_ELEMS_PER_CORE,
 )
 
 RTOL = 1e-3
@@ -52,16 +55,17 @@ def _test(kernel, name: str, ref_fn) -> None:
         batch = num_rounds * wave_rows
         torch.manual_seed(0)
         tensors = ref_fn(batch, TILE_SIZE, _DEVICE)
-        A, B, D = tensors['A'], tensors['B'], tensors['D']
+        A, B, D = tensors["A"], tensors["B"], tensors["D"]
         C = torch.zeros(batch, TILE_SIZE, dtype=torch.float16, device=_DEVICE)
 
         # Fresh fifo per call: avoids FFTS counter accumulation across calls
-        fifo = torch.zeros(BLOCK_DIM * FIFO_ELEMS_PER_CORE,
-                           dtype=torch.float16, device=_DEVICE)
+        fifo = torch.zeros(
+            BLOCK_DIM * FIFO_ELEMS_PER_CORE, dtype=torch.float16, device=_DEVICE
+        )
         kernel(A, B, C, D, fifo)
         torch.npu.synchronize()
 
-        ref = tensors['ref']
+        ref = tensors["ref"]
         try:
             torch.testing.assert_close(C, ref, rtol=RTOL, atol=ATOL)
             passed += 1
@@ -92,8 +96,9 @@ def _v2c_tensors(batch, tile, device):
     return dict(A=A, B=B, D=D, ref=((A + B) @ D).half())
 
 
-def _benchmark(kernel, name: str, make_tensors, warmup: int = 10,
-               repeats: int = 30) -> None:
+def _benchmark(
+    kernel, name: str, make_tensors, warmup: int = 10, repeats: int = 30
+) -> None:
     print("=" * 60)
     print(f"BENCHMARK  {name}  gm_pipe")
     print(f"  warmup={warmup}  repeats={repeats}")
@@ -108,23 +113,26 @@ def _benchmark(kernel, name: str, make_tensors, warmup: int = 10,
     for num_rounds in [1, 2, 4, 8, 16, 32, 64]:
         batch = num_rounds * wave_rows
         tensors = make_tensors(batch, TILE_SIZE, _DEVICE)
-        A, B, D = tensors['A'], tensors['B'], tensors['D']
+        A, B, D = tensors["A"], tensors["B"], tensors["D"]
         C = torch.zeros(batch, TILE_SIZE, dtype=torch.float16, device=_DEVICE)
 
         # Pre-allocate a fresh fifo for every call so TPipe FIFO head/tail
         # pointers stored inside fifo_mem never accumulate across calls.
         # Allocation happens before the timing window — no overhead inside timer.
         n_calls = warmup + repeats
-        fifos = [torch.zeros(BLOCK_DIM * FIFO_ELEMS_PER_CORE,
-                             dtype=torch.float16, device=_DEVICE)
-                 for _ in range(n_calls)]
+        fifos = [
+            torch.zeros(
+                BLOCK_DIM * FIFO_ELEMS_PER_CORE, dtype=torch.float16, device=_DEVICE
+            )
+            for _ in range(n_calls)
+        ]
 
         for i in range(warmup):
             kernel(A, B, C, D, fifos[i])
         torch.npu.synchronize()
 
         start = torch.npu.Event(enable_timing=True)
-        end   = torch.npu.Event(enable_timing=True)
+        end = torch.npu.Event(enable_timing=True)
         start.record()
         for i in range(repeats):
             kernel(A, B, C, D, fifos[warmup + i])
@@ -137,12 +145,14 @@ def _benchmark(kernel, name: str, make_tensors, warmup: int = 10,
         bw_gbs = bytes_total / dur_us * 1e-3
 
         print(f"{batch:>10d}  {num_rounds:>6d}  {dur_us:>10.2f}  {bw_gbs:>10.2f}")
-        records.append(dict(batch=batch, num_rounds=num_rounds,
-                            dur_us=dur_us, bw_gbs=bw_gbs))
+        records.append(
+            dict(batch=batch, num_rounds=num_rounds, dur_us=dur_us, bw_gbs=bw_gbs)
+        )
 
     peak_bw = max(r["bw_gbs"] for r in records)
-    print(f"\nPeak bandwidth: {peak_bw:.1f} GB/s  "
-          f"(910B2 HBM roofline ≈ 1500 GB/s)\n")
+    print(
+        f"\nPeak bandwidth: {peak_bw:.1f} GB/s  " f"(910B2 HBM roofline ≈ 1500 GB/s)\n"
+    )
 
 
 if __name__ == "__main__":
@@ -155,8 +165,8 @@ if __name__ == "__main__":
     v2c = load_add_matmul_v2c(verbose=True)
     print()
 
-    _test(c2v, "matmul_add_c2v  (C = A @ B + D)",    _c2v_tensors)
+    _test(c2v, "matmul_add_c2v  (C = A @ B + D)", _c2v_tensors)
     _test(v2c, "add_matmul_v2c  (C = (A + B) @ D)", _v2c_tensors)
 
-    _benchmark(c2v, "matmul_add_c2v  (C = A @ B + D)",    _c2v_tensors)
+    _benchmark(c2v, "matmul_add_c2v  (C = A @ B + D)", _c2v_tensors)
     _benchmark(v2c, "add_matmul_v2c  (C = (A + B) @ D)", _v2c_tensors)

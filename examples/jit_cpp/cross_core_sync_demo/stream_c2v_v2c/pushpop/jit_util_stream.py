@@ -3,6 +3,7 @@
 C2V:  TPUSH AccTile<float> / TPOP VecTile<float>  →  float slot (64 KB/core/slot)
 V2C:  TPUSH VecTile<half>  / TPOP TileL1<half>    →  half  slot (32 KB/core/slot)
 """
+
 from __future__ import annotations
 
 import ctypes
@@ -32,23 +33,33 @@ try:
 except (RuntimeError, AssertionError):
     BLOCK_DIM = 24
 
-TILE_SIZE  = 128
+TILE_SIZE = 128
 FIFO_DEPTH = 2
 
 # C2V uses float slots; V2C uses half slots.
-C2V_FIFO_ELEMS_PER_CORE = FIFO_DEPTH * TILE_SIZE * TILE_SIZE   # float32 elements
-V2C_FIFO_ELEMS_PER_CORE = FIFO_DEPTH * TILE_SIZE * TILE_SIZE   # float16 elements
+C2V_FIFO_ELEMS_PER_CORE = FIFO_DEPTH * TILE_SIZE * TILE_SIZE  # float32 elements
+V2C_FIFO_ELEMS_PER_CORE = FIFO_DEPTH * TILE_SIZE * TILE_SIZE  # float16 elements
 
 
 def _compile(cpp_basename: str, so_basename: str, verbose: bool = True) -> str:
     flags = [
-        "-fPIC", "-shared", "-xcce", "-DMEMORY_BASE", "-O2", "-std=gnu++17",
+        "-fPIC",
+        "-shared",
+        "-xcce",
+        "-DMEMORY_BASE",
+        "-O2",
+        "-std=gnu++17",
         "--cce-aicore-arch=dav-c220",
-        "-mllvm", "-cce-aicore-stack-size=0x8000",
-        "-mllvm", "-cce-aicore-function-stack-size=0x8000",
-        "-mllvm", "-cce-aicore-record-overflow=true",
-        "-mllvm", "-cce-aicore-dcci-insert-for-scalar=false",
-        "-Wno-macro-redefined", "-Wno-ignored-attributes",
+        "-mllvm",
+        "-cce-aicore-stack-size=0x8000",
+        "-mllvm",
+        "-cce-aicore-function-stack-size=0x8000",
+        "-mllvm",
+        "-cce-aicore-record-overflow=true",
+        "-mllvm",
+        "-cce-aicore-dcci-insert-for-scalar=false",
+        "-Wno-macro-redefined",
+        "-Wno-ignored-attributes",
         f"-I{_PTO_INC}",
         f"-I{ASCEND_TOOLKIT_HOME}/include",
         f"-I{ASCEND_TOOLKIT_HOME}/pkg_inc",
@@ -58,7 +69,7 @@ def _compile(cpp_basename: str, so_basename: str, verbose: bool = True) -> str:
     if os.path.isdir(_DRIVER_INC):
         flags.append(f"-I{_DRIVER_INC}")
     cpp = os.path.join(_HERE, cpp_basename)
-    so  = os.path.join(_HERE, so_basename)
+    so = os.path.join(_HERE, so_basename)
     cmd = ["bisheng", *flags, cpp, "-o", so]
     if verbose:
         print("Compiling:", " ".join(cmd))
@@ -78,7 +89,7 @@ def load_stream_c2v(verbose: bool = True) -> "StreamC2VKernel":
         ctypes.c_void_p,  # A
         ctypes.c_void_p,  # B
         ctypes.c_void_p,  # fifo_mem  (float32)
-        ctypes.c_int32,   # num_iters
+        ctypes.c_int32,  # num_iters
     ]
     lib.call_stream_c2v.restype = None
     return StreamC2VKernel(lib, BLOCK_DIM)
@@ -94,7 +105,7 @@ def load_stream_v2c(verbose: bool = True) -> "StreamV2CKernel":
         ctypes.c_void_p,  # A
         ctypes.c_void_p,  # D
         ctypes.c_void_p,  # fifo_mem  (float16)
-        ctypes.c_int32,   # num_iters
+        ctypes.c_int32,  # num_iters
     ]
     lib.call_stream_v2c.restype = None
     return StreamV2CKernel(lib, BLOCK_DIM)
@@ -105,13 +116,15 @@ class StreamC2VKernel:
         self._lib = lib
         self._block_dim = block_dim
 
-    def __call__(self, A: torch.Tensor, B: torch.Tensor,
-                 fifo_mem: torch.Tensor, num_iters: int) -> None:
+    def __call__(
+        self, A: torch.Tensor, B: torch.Tensor, fifo_mem: torch.Tensor, num_iters: int
+    ) -> None:
         """A: [BLOCK_DIM*T, T] fp16; B: [T, T] fp16;
         fifo_mem: [BLOCK_DIM * C2V_FIFO_ELEMS_PER_CORE] float32."""
         stream_ptr = ctypes.c_void_p(torch.npu.current_stream().npu_stream)
         self._lib.call_stream_c2v(
-            self._block_dim, stream_ptr,
+            self._block_dim,
+            stream_ptr,
             ctypes.c_void_p(A.data_ptr()),
             ctypes.c_void_p(B.data_ptr()),
             ctypes.c_void_p(fifo_mem.data_ptr()),
@@ -124,13 +137,15 @@ class StreamV2CKernel:
         self._lib = lib
         self._block_dim = block_dim
 
-    def __call__(self, A: torch.Tensor, D: torch.Tensor,
-                 fifo_mem: torch.Tensor, num_iters: int) -> None:
+    def __call__(
+        self, A: torch.Tensor, D: torch.Tensor, fifo_mem: torch.Tensor, num_iters: int
+    ) -> None:
         """A, D: [num_iters*BLOCK_DIM*T, T] fp16;
         fifo_mem: [BLOCK_DIM * V2C_FIFO_ELEMS_PER_CORE] fp16."""
         stream_ptr = ctypes.c_void_p(torch.npu.current_stream().npu_stream)
         self._lib.call_stream_v2c(
-            self._block_dim, stream_ptr,
+            self._block_dim,
+            stream_ptr,
             ctypes.c_void_p(A.data_ptr()),
             ctypes.c_void_p(D.data_ptr()),
             ctypes.c_void_p(fifo_mem.data_ptr()),

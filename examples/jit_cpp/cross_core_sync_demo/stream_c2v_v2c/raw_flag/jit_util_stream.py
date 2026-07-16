@@ -1,4 +1,5 @@
 """JIT compile + load utilities for stream_c2v and stream_v2c kernels."""
+
 from __future__ import annotations
 
 import ctypes
@@ -33,13 +34,23 @@ def _compile(cpp_basename: str, so_basename: str, verbose: bool = True) -> str:
     cpp_path = os.path.join(_HERE, cpp_basename)
     lib_path = os.path.join(_HERE, so_basename)
     flags = [
-        "-fPIC", "-shared", "-xcce", "-DMEMORY_BASE", "-O2", "-std=gnu++17",
+        "-fPIC",
+        "-shared",
+        "-xcce",
+        "-DMEMORY_BASE",
+        "-O2",
+        "-std=gnu++17",
         "--cce-aicore-arch=dav-c220",
-        "-mllvm", "-cce-aicore-stack-size=0x8000",
-        "-mllvm", "-cce-aicore-function-stack-size=0x8000",
-        "-mllvm", "-cce-aicore-record-overflow=true",
-        "-mllvm", "-cce-aicore-dcci-insert-for-scalar=false",
-        "-Wno-macro-redefined", "-Wno-ignored-attributes",
+        "-mllvm",
+        "-cce-aicore-stack-size=0x8000",
+        "-mllvm",
+        "-cce-aicore-function-stack-size=0x8000",
+        "-mllvm",
+        "-cce-aicore-record-overflow=true",
+        "-mllvm",
+        "-cce-aicore-dcci-insert-for-scalar=false",
+        "-Wno-macro-redefined",
+        "-Wno-ignored-attributes",
         f"-I{_PTO_INC}",
         f"-I{ASCEND_TOOLKIT_HOME}/include",
         f"-I{ASCEND_TOOLKIT_HOME}/pkg_inc",
@@ -69,7 +80,7 @@ def load_stream_c2v(verbose: bool = True) -> "StreamC2VKernel":
         ctypes.c_void_p,  # A
         ctypes.c_void_p,  # B
         ctypes.c_void_p,  # workspace
-        ctypes.c_int32,   # num_iters
+        ctypes.c_int32,  # num_iters
     ]
     lib.call_stream_c2v.restype = None
     return StreamC2VKernel(lib, BLOCK_DIM)
@@ -88,7 +99,7 @@ def load_stream_v2c(verbose: bool = True) -> "StreamV2CKernel":
         ctypes.c_void_p,  # A
         ctypes.c_void_p,  # D
         ctypes.c_void_p,  # workspace
-        ctypes.c_int32,   # num_iters
+        ctypes.c_int32,  # num_iters
     ]
     lib.call_stream_v2c.restype = None
     return StreamV2CKernel(lib, BLOCK_DIM)
@@ -99,12 +110,14 @@ class StreamC2VKernel:
         self._lib = lib
         self._block_dim = block_dim
 
-    def __call__(self, A: torch.Tensor, B: torch.Tensor,
-                 workspace: torch.Tensor, num_iters: int) -> None:
+    def __call__(
+        self, A: torch.Tensor, B: torch.Tensor, workspace: torch.Tensor, num_iters: int
+    ) -> None:
         """A: [num_cores*T, T], B: [T, T], workspace: [num_cores*T, T]."""
         stream_ptr = ctypes.c_void_p(torch.npu.current_stream().npu_stream)
         self._lib.call_stream_c2v(
-            self._block_dim, stream_ptr,
+            self._block_dim,
+            stream_ptr,
             ctypes.c_void_p(A.data_ptr()),
             ctypes.c_void_p(B.data_ptr()),
             ctypes.c_void_p(workspace.data_ptr()),
@@ -117,12 +130,14 @@ class StreamV2CKernel:
         self._lib = lib
         self._block_dim = block_dim
 
-    def __call__(self, A: torch.Tensor, D: torch.Tensor,
-                 workspace: torch.Tensor, num_iters: int) -> None:
+    def __call__(
+        self, A: torch.Tensor, D: torch.Tensor, workspace: torch.Tensor, num_iters: int
+    ) -> None:
         """A, D: [num_iters*num_cores*T, T], workspace: [num_cores*T, T]."""
         stream_ptr = ctypes.c_void_p(torch.npu.current_stream().npu_stream)
         self._lib.call_stream_v2c(
-            self._block_dim, stream_ptr,
+            self._block_dim,
+            stream_ptr,
             ctypes.c_void_p(A.data_ptr()),
             ctypes.c_void_p(D.data_ptr()),
             ctypes.c_void_p(workspace.data_ptr()),

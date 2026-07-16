@@ -8,6 +8,7 @@ Usage:
     kernel = compile_and_load()
     kernel(A, B, C, D, workspace, batch)
 """
+
 from __future__ import annotations
 
 import ctypes
@@ -51,10 +52,14 @@ def _compile(verbose: bool = True) -> str:
         "-O2",
         "-std=gnu++17",
         "--cce-aicore-arch=dav-c220",
-        "-mllvm", "-cce-aicore-stack-size=0x8000",
-        "-mllvm", "-cce-aicore-function-stack-size=0x8000",
-        "-mllvm", "-cce-aicore-record-overflow=true",
-        "-mllvm", "-cce-aicore-dcci-insert-for-scalar=false",
+        "-mllvm",
+        "-cce-aicore-stack-size=0x8000",
+        "-mllvm",
+        "-cce-aicore-function-stack-size=0x8000",
+        "-mllvm",
+        "-cce-aicore-record-overflow=true",
+        "-mllvm",
+        "-cce-aicore-dcci-insert-for-scalar=false",
         "-Wno-macro-redefined",
         "-Wno-ignored-attributes",
         f"-I{_PTO_INC}",
@@ -82,14 +87,14 @@ def _load_lib(lib_path: str) -> ctypes.CDLL:
     #            uint8_t *A, uint8_t *B, uint8_t *C,
     #            uint8_t *D, uint8_t *workspace, int64_t batch)
     lib.call.argtypes = [
-        ctypes.c_uint32,   # block_dim
-        ctypes.c_void_p,   # stream
-        ctypes.c_void_p,   # A
-        ctypes.c_void_p,   # B
-        ctypes.c_void_p,   # C
-        ctypes.c_void_p,   # D
-        ctypes.c_void_p,   # workspace
-        ctypes.c_int64,    # batch
+        ctypes.c_uint32,  # block_dim
+        ctypes.c_void_p,  # stream
+        ctypes.c_void_p,  # A
+        ctypes.c_void_p,  # B
+        ctypes.c_void_p,  # C
+        ctypes.c_void_p,  # D
+        ctypes.c_void_p,  # workspace
+        ctypes.c_int64,  # batch
     ]
     lib.call.restype = None
     return lib

@@ -44,6 +44,7 @@ ATOL = 1e-5
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+
 def make_workspace() -> torch.Tensor:
     return torch.empty(BLOCK_DIM * TILE_SIZE, TILE_SIZE, **COMMON_KWARGS)
 
@@ -63,13 +64,14 @@ def ref(A, B, D):
 
 # ── Correctness tests ─────────────────────────────────────────────────────────
 
+
 def test_correctness(kernel) -> None:
     print("=" * 60)
     print("CORRECTNESS TESTS")
     print("=" * 60)
 
     passed = failed = 0
-    for seed in range(3):          # run each shape 3 times (indeterminate sync bugs show up)
+    for seed in range(3):  # run each shape 3 times (indeterminate sync bugs show up)
         for num_rounds in range(1, 11):
             batch = num_rounds * BLOCK_DIM * TILE_SIZE
             torch.manual_seed(seed)
@@ -78,7 +80,7 @@ def test_correctness(kernel) -> None:
             D = torch.randn(batch, TILE_SIZE, **COMMON_KWARGS)
 
             C_kernel = run_kernel(kernel, A, B, D)
-            C_ref    = ref(A, B, D)
+            C_ref = ref(A, B, D)
 
             try:
                 torch.testing.assert_close(C_kernel, C_ref, rtol=RTOL, atol=ATOL)
@@ -86,7 +88,9 @@ def test_correctness(kernel) -> None:
             except AssertionError as e:
                 failed += 1
                 if failed <= 5:
-                    print(f"  FAIL  seed={seed} num_rounds={num_rounds} batch={batch}: {e}")
+                    print(
+                        f"  FAIL  seed={seed} num_rounds={num_rounds} batch={batch}: {e}"
+                    )
 
     total = passed + failed
     status = "OK" if failed == 0 else f"FAILED ({failed}/{total})"
@@ -96,6 +100,7 @@ def test_correctness(kernel) -> None:
 
 
 # ── Benchmark ─────────────────────────────────────────────────────────────────
+
 
 def benchmark(kernel, warmup: int = 10, repeats: int = 30) -> None:
     print("=" * 60)
@@ -122,7 +127,7 @@ def benchmark(kernel, warmup: int = 10, repeats: int = 30) -> None:
 
         # Timed loop
         start = torch.npu.Event(enable_timing=True)
-        end   = torch.npu.Event(enable_timing=True)
+        end = torch.npu.Event(enable_timing=True)
         start.record()
         for _ in range(repeats):
             kernel(A, B, C, D, ws)
@@ -137,12 +142,12 @@ def benchmark(kernel, warmup: int = 10, repeats: int = 30) -> None:
         bw_gbs = bytes_total / dur_us * 1e-3  # bytes/µs = GB/s
 
         print(f"{batch:>10d}  {num_rounds:>6d}  {dur_us:>10.2f}  {bw_gbs:>10.2f}")
-        records.append(dict(batch=batch, num_rounds=num_rounds,
-                            dur_us=dur_us, bw_gbs=bw_gbs))
+        records.append(
+            dict(batch=batch, num_rounds=num_rounds, dur_us=dur_us, bw_gbs=bw_gbs)
+        )
 
     peak_bw = max(r["bw_gbs"] for r in records)
-    print(f"\nPeak bandwidth: {peak_bw:.1f} GB/s  "
-          f"(910B2 HBM roofline ≈ 1500 GB/s)")
+    print(f"\nPeak bandwidth: {peak_bw:.1f} GB/s  " f"(910B2 HBM roofline ≈ 1500 GB/s)")
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

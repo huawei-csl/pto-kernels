@@ -11,6 +11,7 @@ Workspace sizing:
     rounds per core.  So:
         workspace[batch, TILE_SIZE]  fp16   (== same shape as A, C, D)
 """
+
 from __future__ import annotations
 
 import ctypes
@@ -21,8 +22,8 @@ from functools import lru_cache
 import torch
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_CPP  = os.path.join(_HERE, "naive_separate.cpp")
-_SO   = os.path.join(_HERE, "naive_separate.so")
+_CPP = os.path.join(_HERE, "naive_separate.cpp")
+_SO = os.path.join(_HERE, "naive_separate.so")
 
 ASCEND_TOOLKIT_HOME = os.environ.get("ASCEND_TOOLKIT_HOME") or os.environ.get(
     "ASCEND_HOME_PATH", ""
@@ -30,7 +31,7 @@ ASCEND_TOOLKIT_HOME = os.environ.get("ASCEND_TOOLKIT_HOME") or os.environ.get(
 if not ASCEND_TOOLKIT_HOME:
     raise RuntimeError("Set ASCEND_TOOLKIT_HOME or ASCEND_HOME_PATH")
 
-_PTO_INC    = os.path.join(ASCEND_TOOLKIT_HOME, "include")
+_PTO_INC = os.path.join(ASCEND_TOOLKIT_HOME, "include")
 _DRIVER_INC = "/usr/local/Ascend/driver/kernel/inc"
 
 _NPU_DEVICE = os.environ.get("NPU_DEVICE", "npu:7")
@@ -46,15 +47,26 @@ TILE_SIZE = 128
 
 # ── Compilation ───────────────────────────────────────────────────────────────
 
+
 def _compile(verbose: bool = True) -> str:
     flags = [
-        "-fPIC", "-shared", "-xcce", "-DMEMORY_BASE", "-O2", "-std=gnu++17",
+        "-fPIC",
+        "-shared",
+        "-xcce",
+        "-DMEMORY_BASE",
+        "-O2",
+        "-std=gnu++17",
         "--cce-aicore-arch=dav-c220",
-        "-mllvm", "-cce-aicore-stack-size=0x8000",
-        "-mllvm", "-cce-aicore-function-stack-size=0x8000",
-        "-mllvm", "-cce-aicore-record-overflow=true",
-        "-mllvm", "-cce-aicore-dcci-insert-for-scalar=false",
-        "-Wno-macro-redefined", "-Wno-ignored-attributes",
+        "-mllvm",
+        "-cce-aicore-stack-size=0x8000",
+        "-mllvm",
+        "-cce-aicore-function-stack-size=0x8000",
+        "-mllvm",
+        "-cce-aicore-record-overflow=true",
+        "-mllvm",
+        "-cce-aicore-dcci-insert-for-scalar=false",
+        "-Wno-macro-redefined",
+        "-Wno-ignored-attributes",
         f"-I{_PTO_INC}",
         f"-I{ASCEND_TOOLKIT_HOME}/include",
         f"-I{ASCEND_TOOLKIT_HOME}/pkg_inc",
@@ -77,14 +89,14 @@ def _bind(lib: ctypes.CDLL, fn_name: str) -> None:
     """Bind the call signature for a kernel entry point."""
     fn = getattr(lib, fn_name)
     fn.argtypes = [
-        ctypes.c_uint32,   # block_dim
-        ctypes.c_void_p,   # stream
-        ctypes.c_void_p,   # A
-        ctypes.c_void_p,   # B
-        ctypes.c_void_p,   # C
-        ctypes.c_void_p,   # D
-        ctypes.c_void_p,   # workspace
-        ctypes.c_int64,    # batch
+        ctypes.c_uint32,  # block_dim
+        ctypes.c_void_p,  # stream
+        ctypes.c_void_p,  # A
+        ctypes.c_void_p,  # B
+        ctypes.c_void_p,  # C
+        ctypes.c_void_p,  # D
+        ctypes.c_void_p,  # workspace
+        ctypes.c_int64,  # batch
     ]
     fn.restype = None
 
@@ -99,6 +111,7 @@ def _load_so(verbose: bool = True) -> ctypes.CDLL:
 
 
 # ── Kernel wrapper ────────────────────────────────────────────────────────────
+
 
 class NaiveKernel:
     """Callable wrapper for a naive_separate entry point.
