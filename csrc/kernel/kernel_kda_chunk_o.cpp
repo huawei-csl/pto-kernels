@@ -197,6 +197,9 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
   constexpr int32_t WS_QKV = WS_QS + C * V_DIM;
   constexpr int32_t WS_PER_CORE = WS_QKV + C * V_DIM;
 
+  int64_t num_seqs = batch_size;
+  int64_t total_work = num_seqs * H;
+
 #if defined(__DAV_CUBE__)
   TileMatL1<float, C, K_DIM, C, K_DIM> q_l1;
   TASSIGN(q_l1, 0);
@@ -211,19 +214,6 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
   TASSIGN(qkv_l0, 0);
   TileAcc<float, C, V_DIM, C, V_DIM> qs_l0;
   TASSIGN(qs_l0, C * C * sizeof(float));
-
-#endif
-
-#if defined(__DAV_VEC__)
-
-#endif
-
-  int64_t num_seqs = batch_size;
-  int64_t total_work = num_seqs * H;
-
-  SYNCALL<SyncCoreType::Mix>();
-
-#if defined(__DAV_CUBE__)
 
   for (int64_t wi = 0; wi < (total_work + block_num - 1) / block_num; ++wi) {
     int64_t pid = wi * block_num + cid;
@@ -333,7 +323,6 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
     }
   }
 
-  SYNCALL<SyncCoreType::Mix>();
 #endif
 
 #if defined(__DAV_VEC__)
@@ -667,8 +656,13 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
 
       // (A.6) Signal Cube: phase A workspace ready.
       pipe_barrier(PIPE_ALL);
-      ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (0 << 8));
+      // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (0 << 8));
+#if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
+      SetCrossFlag<PIPE_MTE3>(0);
+#else
+      set_intra_block(PIPE_MTE3, 0);
 
+#endif
       // ====================================================================
       // PHASE C — wait QS + QKV from Cube; combine O = QS + QKV; write GM.
       // ====================================================================
@@ -732,7 +726,6 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
     }
   }
 
-  SYNCALL<SyncCoreType::Mix>();
 #endif
 }
 
