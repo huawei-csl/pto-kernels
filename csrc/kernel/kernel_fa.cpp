@@ -17,12 +17,454 @@ full text of the License.
 #include <pto/npu/a2a3/custom/TSyncCVID.hpp>
 // clang-format on
 
+#include <pto/common/memory.hpp>
+
 #include "fa_config.h"
-#include "pto_macro_fa_softmax.hpp"
-#include "pto_macro_matmul.hpp"
 
 using namespace std;
 using namespace pto;
+
+// =============================================================================
+// Matmul macro (inlined from the former pto_macro_matmul.hpp).
+// Tiled TMATMUL with L0 ping-pong and Cube_K auto-sizing.
+// =============================================================================
+#define CUBE_K_256 256
+#define CUBE_K_128 128
+#define CUBE_K_64 64
+#define CUBE_K_SMALLEST 32
+
+namespace pto {
+
+/**
+ * Layout type for matrix multiplication operations.
+ * First letter represents the layout of matrix A, second letter represents
+ * matrix B. N = Normal (Row-major), T = Transposed (Column-major)
+ */
+enum class layout_t {
+  NN,  // Matrix A: Normal, Matrix B: Normal
+  NT,  // Matrix A: Normal, Matrix B: Transposed
+  TN,  // Matrix A: Transposed, Matrix B: Normal
+  TT,  // Matrix A: Transposed, Matrix B: Transposed
+  NONE
+};
+
+enum class AccMode {
+  Init,            // auto phase, first slice initializes, rest accumulate
+  Acc,             // auto phase, all slices accumulate into existing C
+  InitPartialSum,  // explicitly partial, first slice initializes
+  InitFinalSum,    // explicitly final, first slice initializes
+  AccPartialSum,   // explicitly partial, all slices accumulate
+  AccFinalSum,     // explicitly final, all slices accumulate
+};
+
+#define L0A_BUF0 ((__ca__ half *)(__ca__ char *)0x0)
+#define L0A_BUF1 ((__ca__ half *)(__ca__ char *)0x8000)
+#define L0B_BUF0 ((__ca__ half *)(__ca__ char *)0x0)
+#define L0B_BUF1 ((__ca__ half *)(__ca__ char *)0x8000)
+#define L0C_BUF0 ((__ca__ half *)(__ca__ char *)0x0)
+#define L0C_BUF1 ((__ca__ half *)(__ca__ char *)0x20000)
+
+#define LAST_LOOP(x, n) ((x) == ((n) - 1))
+#define UNIT_FLAG_ENABLE(i, n) (LAST_LOOP(i, n) ? 3 : 2)
+
+AICORE inline uint64_t getPingPong(uint32_t flip) {
+  static uint64_t pingpong = 0;
+  if (flip) {
+    pingpong = 1 - pingpong;
+  }
+  return pingpong;
+}
+
+// Memory constraints (L0 ping-pong is 32 KiB per buffer in this
+// implementation). Tuning knob: if you change L0 layout or buffer addresses,
+// re-check these constraints.
+constexpr uint32_t MEM_BUFFER_SIZE_BYTES =
+    64 * 1024 / 2;                       // 64KB per buffer with pingpong (32KB)
+constexpr uint32_t HALF_SIZE_BYTES = 2;  // sizeof(half) = 2 bytes
+
+/**
+ * Calculate the largest Cube_K value that fits in the 64KB memory buffer.
+ * Checks if both Cube_M * Cube_K (left matrix) and Cube_K * Cube_N (right
+ * matrix) can fit within the 64KB buffer.
+ *
+ * @param Cube_M - The tile dimension M
+ * @param Cube_N - The tile dimension N
+ * @return - Largest Cube_K value (32, 64, 128, or 256) that fits in memory
+ */
+// Choose the largest Cube_K that fits both L0A (Cube_M x Cube_K) and L0B
+// (Cube_K x Cube_N) so TMATMUL stays compute-dense while respecting L0
+// ping-pong capacity.
+AICORE inline constexpr uint32_t calculateFittingCubeK(uint32_t Cube_M,
+                                                       uint32_t Cube_N) {
+  uint32_t bestCubeK = CUBE_K_SMALLEST;  // Default to smallest value
+
+  // Test candidates from largest to smallest to find the largest that fits
+  if (Cube_M * CUBE_K_256 * HALF_SIZE_BYTES <= MEM_BUFFER_SIZE_BYTES &&
+      CUBE_K_256 * Cube_N * HALF_SIZE_BYTES <= MEM_BUFFER_SIZE_BYTES) {
+    bestCubeK = CUBE_K_256;
+  } else if (Cube_M * CUBE_K_128 * HALF_SIZE_BYTES <= MEM_BUFFER_SIZE_BYTES &&
+             CUBE_K_128 * Cube_N * HALF_SIZE_BYTES <= MEM_BUFFER_SIZE_BYTES) {
+    bestCubeK = CUBE_K_128;
+  } else if (Cube_M * CUBE_K_64 * HALF_SIZE_BYTES <= MEM_BUFFER_SIZE_BYTES &&
+             CUBE_K_64 * Cube_N * HALF_SIZE_BYTES <= MEM_BUFFER_SIZE_BYTES) {
+    bestCubeK = CUBE_K_64;
+  }
+
+  return bestCubeK;
+}
+
+// Deduce layout_t from SLayouts
+template <typename TileDataA, typename TileDataB>
+AICORE inline constexpr layout_t deduce_layout() {
+  if constexpr (TileDataA::SFractal == SLayout::RowMajor &&
+                TileDataB::SFractal == SLayout::RowMajor)
+    return layout_t::NN;
+  if constexpr (TileDataA::SFractal == SLayout::RowMajor &&
+                TileDataB::SFractal == SLayout::ColMajor)
+    return layout_t::NT;
+  if constexpr (TileDataA::SFractal == SLayout::ColMajor &&
+                TileDataB::SFractal == SLayout::RowMajor)
+    return layout_t::TN;
+  if constexpr (TileDataA::SFractal == SLayout::ColMajor &&
+                TileDataB::SFractal == SLayout::ColMajor)
+    return layout_t::TT;
+  return layout_t::NONE;
+}
+
+struct MatmulCallConfig {
+  bool useAcc;     // true -> TMATMUL_UF_ACC, false -> TMATMUL_UF
+  AccPhase phase;  // UF mapping
+};
+
+AICORE inline MatmulCallConfig resolve_acc_mode(AccMode mode, bool isFirstSlice,
+                                                bool isLastSlice) {
+  switch (mode) {
+    case AccMode::Init:
+      return MatmulCallConfig{!isFirstSlice, AccPhase::Unknown};
+    case AccMode::Acc:
+      return MatmulCallConfig{true, AccPhase::Unknown};
+    case AccMode::InitPartialSum:
+      return MatmulCallConfig{!isFirstSlice, AccPhase::Partial};
+    case AccMode::InitFinalSum:
+      return MatmulCallConfig{!isFirstSlice, AccPhase::Final};
+    case AccMode::AccPartialSum:
+      return MatmulCallConfig{true, AccPhase::Partial};
+    case AccMode::AccFinalSum:
+      return MatmulCallConfig{true, AccPhase::Final};
+  }
+  return MatmulCallConfig{!isFirstSlice, AccPhase::Partial};
+}
+
+template <unsigned Cube_M, unsigned Tile_K, unsigned Cube_N,
+          layout_t LAYOUT = layout_t::NONE, typename TileDataA,
+          typename TileDataB, typename TileDataC>
+AICORE inline void pto_macro_matmul(TileDataA &aMatTile, TileDataB &bMatTile,
+                                    TileDataC &cAccTile,
+                                    AccMode accMode = AccMode::Init) {
+  constexpr layout_t layout = deduce_layout<TileDataA, TileDataB>();
+
+  static_assert(layout != layout_t::NONE,
+                "Deduced layout is NONE, check tile SLayouts");
+  // Assert that template LAYOUT matches deduced layout if LAYOUT is not NONE
+  if constexpr (LAYOUT != layout_t::NONE) {
+    static_assert(LAYOUT == layout,
+                  "Layout mismatch: template LAYOUT does not match deduced "
+                  "layout from tile SLayouts. "
+                  "Check SLayout of TileDataA and TileDataB.");
+  }
+
+  // Ping-pong is used to overlap TEXTRACT (L1->L0) with TMATMUL on alternating
+  // buffers.
+  uint64_t pingpong = getPingPong(0);
+  const uint64_t Cube_K = calculateFittingCubeK(Cube_M, Cube_N) > Tile_K
+                              ? Tile_K
+                              : calculateFittingCubeK(Cube_M, Cube_N);
+  const uint64_t kSegments = (uint64_t)(Tile_K / Cube_K);
+  for (uint64_t k = 0; k < kSegments; k++) {
+    using LeftTile = TileLeft<half, Cube_M, Cube_K, Cube_M, Cube_K>;
+    LeftTile al0Tiles[2] = {LeftTile(), LeftTile()};
+    using RightTile = TileRight<half, Cube_K, Cube_N, Cube_K, Cube_N>;
+    RightTile bl0Tiles[2] = {RightTile(), RightTile()};
+
+    TASSIGN(al0Tiles[0], (uint64_t)L0A_BUF0);
+    TASSIGN(al0Tiles[1], (uint64_t)L0A_BUF1);
+    TASSIGN(bl0Tiles[0], (uint64_t)L0B_BUF0);
+    TASSIGN(bl0Tiles[1], (uint64_t)L0B_BUF1);
+
+    // Wait until previous TMATMUL finishes using this L0 buffer before
+    // overwriting it via TEXTRACT.
+    wait_flag(PIPE_M, PIPE_MTE1, pingpong);
+
+    if (layout == layout_t::NT) {
+      TASSIGN(aMatTile,
+              (uint64_t)aMatTile.data() +
+                  k * Cube_K * Cube_M * sizeof(typename TileDataA::DType));
+      TASSIGN(bMatTile,
+              (uint64_t)bMatTile.data() +
+                  k * Cube_K * Cube_N * sizeof(typename TileDataB::DType));
+    }
+
+    // TEXTRACT slices the current Cube_K panel into L0A/L0B.
+    TEXTRACT(al0Tiles[pingpong], aMatTile, 0, 0);
+    TEXTRACT(bl0Tiles[pingpong], bMatTile, 0, 0);
+
+    set_flag(PIPE_MTE1, PIPE_M, pingpong);
+    wait_flag(PIPE_MTE1, PIPE_M, pingpong);
+
+    const bool isLast = (k + 1 == kSegments);
+    MatmulCallConfig cfg = resolve_acc_mode(accMode, k == 0, isLast);
+    if (cfg.useAcc) {
+      if (cfg.phase == AccPhase::Final) {
+        TMATMUL_ACC<AccPhase::Final>(cAccTile, al0Tiles[pingpong],
+                                     bl0Tiles[pingpong]);
+      } else if (cfg.phase == AccPhase::Partial) {
+        TMATMUL_ACC<AccPhase::Partial>(cAccTile, al0Tiles[pingpong],
+                                       bl0Tiles[pingpong]);
+      } else {
+        TMATMUL_ACC(cAccTile, al0Tiles[pingpong], bl0Tiles[pingpong]);
+      }
+    } else {
+      if (cfg.phase == AccPhase::Final) {
+        TMATMUL<AccPhase::Final>(cAccTile, al0Tiles[pingpong],
+                                 bl0Tiles[pingpong]);
+      } else if (cfg.phase == AccPhase::Partial) {
+        TMATMUL<AccPhase::Partial>(cAccTile, al0Tiles[pingpong],
+                                   bl0Tiles[pingpong]);
+      } else {
+        TMATMUL(cAccTile, al0Tiles[pingpong], bl0Tiles[pingpong]);
+      }
+    }
+    set_flag(PIPE_M, PIPE_MTE1, pingpong);
+    pingpong = getPingPong(1);
+  }
+}
+
+}  // namespace pto
+
+// =============================================================================
+// FlashAttention streaming softmax (inlined from the former
+// pto_macro_fa_softmax.hpp).
+//
+// Given one QK tile X (fp32), compute x_exp = exp(scale * (X -
+// new_global_max)). Per-row running state (global_max, global_sum) is
+// maintained so S1 tiles can be streamed without materializing the full
+// attention matrix. Intermediate math stays fp32 for numerical stability.
+// =============================================================================
+namespace pto {
+
+// Additive causal mask magnitude. The diagonal mask is min(base_phase + (i -
+// j), 0) * kCausalMaskNeg: 0 on attended positions, a large negative elsewhere.
+// 1e9 (times the ~0.09 softmax scale) drives exp() to 0 for every masked entry
+// while staying well inside fp32 range (no inf/nan), so it behaves like the old
+// -inf fill but is produced with vector ops instead of a per-row scalar TTRI
+// loop.
+constexpr float kCausalMaskNeg = 1e9f;
+
+constexpr PTO_INTERNAL float constexpr_sqrt(float x) {
+  if (x <= 0.0f) return 0.0f;
+  float guess = x;
+  for (int i = 0; i < 8; ++i) {
+    guess = 0.5f * (guess + x / guess);
+  }
+  return guess;
+}
+
+constexpr AICORE inline float constexpr_inv_sqrt(float x) {
+  return 1.0f / constexpr_sqrt(x);
+}
+
+// Apply the causal mask to the on-diagonal QK tile using the precomputed
+// E[i][j] = i - j (fp16). A query at tile-row i attends key at tile-col j iff j
+// <= base_phase + i, i.e. base_phase + E >= 0. Skipped QK lanes are zeroed by
+// the caller before this additive mask is applied.
+template <typename TileDataS1, typename TileDataD2, typename TileDataTmp>
+AICORE inline void apply_causal_diag_mask(TileDataS1 input_x, TileDataS1 triu,
+                                          TileDataD2 causal_e,
+                                          TileDataTmp causal_tmp, int s0_index,
+                                          int s1_index) {
+  (void)causal_tmp;
+  if (s1_index <= s0_index && s0_index < s1_index + TileDataS1::Cols) {
+    const float base_phase = static_cast<float>(s0_index % TileDataS1::Cols);
+    TCVT(triu, causal_e, RoundMode::CAST_ROUND);  // fp16 E=i-j -> fp32
+#if defined(__DAV_C220_VEC__)
+    pipe_barrier(PIPE_V);
+#endif
+    TADDS(triu, triu, base_phase);  // base_phase + (i - j)
+#if defined(__DAV_C220_VEC__)
+    pipe_barrier(PIPE_V);
+#endif
+    TMINS(triu, triu,
+          0.0f);  // keep only the masked (negative) part; attended -> 0
+#if defined(__DAV_C220_VEC__)
+    pipe_barrier(PIPE_V);
+#endif
+    TMULS(triu, triu,
+          kCausalMaskNeg);  // masked lanes become a large negative value
+#if defined(__DAV_C220_VEC__)
+    pipe_barrier(PIPE_V);
+#endif
+    TADD(input_x, input_x, triu);
+#if defined(__DAV_C220_VEC__)
+    pipe_barrier(PIPE_V);
+#endif
+  }
+}
+
+template <int HEAD_SIZE, bool CAUSAL_MASK, typename ReduceTileD1,
+          typename TileDataD2, typename TileDataS1>
+AICORE inline void softmax_opt_fa_init_impl(
+    TileDataD2 __out__ x_exp, TileDataS1 __in__ input_x,
+    ReduceTileD1 __out__ local_max, ReduceTileD1 __out__ local_sum,
+    ReduceTileD1 __out__ new_global_max, ReduceTileD1 __out__ new_global_sum,
+    ReduceTileD1 __out__ exp_max, TileDataS1 __out__ tmp_float,
+    TileDataS1 __out__ p_tile_f32, TileDataS1 triu, TileDataD2 causal_e,
+    int s0_index, int s1_index) {
+  (void)local_max;
+  (void)exp_max;
+  (void)local_sum;
+
+  constexpr float scale = constexpr_inv_sqrt(HEAD_SIZE);
+  using Tile1D_fp32 =
+      Tile<TileType::Vec, float, 1, TileDataS1::Rows * TileDataS1::Cols,
+           BLayout::RowMajor, 1, TileDataS1::Rows * TileDataS1::Cols>;
+  using Tile1D_out =
+      Tile<TileType::Vec, typename TileDataD2::DType, 1,
+           TileDataS1::Rows * TileDataS1::Cols, BLayout::RowMajor, 1,
+           TileDataS1::Rows * TileDataS1::Cols>;
+  Tile1D_fp32 p_tile_f32_1d;
+  Tile1D_out x_exp_1d;
+  if constexpr (CAUSAL_MASK) {
+    apply_causal_diag_mask<TileDataS1, TileDataD2, TileDataS1>(
+        input_x, triu, causal_e, tmp_float, s0_index, s1_index);
+  }
+  // FA2.0 init mode
+  TROWMAX(new_global_max, input_x, tmp_float);
+#if defined(__DAV_C220_VEC__)
+  pipe_barrier(PIPE_V);
+#endif
+  TROWEXPANDSUB(p_tile_f32, input_x, new_global_max);
+  TMULS(p_tile_f32, p_tile_f32, scale);
+  TEXP(p_tile_f32, p_tile_f32);
+#if defined(__DAV_C220_VEC__)
+  pipe_barrier(PIPE_V);
+#endif
+  TROWSUM(new_global_sum, p_tile_f32, tmp_float);
+
+  TRESHAPE(p_tile_f32_1d, p_tile_f32);
+  TRESHAPE(x_exp_1d, x_exp);
+  TCVT(x_exp_1d, p_tile_f32_1d, RoundMode::CAST_ROUND);
+}
+
+template <int HEAD_SIZE, bool CAUSAL_MASK, typename ReduceTileD1,
+          typename TileDataD2, typename TileDataS1>
+AICORE inline void softmax_opt_fa_not_init_impl(
+    TileDataD2 __out__ x_exp, TileDataS1 __in__ input_x,
+    ReduceTileD1 __out__ local_max, ReduceTileD1 __out__ local_sum,
+    ReduceTileD1 __out__ new_global_max, ReduceTileD1 __out__ new_global_sum,
+    ReduceTileD1 __out__ exp_max, TileDataS1 __out__ tmp_float,
+    TileDataS1 __out__ p_tile_f32, TileDataS1 triu, TileDataD2 causal_e,
+    int s0_index, int s1_index) {
+  constexpr float scale = constexpr_inv_sqrt(HEAD_SIZE);
+
+  using ReduceTileD2 = Tile<TileType::Vec, float, 1, ReduceTileD1::Rows,
+                            BLayout::RowMajor, 1, ReduceTileD1::Rows>;
+  using Tile1D_fp32 =
+      Tile<TileType::Vec, float, 1, TileDataS1::Rows * TileDataS1::Cols,
+           BLayout::RowMajor, 1, TileDataS1::Rows * TileDataS1::Cols>;
+  using Tile1D_out =
+      Tile<TileType::Vec, typename TileDataD2::DType, 1,
+           TileDataS1::Rows * TileDataS1::Cols, BLayout::RowMajor, 1,
+           TileDataS1::Rows * TileDataS1::Cols>;
+
+  ReduceTileD2 tmp_shw_local_max;
+  ReduceTileD2 tmp_shw_new_global_max;
+  ReduceTileD2 tmp_shw_exp_max;
+  ReduceTileD2 tmp_shw_new_global_sum;
+  ReduceTileD2 tmp_shw_local_sum;
+  Tile1D_fp32 p_tile_f32_1d;
+  Tile1D_out x_exp_1d;
+
+  if constexpr (CAUSAL_MASK) {
+    apply_causal_diag_mask<TileDataS1, TileDataD2, TileDataS1>(
+        input_x, triu, causal_e, tmp_float, s0_index, s1_index);
+  }
+  // FA2.0 streaming mode (not first tile): update (global_max, global_sum) and
+  // rescale old sums.
+  TROWMAX(local_max, input_x, tmp_float);
+#if defined(__DAV_C220_VEC__)
+  pipe_barrier(PIPE_V);
+#endif
+  TRESHAPE(tmp_shw_local_max, local_max);
+  TRESHAPE(tmp_shw_new_global_max, new_global_max);
+  TMAX(tmp_shw_local_max, tmp_shw_local_max, tmp_shw_new_global_max);
+#if defined(__DAV_C220_VEC__)
+  pipe_barrier(PIPE_V);
+#endif
+  TRESHAPE(tmp_shw_exp_max, exp_max);
+  TSUB(tmp_shw_exp_max, tmp_shw_new_global_max, tmp_shw_local_max);
+#if defined(__DAV_C220_VEC__)
+  pipe_barrier(PIPE_V);
+#endif
+
+  TMULS(tmp_shw_new_global_max, tmp_shw_local_max, 1.0f);  // just copy
+#if defined(__DAV_C220_VEC__)
+  pipe_barrier(PIPE_V);
+#endif
+  // The current tile must be normalized against the updated global max, not its
+  // local max. Otherwise the PV numerator and global denominator disagree
+  // whenever a previous tile owns the row max, which is mostly invisible for
+  // tiny logits but explodes at realistic q/k scales.
+  TROWEXPANDSUB(p_tile_f32, input_x, new_global_max);
+  TMULS(tmp_shw_exp_max, tmp_shw_exp_max, scale);
+  TMULS(p_tile_f32, p_tile_f32, scale);
+  TEXP(tmp_shw_exp_max, tmp_shw_exp_max);
+  TRESHAPE(tmp_shw_exp_max, exp_max);
+  TEXP(p_tile_f32, p_tile_f32);
+  TRESHAPE(tmp_shw_exp_max, exp_max);
+
+  TRESHAPE(p_tile_f32_1d, p_tile_f32);
+  TRESHAPE(x_exp_1d, x_exp);
+  TCVT(x_exp_1d, p_tile_f32_1d, RoundMode::CAST_ROUND);
+#if defined(__DAV_C220_VEC__)
+  pipe_barrier(PIPE_V);
+#endif
+  TRESHAPE(tmp_shw_new_global_sum, new_global_sum);
+  TMUL(tmp_shw_new_global_sum, tmp_shw_exp_max, tmp_shw_new_global_sum);
+  TROWSUM(local_sum, p_tile_f32, tmp_float);
+  TRESHAPE(tmp_shw_local_sum, local_sum);
+#if defined(__DAV_C220_VEC__)
+  pipe_barrier(PIPE_V);
+#endif
+  TADD(tmp_shw_new_global_sum, tmp_shw_new_global_sum, tmp_shw_local_sum);
+}
+
+template <bool init = false, int HEAD_SIZE, bool CAUSAL_MASK,
+          typename ReduceTileD1, typename TileDataD2, typename TileDataS1>
+AICORE inline void pto_macro_fa_softmax(
+    TileDataD2 __out__ x_exp, TileDataS1 __in__ input_x,
+    ReduceTileD1 __out__ local_max, ReduceTileD1 __out__ local_sum,
+    ReduceTileD1 __in__ new_global_max, ReduceTileD1 __out__ new_global_sum,
+    ReduceTileD1 __out__ exp_max, TileDataS1 __out__ input_reduce_tmp,
+    TileDataS1 __out__ p_tile_fp32, TileDataS1 triu, TileDataD2 causal_e,
+    int s0_index, int s1_index) {
+  // The caller caps num_tiles_s1 at the causal diagonal, so this function never
+  // receives a tile whose start is above the row block.
+  if constexpr (init) {
+    softmax_opt_fa_init_impl<HEAD_SIZE, CAUSAL_MASK, ReduceTileD1, TileDataD2,
+                             TileDataS1>(x_exp, input_x, local_max, local_sum,
+                                         new_global_max, new_global_sum,
+                                         exp_max, input_reduce_tmp, p_tile_fp32,
+                                         triu, causal_e, s0_index, s1_index);
+  } else {
+    softmax_opt_fa_not_init_impl<HEAD_SIZE, CAUSAL_MASK, ReduceTileD1,
+                                 TileDataD2, TileDataS1>(
+        x_exp, input_x, local_max, local_sum, new_global_max, new_global_sum,
+        exp_max, input_reduce_tmp, p_tile_fp32, triu, causal_e, s0_index,
+        s1_index);
+  }
+}
+
+}  // namespace pto
 
 #ifndef FFTS_BUFFER_FLAG_ENUM
 #define FFTS_BUFFER_FLAG_ENUM
@@ -1324,13 +1766,6 @@ AICORE inline void runTFA(
   pipe_barrier(PIPE_ALL);
 }
 
-// Single device entry point. CAUSAL_MASK is a compile-time template arg of
-// runTFA, so both variants are instantiated here and selected on the runtime
-// `causal` flag. The flag is uniform across the launch, so the branch is
-// predictable (no per-core divergence); the only cost is that both
-// specializations live in the one kernel binary. Tiling is fixed for this
-// build and INTERMEDIATE_CHECK stays false (flip it here to dump per-tile
-// exp_max for precision debugging).
 extern "C" __global__ AICORE void fa_fp16(
     __gm__ uint8_t *ffts_addr, __gm__ uint8_t *q, __gm__ uint8_t *k,
     __gm__ uint8_t *v, __gm__ uint8_t *p_tile_fifo,
