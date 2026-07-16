@@ -796,14 +796,11 @@ template <typename PPipe, typename PVPipe, int HEAD_SIZE, int CUBE_S0,
           int CV_FIFO_CONS_SYNC_PERIOD, bool INTERMEDIATE_CHECK,
           bool CAUSAL_MASK, typename TileMatPData, typename TileMatVData,
           typename TilePVData, typename PSlotGlobal, typename PVSlotGlobal>
-AICORE inline void compute_pv(PPipe &pPipe, PVPipe &pvPipe, int tile_id,
-                              int sub_tile_id, __gm__ half *v,
-                              __gm__ half *p_tile_fifo, TileMatPData &pMatTile,
-                              TileMatVData &vMatTile, TilePVData &pvAccTile,
-                              PSlotGlobal &pSlotGlobal,
-                              PVSlotGlobal &pvSlotGlobal,
-                              uint64_t svMatTileEventId, int blk_idx,
-                              int64_t kv_seq_stride) {
+AICORE inline void compute_pv(
+    PPipe &pPipe, PVPipe &pvPipe, int tile_id, int sub_tile_id, __gm__ half *v,
+    __gm__ half *p_tile_fifo, TileMatPData &pMatTile, TileMatVData &vMatTile,
+    TilePVData &pvAccTile, PSlotGlobal &pSlotGlobal, PVSlotGlobal &pvSlotGlobal,
+    uint64_t svMatTileEventId, int blk_idx, int64_t kv_seq_stride) {
   constexpr uint32_t Cube_S0 = CUBE_S0;
   constexpr uint32_t Cube_S1 = CUBE_S1;
   constexpr uint32_t Tile_S1 = TILE_S1;
@@ -1629,12 +1626,12 @@ AICORE inline void runTFA(
             assign_running_acc_tile(qkAccTile);
             compute_qk<QKPipe, HEAD_SIZE, CUBE_S0, CUBE_S1, Tile_S1,
                        CV_FIFO_CONS_SYNC_PERIOD, INTERMEDIATE_CHECK,
-                       CAUSAL_MASK>(
-                qkPipe, preload_tile, sub_tile, q_block, k_head,
-                qk_tile_fifo_block, qMatTile[0],
-                kMatTile[k_src_pingpong_id % kMatTNBuffers], qkAccTile,
-                qkSlotGlobal, k_src_pingpong_id % kMatTNBuffers, logical_block,
-                q_seq_stride, kv_seq_stride);
+                       CAUSAL_MASK>(qkPipe, preload_tile, sub_tile, q_block,
+                                    k_head, qk_tile_fifo_block, qMatTile[0],
+                                    kMatTile[k_src_pingpong_id % kMatTNBuffers],
+                                    qkAccTile, qkSlotGlobal,
+                                    k_src_pingpong_id % kMatTNBuffers,
+                                    logical_block, q_seq_stride, kv_seq_stride);
             k_src_pingpong_id++;
           }
         }
@@ -1667,8 +1664,7 @@ AICORE inline void runTFA(
                 ? -1
                 : (tile_id + static_cast<int>(qkPreloadNum));
 
-        if (next_qk_tile != -1)
-          assign_running_acc_tile(qkAccTile);
+        if (next_qk_tile != -1) assign_running_acc_tile(qkAccTile);
         assign_running_acc_tile(pvAccTile);
 
         for (int sub_tile = 0; sub_tile < static_cast<int>(kTileFactor);

@@ -28,7 +28,7 @@ def _inputs(device, batch, num_q_heads, num_kv_heads, s0, s1, seed=0, f=1.0):
     q = torch.randn(batch, num_q_heads, s0, HEAD_SIZE, generator=generator).half()
     k = torch.randn(batch, num_kv_heads, s1, HEAD_SIZE, generator=generator).half()
     v = torch.randn(batch, num_kv_heads, s1, HEAD_SIZE, generator=generator).half()
-    return f*q.to(device), f*k.to(device), f*v.to(device)
+    return f * q.to(device), f * k.to(device), f * v.to(device)
 
 
 def _reference(q, k, v, causal):
