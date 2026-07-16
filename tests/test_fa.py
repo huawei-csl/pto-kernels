@@ -11,12 +11,8 @@ import math
 import pytest
 import torch
 
-import pto_kernels
+from pto_kernels import pto_fa
 
-pto_fa = getattr(pto_kernels, "pto_fa", None)
-pytestmark = pytest.mark.skipif(
-    pto_fa is None, reason="pto_fa is currently available on Ascend 910B only"
-)
 
 HEAD_SIZE = 128
 NON_CAUSAL_ATOL = 1e-4
