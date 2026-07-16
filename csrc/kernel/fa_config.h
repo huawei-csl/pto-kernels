@@ -24,7 +24,6 @@ constexpr int kFaQkPreload = 4;
 constexpr int kFaMinQkPreload = 2;
 constexpr int kFaMaxCores = 24;
 constexpr int VEC_CORES = 2;
-constexpr std::size_t kFaProfileBytesPerBlock = 3 * 1024;
 constexpr std::size_t kFaWorkspaceAlignment = 512;
 
 struct FaScratch {
