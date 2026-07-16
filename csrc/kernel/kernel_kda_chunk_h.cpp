@@ -47,6 +47,7 @@ using namespace pto;
 using kernel_utils::GetOuterLayout;
 using kernel_utils::PipeBarrierVec;
 using kernel_utils::SetCrossFlag;
+using kernel_utils::SignalBothVecOnA5;
 using kernel_utils::WaitBothVecOnA5;
 
 #ifndef GDN_H
@@ -346,6 +347,7 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
       wait_flag_dev(3);
 #else
       WaitBothVecOnA5<PIPE_MTE3>(3);
+      pipe_barrier(PIPE_ALL);
 #endif
 
       int64_t chunk_start = bos + static_cast<int64_t>(ci) * C;
@@ -401,6 +403,8 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
       wait_flag_dev(1);
 #else
       WaitBothVecOnA5<PIPE_MTE3>(1);
+      pipe_barrier(PIPE_ALL);
+
 #endif
 
       {
