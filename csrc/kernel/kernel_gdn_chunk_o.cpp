@@ -841,22 +841,15 @@ static AICORE void chunk_o_kernel(
       if (local_rows == 0) {
         // Signal Cube: QK_gated ready (flag 1, Vec→Cube)
         // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (1 << 8));
-#if __CCE_AICORE__ == 220
-        SetCrossFlag<PIPE_MTE3>(1);
-#else
-        set_intra_block(PIPE_MTE3, 1);
-#endif
-#if __CCE_AICORE__ == 220
-        wait_flag_dev(2);
-#else
-        wait_intra_block(PIPE_MTE3, 2);
-#endif
-
         // Signal Cube: done with this chunk (flag 3, Vec→Cube)
         // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (3 << 8));
 #if __CCE_AICORE__ == 220
+        SetCrossFlag<PIPE_MTE3>(1);
+        wait_flag_dev(2);
         SetCrossFlag<PIPE_MTE3>(3);
 #else
+        set_intra_block(PIPE_MTE3, 1);
+        wait_intra_block(PIPE_MTE3, 2);
         set_intra_block(PIPE_MTE3, 3);
 #endif
         continue;
@@ -1091,23 +1084,18 @@ static AICORE void chunk_o_kernel(
             if (local_rows == 0) {
               // Signal Cube: QK_gated ready (flag 1, Vec→Cube)
               // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (1 << 8));
-#if __CCE_AICORE__ == 220
-              SetCrossFlag<PIPE_MTE3>(1);
-#else
-              set_intra_block(PIPE_MTE3, 1);
-#endif
-#if __CCE_AICORE__ == 220
-              wait_flag_dev(2);
-#else
-              wait_intra_block(PIPE_MTE3, 2);
-#endif
               // Signal Cube: done with this chunk (flag 3, Vec→Cube)
               // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (3 << 8));
 #if __CCE_AICORE__ == 220
+              SetCrossFlag<PIPE_MTE3>(1);
+              wait_flag_dev(2);
               SetCrossFlag<PIPE_MTE3>(3);
 #else
+              set_intra_block(PIPE_MTE3, 1);
+              wait_intra_block(PIPE_MTE3, 2);
               set_intra_block(PIPE_MTE3, 3);
 #endif
+
             } else {
               // Load QK from workspace
               {
