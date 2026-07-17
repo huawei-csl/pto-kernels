@@ -28,9 +28,9 @@ def _inputs(device, batch, num_q_heads, num_kv_heads, s0, s1, seed=0, f=1.0):
 
 
 def _reference(q, k, v, causal):
-    q = q.float().cpu()
-    k = k.float().cpu()
-    v = v.float().cpu()
+    q = q.double().cpu()
+    k = k.double().cpu()
+    v = v.double().cpu()
     groups = q.size(1) // k.size(1)
     if groups != 1:
         k = k.repeat_interleave(groups, dim=1)
@@ -41,7 +41,7 @@ def _reference(q, k, v, causal):
         query_positions = torch.arange(q.size(2)).view(-1, 1)
         key_positions = torch.arange(k.size(2)).view(1, -1)
         scores.masked_fill_(key_positions > query_positions, float("-inf"))
-    return torch.matmul(torch.softmax(scores, dim=-1), v)
+    return torch.matmul(torch.softmax(scores, dim=-1), v).float()
 
 
 CASES = [
@@ -103,6 +103,17 @@ def test_pto_fa_zero_queries_and_keys_average_values(npu_device):
     expected = v.float().cpu().mean(dim=2, keepdim=True).expand_as(q.float().cpu())
     actual = pto_flash_attention(q, k, v)
     torch.testing.assert_close(actual.cpu(), expected, rtol=0, atol=NON_CAUSAL_ATOL)
+
+
+def test_pto_fa_zero_queries_and_keys_ones_values_exact(npu_device):
+    # softmax(0@0)@1 = 1/n 1@1 = 1
+    L = 1024
+    q = torch.zeros(1, 1, L, HEAD_SIZE, dtype=torch.float16, device=npu_device)
+    k = torch.zeros(1, 1, L, HEAD_SIZE, dtype=torch.float16, device=npu_device)
+    v = torch.ones(1, 1, L, HEAD_SIZE, dtype=torch.float16, device=npu_device)
+    expected = torch.ones(1, 1, L, HEAD_SIZE, dtype=torch.float32)
+    actual = pto_flash_attention(q, k, v)
+    torch.testing.assert_close(actual.cpu(), expected, rtol=0, atol=0)
 
 
 def test_pto_fa_validates_inputs(npu_device):
