@@ -821,13 +821,13 @@ static AICORE void chunk_o_kernel(
         TROWEXPAND(g_r_2d, g_v_col);
         TCOLEXPAND(coeff_ub, g_ub);
         TSUB(coeff_ub, g_r_2d, coeff_ub);
-        kernel_utils::PipeBarrierVec();
+        PipeBarrierVec();
         TMINS(coeff_ub, coeff_ub, 0.0f);
-        kernel_utils::PipeBarrierVec();
+        PipeBarrierVec();
         TEXP(coeff_ub, coeff_ub);
-        kernel_utils::PipeBarrierVec();
+        PipeBarrierVec();
         TMUL(coeff_ub, coeff_ub, msk_ub);
-        kernel_utils::PipeBarrierVec();
+        PipeBarrierVec();
         TEXP(g_v_ub, g_v_ub);
       }
 
@@ -936,7 +936,7 @@ static AICORE void chunk_o_kernel(
       UbDN<float, HalfChunk, 1> g_v_col2;
       TASSIGN(g_v_col2, GvUbAddr);
       TROWEXPAND(g_exp_2d, g_v_col2);
-      kernel_utils::PipeBarrierVec();
+      PipeBarrierVec();
       TMUL(qs_ub, qs_ub, g_exp_2d);
 
       // ── Wait for Cube→Vec flag 2: QKV ready ─────────────────────────
@@ -1065,13 +1065,13 @@ static AICORE void chunk_o_kernel(
               TROWEXPAND(g_r_2d_v, g_v_col_v);
               TCOLEXPAND(coeff_ub, g_ub);
               TSUB(coeff_ub, g_r_2d_v, coeff_ub);
-              kernel_utils::PipeBarrierVec();
+              PipeBarrierVec();
               TMINS(coeff_ub, coeff_ub, 0.0f);
-              kernel_utils::PipeBarrierVec();
+              PipeBarrierVec();
               TEXP(coeff_ub, coeff_ub);
-              kernel_utils::PipeBarrierVec();
+              PipeBarrierVec();
               TMUL(coeff_ub, coeff_ub, msk_ub);
-              kernel_utils::PipeBarrierVec();
+              PipeBarrierVec();
               TEXP(g_v_ub, g_v_ub);
             }
 
@@ -1185,7 +1185,7 @@ static AICORE void chunk_o_kernel(
               UbDN<float, HalfChunk, 1> g_v_col2_v;
               TASSIGN(g_v_col2_v, GvUbAddr);
               TROWEXPAND(g_exp_2d_v, g_v_col2_v);
-              kernel_utils::PipeBarrierVec();
+              PipeBarrierVec();
               TMUL(qs_ub, qs_ub, g_exp_2d_v);
 
 #if __CCE_AICORE__ == 220

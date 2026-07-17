@@ -38,6 +38,7 @@ for the full License text.
 #include "kernel_utils.h"
 
 using namespace pto;
+using namespace kernel_utils;
 
 #ifndef GDN_H
 #define GDN_H 16

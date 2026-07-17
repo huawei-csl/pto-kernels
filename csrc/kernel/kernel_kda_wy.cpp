@@ -63,7 +63,7 @@
 
 using namespace pto;
 using namespace kernel_utils;
-using kernel_utils::GetOuterLayout;
+
 #ifndef GDN_H
 #define GDN_H 16
 #endif
