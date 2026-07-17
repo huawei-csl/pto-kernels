@@ -39,6 +39,7 @@ for the full License text.
 #include "kernel_utils.h"
 
 using namespace pto;
+using namespace kernel_utils;
 
 // ── Compile-time configuration (overridable at build time via -D flags) ──
 #ifndef GDN_H
@@ -368,25 +369,25 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
         TASSIGN(g_ub_temp,
                 GUbAddr + row_offset * static_cast<int32_t>(sizeof(float)));
         TMOV(g_v_ub, g_ub_temp);
-        pipe_barrier(PIPE_V);
+        PipeBarrierVec();
 
         TLOG(beta_ub, beta_ub);
-        pipe_barrier(PIPE_V);
+        PipeBarrierVec();
         TADD(g_v_ub, g_v_ub, beta_ub);
-        pipe_barrier(PIPE_V);
+        PipeBarrierVec();
         TMOV(g_r_ub, g_v_ub);
         TMOV(g_c_ub, g_ub);
-        pipe_barrier(PIPE_V);
+        PipeBarrierVec();
 
         UbDN<float, HalfChunk, 1, HalfChunk, 1> g_r_ub_temp;
         TASSIGN(g_r_ub_temp, GRUbAddr);
         TROWEXPAND(g_r_2d_ub, g_r_ub_temp);
         TCOLEXPAND(g_c_2d_ub, g_c_ub);
-        pipe_barrier(PIPE_V);
+        PipeBarrierVec();
         TSUB(coeff_ub, g_r_2d_ub, g_c_2d_ub);
-        pipe_barrier(PIPE_V);
+        PipeBarrierVec();
         TMINS(coeff_ub, coeff_ub, 0.0f);
-        pipe_barrier(PIPE_V);
+        PipeBarrierVec();
         TEXP(coeff_ub, coeff_ub);
 
         set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);

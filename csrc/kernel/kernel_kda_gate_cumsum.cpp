@@ -38,6 +38,7 @@ for the full License text.
 #include "kernel_utils.h"
 
 using namespace pto;
+using namespace kernel_utils;
 
 #ifndef GDN_H
 #define GDN_H 16
@@ -160,7 +161,7 @@ AICORE void kda_gate_cumsum_kernel(__gm__ half* g_ptr, __gm__ float* g_sum_ptr,
           UbND<float, ChunkSize, CTC> g_f;
           TASSIGN(g_f, GUbAddr);
           TCVT(g_f, g_h, pto::RoundMode::CAST_NONE);
-          pipe_barrier(PIPE_V);
+          PipeBarrierVec();
         }
 
         // Vec: prefix sum (all ColTile cols in parallel).
@@ -168,24 +169,24 @@ AICORE void kda_gate_cumsum_kernel(__gm__ half* g_ptr, __gm__ float* g_sum_ptr,
         UbND<float, 1, CTC> g_row_0;
         TASSIGN(g_row_0, GUbAddr);
         TMOV(acc_ub, g_row_0);
-        pipe_barrier(PIPE_V);
+        PipeBarrierVec();
 
         UbND<float, 1, CTC> s_row_0;
         TASSIGN(s_row_0, SUbAddr);
         TMOV(s_row_0, acc_ub);
-        pipe_barrier(PIPE_V);
+        PipeBarrierVec();
 
         // Rows 1..valid-1: acc += g[i]; g_sum[i] = acc
         for (int32_t i = 1; i < valid; ++i) {
           UbND<float, 1, CTC> g_row_i;
           TASSIGN(g_row_i, GUbAddr + i * RowBytes);
           TADD(acc_ub, acc_ub, g_row_i);
-          pipe_barrier(PIPE_V);
+          PipeBarrierVec();
 
           UbND<float, 1, CTC> s_row_i;
           TASSIGN(s_row_i, SUbAddr + i * RowBytes);
           TMOV(s_row_i, acc_ub);
-          pipe_barrier(PIPE_V);
+          PipeBarrierVec();
         }
 
         // V → MTE2: prevent next iteration's TLOAD from clobbering UB before
@@ -255,29 +256,29 @@ AICORE void kda_gate_cumsum_kernel(__gm__ half* g_ptr, __gm__ float* g_sum_ptr,
               UbND<float, ChunkSize, CTC> g_f;
               TASSIGN(g_f, GUbAddr);
               TCVT(g_f, g_h, pto::RoundMode::CAST_NONE);
-              pipe_barrier(PIPE_V);
+              PipeBarrierVec();
             }
 
             UbND<float, 1, CTC> g_row_0;
             TASSIGN(g_row_0, GUbAddr);
             TMOV(acc_ub, g_row_0);
-            pipe_barrier(PIPE_V);
+            PipeBarrierVec();
 
             UbND<float, 1, CTC> s_row_0;
             TASSIGN(s_row_0, SUbAddr);
             TMOV(s_row_0, acc_ub);
-            pipe_barrier(PIPE_V);
+            PipeBarrierVec();
 
             for (int32_t i = 1; i < valid; ++i) {
               UbND<float, 1, CTC> g_row_i;
               TASSIGN(g_row_i, GUbAddr + i * RowBytes);
               TADD(acc_ub, acc_ub, g_row_i);
-              pipe_barrier(PIPE_V);
+              PipeBarrierVec();
 
               UbND<float, 1, CTC> s_row_i;
               TASSIGN(s_row_i, SUbAddr + i * RowBytes);
               TMOV(s_row_i, acc_ub);
-              pipe_barrier(PIPE_V);
+              PipeBarrierVec();
             }
 
             set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);

@@ -54,6 +54,7 @@
 
 #include "kernel_utils.h"
 using namespace pto;
+using namespace kernel_utils;
 
 #ifndef GDN_H
 #define GDN_H 16
@@ -408,7 +409,7 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
           TileUbDataND<half, HalfC, K_DIM, HalfC, K_DIM> q_stg_cvt;
           TASSIGN(q_stg_cvt, SLOT_D_ADDR);
           TCVT(q_ub, q_stg_cvt, pto::RoundMode::CAST_NONE);
-          pipe_barrier(PIPE_V);
+          PipeBarrierVec();
         }
         {
           GmShape2D g_shape(valid_rows, K_DIM);
@@ -434,9 +435,9 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
 
       // (A.2) q_eff = Q * exp(g_cs).
       TEXP(exp_ub, g_ub);
-      pipe_barrier(PIPE_V);
+      PipeBarrierVec();
       TMUL(exp_ub, q_ub, exp_ub);
-      pipe_barrier(PIPE_V);
+      PipeBarrierVec();
 
       set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
       wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
@@ -465,7 +466,7 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
           TileUbDataND<float, HalfC, C, HalfC, C> zero_ub;
           TASSIGN(zero_ub, SLOT_C_ADDR);
           TEXPANDS(zero_ub, 0.0f);
-          pipe_barrier(PIPE_V);
+          PipeBarrierVec();
           set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
           wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
           GmShape2D z_shape(HalfC, C);
@@ -504,7 +505,7 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
             TileUbDataND<float, 1, K_DIM, 1, K_DIM> kc_f;
             TASSIGN(kc_f, AQK_KC);
             TCVT(kc_f, kc_h, pto::RoundMode::CAST_NONE);
-            pipe_barrier(PIPE_V);
+            PipeBarrierVec();
           }
           TileUbDataND<float, 1, K_DIM, 1, K_DIM> gc;
           TASSIGN(gc, AQK_GC);
@@ -518,17 +519,17 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
           TASSIGN(colsum, AQK_COL);
 
           TCOLEXPANDSUB(diff, g_ub, gc);
-          pipe_barrier(PIPE_V);
+          PipeBarrierVec();
           TMINS(diff, diff, 0.0f);
-          pipe_barrier(PIPE_V);
+          PipeBarrierVec();
           TEXP(diff, diff);
-          pipe_barrier(PIPE_V);
+          PipeBarrierVec();
           TCOLEXPANDMUL(diff, diff, kc);
-          pipe_barrier(PIPE_V);
+          PipeBarrierVec();
           TMUL(diff, diff, q_ub);
-          pipe_barrier(PIPE_V);
+          PipeBarrierVec();
           TROWSUM(colsum, diff, tmp);
-          pipe_barrier(PIPE_V);
+          PipeBarrierVec();
           {
             TileUbDataND<float, HalfC, 16, HalfC, 1> mk;
             TASSIGN(mk, AQK_MSK);
@@ -541,7 +542,7 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
             set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
             wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
             TMUL(colsum, colsum, mk);
-            pipe_barrier(PIPE_V);
+            PipeBarrierVec();
           }
           set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
           wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
@@ -590,10 +591,10 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
           set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
           wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
           TCVT(v_f_ub, vh_ub, pto::RoundMode::CAST_NONE);
-          pipe_barrier(PIPE_V);
+          PipeBarrierVec();
         } else {
           TEXPANDS(v_f_ub, 0.0f);
-          pipe_barrier(PIPE_V);
+          PipeBarrierVec();
         }
 
         set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
@@ -633,7 +634,7 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
         set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
         wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
         TCVT(s_f_ub, sh_ub, pto::RoundMode::CAST_NONE);
-        pipe_barrier(PIPE_V);
+        PipeBarrierVec();
 
         set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
         wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
@@ -690,12 +691,12 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
         wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
         TADD(qs_ub, qs_ub, qkv_ub);
-        pipe_barrier(PIPE_V);
+        PipeBarrierVec();
 
         TileUbDataND<half, HalfC, V_DIM, HalfC, V_DIM> oh_ub;
         TASSIGN(oh_ub, SLOT_D_ADDR);
         TCVT(oh_ub, qs_ub, pto::RoundMode::CAST_NONE);
-        pipe_barrier(PIPE_V);
+        PipeBarrierVec();
         set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
         wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
         int64_t o_offset = (chunk_start * H + head) * V_DIM +

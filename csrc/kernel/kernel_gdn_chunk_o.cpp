@@ -69,6 +69,7 @@ for the full License text.
 #include "kernel_utils.h"
 
 using namespace pto;
+using namespace kernel_utils;
 
 // ── Compile-time configuration (overridable at build time via -D flags) ──
 #ifndef GDN_H
@@ -766,13 +767,13 @@ static AICORE void chunk_o_kernel(
         TROWEXPAND(g_r_2d, g_v_col);
         TCOLEXPAND(coeff_ub, g_ub);
         TSUB(coeff_ub, g_r_2d, coeff_ub);
-        pipe_barrier(PIPE_V);
+        PipeBarrierVec();
         TMINS(coeff_ub, coeff_ub, 0.0f);
-        pipe_barrier(PIPE_V);
+        PipeBarrierVec();
         TEXP(coeff_ub, coeff_ub);
-        pipe_barrier(PIPE_V);
+        PipeBarrierVec();
         TMUL(coeff_ub, coeff_ub, msk_ub);
-        pipe_barrier(PIPE_V);
+        PipeBarrierVec();
         TEXP(g_v_ub, g_v_ub);
       }
 
@@ -861,7 +862,7 @@ static AICORE void chunk_o_kernel(
       UbDN<float, HalfChunk, 1> g_v_col2;
       TASSIGN(g_v_col2, GvUbAddr);
       TROWEXPAND(g_exp_2d, g_v_col2);
-      pipe_barrier(PIPE_V);
+      PipeBarrierVec();
       TMUL(qs_ub, qs_ub, g_exp_2d);
 
       // ── Wait for Cube→Vec flag 2: QKV ready ─────────────────────────
@@ -979,13 +980,13 @@ static AICORE void chunk_o_kernel(
               TROWEXPAND(g_r_2d_v, g_v_col_v);
               TCOLEXPAND(coeff_ub, g_ub);
               TSUB(coeff_ub, g_r_2d_v, coeff_ub);
-              pipe_barrier(PIPE_V);
+              PipeBarrierVec();
               TMINS(coeff_ub, coeff_ub, 0.0f);
-              pipe_barrier(PIPE_V);
+              PipeBarrierVec();
               TEXP(coeff_ub, coeff_ub);
-              pipe_barrier(PIPE_V);
+              PipeBarrierVec();
               TMUL(coeff_ub, coeff_ub, msk_ub);
-              pipe_barrier(PIPE_V);
+              PipeBarrierVec();
               TEXP(g_v_ub, g_v_ub);
             }
 
@@ -1076,7 +1077,7 @@ static AICORE void chunk_o_kernel(
               UbDN<float, HalfChunk, 1> g_v_col2_v;
               TASSIGN(g_v_col2_v, GvUbAddr);
               TROWEXPAND(g_exp_2d_v, g_v_col2_v);
-              pipe_barrier(PIPE_V);
+              PipeBarrierVec();
               TMUL(qs_ub, qs_ub, g_exp_2d_v);
 
               wait_flag_dev(2);

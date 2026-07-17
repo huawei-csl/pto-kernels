@@ -10,6 +10,7 @@ for the full License text.
 #include "kernel_utils.h"
 
 using namespace pto;
+using namespace kernel_utils;
 
 #define DIV_ROUNDUP(x, y) (((x) + (y) - 1) / (y))
 #define ALIGN_UP(x, y) (DIV_ROUNDUP((x), (y)) * (y))
@@ -184,15 +185,15 @@ template <typename TileData, typename T>
 AICORE inline void computeSwiGLUTile(TileData& x0Tile, TileData& x1Tile,
                                      TileData& yTile) {
   TMULS(yTile, x0Tile, (T)-1);
-  pipe_barrier(PIPE_V);
+  PipeBarrierVec();
   TEXP(yTile, yTile);
-  pipe_barrier(PIPE_V);
+  PipeBarrierVec();
   TADDS(yTile, yTile, (T)1);
-  pipe_barrier(PIPE_V);
+  PipeBarrierVec();
   TDIV(yTile, x0Tile, yTile);
-  pipe_barrier(PIPE_V);
+  PipeBarrierVec();
   TMUL(yTile, yTile, x1Tile);
-  pipe_barrier(PIPE_V);
+  PipeBarrierVec();
 }
 
 // col_count is padded for UB tile sizing; col_count_store is the actual GM
