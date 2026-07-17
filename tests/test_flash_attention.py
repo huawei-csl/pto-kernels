@@ -11,7 +11,7 @@ import math
 import pytest
 import torch
 
-from pto_kernels import pto_fa
+from pto_kernels import pto_flash_attention
 
 
 HEAD_SIZE = 128
@@ -59,7 +59,7 @@ CASES = [
 def test_pto_fa_matches_reference(npu_device, causal, batch, nq, nkv, s0, s1):
     q, k, v = _inputs(npu_device, batch, nq, nkv, s0, s1)
 
-    actual = pto_fa(q, k, v, causal=causal)
+    actual = pto_flash_attention(q, k, v, causal=causal)
     expected = _reference(q, k, v, causal)
 
     assert actual.shape == q.shape
@@ -72,14 +72,14 @@ def test_pto_fa_matches_reference(npu_device, causal, batch, nq, nkv, s0, s1):
 @pytest.mark.parametrize("qk_preload", [2, 4, 8])
 def test_pto_fa_qk_preload(npu_device, qk_preload):
     q, k, v = _inputs(npu_device, 1, 1, 1, 128, 1024)
-    actual = pto_fa(q, k, v, qk_preload=qk_preload)
+    actual = pto_flash_attention(q, k, v, qk_preload=qk_preload)
     expected = _reference(q, k, v, causal=False)
     torch.testing.assert_close(actual.cpu(), expected, rtol=0, atol=NON_CAUSAL_ATOL)
 
 
 def test_pto_fa_back_to_back_causal_launches(npu_device):
     q, k, v = _inputs(npu_device, 1, 2, 1, 256, 512)
-    outputs = [pto_fa(q, k, v, causal=True) for _ in range(4)]
+    outputs = [pto_flash_attention(q, k, v, causal=True) for _ in range(4)]
     torch.npu.synchronize()
     expected = _reference(q, k, v, causal=True)
     for output in outputs:
@@ -90,7 +90,7 @@ def test_pto_fa_uses_current_stream(npu_device):
     q, k, v = _inputs(npu_device, 1, 1, 1, 128, 512)
     stream = torch.npu.Stream()
     with torch.npu.stream(stream):
-        actual = pto_fa(q, k, v)
+        actual = pto_flash_attention(q, k, v)
     stream.synchronize()
     expected = _reference(q, k, v, causal=False)
     torch.testing.assert_close(actual.cpu(), expected, rtol=0, atol=NON_CAUSAL_ATOL)
@@ -101,7 +101,7 @@ def test_pto_fa_zero_queries_and_keys_average_values(npu_device):
     k = torch.zeros(1, 1, 512, HEAD_SIZE, dtype=torch.float16, device=npu_device)
     v = torch.randn(1, 1, 512, HEAD_SIZE, dtype=torch.float16, device=npu_device)
     expected = v.float().cpu().mean(dim=2, keepdim=True).expand_as(q.float().cpu())
-    actual = pto_fa(q, k, v)
+    actual = pto_flash_attention(q, k, v)
     torch.testing.assert_close(actual.cpu(), expected, rtol=0, atol=NON_CAUSAL_ATOL)
 
 
@@ -109,29 +109,29 @@ def test_pto_fa_validates_inputs(npu_device):
     q, k, v = _inputs(npu_device, 1, 4, 2, 128, 512)
 
     with pytest.raises(RuntimeError, match="4D BNSD"):
-        pto_fa(q.squeeze(0), k, v)
+        pto_flash_attention(q.squeeze(0), k, v)
     with pytest.raises(RuntimeError, match="dtype fp16"):
-        pto_fa(q.float(), k, v)
+        pto_flash_attention(q.float(), k, v)
     with pytest.raises(RuntimeError, match="head dimension must be 128"):
-        pto_fa(
+        pto_flash_attention(
             q[..., :64].contiguous(), k[..., :64].contiguous(), v[..., :64].contiguous()
         )
     with pytest.raises(RuntimeError, match="S0 must be a multiple of 128"):
-        pto_fa(q[:, :, :64].contiguous(), k, v)
+        pto_flash_attention(q[:, :, :64].contiguous(), k, v)
     with pytest.raises(RuntimeError, match="S1 must be a multiple of 512"):
-        pto_fa(q, k[:, :, :256].contiguous(), v[:, :, :256].contiguous())
+        pto_flash_attention(q, k[:, :, :256].contiguous(), v[:, :, :256].contiguous())
     with pytest.raises(RuntimeError, match="same shape"):
-        pto_fa(q, k, v[:, :, :256].contiguous())
+        pto_flash_attention(q, k, v[:, :, :256].contiguous())
     with pytest.raises(RuntimeError, match="must divide"):
         bad_k = k[:, :2]
         bad_v = v[:, :2]
-        pto_fa(q[:, :3].contiguous(), bad_k, bad_v)
+        pto_flash_attention(q[:, :3].contiguous(), bad_k, bad_v)
     with pytest.raises(RuntimeError, match="contiguous"):
-        pto_fa(q.transpose(3, 2), k.transpose(3, 2), v.transpose(3, 2))
+        pto_flash_attention(q.transpose(3, 2), k.transpose(3, 2), v.transpose(3, 2))
     with pytest.raises(RuntimeError, match="qk_preload"):
-        pto_fa(q, k, v, qk_preload=1)
+        pto_flash_attention(q, k, v, qk_preload=1)
     with pytest.raises(RuntimeError, match="qk_preload"):
-        pto_fa(q, k, v, qk_preload=9)
+        pto_flash_attention(q, k, v, qk_preload=9)
 
 
 def test_pto_fa_rejects_cpu_tensors():
@@ -139,4 +139,4 @@ def test_pto_fa_rejects_cpu_tensors():
     k = torch.empty(1, 1, 512, HEAD_SIZE, dtype=torch.float16)
     v = torch.empty_like(k)
     with pytest.raises(RuntimeError, match="must be on NPU"):
-        pto_fa(q, k, v)
+        pto_flash_attention(q, k, v)

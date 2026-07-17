@@ -48,8 +48,9 @@ namespace pto_isa_ops {
  *                   kFaCvFifoSize].
  * @return fp32 attention output with the same shape as @p q.
  */
-at::Tensor run_fa(const at::Tensor& q, const at::Tensor& k, const at::Tensor& v,
-                  bool causal = false, int64_t qk_preload = kFaQkPreload) {
+at::Tensor run_flash_attention(const at::Tensor& q, const at::Tensor& k,
+                               const at::Tensor& v, bool causal = false,
+                               int64_t qk_preload = kFaQkPreload) {
   TORCH_CHECK(q.dim() == 4 && k.dim() == 4 && v.dim() == 4,
               "fa: Q, K, and V must be 4D BNSD tensors");
   TORCH_CHECK(q.device().type() == DEVICE_TYPE,

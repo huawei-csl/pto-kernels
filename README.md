@@ -75,7 +75,7 @@ y = pto_swiglu(x)  # fused SwiGLU on Ascend NPU
 | Category | Kernels |
 | --- | --- |
 | Elementwise / activation | `pto_abs`, `pto_swiglu` |
-| Attention | `pto_fa` |
+| Attention | `pto_flash_attention` |
 | Linear algebra | `pto_simple_matmul`, `pto_batch_matrix_square`, `pto_tri_inv`, `pto_tri_inv_ns`, `pto_tri_inv_rec_unroll`, `pto_tri_inv_trick` |
 | Scan / gather | `pto_scan_ul1`, `pto_csr_gather` |
 | GDN (Gated DeltaNet) | `pto_gdn_chunk_cumsum`, `pto_gdn_chunk_o`, `pto_gdn_scaled_dot_kkt`, `pto_gdn_wy_fast` |
