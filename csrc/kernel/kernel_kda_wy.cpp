@@ -44,9 +44,6 @@
 //   11 : V→C reduce "ws_keff ready"
 //   12 : C→V broadcast "ws_a2 free"
 //   13 : C→V broadcast "ws_keff free"
-// Sync_all uses 6-9 (matches kkt_kda).  We pick data-flow IDs ≥ 10 so they
-// don't collide with kkt_kda / tri_inverse / gate_cumsum_kda (which all use
-// IDs 0-5 for data flow + 6-9 for sync_all).
 //
 // Layout (matches Python kda_kernel_libs convention; v cast to fp16 wrap-side):
 //   k       head-major [HV, T, K]    fp32
@@ -80,26 +77,6 @@ using kernel_utils::GetOuterLayout;
 #endif
 
 #ifdef __CCE_AICORE__
-
-// Global barrier across ALL AI cores: drains any leftover FFTS state from
-// prior kernel launches and balances the trailing data-flow signals on
-// exit.  Uses four reserved FFTS flag IDs (6, 7, 8, 9) — distinct from the
-// data-flow flags 1-4 used by this kernel.  Pattern matches kkt_kda.cpp.
-AICORE inline void sync_all() {
-  pipe_barrier(PIPE_ALL);
-#if defined(__DAV_CUBE__)
-  ffts_cross_core_sync(PIPE_FIX, 1 | (0 << 4) | (7 << 8));
-  wait_flag_dev(7);
-  ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (8 << 8));
-  wait_flag_dev(9);
-#elif defined(__DAV_VEC__)
-  ffts_cross_core_sync(PIPE_MTE3, 1 | (0 << 4) | (6 << 8));
-  wait_flag_dev(6);
-  ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (9 << 8));
-  wait_flag_dev(8);
-#endif
-  pipe_barrier(PIPE_ALL);
-}
 
 namespace {
 
