@@ -12,6 +12,7 @@ for the full License text.
 #include "torch_abs.h"
 #include "torch_batch_matrix_square.h"
 #include "torch_csr_gather.h"
+#include "torch_flash_attention.h"
 #include "torch_gdn_chunk_cumsum.h"
 #include "torch_gdn_chunk_h.h"
 #include "torch_gdn_chunk_o.h"
@@ -68,6 +69,9 @@ PYBIND11_MODULE(pto_kernels_ops, m) {
         py::arg("cu_seqlens") = at::zeros({1}));
   m.def("pto_batch_matrix_square", &pto_isa_ops::run_batch_matrix_square);
   m.def("pto_csr_gather", &pto_isa_ops::run_csr_gather);
+  m.def("pto_flash_attention", &pto_isa_ops::run_flash_attention, py::arg("q"),
+        py::arg("k"), py::arg("v"), py::arg("causal") = false,
+        py::arg("qk_preload") = kFaQkPreload);
   m.def("pto_gdn_scaled_dot_kkt", &pto_isa_ops::run_gdn_scaled_dot_kkt,
         py::arg("K"), py::arg("Beta"), py::arg("G"), py::arg("Msk"),
         py::arg("batch_size"), py::arg("seq_len"),
