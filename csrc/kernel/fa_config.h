@@ -38,8 +38,8 @@ constexpr std::size_t FaAlignUp(std::size_t value) {
   return (value + kFaWorkspaceAlignment - 1) & ~(kFaWorkspaceAlignment - 1);
 }
 
-inline std::size_t FaNumCores(std::size_t s0, std::size_t batch,
-                              std::size_t num_q_heads) {
+constexpr std::size_t FaNumCores(std::size_t s0, std::size_t batch,
+                                 std::size_t num_q_heads) {
   const std::size_t row_blocks = s0 / kFaCubeS0;
   const std::size_t total = batch * num_q_heads * row_blocks;
   return total < static_cast<std::size_t>(kFaMaxCores)
@@ -47,8 +47,8 @@ inline std::size_t FaNumCores(std::size_t s0, std::size_t batch,
              : static_cast<std::size_t>(kFaMaxCores);
 }
 
-inline std::size_t FaWorkspaceSize(std::size_t s0, std::size_t batch,
-                                   std::size_t num_q_heads) {
+constexpr std::size_t FaWorkspaceSize(std::size_t s0, std::size_t batch,
+                                      std::size_t num_q_heads) {
   const std::size_t cores = FaNumCores(s0, batch, num_q_heads);
   constexpr std::size_t p_elements = kFaCvFifoSize * kFaCubeS0 * kFaTileS1;
   constexpr std::size_t exp_max_elements = kFaCvFifoSize * kFaCubeS0;
