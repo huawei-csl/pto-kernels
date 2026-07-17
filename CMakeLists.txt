@@ -183,7 +183,7 @@ ascendc_library(
   csrc/kernel/kernel_kda_wy.cpp
   csrc/kernel/kernel_gdn_wy_fast.cpp
   csrc/kernel/kernel_kda_kkt.cpp
-  csrc/kernel/kernel_fa.cpp)
+  csrc/kernel/kernel_flash_attention.cpp)
 
 if(USE_ASC_LANGUAGE)
   # pto_kernels_ops is linked with RUNPATH $ORIGIN/build/lib, so the kernel

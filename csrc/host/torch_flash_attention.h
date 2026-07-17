@@ -14,7 +14,7 @@ for the full License text.
 #include <cstdint>
 #include <limits>
 
-#include "fa_config.h"
+#include "config_flash_attention.h"
 #include "utils.h"
 
 // rtGetC2cCtrlAddr is exported by the CANN runtime, but its declaration lives

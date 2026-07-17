@@ -19,7 +19,7 @@ full text of the License.
 
 #include <pto/common/memory.hpp>
 
-#include "../host/fa_config.h"
+#include "../host/config_flash_attention.h"
 
 using namespace std;
 using namespace pto;
