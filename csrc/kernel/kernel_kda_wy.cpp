@@ -885,7 +885,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 #if __CCE_AICORE__ == 220
             SetCrossFlag<PIPE_FIX>(12);
 #else
-            SignalBothVecOnA5<PIPE_FIX>(12);
+            SignalBothVecOnA5<PIPE_MTE3>(12);
 #endif
 
 #if __CCE_AICORE__ == 220
@@ -923,7 +923,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 #if __CCE_AICORE__ == 220
             SetCrossFlag<PIPE_FIX>(13);
 #else
-            SignalBothVecOnA5<PIPE_FIX>(13);
+            SignalBothVecOnA5<PIPE_MTE3>(13);
 #endif
           }
           gi++;
@@ -998,7 +998,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 #if __CCE_AICORE__ == 220
             SetCrossFlag<PIPE_FIX>(12);
 #else
-            SignalBothVecOnA5<PIPE_FIX>(12);
+            SignalBothVecOnA5<PIPE_MTE3>(12);
 #endif
 
 #if __CCE_AICORE__ == 220
@@ -1036,7 +1036,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 #if __CCE_AICORE__ == 220
             SetCrossFlag<PIPE_FIX>(13);
 #else
-            SignalBothVecOnA5<PIPE_FIX>(13);
+            SignalBothVecOnA5<PIPE_MTE3>(13);
 #endif
           }
           gi++;
