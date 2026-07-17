@@ -10,6 +10,7 @@ for the full License text.
 #include "kernel_utils.h"
 
 using namespace pto;
+using namespace kernel_utils;
 
 /**
  * @brief Runs triangular matrix inverse on input buffer.
@@ -116,7 +117,7 @@ AICORE void runTTriInv(__gm__ T* vec_in, __gm__ T* vec_out,
       for (int32_t k = j - 1; k >= 1; --k) {
         TASSIGN(A_k, k * S * sizeof(T));
 
-        pipe_barrier(PIPE_V);
+        PipeBarrierVec();
         set_flag(PIPE_S, PIPE_V, EVENT_ID0);
         wait_flag(PIPE_S, PIPE_V, EVENT_ID0);
         TAXPY(b, A_k, static_cast<T>(-xk));

@@ -44,6 +44,7 @@
 
 #include "kernel_utils.h"
 using namespace pto;
+using namespace kernel_utils;
 
 #ifndef GDN_H
 #define GDN_H 16
@@ -534,7 +535,7 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
           TileUbDataND<half, HalfC, K_DIM, HalfC, K_DIM> k_stg_cvt;
           TASSIGN(k_stg_cvt, K_UB_HALF);
           TCVT(k_ub, k_stg_cvt, pto::RoundMode::CAST_NONE);
-          pipe_barrier(PIPE_V);
+          PipeBarrierVec();
         }
         {
           GmShape2D g_shape(valid_rows, K_DIM);
@@ -574,14 +575,14 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
 
       // ── 3. coeff_2d = exp(g_total - g_cs)  [HalfC, K] ───────────────────
       TCOLEXPAND(coeff_2d_ub, gtotal_ub);
-      pipe_barrier(PIPE_V);
+      PipeBarrierVec();
       TSUB(coeff_2d_ub, coeff_2d_ub, gcs_ub);
-      pipe_barrier(PIPE_V);
+      PipeBarrierVec();
       TEXP(coeff_2d_ub, coeff_2d_ub);
-      pipe_barrier(PIPE_V);
+      PipeBarrierVec();
 
       TMUL(k_ub, k_ub, coeff_2d_ub);
-      pipe_barrier(PIPE_V);
+      PipeBarrierVec();
       TCVT(k_ub_half, k_ub, pto::RoundMode::CAST_NONE);
 
       // ── 4. Reuse GCS_UB region to load U (g_cs is now dead) ──────────────
@@ -611,7 +612,7 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
           TileUbDataND<half, HalfC, V_DIM, HalfC, V_DIM> u_stg_cvt;
           TASSIGN(u_stg_cvt, U_UB_HALF);
           TCVT(u_ub, u_stg_cvt, pto::RoundMode::CAST_NONE);
-          pipe_barrier(PIPE_V);
+          PipeBarrierVec();
         }
       } else {
         TEXPANDS(u_ub, 0.0f);
@@ -635,9 +636,9 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
       set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
       wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
       TCVT(ws_ub, u_ub_half, pto::RoundMode::CAST_NONE);
-      pipe_barrier(PIPE_V);
+      PipeBarrierVec();
       TSUB(u_ub, u_ub, ws_ub);
-      pipe_barrier(PIPE_V);
+      PipeBarrierVec();
       TCVT(u_ub_half, u_ub, pto::RoundMode::CAST_NONE);
 
       // ── 6. Store V_corr (fp16 to output and workspace WS_V) ──────────────
@@ -680,7 +681,7 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
       set_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
       wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
       TEXP(gtotal_ub, gtotal_ub);
-      pipe_barrier(PIPE_V);
+      PipeBarrierVec();
 
       {
         TileUbDataDN<float, HalfC, 1, HalfC, 1> exp_gt_col;
@@ -689,9 +690,9 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
                                 static_cast<int32_t>(sizeof(float)));
         TROWEXPAND(exp_gt_2d_ub, exp_gt_col);
       }
-      pipe_barrier(PIPE_V);
+      PipeBarrierVec();
       TMUL(s_ub, s_ub, exp_gt_2d_ub);
-      pipe_barrier(PIPE_V);
+      PipeBarrierVec();
 
       // ── 8. Wait Cube KV ready, S += KV ───────────────────────────────────
       wait_flag_dev(2);
@@ -715,7 +716,7 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
         TASSIGN(kv_load_view, KV_LOAD_UB);
         TCVT(kv_ub, kv_load_view, pto::RoundMode::CAST_NONE);
       }
-      pipe_barrier(PIPE_V);
+      PipeBarrierVec();
       TADD(s_ub, s_ub, kv_ub);
 
       // ── 9. Write fp16(S) to workspace WS_S for next chunk's W @ S ────────
