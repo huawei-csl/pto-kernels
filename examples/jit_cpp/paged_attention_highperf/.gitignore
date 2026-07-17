@@ -1,0 +1,6 @@
+outputs/
+*.so
+pa_highperf_jit.so
+pa_highperf_jit_bench.csv
+__pycache__/
+.pytest_cache/
