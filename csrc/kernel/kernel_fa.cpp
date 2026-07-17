@@ -19,7 +19,7 @@ full text of the License.
 
 #include <pto/common/memory.hpp>
 
-#include "fa_config.h"
+#include "../host/fa_config.h"
 
 using namespace std;
 using namespace pto;
