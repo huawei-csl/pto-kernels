@@ -364,8 +364,6 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
   set_mask_norm();
   set_vector_mask(-1, -1);
 
-  SYNCALL<SyncCoreType::Mix>();
-
   // Vec prepares the two workspaces (ws_a2 holding A2 = INV*beta_2d, and
   // ws_keff holding K_eff = k*exp(g_cs)) that the Cube phase then consumes.
   // `first_iter` is shared across the two branches and across the trailing
@@ -807,12 +805,9 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 #endif
   }
 
-  SYNCALL<SyncCoreType::Mix>();
 #endif
 
 #if defined(__DAV_CUBE__)
-
-  SYNCALL<SyncCoreType::Mix>();
 
   // Cube reads V from BSND and the two Vec-produced workspaces, then issues
   // U = A2 @ V and W = A2 @ K_eff.  a2_l1 stays resident in L1 across both
@@ -1045,7 +1040,6 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
     }
   }
 
-  SYNCALL<SyncCoreType::Mix>();
 #endif
 }
 
