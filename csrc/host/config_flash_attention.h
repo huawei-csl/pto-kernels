@@ -34,10 +34,23 @@ struct FaScratch {
   void* pv_tile_fifo;   ///< fp32 PV partial-output tile FIFO
 };
 
+/// Round @p value up to the next multiple of kFaWorkspaceAlignment.
 constexpr std::size_t FaAlignUp(std::size_t value) {
   return (value + kFaWorkspaceAlignment - 1) & ~(kFaWorkspaceAlignment - 1);
 }
 
+/**
+ * @brief Number of AI cores the launch grid uses for a given problem shape.
+ *
+ * One core processes one kFaCubeS0-row block of one (batch, q-head) pair,
+ * capped at kFaMaxCores. Shared by the launch block_dim and the per-core
+ * workspace striding so the host and kernel agree on the core count.
+ *
+ * @param s0          Query sequence length (a multiple of kFaCubeS0).
+ * @param batch       Batch size B.
+ * @param num_q_heads Number of query heads Nq.
+ * @return Core count in [1, kFaMaxCores].
+ */
 constexpr std::size_t FaNumCores(std::size_t s0, std::size_t batch,
                                  std::size_t num_q_heads) {
   const std::size_t row_blocks = s0 / kFaCubeS0;
@@ -47,6 +60,35 @@ constexpr std::size_t FaNumCores(std::size_t s0, std::size_t batch,
              : static_cast<std::size_t>(kFaMaxCores);
 }
 
+/**
+ * @brief Total device workspace, in bytes, for the cross-core FA FIFOs.
+ *
+ * On A2/A3 the cube and vector cores cannot hand tiles to each other
+ * directly, so every producer -> consumer step of the pipeline exchanges its
+ * tiles through a ring buffer (FIFO) in GM. This workspace is that scratch GM.
+ * The pipeline is QK -> P -> PV -> GU, backed by four FIFOs (see FaScratch):
+ *   - qk_tile_fifo  (fp32): QK (cube) -> P (vec); one [kFaCubeS0 x kFaTileS1]
+ *                           QK^T score tile per slot.
+ *   - p_tile_fifo   (fp16): P (vec) -> PV (cube); one [kFaCubeS0 x kFaTileS1]
+ *                           softmax-probability tile per slot.
+ *   - pv_tile_fifo  (fp32): PV (cube) -> GU (vec); one [kFaCubeS0 x
+ * kFaHeadSize] partial-output tile per slot.
+ *   - exp_max_ififo (fp32): P's per-row running exp-max correction
+ *                           ([kFaCubeS0 x 1] per slot) that GU uses to rescale
+ *                           the running output.
+ *
+ * Each FIFO is a ring of kFaCvFifoSize slots (so a producer can run ahead of
+ * its consumer) and is replicated per core, hence the FaNumCores() factor. The
+ * four regions are laid out back-to-back, each padded up to
+ * kFaWorkspaceAlignment; the returned size is the final end offset.
+ * FaCarveWorkspace() partitions a buffer of exactly this size into the same
+ * four regions.
+ *
+ * @param s0          Query sequence length (a multiple of kFaCubeS0).
+ * @param batch       Batch size B.
+ * @param num_q_heads Number of query heads Nq.
+ * @return Workspace size in bytes.
+ */
 constexpr std::size_t FaWorkspaceSize(std::size_t s0, std::size_t batch,
                                       std::size_t num_q_heads) {
   const std::size_t cores = FaNumCores(s0, batch, num_q_heads);
@@ -70,6 +112,20 @@ constexpr std::size_t FaWorkspaceSize(std::size_t s0, std::size_t batch,
   return offset;
 }
 
+/**
+ * @brief Partition a raw workspace buffer into the four FA scratch FIFOs.
+ *
+ * Carves @p workspace into the P, exp-max, QK, and PV FIFOs using the same
+ * per-core sizes and kFaWorkspaceAlignment padding as FaWorkspaceSize(), so a
+ * buffer allocated from that size is consumed exactly. Returns the device FIFO
+ * pointers for the kernel launch.
+ *
+ * @param workspace   Base pointer of a buffer at least FaWorkspaceSize() bytes.
+ * @param s0          Query sequence length (a multiple of kFaCubeS0).
+ * @param batch       Batch size B.
+ * @param num_q_heads Number of query heads Nq.
+ * @return FaScratch holding the four device FIFO pointers.
+ */
 inline FaScratch FaCarveWorkspace(void* workspace, std::size_t s0,
                                   std::size_t batch, std::size_t num_q_heads) {
   const std::size_t cores = FaNumCores(s0, batch, num_q_heads);

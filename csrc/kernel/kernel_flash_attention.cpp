@@ -274,10 +274,26 @@ constexpr AICORE inline float constexpr_inv_sqrt(float x) {
   return 1.0f / constexpr_sqrt(x);
 }
 
-// Apply the causal mask to the on-diagonal QK tile using the precomputed
-// E[i][j] = i - j (fp16). A query at tile-row i attends key at tile-col j iff j
-// <= base_phase + i, i.e. base_phase + E >= 0. Skipped QK lanes are zeroed by
-// the caller before this additive mask is applied.
+/**
+ * @brief Apply the causal mask to the on-diagonal QK score tile.
+ *
+ * Uses the precomputed E[i][j] = i - j (fp16). A query at tile-row i attends
+ * key at tile-col j iff j <= base_phase + i, i.e. base_phase + E >= 0. The mask
+ * is additive: attended lanes receive +0 and masked lanes a large negative
+ * value (kCausalMaskNeg) that drives exp() to 0. Only tiles straddling the
+ * diagonal are touched here; fully-attended tiles need no mask and fully-masked
+ * tiles are skipped and zeroed by the caller before this additive mask runs.
+ *
+ * @tparam TileDataS1  Score tile type ([CUBE_S0, CUBE_S1] fp32), also the mask.
+ * @tparam TileDataD2  fp16 tile type holding the mask base E = i - j.
+ * @tparam TileDataTmp Scratch tile type (currently unused / reserved).
+ * @param input_x    In/out fp32 QK score tile; the mask is added in place.
+ * @param triu       Scratch tile reused to build the additive mask.
+ * @param causal_e   Precomputed fp16 E[i][j] = i - j.
+ * @param causal_tmp Unused scratch (reserved).
+ * @param s0_index   Global row index of the tile's first query.
+ * @param s1_index   Global column index of the tile's first key.
+ */
 template <typename TileDataS1, typename TileDataD2, typename TileDataTmp>
 AICORE inline void apply_causal_diag_mask(TileDataS1 input_x, TileDataS1 triu,
                                           TileDataD2 causal_e,
@@ -311,6 +327,20 @@ AICORE inline void apply_causal_diag_mask(TileDataS1 input_x, TileDataS1 triu,
   }
 }
 
+/**
+ * @brief Online-softmax initialization for the first S1 tile (FA2 init mode).
+ *
+ * Seeds the per-row running state from a single QK score tile: sets the running
+ * max to this tile's row-max, exponentiates the scores against it (scaled by
+ * 1/sqrt(HEAD_SIZE)), and sets the running sum to their row-sum. Writes the
+ * fp16 P tile (x_exp) for the PV matmul; intermediate math is fp32. Under
+ * CAUSAL_MASK the on-diagonal mask is applied first via
+ * apply_causal_diag_mask(). Parameters mirror softmax_opt_fa_not_init_impl();
+ * local_max/local_sum/exp_max are unused on the init path.
+ *
+ * @tparam HEAD_SIZE   Head dimension (sets the 1/sqrt(HEAD_SIZE) score scale).
+ * @tparam CAUSAL_MASK Whether to apply the causal diagonal mask.
+ */
 template <int HEAD_SIZE, bool CAUSAL_MASK, typename ReduceTileD1,
           typename TileDataD2, typename TileDataS1>
 AICORE inline void softmax_opt_fa_init_impl(
@@ -356,6 +386,36 @@ AICORE inline void softmax_opt_fa_init_impl(
   TCVT(x_exp_1d, p_tile_f32_1d, RoundMode::CAST_ROUND);
 }
 
+/**
+ * @brief Streaming online-softmax update for a non-first S1 tile (FA2 mode).
+ *
+ * Folds one QK score tile into the running per-row state. Updates the running
+ * max to max(running_max, this tile's row-max) and records
+ * exp_max = exp(scale * (old_max - new_max)) so the caller can rescale the
+ * previously accumulated PV output and the running sum. This tile is
+ * exponentiated against the *updated* max (not its local max) so the PV
+ * numerator and the global denominator stay consistent — critical at realistic
+ * q/k scales where a previous tile can own the row max. Adds this tile's
+ * contribution to the running sum and writes the fp16 P tile (x_exp).
+ * Intermediate math is fp32. Under CAUSAL_MASK the on-diagonal mask is applied
+ * first via apply_causal_diag_mask().
+ *
+ * @tparam HEAD_SIZE   Head dimension (sets the 1/sqrt(HEAD_SIZE) score scale).
+ * @tparam CAUSAL_MASK Whether to apply the causal diagonal mask.
+ * @param x_exp          Out: fp16 exponentiated probabilities (P tile).
+ * @param input_x        In: fp32 QK score tile for this S1 tile.
+ * @param local_max      Scratch: this tile's per-row max.
+ * @param local_sum      Scratch: this tile's per-row sum.
+ * @param new_global_max In/out: running per-row max (updated in place).
+ * @param new_global_sum In/out: running per-row denominator (rescaled + added).
+ * @param exp_max        Out: exp(scale * (old_max - new_max)) rescale factor.
+ * @param tmp_float      Scratch tile for row reductions.
+ * @param p_tile_f32     Scratch fp32 probabilities before the fp16 cast.
+ * @param triu           Scratch tile for the additive causal mask.
+ * @param causal_e       Precomputed fp16 E[i][j] = i - j (causal only).
+ * @param s0_index       Global row index of the tile's first query.
+ * @param s1_index       Global column index of the tile's first key.
+ */
 template <int HEAD_SIZE, bool CAUSAL_MASK, typename ReduceTileD1,
           typename TileDataD2, typename TileDataS1>
 AICORE inline void softmax_opt_fa_not_init_impl(
@@ -439,6 +499,20 @@ AICORE inline void softmax_opt_fa_not_init_impl(
   TADD(tmp_shw_new_global_sum, tmp_shw_new_global_sum, tmp_shw_local_sum);
 }
 
+/**
+ * @brief Online-softmax step for one QK tile (init vs. streaming dispatch).
+ *
+ * Thin wrapper selecting the first-tile initialization path (@p init == true,
+ * softmax_opt_fa_init_impl) or the streaming-update path (@p init == false,
+ * softmax_opt_fa_not_init_impl) for a single S1 score tile; all data parameters
+ * are forwarded verbatim. The caller caps the S1 tile count at the causal
+ * diagonal, so this never receives a tile entirely above the current row block.
+ *
+ * @tparam init        True for the first S1 tile (seed running state), false to
+ *                     fold into existing state.
+ * @tparam HEAD_SIZE   Head dimension (score scale 1/sqrt(HEAD_SIZE)).
+ * @tparam CAUSAL_MASK Whether to apply the causal diagonal mask.
+ */
 template <bool init = false, int HEAD_SIZE, bool CAUSAL_MASK,
           typename ReduceTileD1, typename TileDataD2, typename TileDataS1>
 AICORE inline void pto_macro_fa_softmax(
@@ -542,6 +616,21 @@ constexpr AICORE std::size_t tile_buffer_total_bytes() {
   return tile_storage_bytes<TileType>() * NumBuffers;
 }
 
+/**
+ * @brief Assign consecutive L1 addresses to a ping-pong array of tiles.
+ *
+ * Places @p NumBuffers tiles back-to-back starting at @p base_offset (via
+ * TASSIGN), each sized tile_storage_bytes<TileType>(), and returns the offset
+ * just past the last tile so callers can chain allocations. A static_assert
+ * guards the 512 KB L1 budget. No-op returning @p base_offset when NumBuffers
+ * is 0.
+ *
+ * @tparam TileType   Tile type being placed.
+ * @tparam NumBuffers Number of ping-pong buffers.
+ * @param tiles       Array of tiles to receive addresses.
+ * @param base_offset Starting byte offset within L1.
+ * @return Byte offset immediately after the assigned block.
+ */
 template <typename TileType, std::size_t NumBuffers>
 AICORE inline uint32_t assign_tile_buffers(TileType (&tiles)[NumBuffers],
                                            uint32_t base_offset) {
@@ -564,6 +653,25 @@ AICORE inline uint32_t assign_tile_buffers(TileType (&tiles)[NumBuffers],
   return base_offset + static_cast<uint32_t>(total_storage_bytes);
 }
 
+/**
+ * @brief Overlay two equal-count tile arrays on the same UB addresses (a
+ * union).
+ *
+ * Assigns tilesA[i] and tilesB[i] to the *same* offset so the two arrays alias.
+ * Used when a slot serves as a source tile in one stage and a PV output tile in
+ * another and the two never live at once, saving UB. The per-slot stride is the
+ * larger of the two tile sizes. Returns the offset past the block; a
+ * static_assert guards the 192 KB UB budget. No-op when the buffer count is 0.
+ *
+ * @tparam TileA First tile type (e.g. softmax source).
+ * @tparam NumA  First array's buffer count (must equal @p NumB).
+ * @tparam TileB Second tile type (e.g. PV output).
+ * @tparam NumB  Second array's buffer count.
+ * @param tilesA      First tile array.
+ * @param tilesB      Second tile array, aliased onto @p tilesA.
+ * @param base_offset Starting byte offset within UB.
+ * @return Byte offset immediately after the assigned block.
+ */
 template <typename TileA, std::size_t NumA, typename TileB, std::size_t NumB>
 AICORE inline uint32_t assign_tile_buffers_union(TileA (&tilesA)[NumA],
                                                  TileB (&tilesB)[NumB],
@@ -681,10 +789,19 @@ AICORE inline void allocate_vec_tile_buffers(
   (void)offset;
 }
 
-// Helper to assign an accumulator tile to one of two ping-pong UB addresses
-// (0x0 / 0x10000). Keeps a per-type static running index that toggles on every
-// call. Caller may pass `initial_id` (0 or 1) to set the starting buffer index
-// on the first call for that tile type.
+/**
+ * @brief Assign an accumulator tile to one of two fixed ping-pong UB addresses.
+ *
+ * Toggles between base 0x0 and 0x10000 using a per-instantiation static index,
+ * so successive calls for the same tile type alternate buffers. Pass @p
+ * initial_id (0 or 1) to (re)seed the starting buffer, e.g. to align the
+ * ping-pong phase at the start of a row block; -1 leaves the index running.
+ *
+ * @tparam AccTileT  Accumulator tile type.
+ * @param accTile    Tile to assign a UB address to.
+ * @param initial_id 0 or 1 to (re)seed the running index; -1 to leave it as is.
+ * @return The buffer index (0 or 1) used for this call.
+ */
 template <typename AccTileT>
 AICORE inline int assign_running_acc_tile(AccTileT &accTile,
                                           int initial_id = -1) {
@@ -700,6 +817,35 @@ AICORE inline int assign_running_acc_tile(AccTileT &accTile,
   return id;
 }
 
+/**
+ * @brief Cube stage: compute one QK^T score sub-tile and push it to the FIFO.
+ *
+ * Loads the Q row tile (once per row block) and one K column sub-tile from GM,
+ * runs the [CUBE_S0 x HEAD_SIZE] x [HEAD_SIZE x CUBE_S1] matmul, and stores the
+ * fp32 scores into the QK cross-core FIFO in global memory for the softmax (P)
+ * stage. Sequence strides are runtime so the same loads serve BNSD (and, in
+ * future, BSND) layouts. Under CAUSAL_MASK, sub-tiles fully above the diagonal
+ * are skipped: only the FIFO slot is pushed, not filled. Runs on cube cores
+ * only (no-op elsewhere).
+ *
+ * @tparam QKPipe      Producer FIFO pipe type for QK tiles.
+ * @tparam HEAD_SIZE   Head dimension.
+ * @tparam CUBE_S0     Query rows per cube tile.
+ * @tparam CUBE_S1     Key columns per cube sub-tile.
+ * @tparam TILE_S1     Key columns per streaming S1 tile (TILE_S1/CUBE_S1
+ *                     sub-tiles).
+ * @tparam CAUSAL_MASK Whether causal skipping applies.
+ * @param qkPipe        QK FIFO pipe (slot alloc/push).
+ * @param tile_id       S1 tile index within the row block.
+ * @param sub_tile_id   Sub-tile index within the S1 tile.
+ * @param q, k          GM base pointers for this (batch, head).
+ * @param qk_tile_fifo  GM QK score FIFO to store into.
+ * @param qMatTile, kMatTile, qkAccTile  L1 tiles for Q, K, and the QK accum.
+ * @param qkSlotGlobal  FIFO slot handle.
+ * @param qkMatTileEventId  Pipe event id for MTE1/MTE2 tile-reuse sync.
+ * @param blk_idx       Row-block index (row offset = blk_idx * CUBE_S0).
+ * @param q_seq_stride, kv_seq_stride  Runtime sequence-axis strides.
+ */
 template <typename QKPipe, int HEAD_SIZE, int CUBE_S0, int CUBE_S1, int TILE_S1,
           int CV_FIFO_CONS_SYNC_PERIOD, bool INTERMEDIATE_CHECK,
           bool CAUSAL_MASK, typename TileMatQData, typename TileMatKData,
@@ -792,6 +938,30 @@ AICORE inline void compute_qk(QKPipe &qkPipe, int tile_id, int sub_tile_id,
   }
 }
 
+/**
+ * @brief Cube stage: multiply the softmax P tile by V and push PV partials.
+ *
+ * Pops one P (fp16 probabilities) tile from the P FIFO, loads the matching V
+ * column sub-tile from GM, and accumulates the [CUBE_S0 x CUBE_S1] x
+ * [CUBE_S1 x HEAD_SIZE] matmul into the running PV accumulator. The AccMode
+ * transitions (Init/Acc x Partial/Final) fold a whole S1 tile's sub-tiles into
+ * one PV result, which is stored to the PV FIFO for the running-update (GU)
+ * stage. On causal-skipped sub-tiles the P slot is freed and the matmul is
+ * skipped. Runs on cube cores only.
+ *
+ * @tparam PPipe, PVPipe  P consumer / PV producer FIFO pipe types.
+ * @tparam HEAD_SIZE, CUBE_S0, CUBE_S1, TILE_S1  Tile geometry.
+ * @tparam CAUSAL_MASK    Whether causal skipping applies.
+ * @param pPipe, pvPipe   P and PV FIFO pipes.
+ * @param tile_id, sub_tile_id  S1 tile and sub-tile indices.
+ * @param v               GM base pointer for V of this (batch, head).
+ * @param p_tile_fifo     GM P (probabilities) FIFO to load from.
+ * @param pMatTile, vMatTile, pvAccTile  L1 tiles for P, V, and the PV accum.
+ * @param pSlotGlobal, pvSlotGlobal  FIFO slot handles.
+ * @param svMatTileEventId  Pipe event id for tile-reuse sync.
+ * @param blk_idx         Row-block index.
+ * @param kv_seq_stride   Runtime K/V sequence-axis stride.
+ */
 template <typename PPipe, typename PVPipe, int HEAD_SIZE, int CUBE_S0,
           int CUBE_S1, int TILE_S1, int PV_CV_FIFO,
           int CV_FIFO_CONS_SYNC_PERIOD, bool INTERMEDIATE_CHECK,
@@ -893,6 +1063,38 @@ AICORE inline void compute_pv(
   }  // end if DAV_CUBE
 }
 
+/**
+ * @brief Vector stage: online-softmax one QK tile into fp16 P probabilities.
+ *
+ * Pops a QK score tile from the QK FIFO, splits it across vector cores and row
+ * slices, and runs the streaming softmax (pto_macro_fa_softmax) to update the
+ * per-row running max/sum and produce the fp16 P tile, which is pushed to the P
+ * FIFO for the PV stage. The first S1 tile (@p tile_id == 0) initializes the
+ * running state. Under INTERMEDIATE_CHECK it also stores the per-row exp-max
+ * rescale factor to GM for the running-update stage. Under CAUSAL_MASK,
+ * sub-tiles above the diagonal are skipped so their unwritten FIFO bytes are
+ * never read. Runs on vector cores only.
+ *
+ * @tparam QKPipe, PPipe  QK consumer / P producer FIFO pipe types.
+ * @tparam HEAD_SIZE, CUBE_S0, CUBE_S1, TILE_S1  Tile geometry.
+ * @tparam INTERMEDIATE_CHECK  Also emit per-row exp-max to GM.
+ * @tparam CAUSAL_MASK    Whether the causal mask/skip applies.
+ * @param qkPipe, pPipe   QK and P FIFO pipes.
+ * @param tile_id         S1 tile index (0 => initialize running state).
+ * @param row_slice       Row-slice index within this core's row range.
+ * @param exp_max_ififo   GM exp-max FIFO written under INTERMEDIATE_CHECK.
+ * @param qk_tile_fifo    GM QK score FIFO to load from.
+ * @param p_tile_fifo     GM P (probabilities) FIFO to store into.
+ * @param global_sum_out, exp_max_out  Reserved GM intermediate outputs (unused
+ *                        in this stage).
+ * @param qkVecTile, x_expT, input_reduce_tmp, triu  UB working tiles.
+ * @param m1_local_max, l1_local_sum, m2_global_max, l2_global_sum,
+ *        l1_exp_max_ififo  Per-row online-softmax reduce tiles.
+ * @param causal_e        Precomputed fp16 E[i][j] = i - j (causal only).
+ * @param qkVecSlotGlobal, pVecSlotGlobal  FIFO slot handles.
+ * @param pTileEventId    Pipe event id for cross-pipe sync.
+ * @param blk_idx         Row-block index.
+ */
 template <typename QKPipe, typename PPipe, int HEAD_SIZE, int CUBE_S0,
           int CUBE_S1, int TILE_S1, int CV_FIFO_CONS_SYNC_PERIOD,
           bool INTERMEDIATE_CHECK, bool CAUSAL_MASK, typename TileDataF_T,
@@ -1068,9 +1270,12 @@ AICORE inline void compute_p(
 }
 
 // -----------------------------------------------------------------------------
-// FlashAttention "GU" (running update) helpers.
+// FlashAttention "GU" (global update) helpers.
 //
-// Numerically-stable streaming update kept resident in UB across tiles:
+// "GU" is the online-softmax output-update stage of the pipeline (QK -> P -> PV
+// -> GU): after each PV partial it rescales the running output by the max
+// correction and adds the new partial, then on the last tile normalizes by the
+// running denominator. The accumulator stays resident in UB across S1 tiles:
 //   O = O * exp(max_prev - max_new) + PV_tile
 // and, on the last tile:
 //   O = O / global_sum
@@ -1110,6 +1315,35 @@ AICORE inline void pto_macro_fa_gu_single_and_last_tile(
   TROWEXPANDDIV(sv_tile, sv_tile, new_global_sum);
 }
 
+/**
+ * @brief Vector stage: apply the running output update for one PV tile.
+ *
+ * Pops one PV partial from the PV FIFO and folds it into the resident running
+ * output tile. Tile 0 initializes O with the first PV partial; later tiles
+ * rescale O by the per-row exp-max correction and add the new partial
+ * (pto_macro_fa_gu). The last tile also divides by the running denominator
+ * (pto_macro_fa_gu_last, or pto_macro_fa_gu_single_and_last_tile when there is
+ * only one tile) and stores the normalized [Vec_S0 x HEAD_SIZE] result to
+ * o_out. runningOTile is single-buffered and reused per row block, so its
+ * cross-block reload is ordered against the previous block's store. Runs on
+ * vector cores only.
+ *
+ * @tparam PVPipe      PV consumer FIFO pipe type.
+ * @tparam HEAD_SIZE, CUBE_S0, TILE_S1  Tile geometry.
+ * @param pvPipe       PV FIFO pipe.
+ * @param tile_id      S1 tile index (0 => init; num_tiles-1 =>
+ * normalize+store).
+ * @param num_tiles    Number of S1 tiles for this row block.
+ * @param o_out        GM output tensor for this (batch, head).
+ * @param o_parts_out  Reserved GM partial-output pointer (unused in this
+ * stage).
+ * @param runningOTile Resident UB running-output accumulator.
+ * @param pvVecTile    UB tile receiving the popped PV partial.
+ * @param l1_exp_max_ififo  Per-row exp-max rescale factor.
+ * @param l2_global_sum     Per-row running denominator (final divide).
+ * @param guEventId    Pipe event id for MTE2/V sync.
+ * @param o_seq_stride Runtime output sequence-axis stride.
+ */
 template <typename PVPipe, int HEAD_SIZE, int CUBE_S0, int TILE_S1,
           int PV_CV_FIFO, int CV_FIFO_CONS_SYNC_PERIOD, bool INTERMEDIATE_CHECK,
           bool CAUSAL_MASK, typename TileOutT, typename ReduceTileF_T>
