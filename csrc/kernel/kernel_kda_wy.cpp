@@ -364,15 +364,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
   set_mask_norm();
   set_vector_mask(-1, -1);
 
-// Global all-core barrier at kernel start: drains any stale FFTS counters
-// left by previous launches (this kernel's Cube emits flags 3/4 N times
-// per block while Vec only waits N-1 times, so without this entry/exit
-// pair the trailing signal would leak into the next launch).
-#if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
-  sync_all();
-#else
-  // SYNCALL<SyncCoreType::Mix>();
-#endif
+  SYNCALL<SyncCoreType::Mix>();
 
   // Vec prepares the two workspaces (ws_a2 holding A2 = INV*beta_2d, and
   // ws_keff holding K_eff = k*exp(g_cs)) that the Cube phase then consumes.
@@ -815,22 +807,12 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 #endif
   }
 
-// Global all-core barrier at kernel exit: matches the entry sync_all so
-// the next launch starts with clean FFTS state.
-#if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
-  sync_all();
-#else
-  // SYNCALL<SyncCoreType::Mix>();
-#endif
+  SYNCALL<SyncCoreType::Mix>();
 #endif
 
 #if defined(__DAV_CUBE__)
-// Global all-core barrier at kernel start (matches Vec side).
-#if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
-  sync_all();
-#else
-  // SYNCALL<SyncCoreType::Mix>();
-#endif
+
+  SYNCALL<SyncCoreType::Mix>();
 
   // Cube reads V from BSND and the two Vec-produced workspaces, then issues
   // U = A2 @ V and W = A2 @ K_eff.  a2_l1 stays resident in L1 across both
@@ -1063,12 +1045,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
     }
   }
 
-// Global all-core barrier at kernel exit (matches Vec side).
-#if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
-  sync_all();
-#else
-  // SYNCALL<SyncCoreType::Mix>();
-#endif
+  SYNCALL<SyncCoreType::Mix>();
 #endif
 }
 
