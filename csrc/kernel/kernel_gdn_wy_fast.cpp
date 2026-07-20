@@ -898,7 +898,7 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TASSIGN(u_store, 0);
               TSTORE(u_global, u_store);
             }
-// ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (3 << 8));
+            // ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (3 << 8));
 #if __CCE_AICORE__ == 220
             SetCrossFlag<PIPE_FIX>(3);
 #else
@@ -938,7 +938,6 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TASSIGN(w_store, 65536);
               TSTORE(w_global, w_store);
             }
-
             // Signal both Vecs: A1 slot free (flag 4)
             // ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (4 << 8));
 #if __CCE_AICORE__ == 220

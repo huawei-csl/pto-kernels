@@ -888,6 +888,7 @@ AICORE void chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
 
         // Expose the post-chunk state so the next chunk (and debug/verification
         // outputs) can see S_{i+1}. Conceptually:
+        //   S_handle[chunk_idx + 1, head] = S_{i+1}
         int64_t s_out_offset = ((chunk_offset + ci + 1) * H + head) * DD;
         {
           GmShape2D s_out_shape(HalfC, D);
