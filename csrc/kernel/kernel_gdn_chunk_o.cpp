@@ -382,7 +382,6 @@ static AICORE void chunk_o_kernel(
       SignalBothVecOnA5<PIPE_FIX>(0);
 #endif
 
-
       // Wait for Vec to write QK_gated back (flag 1, Vec→Cube)
 #if __CCE_AICORE__ == 220
       wait_flag_dev(1);
