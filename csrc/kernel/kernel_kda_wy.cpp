@@ -455,7 +455,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TSTORE(workspace_a2_global, a2_ub_half);
             }
             pipe_barrier(PIPE_ALL);
-// ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (10 << 8));
+            // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (10 << 8));
 #if __CCE_AICORE__ == 220
             SetCrossFlag<PIPE_MTE3>(10);
 #else
@@ -548,7 +548,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TSTORE(workspace_keff_global, keff_ub_half);
             }
             pipe_barrier(PIPE_ALL);
-// ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (11 << 8));
+            // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (11 << 8));
 #if __CCE_AICORE__ == 220
             SetCrossFlag<PIPE_MTE3>(11);
 #else
@@ -664,7 +664,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TSTORE(workspace_a2_global, a2_ub_half);
             }
             pipe_barrier(PIPE_ALL);
-// ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (10 << 8));
+            // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (10 << 8));
 #if __CCE_AICORE__ == 220
             SetCrossFlag<PIPE_MTE3>(10);
 #else
@@ -754,7 +754,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TSTORE(workspace_keff_global, keff_ub_half);
             }
             pipe_barrier(PIPE_ALL);
-// ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (11 << 8));
+            // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (11 << 8));
 #if __CCE_AICORE__ == 220
             SetCrossFlag<PIPE_MTE3>(11);
 #else
@@ -853,7 +853,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TASSIGN(u_store, 0);
               TSTORE(u_global, u_store);
             }
-// ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (12 << 8));
+            // ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (12 << 8));
 #if __CCE_AICORE__ == 220
             SetCrossFlag<PIPE_FIX>(12);
 #else
@@ -891,7 +891,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TASSIGN(w_store, 65536);
               TSTORE(w_global, w_store);
             }
-// ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (13 << 8));
+            // ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (13 << 8));
 #if __CCE_AICORE__ == 220
             SetCrossFlag<PIPE_FIX>(13);
 #else
@@ -966,7 +966,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TASSIGN(u_store, 0);
               TSTORE(u_global, u_store);
             }
-// ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (12 << 8));
+            // ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (12 << 8));
 #if __CCE_AICORE__ == 220
             SetCrossFlag<PIPE_FIX>(12);
 #else
@@ -1004,7 +1004,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TSTORE(w_global, w_store);
             }
 
-// ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (13 << 8));
+            // ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (13 << 8));
 #if __CCE_AICORE__ == 220
             SetCrossFlag<PIPE_FIX>(13);
 #else
