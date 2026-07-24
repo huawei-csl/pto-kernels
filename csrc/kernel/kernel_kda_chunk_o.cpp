@@ -29,8 +29,8 @@
 // its own s_snapshots entry).  Cube/Vec still process them sequentially per
 // work item to keep the per-core 4-flag protocol simple.
 //
-// Cross-core sync: same data-flow flags as kda_chunk_h (0-3), plus SyncAll
-// on entry/exit via kernel_utils::SyncAll<false>().
+// Cross-core sync: same data-flow flags as kda_chunk_h (0-3), plus a
+// full mix-core barrier on entry/exit via SYNCALL<SyncCoreType::Mix>().
 //
 // Inputs:
 //   Q       [HV, T, K]               fp16  — queries (head-major)
@@ -54,7 +54,11 @@
 
 #include "kernel_utils.h"
 using namespace pto;
-using namespace kernel_utils;
+using kernel_utils::GetOuterLayout;
+using kernel_utils::PipeBarrierVec;
+using kernel_utils::SetCrossFlag;
+using kernel_utils::SignalBothVecOnA5;
+using kernel_utils::WaitBothVecOnA5;
 
 #ifndef GDN_H
 #define GDN_H 16
@@ -103,15 +107,17 @@ using TileMatL1ZN = pto::Tile<pto::TileType::Mat, T, Rows, Cols,
 
 template <typename T, int32_t Rows, int32_t Cols, int32_t RowValid = Rows,
           int32_t ColValid = Cols>
-using TileMatL0A = pto::Tile<pto::TileType::Left, T, Rows, Cols,
-                             pto::BLayout::RowMajor, RowValid, ColValid,
-                             pto::SLayout::RowMajor, 512, pto::PadValue::Zero>;
+using TileMatL0A =
+    pto::Tile<pto::TileType::Left, T, Rows, Cols,
+              GetOuterLayout(/* isLeft*/ true), RowValid, ColValid,
+              pto::SLayout::RowMajor, 512, pto::PadValue::Zero>;
 
 template <typename T, int32_t Rows, int32_t Cols, int32_t RowValid = Rows,
           int32_t ColValid = Cols>
-using TileMatL0B = pto::Tile<pto::TileType::Right, T, Rows, Cols,
-                             pto::BLayout::RowMajor, RowValid, ColValid,
-                             pto::SLayout::ColMajor, 512, pto::PadValue::Zero>;
+using TileMatL0B =
+    pto::Tile<pto::TileType::Right, T, Rows, Cols,
+              GetOuterLayout(/* isLeft*/ false), RowValid, ColValid,
+              pto::SLayout::ColMajor, 512, pto::PadValue::Zero>;
 
 template <typename T, int32_t Rows, int32_t Cols, int32_t RowValid = Rows,
           int32_t ColValid = Cols, pto::PadValue PadVal = pto::PadValue::Null>
@@ -171,7 +177,6 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
                                __gm__ int32_t* cu_seqlens, int64_t batch_size,
                                int64_t seq_len, int64_t total_tokens) {
   auto cid = get_block_idx();
-  auto block_num = get_block_num();
 
   constexpr int32_t K_DIM = HiddenSize;
   constexpr int32_t V_DIM = HiddenSize;
@@ -192,6 +197,9 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
   constexpr int32_t WS_QKV = WS_QS + C * V_DIM;
   constexpr int32_t WS_PER_CORE = WS_QKV + C * V_DIM;
 
+  int64_t num_seqs = batch_size;
+  int64_t total_work = num_seqs * H;
+
 #if defined(__DAV_CUBE__)
   TileMatL1<float, C, K_DIM, C, K_DIM> q_l1;
   TASSIGN(q_l1, 0);
@@ -206,24 +214,6 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
   TASSIGN(qkv_l0, 0);
   TileAcc<float, C, V_DIM, C, V_DIM> qs_l0;
   TASSIGN(qs_l0, C * C * sizeof(float));
-
-#endif
-
-#if defined(__DAV_VEC__)
-  // ── Vec UB address plan (192 KB budget) ──────────────────────────────────
-  // MASK_UB [HalfC, C] fp32 — loaded once; used in every chunk.
-  constexpr int32_t MASK_UB_ADDR = 0;
-  constexpr int32_t SLOT_A_ADDR = MASK_UB_ADDR + HalfC * C * sizeof(float);
-  constexpr int32_t SLOT_B_ADDR = SLOT_A_ADDR + HalfC * K_DIM * sizeof(float);
-  constexpr int32_t SLOT_C_ADDR = SLOT_B_ADDR + HalfC * K_DIM * sizeof(float);
-  constexpr int32_t SLOT_D_ADDR = SLOT_C_ADDR + HalfC * K_DIM * sizeof(float);
-#endif
-
-  int64_t num_seqs = batch_size;
-  int64_t total_work = num_seqs * H;
-
-#if defined(__DAV_CUBE__)
-  kernel_utils::SyncAll<false>();
 
   for (int64_t wi = 0; wi < (total_work + block_num - 1) / block_num; ++wi) {
     int64_t pid = wi * block_num + cid;
@@ -246,7 +236,11 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
 
     for (int32_t ci = 0; ci < num_chunks; ++ci) {
       // Wait Vec phase A: q_eff, masked Aqk, V_corr, S all in workspace.
+#if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
       wait_flag_dev(0);
+#else
+      WaitBothVecOnA5<PIPE_MTE3>(0);
+#endif
 
       {
         GmShape2D q_shape(C, K_DIM);
@@ -319,18 +313,29 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
         TASSIGN(qkv_store, 0);
         TSTORE(qkv_global, qkv_store);
       }
-      ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (1 << 8));
+
+      // ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (1 << 8));
+#if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
+      SetCrossFlag<PIPE_FIX>(1);
+#else
+      SignalBothVecOnA5<PIPE_FIX>(1);
+#endif
     }
   }
 
-  kernel_utils::SyncAll<false>();
 #endif
 
 #if defined(__DAV_VEC__)
+
+  // ── Vec UB address plan (192 KB budget) ──────────────────────────────────
+  // MASK_UB [HalfC, C] fp32 — loaded once; used in every chunk.
+  constexpr int32_t MASK_UB_ADDR = 0;
+  constexpr int32_t SLOT_A_ADDR = MASK_UB_ADDR + HalfC * C * sizeof(float);
+  constexpr int32_t SLOT_B_ADDR = SLOT_A_ADDR + HalfC * K_DIM * sizeof(float);
+  constexpr int32_t SLOT_C_ADDR = SLOT_B_ADDR + HalfC * K_DIM * sizeof(float);
+  constexpr int32_t SLOT_D_ADDR = SLOT_C_ADDR + HalfC * K_DIM * sizeof(float);
   set_mask_norm();
   set_vector_mask(-1, -1);
-
-  kernel_utils::SyncAll<false>();
 
   auto vid = get_subblockid();
   int32_t my_row_offset = static_cast<int32_t>(vid) * HalfC;
@@ -651,12 +656,21 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
 
       // (A.6) Signal Cube: phase A workspace ready.
       pipe_barrier(PIPE_ALL);
-      ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (0 << 8));
+      // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (0 << 8));
+#if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
+      SetCrossFlag<PIPE_MTE3>(0);
+#else
+      set_intra_block(PIPE_MTE3, 0);
 
+#endif
       // ====================================================================
       // PHASE C — wait QS + QKV from Cube; combine O = QS + QKV; write GM.
       // ====================================================================
+#if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
       wait_flag_dev(1);
+#else
+      wait_intra_block(PIPE_MTE3, 1);
+#endif
       pipe_barrier(PIPE_ALL);
 
       if (valid_rows > 0) {
@@ -712,7 +726,6 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
     }
   }
 
-  kernel_utils::SyncAll<false>();
 #endif
 }
 

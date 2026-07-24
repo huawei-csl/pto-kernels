@@ -61,14 +61,15 @@ using UbND = pto::Tile<pto::TileType::Vec, T, R, C, pto::BLayout::RowMajor, RV,
 #endif
 
 template <int32_t NumHeads, int32_t KDim, int32_t ChunkSize>
-AICORE void kda_gate_cumsum_kernel(__gm__ half* g_ptr, __gm__ float* g_sum_ptr,
-                                   __gm__ int32_t* cu_seqlens,
-                                   int64_t batch_size, int64_t seq_len) {
+AICORE inline void kda_gate_cumsum_kernel(__gm__ half* g_ptr,
+                                          __gm__ float* g_sum_ptr,
+                                          __gm__ int32_t* cu_seqlens,
+                                          int64_t batch_size, int64_t seq_len) {
+  using kernel_utils::PipeBarrierVec;
+  using pto::Stride;
   auto cid = get_block_idx();
-  auto block_num = get_block_num();
   auto vid = get_subblockid();
 
-#if defined(__DAV_VEC__)
   if (vid != 0) return;
 
   set_mask_norm();
@@ -305,7 +306,6 @@ AICORE void kda_gate_cumsum_kernel(__gm__ half* g_ptr, __gm__ float* g_sum_ptr,
       }
     }
   }
-#endif  // __DAV_VEC__
 }
 
 extern "C" __global__ AICORE void kda_gate_cumsum(__gm__ uint8_t* g_ptr,

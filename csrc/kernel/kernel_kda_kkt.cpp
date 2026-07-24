@@ -49,7 +49,7 @@
 #include "kernel_utils.h"
 
 using namespace pto;
-using namespace kernel_utils;
+using kernel_utils::PipeBarrierVec;
 
 #ifndef KDA_KKT_H
 #define KDA_KKT_H 4
@@ -84,6 +84,7 @@ AICORE inline void kda_kkt_kernel(__gm__ half* k_ptr, __gm__ float* g_cs_ptr,
                                   __gm__ int32_t* cu_seqlens,
                                   int64_t batch_size, int64_t seq_len,
                                   int64_t total_tokens) {
+  using pto::Stride;
   // This is a Vec-only kernel (no Cube branch), so bisheng compiles it as a
   // pure-AIV kernel where get_subblockid() is always 0.  Enumerate the launched
   // AIV lanes flatly (same idiom as kernel_swiglu / kernel_tri_inv_col_sweep)

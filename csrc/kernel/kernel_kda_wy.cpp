@@ -44,9 +44,6 @@
 //   11 : V→C reduce "ws_keff ready"
 //   12 : C→V broadcast "ws_a2 free"
 //   13 : C→V broadcast "ws_keff free"
-// Sync_all uses 6-9 (matches kkt_kda).  We pick data-flow IDs ≥ 10 so they
-// don't collide with kkt_kda / tri_inverse / gate_cumsum_kda (which all use
-// IDs 0-5 for data flow + 6-9 for sync_all).
 //
 // Layout (matches Python kda_kernel_libs convention; v cast to fp16 wrap-side):
 //   k       head-major [HV, T, K]    fp32
@@ -81,26 +78,6 @@ using namespace kernel_utils;
 
 #ifdef __CCE_AICORE__
 
-// Global barrier across ALL AI cores: drains any leftover FFTS state from
-// prior kernel launches and balances the trailing data-flow signals on
-// exit.  Uses four reserved FFTS flag IDs (6, 7, 8, 9) — distinct from the
-// data-flow flags 1-4 used by this kernel.  Pattern matches kkt_kda.cpp.
-AICORE inline void sync_all() {
-  pipe_barrier(PIPE_ALL);
-#if defined(__DAV_CUBE__)
-  ffts_cross_core_sync(PIPE_FIX, 1 | (0 << 4) | (7 << 8));
-  wait_flag_dev(7);
-  ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (8 << 8));
-  wait_flag_dev(9);
-#elif defined(__DAV_VEC__)
-  ffts_cross_core_sync(PIPE_MTE3, 1 | (0 << 4) | (6 << 8));
-  wait_flag_dev(6);
-  ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (9 << 8));
-  wait_flag_dev(8);
-#endif
-  pipe_barrier(PIPE_ALL);
-}
-
 namespace {
 
 template <typename T, int Rows, int Cols, int RowValid = Rows,
@@ -117,15 +94,17 @@ using TileMatL1ZN = pto::Tile<pto::TileType::Mat, T, Rows, Cols,
 
 template <typename T, int Rows, int Cols, int RowValid = Rows,
           int ColValid = Cols>
-using TileMatL0A = pto::Tile<pto::TileType::Left, T, Rows, Cols,
-                             pto::BLayout::RowMajor, RowValid, ColValid,
-                             pto::SLayout::RowMajor, 512, pto::PadValue::Zero>;
+using TileMatL0A =
+    pto::Tile<pto::TileType::Left, T, Rows, Cols,
+              GetOuterLayout(/* isLeft*/ true), RowValid, ColValid,
+              pto::SLayout::RowMajor, 512, pto::PadValue::Zero>;
 
 template <typename T, int Rows, int Cols, int RowValid = Rows,
           int ColValid = Cols>
-using TileMatL0B = pto::Tile<pto::TileType::Right, T, Rows, Cols,
-                             pto::BLayout::RowMajor, RowValid, ColValid,
-                             pto::SLayout::ColMajor, 512, pto::PadValue::Zero>;
+using TileMatL0B =
+    pto::Tile<pto::TileType::Right, T, Rows, Cols,
+              GetOuterLayout(/* isLeft*/ false), RowValid, ColValid,
+              pto::SLayout::ColMajor, 512, pto::PadValue::Zero>;
 
 template <typename T, int Rows, int Cols, int RowValid = Rows,
           int ColValid = Cols, pto::PadValue PadVal = pto::PadValue::Null>
@@ -312,7 +291,6 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
   constexpr int32_t WsKeffSize = ChunkSize * HiddenSize;
 
   auto cid = get_block_idx();
-  auto block_num = get_block_num();
   auto vid = get_subblockid();
 
   int64_t num_seqs = batch_size;
@@ -362,12 +340,6 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 #if defined(__DAV_VEC__)
   set_mask_norm();
   set_vector_mask(-1, -1);
-
-  // Global all-core barrier at kernel start: drains any stale FFTS counters
-  // left by previous launches (this kernel's Cube emits flags 3/4 N times
-  // per block while Vec only waits N-1 times, so without this entry/exit
-  // pair the trailing signal would leak into the next launch).
-  sync_all();
 
   // Vec prepares the two workspaces (ws_a2 holding A2 = INV*beta_2d, and
   // ws_keff holding K_eff = k*exp(g_cs)) that the Cube phase then consumes.
@@ -464,7 +436,13 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TCVT(a2_ub_half, a2_ub, pto::RoundMode::CAST_NONE);
             }
 
-            if (!first_iter) wait_flag_dev(12);
+            if (!first_iter) {
+#if __CCE_AICORE__ == 220
+              wait_flag_dev(12);
+#else
+              wait_intra_block(PIPE_MTE3, 12);
+#endif
+            }
             set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             {
@@ -477,7 +455,12 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TSTORE(workspace_a2_global, a2_ub_half);
             }
             pipe_barrier(PIPE_ALL);
-            ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (10 << 8));
+            // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (10 << 8));
+#if __CCE_AICORE__ == 220
+            SetCrossFlag<PIPE_MTE3>(10);
+#else
+            set_intra_block(PIPE_MTE3, 10);
+#endif
 
             // ─── Phase 2: build K_eff = k * exp(g_cs) ──────────────────────
             // k and g_cs are head-major [HV, total_tokens, K] fp16; per-head
@@ -545,7 +528,13 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TCVT(keff_ub_half, keff_ub, pto::RoundMode::CAST_NONE);
             }
 
-            if (!first_iter) wait_flag_dev(13);
+            if (!first_iter) {
+#if __CCE_AICORE__ == 220
+              wait_flag_dev(13);
+#else
+              wait_intra_block(PIPE_MTE3, 13);
+#endif
+            }
             set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             {
@@ -559,7 +548,12 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TSTORE(workspace_keff_global, keff_ub_half);
             }
             pipe_barrier(PIPE_ALL);
-            ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (11 << 8));
+            // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (11 << 8));
+#if __CCE_AICORE__ == 220
+            SetCrossFlag<PIPE_MTE3>(11);
+#else
+            set_intra_block(PIPE_MTE3, 11);
+#endif
             first_iter = false;
           }
           gi++;
@@ -651,7 +645,13 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TCVT(a2_ub_half, a2_ub, pto::RoundMode::CAST_NONE);
             }
 
-            if (!first_iter) wait_flag_dev(12);
+            if (!first_iter) {
+#if __CCE_AICORE__ == 220
+              wait_flag_dev(12);
+#else
+              wait_intra_block(PIPE_MTE3, 12);
+#endif
+            }
             set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             {
@@ -664,7 +664,12 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TSTORE(workspace_a2_global, a2_ub_half);
             }
             pipe_barrier(PIPE_ALL);
-            ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (10 << 8));
+            // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (10 << 8));
+#if __CCE_AICORE__ == 220
+            SetCrossFlag<PIPE_MTE3>(10);
+#else
+            set_intra_block(PIPE_MTE3, 10);
+#endif
 
             // ─── Phase 2: build K_eff = k * exp(g_cs) ──────────────────────
             if (local_rows > 0) {
@@ -729,7 +734,13 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TCVT(keff_ub_half, keff_ub, pto::RoundMode::CAST_NONE);
             }
 
-            if (!first_iter) wait_flag_dev(13);
+            if (!first_iter) {
+#if __CCE_AICORE__ == 220
+              wait_flag_dev(13);
+#else
+              wait_intra_block(PIPE_MTE3, 13);
+#endif
+            }
             set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             {
@@ -743,7 +754,12 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TSTORE(workspace_keff_global, keff_ub_half);
             }
             pipe_barrier(PIPE_ALL);
-            ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (11 << 8));
+            // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (11 << 8));
+#if __CCE_AICORE__ == 220
+            SetCrossFlag<PIPE_MTE3>(11);
+#else
+            set_intra_block(PIPE_MTE3, 11);
+#endif
             first_iter = false;
           }
           gi++;
@@ -757,18 +773,18 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
   // flags 3 and 4 (because the in-loop wait is gated by `!first_iter`), and
   // that stale count corrupts the next launch's first non-first-iter wait.
   if (!first_iter) {
+#if __CCE_AICORE__ == 220
     wait_flag_dev(12);
     wait_flag_dev(13);
+#else
+    wait_intra_block(PIPE_MTE3, 12);
+    wait_intra_block(PIPE_MTE3, 13);
+#endif
   }
 
-  // Global all-core barrier at kernel exit: matches the entry sync_all so
-  // the next launch starts with clean FFTS state.
-  sync_all();
 #endif
 
 #if defined(__DAV_CUBE__)
-  // Global all-core barrier at kernel start (matches Vec side).
-  sync_all();
 
   // Cube reads V from BSND and the two Vec-produced workspaces, then issues
   // U = A2 @ V and W = A2 @ K_eff.  a2_l1 stays resident in L1 across both
@@ -807,7 +823,11 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               }
             }
 
+#if __CCE_AICORE__ == 220
             wait_flag_dev(10);
+#else
+            WaitBothVecOnA5<PIPE_MTE3>(10);
+#endif
             {
               GmShape2D a2_shape(ChunkSize, ChunkSize);
               GmStride2D a2_stride(ChunkSize);
@@ -833,9 +853,18 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TASSIGN(u_store, 0);
               TSTORE(u_global, u_store);
             }
-            ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (12 << 8));
+            // ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (12 << 8));
+#if __CCE_AICORE__ == 220
+            SetCrossFlag<PIPE_FIX>(12);
+#else
+            SignalBothVecOnA5<PIPE_MTE3>(12);
+#endif
 
+#if __CCE_AICORE__ == 220
             wait_flag_dev(11);
+#else
+            WaitBothVecOnA5<PIPE_MTE3>(11);
+#endif
             {
               GmShape2D keff_shape(ChunkSize, HiddenSize);
               GmStride2D keff_stride(HiddenSize);
@@ -862,7 +891,12 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TASSIGN(w_store, 65536);
               TSTORE(w_global, w_store);
             }
-            ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (13 << 8));
+            // ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (13 << 8));
+#if __CCE_AICORE__ == 220
+            SetCrossFlag<PIPE_FIX>(13);
+#else
+            SignalBothVecOnA5<PIPE_MTE3>(13);
+#endif
           }
           gi++;
         }
@@ -903,7 +937,11 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               }
             }
 
+#if __CCE_AICORE__ == 220
             wait_flag_dev(10);
+#else
+            WaitBothVecOnA5<PIPE_MTE3>(10);
+#endif
             {
               GmShape2D a2_shape(ChunkSize, ChunkSize);
               GmStride2D a2_stride(ChunkSize);
@@ -928,9 +966,18 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TASSIGN(u_store, 0);
               TSTORE(u_global, u_store);
             }
-            ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (12 << 8));
+            // ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (12 << 8));
+#if __CCE_AICORE__ == 220
+            SetCrossFlag<PIPE_FIX>(12);
+#else
+            SignalBothVecOnA5<PIPE_MTE3>(12);
+#endif
 
+#if __CCE_AICORE__ == 220
             wait_flag_dev(11);
+#else
+            WaitBothVecOnA5<PIPE_MTE3>(11);
+#endif
             {
               GmShape2D keff_shape(ChunkSize, HiddenSize);
               GmStride2D keff_stride(HiddenSize);
@@ -956,7 +1003,13 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TASSIGN(w_store, 65536);
               TSTORE(w_global, w_store);
             }
-            ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (13 << 8));
+
+            // ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (13 << 8));
+#if __CCE_AICORE__ == 220
+            SetCrossFlag<PIPE_FIX>(13);
+#else
+            SignalBothVecOnA5<PIPE_MTE3>(13);
+#endif
           }
           gi++;
         }
@@ -964,8 +1017,6 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
     }
   }
 
-  // Global all-core barrier at kernel exit (matches Vec side).
-  sync_all();
 #endif
 }
 

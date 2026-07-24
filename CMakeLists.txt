@@ -34,7 +34,7 @@ option(USE_ASC_LANGUAGE
        "Compile kernels with the ASC language toolchain (CANN >= 9.0)" ON)
 
 set(BASE_MODE
-    "MEMORY"
+    "REGISTER"
     CACHE STRING "Base addressing mode: MEMORY or REGISTER")
 set_property(CACHE BASE_MODE PROPERTY STRINGS "MEMORY" "REGISTER")
 
@@ -173,6 +173,7 @@ ascendc_library(
   csrc/kernel/kernel_gdn_chunk_h.cpp
   csrc/kernel/kernel_gdn_scaled_dot_kkt.cpp
   csrc/kernel/kernel_gdn_chunk_o.cpp
+  csrc/kernel/kernel_gdn_wy_fast.cpp
   csrc/kernel/kernel_scan_ul1.cpp
   csrc/kernel/kernel_simple_matmul.cpp
   csrc/kernel/kernel_batch_matrix_square.cpp
@@ -182,7 +183,6 @@ ascendc_library(
   csrc/kernel/kernel_swiglu.cpp
   csrc/kernel/kernel_kda_gate_cumsum.cpp
   csrc/kernel/kernel_kda_wy.cpp
-  csrc/kernel/kernel_gdn_wy_fast.cpp
   csrc/kernel/kernel_kda_kkt.cpp)
 
 if(USE_ASC_LANGUAGE)

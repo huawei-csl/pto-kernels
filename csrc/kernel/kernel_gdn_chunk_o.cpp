@@ -153,7 +153,6 @@ static AICORE void chunk_o_kernel(
   constexpr int32_t OUbAddr = QKUbAddr;
 
   auto cid = get_block_idx();
-  auto block_num = get_block_num();
   auto vid = get_subblockid();
 
   int64_t num_seqs = batch_size;
@@ -218,7 +217,14 @@ static AICORE void chunk_o_kernel(
 
     for (int64_t work_idx = static_cast<int64_t>(cid); work_idx < total_work;
          work_idx += static_cast<int64_t>(block_num)) {
-      if (!first_cube_iter) wait_flag_dev(3);
+      if (!first_cube_iter) {
+#if __CCE_AICORE__ == 220
+        wait_flag_dev(3);
+#else
+        WaitBothVecOnA5<PIPE_MTE3>(3);
+        pipe_barrier(PIPE_ALL);
+#endif
+      }
       set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
       wait_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
 
@@ -260,7 +266,8 @@ static AICORE void chunk_o_kernel(
         Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
         _gs.shape[3] = valid_rows;
         _gs.shape[4] = HiddenSize;
-        GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, BSND_QK_STRIDE, 1>>
+        GlobalTensor<half, decltype(_gs),
+                     pto::Stride<1, 1, 1, BSND_QK_STRIDE, 1>>
             _gm(Q_handle + qk_off, _gs);
         TLOAD(_l1, _gm);
         if (valid_rows != ChunkSize) TFILLPAD(_l1, _l1);
@@ -273,7 +280,8 @@ static AICORE void chunk_o_kernel(
         Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
         _gs.shape[3] = valid_rows;
         _gs.shape[4] = HiddenSize;
-        GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, BSND_QK_STRIDE, 1>>
+        GlobalTensor<half, decltype(_gs),
+                     pto::Stride<1, 1, 1, BSND_QK_STRIDE, 1>>
             _gm(K_handle + qk_off, _gs);
         TLOAD(_l1, _gm);
         if (valid_rows != ChunkSize) TFILLPAD(_l1, _l1);
@@ -311,8 +319,8 @@ static AICORE void chunk_o_kernel(
         Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
         _gs.shape[3] = HiddenSize;
         _gs.shape[4] = HiddenSize;
-        GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, HiddenSize, 1>> _gm(
-            S_handle + s_offset, _gs);
+        GlobalTensor<half, decltype(_gs), pto::Stride<1, 1, 1, HiddenSize, 1>>
+            _gm(S_handle + s_offset, _gs);
         TLOAD(_l1, _gm);
       }
 
@@ -346,8 +354,9 @@ static AICORE void chunk_o_kernel(
         Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
         _gs.shape[3] = ChunkSize;
         _gs.shape[4] = ChunkSize;
-        GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, ChunkSize, 1>> _gm(
-            workspace_qk_handle + static_cast<int64_t>(cid) * WsQKSize, _gs);
+        GlobalTensor<half, decltype(_gs), pto::Stride<1, 1, 1, ChunkSize, 1>>
+            _gm(workspace_qk_handle + static_cast<int64_t>(cid) * WsQKSize,
+                _gs);
         TSTORE(_gm, _l0);
       }
 
@@ -359,17 +368,28 @@ static AICORE void chunk_o_kernel(
         Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
         _gs.shape[3] = ChunkSize;
         _gs.shape[4] = HiddenSize;
-        GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, HiddenSize, 1>> _gm(
-            workspace_qs_qkv_handle + static_cast<int64_t>(cid) * WsQSSize,
-            _gs);
+        GlobalTensor<half, decltype(_gs), pto::Stride<1, 1, 1, HiddenSize, 1>>
+            _gm(workspace_qs_qkv_handle + static_cast<int64_t>(cid) * WsQSSize,
+                _gs);
         TSTORE(_gm, _l0);
       }
 
       // Signal Vec: QK and QS are ready (flag 0, Cube→Vec)
-      ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (0 << 8));
+      // ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (0 << 8));
+#if __CCE_AICORE__ == 220
+      SetCrossFlag<PIPE_FIX>(0);
+#else
+      pipe_barrier(PIPE_ALL);
+      SignalBothVecOnA5<PIPE_FIX>(0);
+#endif
 
       // Wait for Vec to write QK_gated back (flag 1, Vec→Cube)
+#if __CCE_AICORE__ == 220
       wait_flag_dev(1);
+#else
+      WaitBothVecOnA5<PIPE_MTE3>(1);
+      pipe_barrier(PIPE_ALL);
+#endif
 
       set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
       wait_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
@@ -382,9 +402,10 @@ static AICORE void chunk_o_kernel(
         Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
         _gs.shape[3] = ChunkSize;
         _gs.shape[4] = ChunkSize;
-        GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, ChunkSize, 1>> _gm(
-            workspace_qk_gated_handle + static_cast<int64_t>(cid) * WsGatedSize,
-            _gs);
+        GlobalTensor<half, decltype(_gs), pto::Stride<1, 1, 1, ChunkSize, 1>>
+            _gm(workspace_qk_gated_handle +
+                    static_cast<int64_t>(cid) * WsGatedSize,
+                _gs);
         TLOAD(_l1, _gm);
       }
       // ── Load V [valid_rows × D] from GM → L1 ────────────────────────
@@ -395,7 +416,8 @@ static AICORE void chunk_o_kernel(
         Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
         _gs.shape[3] = valid_rows;
         _gs.shape[4] = HiddenSize;
-        GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, BSND_V_STRIDE, 1>>
+        GlobalTensor<half, decltype(_gs),
+                     pto::Stride<1, 1, 1, BSND_V_STRIDE, 1>>
             _gm(V_handle + v_off, _gs);
         TLOAD(_l1, _gm);
         if (valid_rows != ChunkSize) TFILLPAD(_l1, _l1);
@@ -433,14 +455,20 @@ static AICORE void chunk_o_kernel(
         Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
         _gs.shape[3] = ChunkSize;
         _gs.shape[4] = HiddenSize;
-        GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, HiddenSize, 1>> _gm(
-            workspace_qs_qkv_handle + static_cast<int64_t>(cid) * WsQSSize,
-            _gs);
+        GlobalTensor<half, decltype(_gs), pto::Stride<1, 1, 1, HiddenSize, 1>>
+            _gm(workspace_qs_qkv_handle + static_cast<int64_t>(cid) * WsQSSize,
+                _gs);
         TSTORE(_gm, _l0);
       }
 
       // Signal Vec: QKV is ready (flag 2, Cube→Vec)
-      ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (2 << 8));
+      // ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (2 << 8));
+#if __CCE_AICORE__ == 220
+      SetCrossFlag<PIPE_FIX>(2);
+#else
+      pipe_barrier(PIPE_ALL);
+      SignalBothVecOnA5<PIPE_FIX>(2);
+#endif
       first_cube_iter = false;
     }
   } else {
@@ -458,7 +486,14 @@ static AICORE void chunk_o_kernel(
         for (int32_t h = 0; h < NumHeads; ++h) {
           if (gi % static_cast<int64_t>(block_num) ==
               static_cast<int64_t>(cid)) {
-            if (!first_cube_iter_v) wait_flag_dev(3);
+            if (!first_cube_iter_v) {
+#if __CCE_AICORE__ == 220
+              wait_flag_dev(3);
+#else
+              WaitBothVecOnA5<PIPE_MTE3>(3);
+              pipe_barrier(PIPE_ALL);
+#endif
+            }
             set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
             wait_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
 
@@ -489,7 +524,7 @@ static AICORE void chunk_o_kernel(
               _gs.shape[3] = valid_rows;
               _gs.shape[4] = HiddenSize;
               GlobalTensor<half, decltype(_gs),
-                           Stride<1, 1, 1, BSND_QK_STRIDE, 1>>
+                           pto::Stride<1, 1, 1, BSND_QK_STRIDE, 1>>
                   _gm(Q_handle + qk_off, _gs);
               TLOAD(_l1, _gm);
               if (valid_rows != ChunkSize) TFILLPAD(_l1, _l1);
@@ -503,7 +538,7 @@ static AICORE void chunk_o_kernel(
               _gs.shape[3] = valid_rows;
               _gs.shape[4] = HiddenSize;
               GlobalTensor<half, decltype(_gs),
-                           Stride<1, 1, 1, BSND_QK_STRIDE, 1>>
+                           pto::Stride<1, 1, 1, BSND_QK_STRIDE, 1>>
                   _gm(K_handle + qk_off, _gs);
               TLOAD(_l1, _gm);
               if (valid_rows != ChunkSize) TFILLPAD(_l1, _l1);
@@ -542,7 +577,8 @@ static AICORE void chunk_o_kernel(
               Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
               _gs.shape[3] = HiddenSize;
               _gs.shape[4] = HiddenSize;
-              GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, HiddenSize, 1>>
+              GlobalTensor<half, decltype(_gs),
+                           pto::Stride<1, 1, 1, HiddenSize, 1>>
                   _gm(S_handle + s_offset, _gs);
               TLOAD(_l1, _gm);
             }
@@ -578,7 +614,8 @@ static AICORE void chunk_o_kernel(
               Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
               _gs.shape[3] = ChunkSize;
               _gs.shape[4] = ChunkSize;
-              GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, ChunkSize, 1>>
+              GlobalTensor<half, decltype(_gs),
+                           pto::Stride<1, 1, 1, ChunkSize, 1>>
                   _gm(workspace_qk_handle +
                           static_cast<int64_t>(cid) * WsQKSize,
                       _gs);
@@ -593,7 +630,8 @@ static AICORE void chunk_o_kernel(
               Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
               _gs.shape[3] = ChunkSize;
               _gs.shape[4] = HiddenSize;
-              GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, HiddenSize, 1>>
+              GlobalTensor<half, decltype(_gs),
+                           pto::Stride<1, 1, 1, HiddenSize, 1>>
                   _gm(workspace_qs_qkv_handle +
                           static_cast<int64_t>(cid) * WsQSSize,
                       _gs);
@@ -601,10 +639,21 @@ static AICORE void chunk_o_kernel(
             }
 
             // Cube→Vec: QK & QS ready (flag 0)
-            ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (0 << 8));
+            // ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (0 << 8));
+#if __CCE_AICORE__ == 220
+            SetCrossFlag<PIPE_FIX>(0);
+#else
+            pipe_barrier(PIPE_ALL);
+            SignalBothVecOnA5<PIPE_FIX>(0);
+#endif
 
             // Wait Vec→Cube: QK_gated ready (flag 1)
+#if __CCE_AICORE__ == 220
             wait_flag_dev(1);
+#else
+            WaitBothVecOnA5<PIPE_MTE2>(1);
+            pipe_barrier(PIPE_ALL);
+#endif
 
             set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
             wait_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
@@ -617,7 +666,8 @@ static AICORE void chunk_o_kernel(
               Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
               _gs.shape[3] = ChunkSize;
               _gs.shape[4] = ChunkSize;
-              GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, ChunkSize, 1>>
+              GlobalTensor<half, decltype(_gs),
+                           pto::Stride<1, 1, 1, ChunkSize, 1>>
                   _gm(workspace_qk_gated_handle +
                           static_cast<int64_t>(cid) * WsGatedSize,
                       _gs);
@@ -632,7 +682,7 @@ static AICORE void chunk_o_kernel(
               _gs.shape[3] = valid_rows;
               _gs.shape[4] = HiddenSize;
               GlobalTensor<half, decltype(_gs),
-                           Stride<1, 1, 1, BSND_V_STRIDE, 1>>
+                           pto::Stride<1, 1, 1, BSND_V_STRIDE, 1>>
                   _gm(V_handle + v_off, _gs);
               TLOAD(_l1, _gm);
               if (valid_rows != ChunkSize) TFILLPAD(_l1, _l1);
@@ -668,14 +718,22 @@ static AICORE void chunk_o_kernel(
               Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
               _gs.shape[3] = ChunkSize;
               _gs.shape[4] = HiddenSize;
-              GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, HiddenSize, 1>>
+              GlobalTensor<half, decltype(_gs),
+                           pto::Stride<1, 1, 1, HiddenSize, 1>>
                   _gm(workspace_qs_qkv_handle +
                           static_cast<int64_t>(cid) * WsQSSize,
                       _gs);
               TSTORE(_gm, _l0);
             }
 
-            ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (2 << 8));
+            // Signal Vec: QKV is ready (flag 2, Cube→Vec)
+            // ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (2 << 8));
+#if __CCE_AICORE__ == 220
+            SetCrossFlag<PIPE_FIX>(2);
+#else
+            pipe_barrier(PIPE_ALL);
+            SignalBothVecOnA5<PIPE_FIX>(2);
+#endif
             first_cube_iter_v = false;
           }
           gi++;
@@ -698,7 +756,7 @@ static AICORE void chunk_o_kernel(
     Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
     _gs.shape[3] = HalfChunk;
     _gs.shape[4] = ChunkSize;
-    GlobalTensor<float, decltype(_gs), Stride<1, 1, 1, ChunkSize, 1>> _gm(
+    GlobalTensor<float, decltype(_gs), pto::Stride<1, 1, 1, ChunkSize, 1>> _gm(
         Msk_handle + static_cast<int64_t>(vid) * HalfChunk * ChunkSize, _gs);
     UbND<float, HalfChunk, ChunkSize, DYNAMIC, DYNAMIC, PadValue::Zero> _ld(
         HalfChunk, ChunkSize);
@@ -736,7 +794,7 @@ static AICORE void chunk_o_kernel(
           Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
           _gs.shape[3] = 1;
           _gs.shape[4] = valid_rows;
-          GlobalTensor<float, decltype(_gs), Stride<1, 1, 1, 1, 1>> _gm(
+          GlobalTensor<float, decltype(_gs), pto::Stride<1, 1, 1, 1, 1>> _gm(
               G_handle + static_cast<int64_t>(head_idx) * total_tokens +
                   chunk_token_start,
               _gs);
@@ -778,11 +836,28 @@ static AICORE void chunk_o_kernel(
       }
 
       // ── Wait for Cube→Vec flag 0: QK & QS ready ─────────────────────
+#if __CCE_AICORE__ == 220
       wait_flag_dev(0);
+#else
+      wait_intra_block(PIPE_MTE3, 0);
+      pipe_barrier(PIPE_ALL);
+#endif
+
       if (local_rows == 0) {
-        ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (1 << 8));
+        // Signal Cube: QK_gated ready (flag 1, Vec→Cube)
+        // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (1 << 8));
+        // Signal Cube: done with this chunk (flag 3, Vec→Cube)
+        // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (3 << 8));
+#if __CCE_AICORE__ == 220
+        SetCrossFlag<PIPE_MTE3>(1);
         wait_flag_dev(2);
-        ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (3 << 8));
+        SetCrossFlag<PIPE_MTE3>(3);
+#else
+        pipe_barrier(PIPE_ALL);
+        set_intra_block(PIPE_MTE3, 1);
+        wait_intra_block(PIPE_MTE3, 2);
+        set_intra_block(PIPE_MTE3, 3);
+#endif
         continue;
       }
 
@@ -791,10 +866,10 @@ static AICORE void chunk_o_kernel(
         Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
         _gs.shape[3] = local_rows;
         _gs.shape[4] = ChunkSize;
-        GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, ChunkSize, 1>> _gm(
-            workspace_qk_handle + static_cast<int64_t>(cid) * WsQKSize +
-                static_cast<int64_t>(vid) * HalfChunk * ChunkSize,
-            _gs);
+        GlobalTensor<half, decltype(_gs), pto::Stride<1, 1, 1, ChunkSize, 1>>
+            _gm(workspace_qk_handle + static_cast<int64_t>(cid) * WsQKSize +
+                    static_cast<int64_t>(vid) * HalfChunk * ChunkSize,
+                _gs);
         UbND<half, HalfChunk, ChunkSize, DYNAMIC, DYNAMIC, PadValue::Zero> _ld(
             local_rows, ChunkSize);
         TASSIGN(_ld, QKHalfUbAddr);
@@ -816,10 +891,10 @@ static AICORE void chunk_o_kernel(
         Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
         _gs.shape[3] = local_rows;
         _gs.shape[4] = HiddenSize;
-        GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, HiddenSize, 1>> _gm(
-            workspace_qs_qkv_handle + static_cast<int64_t>(cid) * WsQSSize +
-                static_cast<int64_t>(vid) * HalfChunk * HiddenSize,
-            _gs);
+        GlobalTensor<half, decltype(_gs), pto::Stride<1, 1, 1, HiddenSize, 1>>
+            _gm(workspace_qs_qkv_handle + static_cast<int64_t>(cid) * WsQSSize +
+                    static_cast<int64_t>(vid) * HalfChunk * HiddenSize,
+                _gs);
         UbND<half, HalfChunk, HiddenSize, DYNAMIC, DYNAMIC, PadValue::Zero> _ld(
             local_rows, HiddenSize);
         TASSIGN(_ld, QSHalfUbAddr);
@@ -840,18 +915,24 @@ static AICORE void chunk_o_kernel(
         Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
         _gs.shape[3] = local_rows;
         _gs.shape[4] = ChunkSize;
-        GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, ChunkSize, 1>> _gm(
-            workspace_qk_gated_handle +
-                static_cast<int64_t>(cid) * WsGatedSize +
-                static_cast<int64_t>(vid) * HalfChunk * ChunkSize,
-            _gs);
+        GlobalTensor<half, decltype(_gs), pto::Stride<1, 1, 1, ChunkSize, 1>>
+            _gm(workspace_qk_gated_handle +
+                    static_cast<int64_t>(cid) * WsGatedSize +
+                    static_cast<int64_t>(vid) * HalfChunk * ChunkSize,
+                _gs);
         UbND<half, HalfChunk, ChunkSize, DYNAMIC, DYNAMIC> _st(local_rows,
                                                                ChunkSize);
         TASSIGN(_st, QKHalfUbAddr);
         TSTORE(_gm, _st);
       }
       // Vec→Cube: QK_gated ready (flag 1)
-      ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (1 << 8));
+      // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (1 << 8));
+#if __CCE_AICORE__ == 220
+      SetCrossFlag<PIPE_MTE3>(1);
+#else
+      pipe_barrier(PIPE_ALL);
+      set_intra_block(PIPE_MTE3, 1);
+#endif
 
       // ── Scale QS by exp(g): QS_gated = QS * exp(g_row) ──────────────
       set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
@@ -866,17 +947,22 @@ static AICORE void chunk_o_kernel(
       TMUL(qs_ub, qs_ub, g_exp_2d);
 
       // ── Wait for Cube→Vec flag 2: QKV ready ─────────────────────────
+#if __CCE_AICORE__ == 220
       wait_flag_dev(2);
+#else
+      wait_intra_block(PIPE_MTE3, 2);
+      pipe_barrier(PIPE_ALL);
+#endif
 
       // ── Load QKV [C/2 × D] from workspace → UB ──────────────────────
       {
         Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
         _gs.shape[3] = local_rows;
         _gs.shape[4] = HiddenSize;
-        GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, HiddenSize, 1>> _gm(
-            workspace_qs_qkv_handle + static_cast<int64_t>(cid) * WsQSSize +
-                static_cast<int64_t>(vid) * HalfChunk * HiddenSize,
-            _gs);
+        GlobalTensor<half, decltype(_gs), pto::Stride<1, 1, 1, HiddenSize, 1>>
+            _gm(workspace_qs_qkv_handle + static_cast<int64_t>(cid) * WsQSSize +
+                    static_cast<int64_t>(vid) * HalfChunk * HiddenSize,
+                _gs);
         UbND<half, HalfChunk, HiddenSize, DYNAMIC, DYNAMIC, PadValue::Zero> _ld(
             local_rows, HiddenSize);
         TASSIGN(_ld, OHalfUbAddr);
@@ -908,7 +994,8 @@ static AICORE void chunk_o_kernel(
         Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
         _gs.shape[3] = local_rows;
         _gs.shape[4] = HiddenSize;
-        GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, BSND_V_STRIDE, 1>>
+        GlobalTensor<half, decltype(_gs),
+                     pto::Stride<1, 1, 1, BSND_V_STRIDE, 1>>
             _gm(O_handle + o_offset, _gs);
         UbND<half, HalfChunk, HiddenSize, DYNAMIC, DYNAMIC> _st(local_rows,
                                                                 HiddenSize);
@@ -917,7 +1004,13 @@ static AICORE void chunk_o_kernel(
       }
 
       // Vec→Cube: done with this chunk (flag 3)
-      ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (3 << 8));
+      // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (3 << 8));
+#if __CCE_AICORE__ == 220
+      SetCrossFlag<PIPE_MTE3>(3);
+#else
+      pipe_barrier(PIPE_ALL);
+      set_intra_block(PIPE_MTE3, 3);
+#endif
     }
   } else {
     // ── Variable-length sequence path (cu_seqlens != nullptr) ──────────
@@ -949,10 +1042,11 @@ static AICORE void chunk_o_kernel(
                 Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
                 _gs.shape[3] = 1;
                 _gs.shape[4] = valid_rows;
-                GlobalTensor<float, decltype(_gs), Stride<1, 1, 1, 1, 1>> _gm(
-                    G_handle + static_cast<int64_t>(head_idx) * total_tokens +
-                        chunk_token_start,
-                    _gs);
+                GlobalTensor<float, decltype(_gs), pto::Stride<1, 1, 1, 1, 1>>
+                    _gm(G_handle +
+                            static_cast<int64_t>(head_idx) * total_tokens +
+                            chunk_token_start,
+                        _gs);
                 UbND<float, 1, ChunkSize, DYNAMIC, DYNAMIC, PadValue::Zero> _ld(
                     1, valid_rows);
                 TASSIGN(_ld, GUbAddr);
@@ -990,18 +1084,36 @@ static AICORE void chunk_o_kernel(
               TEXP(g_v_ub, g_v_ub);
             }
 
+#if __CCE_AICORE__ == 220
             wait_flag_dev(0);
+#else
+            wait_intra_block(PIPE_MTE3, 0);
+            pipe_barrier(PIPE_ALL);
+#endif
+
             if (local_rows == 0) {
-              ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (1 << 8));
+              // Signal Cube: QK_gated ready (flag 1, Vec→Cube)
+              // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (1 << 8));
+              // Signal Cube: done with this chunk (flag 3, Vec→Cube)
+              // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (3 << 8));
+#if __CCE_AICORE__ == 220
+              SetCrossFlag<PIPE_MTE3>(1);
               wait_flag_dev(2);
-              ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (3 << 8));
+              SetCrossFlag<PIPE_MTE3>(3);
+#else
+              set_intra_block(PIPE_MTE3, 1);
+              wait_intra_block(PIPE_MTE3, 2);
+              set_intra_block(PIPE_MTE3, 3);
+#endif
+
             } else {
               // Load QK from workspace
               {
                 Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
                 _gs.shape[3] = local_rows;
                 _gs.shape[4] = ChunkSize;
-                GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, ChunkSize, 1>>
+                GlobalTensor<half, decltype(_gs),
+                             pto::Stride<1, 1, 1, ChunkSize, 1>>
                     _gm(workspace_qk_handle +
                             static_cast<int64_t>(cid) * WsQKSize +
                             static_cast<int64_t>(vid) * HalfChunk * ChunkSize,
@@ -1029,7 +1141,7 @@ static AICORE void chunk_o_kernel(
                 _gs.shape[3] = local_rows;
                 _gs.shape[4] = HiddenSize;
                 GlobalTensor<half, decltype(_gs),
-                             Stride<1, 1, 1, HiddenSize, 1>>
+                             pto::Stride<1, 1, 1, HiddenSize, 1>>
                     _gm(workspace_qs_qkv_handle +
                             static_cast<int64_t>(cid) * WsQSSize +
                             static_cast<int64_t>(vid) * HalfChunk * HiddenSize,
@@ -1054,7 +1166,8 @@ static AICORE void chunk_o_kernel(
                 Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
                 _gs.shape[3] = local_rows;
                 _gs.shape[4] = ChunkSize;
-                GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, ChunkSize, 1>>
+                GlobalTensor<half, decltype(_gs),
+                             pto::Stride<1, 1, 1, ChunkSize, 1>>
                     _gm(workspace_qk_gated_handle +
                             static_cast<int64_t>(cid) * WsGatedSize +
                             static_cast<int64_t>(vid) * HalfChunk * ChunkSize,
@@ -1065,7 +1178,13 @@ static AICORE void chunk_o_kernel(
                 TSTORE(_gm, _st);
               }
               // Vec→Cube: QK_gated ready (flag 1)
-              ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (1 << 8));
+              // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (1 << 8));
+#if __CCE_AICORE__ == 220
+              SetCrossFlag<PIPE_MTE3>(1);
+#else
+              pipe_barrier(PIPE_ALL);
+              set_intra_block(PIPE_MTE3, 1);
+#endif
 
               // Scale QS by exp(g)
               set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
@@ -1080,7 +1199,12 @@ static AICORE void chunk_o_kernel(
               PipeBarrierVec();
               TMUL(qs_ub, qs_ub, g_exp_2d_v);
 
+#if __CCE_AICORE__ == 220
               wait_flag_dev(2);
+#else
+              wait_intra_block(PIPE_MTE3, 2);
+              pipe_barrier(PIPE_ALL);
+#endif
 
               // Load QKV from workspace
               {
@@ -1088,7 +1212,7 @@ static AICORE void chunk_o_kernel(
                 _gs.shape[3] = local_rows;
                 _gs.shape[4] = HiddenSize;
                 GlobalTensor<half, decltype(_gs),
-                             Stride<1, 1, 1, HiddenSize, 1>>
+                             pto::Stride<1, 1, 1, HiddenSize, 1>>
                     _gm(workspace_qs_qkv_handle +
                             static_cast<int64_t>(cid) * WsQSSize +
                             static_cast<int64_t>(vid) * HalfChunk * HiddenSize,
@@ -1126,7 +1250,7 @@ static AICORE void chunk_o_kernel(
                 _gs.shape[3] = local_rows;
                 _gs.shape[4] = HiddenSize;
                 GlobalTensor<half, decltype(_gs),
-                             Stride<1, 1, 1, BSND_V_STRIDE, 1>>
+                             pto::Stride<1, 1, 1, BSND_V_STRIDE, 1>>
                     _gm(O_handle + o_offset, _gs);
                 UbND<half, HalfChunk, HiddenSize, DYNAMIC, DYNAMIC> _st(
                     local_rows, HiddenSize);
@@ -1135,7 +1259,13 @@ static AICORE void chunk_o_kernel(
               }
 
               // Vec→Cube: done with this chunk (flag 3)
-              ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (3 << 8));
+              // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (3 << 8));
+#if __CCE_AICORE__ == 220
+              SetCrossFlag<PIPE_MTE3>(3);
+#else
+              pipe_barrier(PIPE_ALL);
+              set_intra_block(PIPE_MTE3, 3);
+#endif
             }
           }
           gi++;

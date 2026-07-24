@@ -203,7 +203,7 @@ AICORE void issueTLoad(__gm__ T* x, uint32_t input_n, uint32_t output_n,
                        const TileWork& tile, unsigned x0_base, unsigned x1_base,
                        event_t ev) {
   using TileShapeND = TileShape2D<T, DYNAMIC, DYNAMIC, Layout::ND>;
-  using DynStrideND = Stride<1, 1, 1, DYNAMIC, 1>;
+  using DynStrideND = pto::Stride<1, 1, 1, DYNAMIC, 1>;
   using GlobalData = GlobalTensor<T, TileShapeND, DynStrideND, Layout::ND>;
   using TileData = Tile<TileType::Vec, T, kTileRows, kTileCols,
                         BLayout::RowMajor, DYNAMIC, DYNAMIC>;
@@ -233,7 +233,7 @@ template <typename T, uint32_t kTileRows, uint32_t kTileCols>
 AICORE void issueTStore(__gm__ T* y, uint32_t output_n, const TileWork& tile,
                         unsigned y_base, event_t ev) {
   using TileShapeND = TileShape2D<T, DYNAMIC, DYNAMIC, Layout::ND>;
-  using DynStrideND = Stride<1, 1, 1, DYNAMIC, 1>;
+  using DynStrideND = pto::Stride<1, 1, 1, DYNAMIC, 1>;
   using GlobalData = GlobalTensor<T, TileShapeND, DynStrideND, Layout::ND>;
   using TileData = Tile<TileType::Vec, T, kTileRows, kTileCols,
                         BLayout::RowMajor, DYNAMIC, DYNAMIC>;
