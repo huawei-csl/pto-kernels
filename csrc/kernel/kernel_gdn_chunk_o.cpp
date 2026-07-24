@@ -379,6 +379,7 @@ static AICORE void chunk_o_kernel(
 #if __CCE_AICORE__ == 220
       SetCrossFlag<PIPE_FIX>(0);
 #else
+      pipe_barrier(PIPE_ALL);
       SignalBothVecOnA5<PIPE_FIX>(0);
 #endif
 
@@ -465,6 +466,7 @@ static AICORE void chunk_o_kernel(
 #if __CCE_AICORE__ == 220
       SetCrossFlag<PIPE_FIX>(2);
 #else
+      pipe_barrier(PIPE_ALL);
       SignalBothVecOnA5<PIPE_FIX>(2);
 #endif
       first_cube_iter = false;
@@ -641,6 +643,7 @@ static AICORE void chunk_o_kernel(
 #if __CCE_AICORE__ == 220
             SetCrossFlag<PIPE_FIX>(0);
 #else
+            pipe_barrier(PIPE_ALL);
             SignalBothVecOnA5<PIPE_FIX>(0);
 #endif
 
@@ -728,6 +731,7 @@ static AICORE void chunk_o_kernel(
 #if __CCE_AICORE__ == 220
             SetCrossFlag<PIPE_FIX>(2);
 #else
+            pipe_barrier(PIPE_ALL);
             SignalBothVecOnA5<PIPE_FIX>(2);
 #endif
             first_cube_iter_v = false;
@@ -836,6 +840,7 @@ static AICORE void chunk_o_kernel(
       wait_flag_dev(0);
 #else
       wait_intra_block(PIPE_MTE3, 0);
+      pipe_barrier(PIPE_ALL);
 #endif
 
       if (local_rows == 0) {
@@ -848,6 +853,7 @@ static AICORE void chunk_o_kernel(
         wait_flag_dev(2);
         SetCrossFlag<PIPE_MTE3>(3);
 #else
+        pipe_barrier(PIPE_ALL);
         set_intra_block(PIPE_MTE3, 1);
         wait_intra_block(PIPE_MTE3, 2);
         set_intra_block(PIPE_MTE3, 3);
@@ -924,6 +930,7 @@ static AICORE void chunk_o_kernel(
 #if __CCE_AICORE__ == 220
       SetCrossFlag<PIPE_MTE3>(1);
 #else
+      pipe_barrier(PIPE_ALL);
       set_intra_block(PIPE_MTE3, 1);
 #endif
 
@@ -944,6 +951,7 @@ static AICORE void chunk_o_kernel(
       wait_flag_dev(2);
 #else
       wait_intra_block(PIPE_MTE3, 2);
+      pipe_barrier(PIPE_ALL);
 #endif
 
       // ── Load QKV [C/2 × D] from workspace → UB ──────────────────────
@@ -1000,6 +1008,7 @@ static AICORE void chunk_o_kernel(
 #if __CCE_AICORE__ == 220
       SetCrossFlag<PIPE_MTE3>(3);
 #else
+      pipe_barrier(PIPE_ALL);
       set_intra_block(PIPE_MTE3, 3);
 #endif
     }
@@ -1079,6 +1088,7 @@ static AICORE void chunk_o_kernel(
             wait_flag_dev(0);
 #else
             wait_intra_block(PIPE_MTE3, 0);
+            pipe_barrier(PIPE_ALL);
 #endif
 
             if (local_rows == 0) {
@@ -1172,6 +1182,7 @@ static AICORE void chunk_o_kernel(
 #if __CCE_AICORE__ == 220
               SetCrossFlag<PIPE_MTE3>(1);
 #else
+              pipe_barrier(PIPE_ALL);
               set_intra_block(PIPE_MTE3, 1);
 #endif
 
@@ -1192,6 +1203,7 @@ static AICORE void chunk_o_kernel(
               wait_flag_dev(2);
 #else
               wait_intra_block(PIPE_MTE3, 2);
+              pipe_barrier(PIPE_ALL);
 #endif
 
               // Load QKV from workspace
@@ -1251,6 +1263,7 @@ static AICORE void chunk_o_kernel(
 #if __CCE_AICORE__ == 220
               SetCrossFlag<PIPE_MTE3>(3);
 #else
+              pipe_barrier(PIPE_ALL);
               set_intra_block(PIPE_MTE3, 3);
 #endif
             }
