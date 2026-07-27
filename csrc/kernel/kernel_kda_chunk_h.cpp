@@ -404,6 +404,7 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
       wait_flag_dev(1);
 #else
       WaitBothVecOnA5<PIPE_MTE2>(1);
+      pipe_barrier(PIPE_ALL);
 #endif
 
       {
@@ -740,6 +741,7 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
       wait_flag_dev(2);
 #else
       WaitBothVecOnA5<PIPE_MTE3>(2);
+      pipe_barrier(PIPE_ALL);
 #endif
       {
         GmShape2D kv_shape(HalfC, V_DIM);
