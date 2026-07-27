@@ -441,6 +441,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               wait_flag_dev(12);
 #else
               wait_intra_block(PIPE_MTE3, 12);
+              pipe_barrier(PIPE_ALL);
 #endif
             }
             set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
@@ -533,6 +534,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               wait_flag_dev(13);
 #else
               wait_intra_block(PIPE_MTE3, 13);
+              pipe_barrier(PIPE_ALL);
 #endif
             }
             set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
@@ -650,6 +652,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               wait_flag_dev(12);
 #else
               wait_intra_block(PIPE_MTE3, 12);
+              pipe_barrier(PIPE_ALL);
 #endif
             }
             set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
@@ -739,6 +742,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               wait_flag_dev(13);
 #else
               wait_intra_block(PIPE_MTE3, 13);
+              pipe_barrier(PIPE_ALL);
 #endif
             }
             set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
@@ -779,6 +783,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 #else
     wait_intra_block(PIPE_MTE3, 12);
     wait_intra_block(PIPE_MTE3, 13);
+    pipe_barrier(PIPE_ALL);
 #endif
   }
 
@@ -827,6 +832,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
             wait_flag_dev(10);
 #else
             WaitBothVecOnA5<PIPE_MTE3>(10);
+            pipe_barrier(PIPE_ALL);
 #endif
             {
               GmShape2D a2_shape(ChunkSize, ChunkSize);
@@ -857,6 +863,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 #if __CCE_AICORE__ == 220
             SetCrossFlag<PIPE_FIX>(12);
 #else
+            pipe_barrier(PIPE_ALL);
             SignalBothVecOnA5<PIPE_MTE3>(12);
 #endif
 
@@ -864,6 +871,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
             wait_flag_dev(11);
 #else
             WaitBothVecOnA5<PIPE_MTE3>(11);
+            pipe_barrier(PIPE_ALL);
 #endif
             {
               GmShape2D keff_shape(ChunkSize, HiddenSize);
@@ -895,6 +903,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 #if __CCE_AICORE__ == 220
             SetCrossFlag<PIPE_FIX>(13);
 #else
+            pipe_barrier(PIPE_ALL);
             SignalBothVecOnA5<PIPE_MTE3>(13);
 #endif
           }
@@ -941,6 +950,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
             wait_flag_dev(10);
 #else
             WaitBothVecOnA5<PIPE_MTE3>(10);
+            pipe_barrier(PIPE_ALL);
 #endif
             {
               GmShape2D a2_shape(ChunkSize, ChunkSize);
@@ -970,6 +980,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 #if __CCE_AICORE__ == 220
             SetCrossFlag<PIPE_FIX>(12);
 #else
+            pipe_barrier(PIPE_ALL);
             SignalBothVecOnA5<PIPE_MTE3>(12);
 #endif
 
@@ -977,6 +988,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
             wait_flag_dev(11);
 #else
             WaitBothVecOnA5<PIPE_MTE3>(11);
+            pipe_barrier(PIPE_ALL);
 #endif
             {
               GmShape2D keff_shape(ChunkSize, HiddenSize);
@@ -1008,6 +1020,7 @@ AICORE void kda_wy_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 #if __CCE_AICORE__ == 220
             SetCrossFlag<PIPE_FIX>(13);
 #else
+            pipe_barrier(PIPE_ALL);
             SignalBothVecOnA5<PIPE_MTE3>(13);
 #endif
           }
