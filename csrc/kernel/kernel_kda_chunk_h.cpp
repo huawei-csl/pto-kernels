@@ -739,7 +739,7 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
 #if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
       wait_flag_dev(2);
 #else
-      WaitBothVecOnA5<PIPE_FIX>(2);
+      WaitBothVecOnA5<PIPE_MTE3>(2);
 #endif
       {
         GmShape2D kv_shape(HalfC, V_DIM);
