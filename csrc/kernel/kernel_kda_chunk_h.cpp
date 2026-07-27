@@ -396,6 +396,7 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
 #if __CCE_AICORE__ == 220
       SetCrossFlag<PIPE_FIX>(0);
 #else
+      pipe_barrier(PIPE_ALL);
       SignalBothVecOnA5<PIPE_FIX>(0);
 #endif
 
@@ -403,8 +404,6 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
       wait_flag_dev(1);
 #else
       WaitBothVecOnA5<PIPE_MTE2>(1);
-      pipe_barrier(PIPE_ALL);
-
 #endif
 
       {
@@ -448,6 +447,7 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
 #if __CCE_AICORE__ == 220
       SetCrossFlag<PIPE_FIX>(2);
 #else
+      pipe_barrier(PIPE_ALL);
       SignalBothVecOnA5<PIPE_FIX>(2);
 #endif
     }
@@ -509,6 +509,7 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
 #if __CCE_AICORE__ == 220
     SetCrossFlag<PIPE_MTE3>(3);
 #else
+    pipe_barrier(PIPE_ALL);
     set_intra_block(PIPE_MTE3, 3);
 #endif
 
@@ -713,6 +714,7 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
 #if __CCE_AICORE__ == 220
       SetCrossFlag<PIPE_MTE3>(1);
 #else
+      pipe_barrier(PIPE_ALL);
       set_intra_block(PIPE_MTE3, 1);
 #endif
 
@@ -780,9 +782,10 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
         }
 
         // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (3 << 8));
-#if __CCE_AICORE__ == 220
+#if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
         SetCrossFlag<PIPE_MTE3>(3);
 #else
+        pipe_barrier(PIPE_ALL);
         set_intra_block(PIPE_MTE3, 3);
 #endif
       }
