@@ -240,6 +240,7 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
       wait_flag_dev(0);
 #else
       WaitBothVecOnA5<PIPE_MTE3>(0);
+      pipe_barrier(PIPE_ALL);
 #endif
 
       {
@@ -318,6 +319,7 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
 #if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
       SetCrossFlag<PIPE_FIX>(1);
 #else
+      pipe_barrier(PIPE_ALL);
       SignalBothVecOnA5<PIPE_FIX>(1);
 #endif
     }
@@ -661,7 +663,6 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
       SetCrossFlag<PIPE_MTE3>(0);
 #else
       set_intra_block(PIPE_MTE3, 0);
-
 #endif
       // ====================================================================
       // PHASE C — wait QS + QKV from Cube; combine O = QS + QKV; write GM.
