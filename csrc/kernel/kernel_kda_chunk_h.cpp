@@ -654,6 +654,7 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
       wait_flag_dev(0);
 #else
       wait_intra_block(PIPE_MTE3, 0);
+      pipe_barrier(PIPE_ALL);
 #endif
       {
         GmShape2D ws_shape(HalfC, V_DIM);
