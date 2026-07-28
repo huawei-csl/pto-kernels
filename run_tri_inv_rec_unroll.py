@@ -19,13 +19,6 @@ import ctypes
 import numpy as np
 import torch
 
-# Importing the built extension initializes the ACL runtime / mix-kernel
-# environment. Without it, the raw ctypes launch of this cube (mix) kernel
-# lands on the vector core and the `__DAV_CUBE__` body never runs (all-zero
-# output). The symbol itself is not called here — the import side effect is
-# what matters.
-import pto_kernels  # noqa: F401
-
 # Select device "cpu" or "npu"
 DEVICE = "npu:0"
 

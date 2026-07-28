@@ -156,7 +156,7 @@ if __name__ == "__main__":
             block_dim * ws_per_core, device=DEVICE, dtype=torch.float32
         )
 
-        O = torch.zeros(T, HV, D, device=DEVICE, dtype=torch.float16)
+        output = torch.zeros(T, HV, D, device=DEVICE, dtype=torch.float16)
 
         lib.pto_launch_kda_chunk_o(
             block_dim,
@@ -168,7 +168,7 @@ if __name__ == "__main__":
             torch_to_ctypes(G_npu),
             torch_to_ctypes(Mask),
             torch_to_ctypes(workspace),
-            torch_to_ctypes(O),
+            torch_to_ctypes(output),
             None,  # cu_seqlens
             batch_size,
             seq_len,
@@ -176,7 +176,7 @@ if __name__ == "__main__":
         )
         torch.npu.synchronize()
 
-        o_act = O.float().cpu()
+        o_act = output.float().cpu()
 
         print(f"O max abs diff: {(o_act - O_ref).abs().max().item()}")
         print(f"O is all close? {torch.allclose(o_act, O_ref, rtol=1e-2, atol=1e-2)}")

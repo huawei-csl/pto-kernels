@@ -1,7 +1,6 @@
 import os
 import ctypes
 import torch
-import torch_npu  # noqa: F401  (registers the "npu" device with torch)
 
 
 def swiglu_ref(x):
