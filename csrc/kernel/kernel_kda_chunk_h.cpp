@@ -741,7 +741,7 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
 #if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
       wait_flag_dev(2);
 #else
-      WaitBothVecOnA5<PIPE_MTE3>(2);
+      wait_intra_block(PIPE_MTE3, 2);
       pipe_barrier(PIPE_ALL);
 #endif
       {
