@@ -23,7 +23,7 @@ wheel: clean
 	export CMAKE_GENERATOR="Unix Makefiles" && pip wheel -v . --extra-index-url https://download.pytorch.org/whl/cpu
 
 
-# 'make compile_abs' compiles 'kernel_abs.cpp' into 'libkernel_abs.so' without building the whole wheel package.
+# 'make compile_abs' compiles 'kernel_abs.cpp' into 'build/lib/libkernel_abs.so' without building the whole wheel package.
 # This is useful for development and debugging of individual kernels.
 compile_%:
 	mkdir -p build/lib/
