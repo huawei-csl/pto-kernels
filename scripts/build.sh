@@ -8,7 +8,7 @@ SHORT=v:,
 LONG=soc-version:,
 OPTS=$(getopt -a --options $SHORT --longoptions $LONG -- "$@")
 eval set -- "$OPTS"
-SOC_VERSION="ascend950pr_9599"
+SOC_VERSION="Ascend910B2"
 
 while :; do
     case "$1" in

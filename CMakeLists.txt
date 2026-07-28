@@ -34,7 +34,7 @@ option(USE_ASC_LANGUAGE
        "Compile kernels with the ASC language toolchain (CANN >= 9.0)" ON)
 
 set(BASE_MODE
-    "REGISTER"
+    "MEMORY"
     CACHE STRING "Base addressing mode: MEMORY or REGISTER")
 set_property(CACHE BASE_MODE PROPERTY STRINGS "MEMORY" "REGISTER")
 
