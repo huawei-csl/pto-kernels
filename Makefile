@@ -8,7 +8,7 @@
 PTO_LIB_PATH    ?= $(ASCEND_TOOLKIT_HOME)
 CSRC_KERNEL_DIR := csrc/kernel
 
-.PHONY: clean setup_once build wheel install docs test test_tri_inv compile_all_a5
+.PHONY: clean setup_once build wheel install docs test test_tri_inv
 
 clean:
 	rm -rf build/ dist/ extra-info/ *.egg-info/ kernel_meta/ pto_kernels-*.whl
@@ -52,15 +52,6 @@ compile_a5_%:
 		-Wno-ignored-attributes \
 		$(CSRC_KERNEL_DIR)/kernel_$*.cpp \
 		-o build/lib/libkernel_$*.so
-
-compile_all_a5: compile_a5_abs compile_a5_batch_matrix_square compile_a5_csr_gather \
-	compile_a5_gdn_chunk_cumsum compile_a5_gdn_chunk_h compile_a5_gdn_chunk_o \
-	compile_a5_gdn_scaled_dot_kkt compile_a5_gdn_wy_fast \
-	compile_a5_kda_chunk_h compile_a5_kda_chunk_o compile_a5_kda_gate_cumsum \
-	compile_a5_kda_kkt compile_a5_kda_wy \
-	compile_a5_scan_ul1 compile_a5_simple_matmul compile_a5_swiglu \
-	compile_a5_tri_inv_col_sweep compile_a5_tri_inv_ns compile_a5_tri_inv_rec_unroll \
-	compile_a5_tri_inv_trick
 
 install:
 	python3 -m pip install --force-reinstall pto_kernels-*.whl
