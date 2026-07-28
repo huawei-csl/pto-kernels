@@ -1,5 +1,6 @@
-import os
 import ctypes
+import os
+
 import torch
 import torch.nn.functional as F
 
@@ -149,7 +150,7 @@ if __name__ == "__main__":
         workspace_qk_gated = torch.zeros(
             block_dim, C, C, device=DEVICE, dtype=torch.float16
         )
-        O = torch.zeros(T, H, D, device=DEVICE, dtype=torch.float16)
+        output = torch.zeros(T, H, D, device=DEVICE, dtype=torch.float16)
 
         lib.pto_launch_gdn_chunk_o(
             block_dim,
@@ -163,7 +164,7 @@ if __name__ == "__main__":
             torch_to_ctypes(workspace_qk),
             torch_to_ctypes(workspace_qs_qkv),
             torch_to_ctypes(workspace_qk_gated),
-            torch_to_ctypes(O),
+            torch_to_ctypes(output),
             None,  # cu_seqlens
             batch_size,
             seq_len,
@@ -172,7 +173,7 @@ if __name__ == "__main__":
         torch.npu.synchronize()
 
         o_ref = ref_chunk_o(q_cpu, k_cpu, v_new_fp16, h_out_fp16.float(), g_cumsum)
-        o_act = O.float().cpu()
+        o_act = output.float().cpu()
 
         print(f"O max abs diff: {(o_act - o_ref).abs().max().item()}")
         print(f"O is all close? {torch.allclose(o_act, o_ref, rtol=1e-2, atol=1e-1)}")
