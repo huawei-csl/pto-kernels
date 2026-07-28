@@ -1,7 +1,6 @@
 import pytest
 import torch
-import torch_npu  # noqa
-
+import torch_npu
 from pto_kernels import pto_swiglu
 
 DTYPE = torch.float16

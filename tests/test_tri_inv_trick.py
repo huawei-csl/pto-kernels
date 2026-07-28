@@ -6,12 +6,13 @@
 # for the full License text.
 # --------------------------------------------------------------------------------
 
+import random
+from collections.abc import Callable
+
+import numpy as np
+import pytest
 import torch
 from pto_kernels import pto_tri_inv_trick
-import pytest
-import numpy as np
-import random
-from typing import Callable
 
 random.seed(42)
 torch.manual_seed(42)
@@ -57,7 +58,7 @@ def _test_tri_inv_trick(U: torch.tensor, atol: float, rtol: float, ftol: float):
     Identity = np.ones((n, n), dtype=np.double)
     Identity = np.triu(Identity)
     Identity = np.tril(Identity)
-    golden_numpy = np.zeros((U.shape))
+    golden_numpy = np.zeros(U.shape)
     for x in range(U.shape[0]):
         for y in range(U.shape[1]):
             golden_numpy[x, y] = np.linalg.inv(

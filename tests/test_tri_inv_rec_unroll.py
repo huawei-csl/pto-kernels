@@ -6,11 +6,12 @@
 # for the full License text.
 # --------------------------------------------------------------------------------
 
-import torch
-import pytest
-import numpy as np
 import random
-from typing import Callable
+from collections.abc import Callable
+
+import numpy as np
+import pytest
+import torch
 from pto_kernels import pto_tri_inv_rec_unroll
 
 random.seed(42)
@@ -63,7 +64,7 @@ def block_random_triu_matrix(n, block_dim_x, block_dim_y, scale=0.1):
 def linalg_inv(U: torch.tensor) -> torch.tensor:
     n = U.shape[-1]
     Identity = np.eye(n, dtype=np.double)
-    golden_numpy = np.zeros((U.shape))
+    golden_numpy = np.zeros(U.shape)
     for x in range(U.shape[0]):
         for y in range(U.shape[1]):
             golden_numpy[x, y] = np.linalg.inv(
@@ -216,7 +217,6 @@ def test_tri_inv_rec_unroll(
         (block_ones_triu_matrix, 0, 0, 0, torch.float16),
         (ones_tri_matrix, 0, 0, 0, torch.float16),
         (random_tri_matrix, 5e-5, 0.1, 1e-4, torch.float16),
-        (ones_tri_matrix, 0, 0, 0, torch.float16),
         (
             block_random_triu_matrix,
             5e-4,

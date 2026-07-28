@@ -26,7 +26,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import torch
-
 from pto_kernels import pto_kda_wy
 
 # Compile-time kernel constants (default build: GDN_H=16, GDN_D=128, GDN_C=128)

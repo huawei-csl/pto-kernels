@@ -29,7 +29,6 @@ import numpy as np
 import pytest
 import torch
 import torch.nn.functional as F
-
 from pto_kernels import pto_kda_chunk_h
 
 # Compile-time kernel constants (default build: GDN_H=16, GDN_D=128, GDN_C=128)

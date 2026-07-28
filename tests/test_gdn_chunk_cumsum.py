@@ -18,7 +18,6 @@ import random
 
 import pytest
 import torch
-
 from pto_kernels import pto_gdn_chunk_cumsum
 
 # Compile-time constants — must match GDN_H and GDN_C baked into the kernel binary.

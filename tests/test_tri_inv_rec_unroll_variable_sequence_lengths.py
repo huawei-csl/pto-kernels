@@ -7,11 +7,12 @@
 # --------------------------------------------------------------------------------
 
 
+import random
+
+import numpy as np
+import pytest
 import torch
 import torch.nn.functional as torch_functional
-import pytest
-import numpy as np
-import random
 from pto_kernels import pto_tri_inv_rec_unroll
 
 random.seed(42)
@@ -31,7 +32,7 @@ def generate_random_sequence_lengths(
 
     # num_sequences-1 sorted random integers in the range [1,...,total_tokens-1]
     cummulative_lengths = sorted(
-        list(np.random.choice(total_tokens - 2, num_sequences - 1, replace=False) + 1)
+        np.random.choice(total_tokens - 2, num_sequences - 1, replace=False) + 1
     )
     cummulative_lengths = [0] + cummulative_lengths
     cummulative_lengths.append(total_tokens)

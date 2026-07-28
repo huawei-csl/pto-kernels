@@ -6,8 +6,8 @@
 # for the full License text.
 # --------------------------------------------------------------------------------
 
-import torch
 import pytest
+import torch
 from pto_kernels import pto_scan_ul1
 
 size = [16, 32, 64, 128]

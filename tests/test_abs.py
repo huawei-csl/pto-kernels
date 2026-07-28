@@ -6,9 +6,9 @@
 # for the full License text.
 # --------------------------------------------------------------------------------
 
+import pytest
 import torch
 from pto_kernels import pto_abs
-import pytest
 
 
 @pytest.mark.parametrize("size0", [1, 2, 3, 10, 20, 64, 128])

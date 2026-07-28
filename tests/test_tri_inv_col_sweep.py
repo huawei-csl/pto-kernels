@@ -6,11 +6,12 @@
 # for the full License text.
 # --------------------------------------------------------------------------------
 
+import random
+
+import numpy as np
+import pytest
 import torch
 from pto_kernels import pto_tri_inv
-import pytest
-import numpy as np
-import random
 
 random.seed(42)
 torch.manual_seed(42)

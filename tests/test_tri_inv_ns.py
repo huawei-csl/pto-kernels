@@ -8,12 +8,11 @@
 
 import math
 import random
-from typing import Callable
+from collections.abc import Callable
 
 import numpy as np
 import pytest
 import torch
-
 from pto_kernels import pto_tri_inv_ns
 
 SEED = 42
@@ -73,7 +72,7 @@ def linalg_inv(U: torch.Tensor) -> torch.Tensor:
 
 
 def default_num_iters(n: int) -> int:
-    return int(math.ceil(4.0 * math.log2(n)))
+    return math.ceil(4.0 * math.log2(n))
 
 
 def _test_tri_inv_ns(

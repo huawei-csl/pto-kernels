@@ -10,7 +10,6 @@ import numpy as np
 import pytest
 import torch
 import torch.nn.functional as F
-
 from pto_kernels import pto_gdn_scaled_dot_kkt
 
 # Compile-time kernel constants (default build: GDN_H=16, GDN_HG=16, GDN_D=128, GDN_C=128)

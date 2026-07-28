@@ -1,5 +1,6 @@
-import pytest
 import os
+
+import pytest
 import torch
 
 NPU_DEVICE = os.environ.get("NPU_DEVICE", "npu:1")

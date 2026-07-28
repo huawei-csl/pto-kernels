@@ -23,7 +23,6 @@ import random
 
 import pytest
 import torch
-
 from pto_kernels import pto_kda_gate_cumsum
 
 # Compile-time constants — must match GDN_H, GDN_D, GDN_C baked into the kernel binary.

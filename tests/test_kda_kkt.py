@@ -22,7 +22,6 @@ import numpy as np
 import pytest
 import torch
 import torch.nn.functional as F
-
 from pto_kernels import pto_kda_kkt
 
 # Compile-time kernel constants (default build: KDA_KKT_H=4, KDA_KKT_D=128, KDA_KKT_C=128)

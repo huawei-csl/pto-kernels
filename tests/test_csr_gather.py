@@ -6,9 +6,9 @@
 # for the full License text.
 # --------------------------------------------------------------------------------
 
+import pytest
 import torch
 from pto_kernels import pto_csr_gather
-import pytest
 
 
 def ref_csr_gather(
