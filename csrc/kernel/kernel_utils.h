@@ -8,6 +8,7 @@ for the full License text.
 */
 #pragma once
 
+#include <cstddef>
 #include <pto/pto-inst.hpp>
 #include <type_traits>
 
@@ -47,6 +48,61 @@ template <typename T1, typename T2,
                                   int>::type = 0>
 AICORE inline T1 CeilDiv(T1 value, T2 divisor) {
   return (value + divisor - 1) / divisor;
+}
+
+/**
+ * @brief Square root usable in constant expressions.
+ *
+ * std::sqrt is not constexpr, so compile-time scales (e.g. 1/sqrt(head_size))
+ * are computed here with a fixed 8-step Babylonian (Newton-Raphson) iteration.
+ * That converges to fp32 precision for the tile-dimension-sized inputs this is
+ * used with. Not meant for runtime math: use the hardware sqrt for that.
+ *
+ * @param [in] x Value to take the square root of.
+ * @return sqrt(x), or 0 for non-positive @p x.
+ */
+constexpr AICORE inline float ConstexprSqrt(float x) {
+  if (x <= 0.0f) return 0.0f;
+  float guess = x;
+  for (int i = 0; i < 8; ++i) {
+    guess = 0.5f * (guess + x / guess);
+  }
+  return guess;
+}
+
+/**
+ * @brief Inverse square root usable in constant expressions.
+ *
+ * @param [in] x Value to take the inverse square root of. Must be positive.
+ * @return 1/sqrt(x).
+ */
+constexpr AICORE inline float ConstexprInvSqrt(float x) {
+  return 1.0f / ConstexprSqrt(x);
+}
+
+/**
+ * @brief Byte size of the storage backing a single tile.
+ *
+ * @tparam TileType Tile type to measure.
+ * @return Rows * Cols * sizeof(element type) in bytes.
+ */
+template <typename TileType>
+constexpr AICORE std::size_t TileStorageBytes() {
+  using ElementType = typename TileType::DType;
+  return static_cast<std::size_t>(TileType::Rows * TileType::Cols) *
+         sizeof(ElementType);
+}
+
+/**
+ * @brief Byte size of a ping-pong array of tiles.
+ *
+ * @tparam TileType   Tile type to measure.
+ * @tparam NumBuffers Number of buffers in the array.
+ * @return TileStorageBytes<TileType>() * NumBuffers.
+ */
+template <typename TileType, std::size_t NumBuffers>
+constexpr AICORE std::size_t TileBufferTotalBytes() {
+  return TileStorageBytes<TileType>() * NumBuffers;
 }
 
 #define BSND_OFFSET(tile_id, N, S, D) \

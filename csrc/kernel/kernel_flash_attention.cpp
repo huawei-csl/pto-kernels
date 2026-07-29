@@ -20,6 +20,7 @@ full text of the License.
 #include <pto/common/memory.hpp>
 
 #include "../host/config_flash_attention.h"
+#include "kernel_utils.h"
 
 using namespace std;
 using namespace pto;
@@ -261,19 +262,6 @@ namespace pto {
 // loop.
 constexpr float kCausalMaskNeg = 1e9f;
 
-constexpr PTO_INTERNAL float constexpr_sqrt(float x) {
-  if (x <= 0.0f) return 0.0f;
-  float guess = x;
-  for (int i = 0; i < 8; ++i) {
-    guess = 0.5f * (guess + x / guess);
-  }
-  return guess;
-}
-
-constexpr AICORE inline float constexpr_inv_sqrt(float x) {
-  return 1.0f / constexpr_sqrt(x);
-}
-
 /**
  * @brief Apply the causal mask to the on-diagonal QK score tile.
  *
@@ -354,7 +342,7 @@ AICORE inline void softmax_opt_fa_init_impl(
   (void)exp_max;
   (void)local_sum;
 
-  constexpr float scale = constexpr_inv_sqrt(HEAD_SIZE);
+  constexpr float scale = kernel_utils::ConstexprInvSqrt(HEAD_SIZE);
   using Tile1D_fp32 =
       Tile<TileType::Vec, float, 1, TileDataS1::Rows * TileDataS1::Cols,
            BLayout::RowMajor, 1, TileDataS1::Rows * TileDataS1::Cols>;
@@ -425,7 +413,7 @@ AICORE inline void softmax_opt_fa_not_init_impl(
     ReduceTileD1 __out__ exp_max, TileDataS1 __out__ tmp_float,
     TileDataS1 __out__ p_tile_f32, TileDataS1 triu, TileDataD2 causal_e,
     int s0_index, int s1_index) {
-  constexpr float scale = constexpr_inv_sqrt(HEAD_SIZE);
+  constexpr float scale = kernel_utils::ConstexprInvSqrt(HEAD_SIZE);
 
   using ReduceTileD2 = Tile<TileType::Vec, float, 1, ReduceTileD1::Rows,
                             BLayout::RowMajor, 1, ReduceTileD1::Rows>;
@@ -604,26 +592,14 @@ constexpr bool DAV_VEC = false;
 constexpr std::size_t MAX_TILE_L1_BYTES = 512U * 1024U;
 constexpr std::size_t MAX_VEC_UB_BYTES = 192U * 1024U;
 
-template <typename TileType>
-constexpr AICORE std::size_t tile_storage_bytes() {
-  using ElementType = typename TileType::DType;
-  return static_cast<std::size_t>(TileType::Rows * TileType::Cols) *
-         sizeof(ElementType);
-}
-
-template <typename TileType, std::size_t NumBuffers>
-constexpr AICORE std::size_t tile_buffer_total_bytes() {
-  return tile_storage_bytes<TileType>() * NumBuffers;
-}
-
 /**
  * @brief Assign consecutive L1 addresses to a ping-pong array of tiles.
  *
  * Places @p NumBuffers tiles back-to-back starting at @p base_offset (via
- * TASSIGN), each sized tile_storage_bytes<TileType>(), and returns the offset
- * just past the last tile so callers can chain allocations. A static_assert
- * guards the 512 KB L1 budget. No-op returning @p base_offset when NumBuffers
- * is 0.
+ * TASSIGN), each sized kernel_utils::TileStorageBytes<TileType>(), and returns
+ * the offset just past the last tile so callers can chain allocations. A
+ * static_assert guards the 512 KB L1 budget. No-op returning @p base_offset
+ * when NumBuffers is 0.
  *
  * @tparam TileType   Tile type being placed.
  * @tparam NumBuffers Number of ping-pong buffers.
@@ -639,14 +615,14 @@ AICORE inline uint32_t assign_tile_buffers(TileType (&tiles)[NumBuffers],
   }
 
   constexpr std::size_t total_storage_bytes =
-      tile_buffer_total_bytes<TileType, NumBuffers>();
+      kernel_utils::TileBufferTotalBytes<TileType, NumBuffers>();
   static_assert(total_storage_bytes <= MAX_TILE_L1_BYTES,
                 "Tile buffer L1 allocation exceeds 512KB");
 
   for (std::size_t idx = 0; idx < NumBuffers; ++idx) {
     const uint32_t tile_offset =
         base_offset +
-        static_cast<uint32_t>(idx * tile_storage_bytes<TileType>());
+        static_cast<uint32_t>(idx * kernel_utils::TileStorageBytes<TileType>());
     TASSIGN(tiles[idx], tile_offset);
   }
 
@@ -683,9 +659,10 @@ AICORE inline uint32_t assign_tile_buffers_union(TileA (&tilesA)[NumA],
   }
 
   constexpr std::size_t stride_bytes =
-      (tile_storage_bytes<TileA>() > tile_storage_bytes<TileB>())
-          ? tile_storage_bytes<TileA>()
-          : tile_storage_bytes<TileB>();
+      (kernel_utils::TileStorageBytes<TileA>() >
+       kernel_utils::TileStorageBytes<TileB>())
+          ? kernel_utils::TileStorageBytes<TileA>()
+          : kernel_utils::TileStorageBytes<TileB>();
   constexpr std::size_t total_storage_bytes = stride_bytes * NumA;
   static_assert(total_storage_bytes <= MAX_VEC_UB_BYTES,
                 "Union tile UB allocation exceeds 192KB");
@@ -708,10 +685,10 @@ AICORE inline void allocate_cube_tile_buffers(TileQType (&qTiles)[NumQ],
                                               TilePType (&pTiles)[NumP],
                                               TileVType (&vTiles)[NumV]) {
   constexpr std::size_t total_bytes =
-      tile_buffer_total_bytes<TileQType, NumQ>() +
-      tile_buffer_total_bytes<TileKType, NumK>() +
-      tile_buffer_total_bytes<TilePType, NumP>() +
-      tile_buffer_total_bytes<TileVType, NumV>();
+      kernel_utils::TileBufferTotalBytes<TileQType, NumQ>() +
+      kernel_utils::TileBufferTotalBytes<TileKType, NumK>() +
+      kernel_utils::TileBufferTotalBytes<TilePType, NumP>() +
+      kernel_utils::TileBufferTotalBytes<TileVType, NumV>();
   static_assert(total_bytes <= MAX_TILE_L1_BYTES,
                 "Total cube L1 allocation exceeds 512KB");
 
@@ -733,17 +710,22 @@ AICORE inline void allocate_vec_tile_buffers(
     ReduceTileF_T (&l1_exp_max)[ExpMaxBuffers],
     TileDataH_T (&x_expT)[XexpBuffers], TileOutT (&pvTile)[pvVecBuffers],
     TileOutT &runningOTile, TileDataF_T &triu, TileDataH_T &causal_e) {
-  constexpr std::size_t float_tile_bytes = tile_storage_bytes<TileDataF_T>();
-  constexpr std::size_t reduce_tile_bytes = tile_storage_bytes<ReduceTileF_T>();
+  constexpr std::size_t float_tile_bytes =
+      kernel_utils::TileStorageBytes<TileDataF_T>();
+  constexpr std::size_t reduce_tile_bytes =
+      kernel_utils::TileStorageBytes<ReduceTileF_T>();
   constexpr std::size_t xexp_bytes =
-      tile_buffer_total_bytes<TileDataH_T, XexpBuffers>();
+      kernel_utils::TileBufferTotalBytes<TileDataH_T, XexpBuffers>();
   constexpr std::size_t half_tile_bytes =
-      tile_storage_bytes<TileDataH_T>();  // causal_e (fp16 i-j mask base)
-  constexpr std::size_t out_tile_bytes = tile_storage_bytes<TileOutT>();
+      kernel_utils::TileStorageBytes<TileDataH_T>();  // causal_e (fp16 i-j mask
+                                                      // base)
+  constexpr std::size_t out_tile_bytes =
+      kernel_utils::TileStorageBytes<TileOutT>();
   constexpr std::size_t union_stride =
-      (tile_storage_bytes<TileDataF_T>() > tile_storage_bytes<TileOutT>())
-          ? tile_storage_bytes<TileDataF_T>()
-          : tile_storage_bytes<TileOutT>();
+      (kernel_utils::TileStorageBytes<TileDataF_T>() >
+       kernel_utils::TileStorageBytes<TileOutT>())
+          ? kernel_utils::TileStorageBytes<TileDataF_T>()
+          : kernel_utils::TileStorageBytes<TileOutT>();
   static_assert(
       SrcBuffers == pvVecBuffers,
       "src/pv ping-pong buffer counts must match for union allocation");
