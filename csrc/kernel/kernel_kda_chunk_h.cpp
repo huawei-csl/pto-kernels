@@ -22,9 +22,7 @@
 //   - v_corr (fp16 copy) lives in a dedicated workspace slot (WS_V) so the
 //     Cube K_rest^T @ V_corr GEMM has an fp16 source — the BSND output is fp16.
 //
-// Cross-core sync: same data-flow flags as GDN chunk_h (0-3), plus a
-// full mix-core barrier on entry/exit via SYNCALL<SyncCoreType::Mix>().
-//
+// Cross-core sync: same data-flow flags as GDN chunk_h (0-3).
 // Inputs:
 //   K   [HV, T, K]              fp16  — keys (head-major)
 //   W   [T, HV, K]              fp16  — wy_kda output, cast to fp16 in wrapper

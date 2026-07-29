@@ -496,7 +496,7 @@ AICORE void chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
 #if __CCE_AICORE__ == 220
       wait_flag_dev(1);
 #else
-      WaitBothVecOnA5<PIPE_MTE3>(1);
+      WaitBothVecOnA5<PIPE_MTE2>(1);
       pipe_barrier(PIPE_ALL);
 #endif
       {

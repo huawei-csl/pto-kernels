@@ -29,9 +29,7 @@
 // its own s_snapshots entry).  Cube/Vec still process them sequentially per
 // work item to keep the per-core 4-flag protocol simple.
 //
-// Cross-core sync: same data-flow flags as kda_chunk_h (0-3), plus a
-// full mix-core barrier on entry/exit via SYNCALL<SyncCoreType::Mix>().
-//
+// Cross-core sync: same data-flow flags as kda_chunk_h (0-3).
 // Inputs:
 //   Q       [HV, T, K]               fp16  — queries (head-major)
 //   K       [HV, T, K]               fp16  — keys    (head-major)
@@ -239,7 +237,7 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
 #if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
       wait_flag_dev(0);
 #else
-      WaitBothVecOnA5<PIPE_MTE3>(0);
+      WaitBothVecOnA5<PIPE_MTE2>(0);
       pipe_barrier(PIPE_ALL);
 #endif
 
