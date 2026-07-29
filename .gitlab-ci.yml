@@ -4,7 +4,7 @@ default:
 stages:
    - build_in_docker
    - test
-   - test_aarch64_910B2_py3.12
+   - test_aarch64_910B2
 
 
 # Define the workflow rules manually to make sure only a single pipeline
@@ -56,7 +56,7 @@ build_and_test_x86_910B4:
 
 build_and_test_aarch64_910B2_py3.12:
   image: quay.io/ascend/cann:9.1.0-beta.3-910b-ubuntu22.04-py3.12
-  stage: test_aarch64_910B2_py3.12
+  stage: test_aarch64_910B2
   tags:
     - docker_npu_910B2 # Build and test on-device (aarch64 / 910B2)
   before_script:
@@ -91,7 +91,7 @@ test_pypi_x86_910B4:
 
 test_pypi_aarch64_910B2_py3.11:
   image: quay.io/ascend/cann:9.0.0-910b-ubuntu22.04-py3.11
-  stage: test_aarch64_910B2_py3.11
+  stage: test_aarch64_910B2
   tags:
     - docker_npu_910B2 # Build and test on-device (aarch64 / 910B2)
   before_script:

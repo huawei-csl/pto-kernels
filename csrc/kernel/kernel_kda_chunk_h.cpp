@@ -22,9 +22,7 @@
 //   - v_corr (fp16 copy) lives in a dedicated workspace slot (WS_V) so the
 //     Cube K_rest^T @ V_corr GEMM has an fp16 source — the BSND output is fp16.
 //
-// Cross-core sync: same data-flow flags as GDN chunk_h (0-3), plus SyncAll
-// on entry/exit via kernel_utils::SyncAll<false>().
-//
+// Cross-core sync: same data-flow flags as GDN chunk_h (0-3).
 // Inputs:
 //   K   [HV, T, K]              fp16  — keys (head-major)
 //   W   [T, HV, K]              fp16  — wy_kda output, cast to fp16 in wrapper
@@ -44,6 +42,11 @@
 
 #include "kernel_utils.h"
 using namespace pto;
+using kernel_utils::GetOuterLayout;
+using kernel_utils::PipeBarrierVec;
+using kernel_utils::SetCrossFlag;
+using kernel_utils::SignalBothVecOnA5;
+using kernel_utils::WaitBothVecOnA5;
 
 #ifndef GDN_H
 #define GDN_H 16
@@ -95,15 +98,17 @@ using TileMatL1ZN = pto::Tile<pto::TileType::Mat, T, Rows, Cols,
 
 template <typename T, int32_t Rows, int32_t Cols, int32_t RowValid = Rows,
           int32_t ColValid = Cols>
-using TileMatL0A = pto::Tile<pto::TileType::Left, T, Rows, Cols,
-                             pto::BLayout::RowMajor, RowValid, ColValid,
-                             pto::SLayout::RowMajor, 512, pto::PadValue::Zero>;
+using TileMatL0A =
+    pto::Tile<pto::TileType::Left, T, Rows, Cols,
+              GetOuterLayout(/* isLeft*/ true), RowValid, ColValid,
+              pto::SLayout::RowMajor, 512, pto::PadValue::Zero>;
 
 template <typename T, int32_t Rows, int32_t Cols, int32_t RowValid = Rows,
           int32_t ColValid = Cols>
-using TileMatL0B = pto::Tile<pto::TileType::Right, T, Rows, Cols,
-                             pto::BLayout::RowMajor, RowValid, ColValid,
-                             pto::SLayout::ColMajor, 512, pto::PadValue::Zero>;
+using TileMatL0B =
+    pto::Tile<pto::TileType::Right, T, Rows, Cols,
+              GetOuterLayout(/* isLeft*/ false), RowValid, ColValid,
+              pto::SLayout::ColMajor, 512, pto::PadValue::Zero>;
 
 template <typename T, int32_t Rows, int32_t Cols, int32_t RowValid = Rows,
           int32_t ColValid = Cols, pto::PadValue PadVal = pto::PadValue::Null>
@@ -233,7 +238,6 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
                                __gm__ int32_t* cu_seqlens, int64_t batch_size,
                                int64_t seq_len, int64_t total_tokens) {
   auto cid = get_block_idx();
-  auto block_num = get_block_num();
 
   constexpr int32_t K_DIM = HiddenSize;
   constexpr int32_t V_DIM = HiddenSize;
@@ -316,7 +320,6 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
   int64_t total_work = num_seqs * H;
 
 #if defined(__DAV_CUBE__)
-  kernel_utils::SyncAll<false>();
 
   for (int64_t wi = 0; wi < (total_work + block_num - 1) / block_num; ++wi) {
     int64_t pid = wi * block_num + cid;
@@ -338,7 +341,12 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
     int64_t ws_base = static_cast<int64_t>(cid) * WS_PER_CORE;
 
     for (int32_t ci = 0; ci < num_chunks; ++ci) {
+#if __CCE_AICORE__ == 220
       wait_flag_dev(3);
+#else
+      WaitBothVecOnA5<PIPE_MTE2>(3);
+      pipe_barrier(PIPE_ALL);
+#endif
 
       int64_t chunk_start = bos + static_cast<int64_t>(ci) * C;
       int64_t valid = slen - static_cast<int64_t>(ci) * C;
@@ -381,9 +389,21 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
         TASSIGN(ws_store, 0);
         TSTORE(ws_global, ws_store);
       }
-      ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (0 << 8));
 
+      // ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (0 << 8));
+#if __CCE_AICORE__ == 220
+      SetCrossFlag<PIPE_FIX>(0);
+#else
+      pipe_barrier(PIPE_ALL);
+      SignalBothVecOnA5<PIPE_FIX>(0);
+#endif
+
+#if __CCE_AICORE__ == 220
       wait_flag_dev(1);
+#else
+      WaitBothVecOnA5<PIPE_MTE2>(1);
+      pipe_barrier(PIPE_ALL);
+#endif
 
       {
         GmShape2D k_shape(K_DIM, C);
@@ -421,18 +441,22 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
         TASSIGN(kv_store, C * V_DIM * static_cast<int32_t>(sizeof(float)));
         TSTORE(kv_global, kv_store);
       }
-      ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (2 << 8));
+
+      // ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (2 << 8));
+#if __CCE_AICORE__ == 220
+      SetCrossFlag<PIPE_FIX>(2);
+#else
+      pipe_barrier(PIPE_ALL);
+      SignalBothVecOnA5<PIPE_FIX>(2);
+#endif
     }
   }
 
-  kernel_utils::SyncAll<false>();
 #endif
 
 #if defined(__DAV_VEC__)
   set_mask_norm();
   set_vector_mask(-1, -1);
-
-  kernel_utils::SyncAll<false>();
 
   for (int64_t wi = 0; wi < (total_work + block_num - 1) / block_num; ++wi) {
     int64_t pid = wi * block_num + cid;
@@ -480,7 +504,13 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
       TASSIGN(s_store, S_UB_HALF);
       TSTORE(s_global, s_store);
     }
-    ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (3 << 8));
+    // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (3 << 8));
+#if __CCE_AICORE__ == 220
+    SetCrossFlag<PIPE_MTE3>(3);
+#else
+    pipe_barrier(PIPE_ALL);
+    set_intra_block(PIPE_MTE3, 3);
+#endif
 
     for (int32_t ci = 0; ci < static_cast<int32_t>(num_chunks); ++ci) {
       int64_t chunk_start = bos + static_cast<int64_t>(ci) * C;
@@ -534,7 +564,7 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
           TileUbDataND<half, HalfC, K_DIM, HalfC, K_DIM> k_stg_cvt;
           TASSIGN(k_stg_cvt, K_UB_HALF);
           TCVT(k_ub, k_stg_cvt, pto::RoundMode::CAST_NONE);
-          pipe_barrier(PIPE_V);
+          PipeBarrierVec();
         }
         {
           GmShape2D g_shape(valid_rows, K_DIM);
@@ -574,14 +604,14 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
 
       // ── 3. coeff_2d = exp(g_total - g_cs)  [HalfC, K] ───────────────────
       TCOLEXPAND(coeff_2d_ub, gtotal_ub);
-      pipe_barrier(PIPE_V);
+      PipeBarrierVec();
       TSUB(coeff_2d_ub, coeff_2d_ub, gcs_ub);
-      pipe_barrier(PIPE_V);
+      PipeBarrierVec();
       TEXP(coeff_2d_ub, coeff_2d_ub);
-      pipe_barrier(PIPE_V);
+      PipeBarrierVec();
 
       TMUL(k_ub, k_ub, coeff_2d_ub);
-      pipe_barrier(PIPE_V);
+      PipeBarrierVec();
       TCVT(k_ub_half, k_ub, pto::RoundMode::CAST_NONE);
 
       // ── 4. Reuse GCS_UB region to load U (g_cs is now dead) ──────────────
@@ -611,14 +641,19 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
           TileUbDataND<half, HalfC, V_DIM, HalfC, V_DIM> u_stg_cvt;
           TASSIGN(u_stg_cvt, U_UB_HALF);
           TCVT(u_ub, u_stg_cvt, pto::RoundMode::CAST_NONE);
-          pipe_barrier(PIPE_V);
+          PipeBarrierVec();
         }
       } else {
         TEXPANDS(u_ub, 0.0f);
       }
 
       // ── 5. Wait Cube WS ready, load WS (fp16) into U_UB_HALF buffer ──────
+#if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
       wait_flag_dev(0);
+#else
+      wait_intra_block(PIPE_MTE3, 0);
+      pipe_barrier(PIPE_ALL);
+#endif
       {
         GmShape2D ws_shape(HalfC, V_DIM);
         GmStride2D ws_stride(V_DIM);
@@ -635,9 +670,9 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
       set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
       wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
       TCVT(ws_ub, u_ub_half, pto::RoundMode::CAST_NONE);
-      pipe_barrier(PIPE_V);
+      PipeBarrierVec();
       TSUB(u_ub, u_ub, ws_ub);
-      pipe_barrier(PIPE_V);
+      PipeBarrierVec();
       TCVT(u_ub_half, u_ub, pto::RoundMode::CAST_NONE);
 
       // ── 6. Store V_corr (fp16 to output and workspace WS_V) ──────────────
@@ -674,13 +709,20 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
         TASSIGN(k_store, K_UB_HALF);
         TSTORE(k_global, k_store);
       }
-      ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (1 << 8));
+
+      // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (1 << 8));
+#if __CCE_AICORE__ == 220
+      SetCrossFlag<PIPE_MTE3>(1);
+#else
+      pipe_barrier(PIPE_ALL);
+      set_intra_block(PIPE_MTE3, 1);
+#endif
 
       // ── 7. State decay: S *= exp(g_total) (per-K row, broadcast over V) ──
       set_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
       wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
       TEXP(gtotal_ub, gtotal_ub);
-      pipe_barrier(PIPE_V);
+      PipeBarrierVec();
 
       {
         TileUbDataDN<float, HalfC, 1, HalfC, 1> exp_gt_col;
@@ -689,12 +731,17 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
                                 static_cast<int32_t>(sizeof(float)));
         TROWEXPAND(exp_gt_2d_ub, exp_gt_col);
       }
-      pipe_barrier(PIPE_V);
+      PipeBarrierVec();
       TMUL(s_ub, s_ub, exp_gt_2d_ub);
-      pipe_barrier(PIPE_V);
+      PipeBarrierVec();
 
       // ── 8. Wait Cube KV ready, S += KV ───────────────────────────────────
+#if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
       wait_flag_dev(2);
+#else
+      wait_intra_block(PIPE_MTE3, 2);
+      pipe_barrier(PIPE_ALL);
+#endif
       {
         GmShape2D kv_shape(HalfC, V_DIM);
         GmStride2D kv_stride(V_DIM);
@@ -715,7 +762,7 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
         TASSIGN(kv_load_view, KV_LOAD_UB);
         TCVT(kv_ub, kv_load_view, pto::RoundMode::CAST_NONE);
       }
-      pipe_barrier(PIPE_V);
+      PipeBarrierVec();
       TADD(s_ub, s_ub, kv_ub);
 
       // ── 9. Write fp16(S) to workspace WS_S for next chunk's W @ S ────────
@@ -734,12 +781,18 @@ AICORE void kda_chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
           TASSIGN(s_store, S_UB_HALF);
           TSTORE(s_global, s_store);
         }
-        ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (3 << 8));
+
+        // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (3 << 8));
+#if defined(__CCE_AICORE__) && (__CCE_AICORE__ == 220)
+        SetCrossFlag<PIPE_MTE3>(3);
+#else
+        pipe_barrier(PIPE_ALL);
+        set_intra_block(PIPE_MTE3, 3);
+#endif
       }
     }
   }
 
-  kernel_utils::SyncAll<false>();
 #endif
 }
 

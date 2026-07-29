@@ -172,6 +172,7 @@ ascendc_library(
   csrc/kernel/kernel_gdn_chunk_h.cpp
   csrc/kernel/kernel_gdn_scaled_dot_kkt.cpp
   csrc/kernel/kernel_gdn_chunk_o.cpp
+  csrc/kernel/kernel_gdn_wy_fast.cpp
   csrc/kernel/kernel_scan_ul1.cpp
   csrc/kernel/kernel_simple_matmul.cpp
   csrc/kernel/kernel_batch_matrix_square.cpp
@@ -181,7 +182,6 @@ ascendc_library(
   csrc/kernel/kernel_swiglu.cpp
   csrc/kernel/kernel_kda_gate_cumsum.cpp
   csrc/kernel/kernel_kda_wy.cpp
-  csrc/kernel/kernel_gdn_wy_fast.cpp
   csrc/kernel/kernel_kda_kkt.cpp
   csrc/kernel/kernel_flash_attention.cpp)
 

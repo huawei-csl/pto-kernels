@@ -39,6 +39,7 @@ for the full License text.
 #include "kernel_utils.h"
 
 using namespace pto;
+using namespace kernel_utils;
 
 // ── Compile-time configuration (overridable at build time via -D flags) ──
 #ifndef GDN_H
@@ -116,7 +117,6 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
   constexpr int32_t AUbHalfAddr = GR2dUbAddr;
 
   auto cid = get_block_idx();
-  auto block_num = get_block_num();
   auto vid = get_subblockid();
 
   int64_t num_seqs = batch_size;
@@ -179,9 +179,13 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
 
     for (int64_t ci = 0; ci < num_chunks; ++ci) {
       int32_t slot = static_cast<int32_t>(ci & 1);
-      // Wait for Vec to free this workspace slot
+// Wait for Vec to free this workspace slot
+#if __CCE_AICORE__ == 220
       wait_flag_dev(2 + slot);
+#else
+      WaitBothVecOnA5<PIPE_MTE2>(2 + slot);
       pipe_barrier(PIPE_ALL);
+#endif
 
       int64_t chunk_start = ci * ChunkSize;
       int64_t remaining = slen - chunk_start;
@@ -202,7 +206,8 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
         Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
         _gs.shape[3] = valid_rows;
         _gs.shape[4] = HiddenSize;
-        GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, BSND_QK_STRIDE, 1>>
+        GlobalTensor<half, decltype(_gs),
+                     pto::Stride<1, 1, 1, BSND_QK_STRIDE, 1>>
             _gm(K_handle + k_offset, _gs);
         TLOAD(_l1, _gm);
         if (valid_rows != ChunkSize) TFILLPAD(_l1, _l1);
@@ -240,15 +245,20 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
         Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
         _gs.shape[3] = ChunkSize;
         _gs.shape[4] = ChunkSize;
-        GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, ChunkSize, 1>> _gm(
-            workspace_handle +
-                (static_cast<int64_t>(cid) * 2 + slot) * ChunkSquare,
-            _gs);
+        GlobalTensor<half, decltype(_gs), pto::Stride<1, 1, 1, ChunkSize, 1>>
+            _gm(workspace_handle +
+                    (static_cast<int64_t>(cid) * 2 + slot) * ChunkSquare,
+                _gs);
         TSTORE(_gm, _l0);
       }
 
       // Signal Vec: this slot's KK^T is ready (flag 0 or 1)
-      ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (slot << 8));
+      // ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (slot << 8));
+#if __CCE_AICORE__ == 220
+      SetCrossFlag<PIPE_FIX>(slot);
+#else
+      SignalBothVecOnA5<PIPE_FIX>(slot);
+#endif
     }
   }
 #endif
@@ -268,7 +278,7 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
     Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
     _gs.shape[3] = HalfChunk;
     _gs.shape[4] = ChunkSize;
-    GlobalTensor<float, decltype(_gs), Stride<1, 1, 1, ChunkSize, 1>> _gm(
+    GlobalTensor<float, decltype(_gs), pto::Stride<1, 1, 1, ChunkSize, 1>> _gm(
         Msk_handle + static_cast<int64_t>(vid) * HalfChunk * ChunkSize, _gs);
     UbND<float, HalfChunk, ChunkSize, DYNAMIC, DYNAMIC, PadValue::Zero> _ld(
         HalfChunk, ChunkSize);
@@ -279,8 +289,16 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
   wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
 
   // Release both workspace slots so Cube can start writing immediately
-  ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (2 << 8));
-  ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (3 << 8));
+
+#if __CCE_AICORE__ == 220
+  //  ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (2 << 8));
+  ///  ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (3 << 8));
+  SetCrossFlag<PIPE_MTE3>(2);
+  SetCrossFlag<PIPE_MTE3>(3);
+#else
+  set_intra_block(PIPE_MTE3, 2);
+  set_intra_block(PIPE_MTE3, 3);
+#endif
 
   for (int64_t work_idx = 0;
        work_idx < (total_work + block_num - 1) / block_num; ++work_idx) {
@@ -321,7 +339,7 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
           Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
           _gs.shape[3] = 1;
           _gs.shape[4] = valid_rows;
-          GlobalTensor<float, decltype(_gs), Stride<1, 1, 1, 1, 1>> _gm(
+          GlobalTensor<float, decltype(_gs), pto::Stride<1, 1, 1, 1, 1>> _gm(
               G_handle + static_cast<int64_t>(head_idx) * total_tokens +
                   (bos + chunk_start),
               _gs);
@@ -340,7 +358,7 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
           Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
           _gs.shape[3] = 1;
           _gs.shape[4] = local_valid;
-          GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, 1, 1>> _gm(
+          GlobalTensor<half, decltype(_gs), pto::Stride<1, 1, 1, 1, 1>> _gm(
               Beta_handle + static_cast<int64_t>(head_idx) * total_tokens +
                   (bos + chunk_start + row_offset),
               _gs);
@@ -357,7 +375,11 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
       }
 
       // Wait for Cube to finish writing KK^T for this slot
+#if __CCE_AICORE__ == 220
       wait_flag_dev(slot);
+#else
+      wait_intra_block(PIPE_MTE3, slot);
+#endif
       pipe_barrier(PIPE_ALL);
 
       if (local_valid > 0) {
@@ -368,25 +390,25 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
         TASSIGN(g_ub_temp,
                 GUbAddr + row_offset * static_cast<int32_t>(sizeof(float)));
         TMOV(g_v_ub, g_ub_temp);
-        pipe_barrier(PIPE_V);
+        PipeBarrierVec();
 
         TLOG(beta_ub, beta_ub);
-        pipe_barrier(PIPE_V);
+        PipeBarrierVec();
         TADD(g_v_ub, g_v_ub, beta_ub);
-        pipe_barrier(PIPE_V);
+        PipeBarrierVec();
         TMOV(g_r_ub, g_v_ub);
         TMOV(g_c_ub, g_ub);
-        pipe_barrier(PIPE_V);
+        PipeBarrierVec();
 
         UbDN<float, HalfChunk, 1, HalfChunk, 1> g_r_ub_temp;
         TASSIGN(g_r_ub_temp, GRUbAddr);
         TROWEXPAND(g_r_2d_ub, g_r_ub_temp);
         TCOLEXPAND(g_c_2d_ub, g_c_ub);
-        pipe_barrier(PIPE_V);
+        PipeBarrierVec();
         TSUB(coeff_ub, g_r_2d_ub, g_c_2d_ub);
-        pipe_barrier(PIPE_V);
+        PipeBarrierVec();
         TMINS(coeff_ub, coeff_ub, 0.0f);
-        pipe_barrier(PIPE_V);
+        PipeBarrierVec();
         TEXP(coeff_ub, coeff_ub);
 
         set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
@@ -397,11 +419,11 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
           Shape<1, 1, 1, DYNAMIC, DYNAMIC> _gs;
           _gs.shape[3] = HalfChunk;
           _gs.shape[4] = ChunkSize;
-          GlobalTensor<half, decltype(_gs), Stride<1, 1, 1, ChunkSize, 1>> _gm(
-              workspace_handle +
-                  (static_cast<int64_t>(cid) * 2 + slot) * ChunkSquare +
-                  static_cast<int64_t>(vid) * HalfChunk * ChunkSize,
-              _gs);
+          GlobalTensor<half, decltype(_gs), pto::Stride<1, 1, 1, ChunkSize, 1>>
+              _gm(workspace_handle +
+                      (static_cast<int64_t>(cid) * 2 + slot) * ChunkSquare +
+                      static_cast<int64_t>(vid) * HalfChunk * ChunkSize,
+                  _gs);
           UbND<half, HalfChunk, ChunkSize, DYNAMIC, DYNAMIC, PadValue::Zero>
               _ld(HalfChunk, ChunkSize);
           TASSIGN(_ld, AUbHalfAddr);
@@ -431,7 +453,7 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
           _gs.shape[3] = local_valid;
           _gs.shape[4] = ChunkSize;
           GlobalTensor<half, decltype(_gs),
-                       Stride<1, 1, 1, NumHeads * ChunkSize, 1>>
+                       pto::Stride<1, 1, 1, NumHeads * ChunkSize, 1>>
               _gm(A_handle + a_gm_offset, _gs);
           UbND<half, HalfChunk, ChunkSize, DYNAMIC, DYNAMIC> _st(local_valid,
                                                                  ChunkSize);
@@ -441,8 +463,14 @@ AICORE void kkt_kernel(__gm__ half* K_handle, __gm__ half* Beta_handle,
       }
 
       pipe_barrier(PIPE_ALL);
+
       // Signal Cube that this workspace slot is free for reuse
-      ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | ((2 + slot) << 8));
+      // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | ((2 + slot) << 8));
+#if __CCE_AICORE__ == 220
+      SetCrossFlag<PIPE_MTE3>(2 + slot);
+#else
+      set_intra_block(PIPE_MTE3, 2 + slot);
+#endif
     }
   }
 #endif

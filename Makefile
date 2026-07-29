@@ -20,25 +20,32 @@ build: clean
 	bash scripts/build.sh
 
 wheel: clean
-	export CMAKE_GENERATOR="Unix Makefiles" && pip wheel -v  . --extra-index-url https://download.pytorch.org/whl/cpu
+	export CMAKE_GENERATOR="Unix Makefiles" && pip wheel -v . --extra-index-url https://download.pytorch.org/whl/cpu
 
 
-# 'make compile_abs' compiles 'kernel_abs.cpp' into 'libkernel_abs.so' without building the whole wheel package.
+# 'make compile_abs' compiles 'kernel_abs.cpp' into 'build/lib/libkernel_abs.so' without building the whole wheel package.
 # This is useful for development and debugging of individual kernels.
 compile_%:
+	mkdir -p build/lib/
 	bisheng -fPIC -shared -xcce -DMEMORY_BASE -O2 -std=c++17 \
 		-I$(CSRC_KERNEL_DIR) \
 		-I$(PTO_LIB_PATH)/include \
+	        -I${ASCEND_TOOLKIT_HOME}/pkg_inc \
+		-I${ASCEND_TOOLKIT_HOME}/pkg_inc/runtime \
+		-I${ASCEND_TOOLKIT_HOME}/pkg_inc/profiling \
 		--npu-arch=dav-2201 \
-	    -Wno-ignored-attributes \
+		-Wno-ignored-attributes \
 		$(CSRC_KERNEL_DIR)/kernel_$*.cpp \
-		-o libkernel_$*.so
+		-o build/lib/libkernel_$*.so
 
 compile_a5_%:
 	mkdir -p build/lib/
 	bisheng -fPIC -shared -xcce -DREGISTER_BASE -O2 -std=gnu++17 \
 		-I$(CSRC_KERNEL_DIR) \
 		-I$(PTO_LIB_PATH)/include \
+	        -I${ASCEND_TOOLKIT_HOME}/pkg_inc \
+		-I${ASCEND_TOOLKIT_HOME}/pkg_inc/runtime \
+		-I${ASCEND_TOOLKIT_HOME}/pkg_inc/profiling \
 		--cce-aicore-arch=dav-c310 \
 		-mllvm -cce-aicore-stack-size=0x8000 \
 		-mllvm -cce-aicore-function-stack-size=0x8000 \

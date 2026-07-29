@@ -10,6 +10,7 @@ for the full License text.
 #include "kernel_utils.h"
 
 using namespace pto;
+using namespace kernel_utils;
 
 constexpr uint32_t UB_USABLE_BYTES = 192 * 1024;
 constexpr uint32_t UB_ZERO_ADDR = 0;
@@ -147,7 +148,7 @@ AICORE void runTCsrGather(__gm__ T* values, __gm__ int32_t* indices,
     set_flag(PIPE_MTE2, PIPE_V, EVENT_ID7);
 
     // Wait for mul to be done (previous iteration's computation)
-    pipe_barrier(PIPE_V);
+    PipeBarrierVec();
 
     // Gather
     TGATHER(wTiles, xTiles, idxTiles, tmpTiles);
@@ -170,7 +171,7 @@ AICORE void runTCsrGather(__gm__ T* values, __gm__ int32_t* indices,
     wait_flag(PIPE_MTE3, PIPE_V, ev0);
 
     // Wait for gather to be done
-    pipe_barrier(PIPE_V);
+    PipeBarrierVec();
 
     // Mul
     TMUL(zTiles, valTiles, wTiles);

@@ -38,6 +38,7 @@ for the full License text.
 
 #include "kernel_utils.h"
 using namespace pto;
+using namespace kernel_utils;
 
 // ── Compile-time configuration (overridable at build time via -D flags) ──
 #ifndef GDN_H
@@ -75,13 +76,13 @@ using TileMatL1ZN = pto::Tile<pto::TileType::Mat, T, Rows, Cols,
 template <typename T, int Rows, int Cols, int RowValid = Rows,
           int ColValid = Cols>
 using TileMatL0A = pto::Tile<pto::TileType::Left, T, Rows, Cols,
-                             pto::BLayout::RowMajor, RowValid, ColValid,
+                             GetOuterLayout(true), RowValid, ColValid,
                              pto::SLayout::RowMajor, 512, pto::PadValue::Zero>;
 
 template <typename T, int Rows, int Cols, int RowValid = Rows,
           int ColValid = Cols>
 using TileMatL0B = pto::Tile<pto::TileType::Right, T, Rows, Cols,
-                             pto::BLayout::RowMajor, RowValid, ColValid,
+                             GetOuterLayout(false), RowValid, ColValid,
                              pto::SLayout::ColMajor, 512, pto::PadValue::Zero>;
 
 template <typename T, int Rows, int Cols, int RowValid = Rows,
@@ -273,7 +274,6 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
   constexpr int32_t WsA2Size = ChunkSize * ChunkSize;
 
   auto cid = get_block_idx();
-  auto block_num = get_block_num();
   auto vid = get_subblockid();
 
   int64_t num_seqs = batch_size;
@@ -394,7 +394,7 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
             } else {
               // Empty lower-half tail: zero-fill so Cube sees valid padding
               TEXPANDS(a1_ub, 0.0f);
-              pipe_barrier(PIPE_V);
+              PipeBarrierVec();
               TCVT(a1_ub_half, a1_ub, pto::RoundMode::CAST_NONE);
             }
 
@@ -403,16 +403,22 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 
             // A2 = A * beta_2d   (beta broadcast along columns)
             TCVT(beta_ub, beta_ub_half, pto::RoundMode::CAST_NONE);
-            pipe_barrier(PIPE_V);
+            PipeBarrierVec();
             TMOV(beta_r_ub, beta_ub);
-            pipe_barrier(PIPE_V);
+            PipeBarrierVec();
             TCOLEXPAND(beta_2d_ub, beta_r_ub);
 
             TCVT(a1_ub, a1_ub_half, pto::RoundMode::CAST_NONE);
             TMUL(a2_ub, a1_ub, beta_2d_ub);
             TCVT(a2_ub_half, a2_ub, pto::RoundMode::CAST_NONE);
 
-            if (!first_iter) wait_flag_dev(3);
+            if (!first_iter) {
+#if __CCE_AICORE__ == 220
+              wait_flag_dev(3);
+#else
+              wait_intra_block(PIPE_MTE3, 3);
+#endif
+            }
             set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             {
@@ -426,7 +432,12 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
             }
             pipe_barrier(PIPE_ALL);
             // Signal Cube: A2 workspace ready (flag 2)
-            ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (2 << 8));
+            // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (2 << 8));
+#if __CCE_AICORE__ == 220
+            SetCrossFlag<PIPE_MTE3>(2);
+#else
+            set_intra_block(PIPE_MTE3, 2);
+#endif
 
             // Load G [1 × valid_rows] from [H, total_tokens]
             {
@@ -450,16 +461,22 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 
             // A1 = A * (exp(g)*beta)_2d
             TEXP(g_ub, g_ub);
-            pipe_barrier(PIPE_V);
+            PipeBarrierVec();
             TMUL(g_ub, g_ub, beta_ub);
-            pipe_barrier(PIPE_V);
+            PipeBarrierVec();
             TMOV(g_r_ub, g_ub);
-            pipe_barrier(PIPE_V);
+            PipeBarrierVec();
             TCOLEXPAND(g_2d_ub, g_r_ub);
             TMUL(a1_ub, a1_ub, g_2d_ub);
             TCVT(a1_ub_half, a1_ub, pto::RoundMode::CAST_NONE);
 
-            if (!first_iter) wait_flag_dev(4);
+            if (!first_iter) {
+#if __CCE_AICORE__ == 220
+              wait_flag_dev(4);
+#else
+              wait_intra_block(PIPE_MTE3, 4);
+#endif
+            }
             set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             {
@@ -473,7 +490,13 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
             }
             pipe_barrier(PIPE_ALL);
             // Signal Cube: A1 workspace ready (flag 1)
-            ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (1 << 8));
+            // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (1 << 8));
+#if __CCE_AICORE__ == 220
+            SetCrossFlag<PIPE_MTE3>(1);
+#else
+            set_intra_block(PIPE_MTE3, 1);
+#endif
+
             first_iter = false;
           }
           gi++;
@@ -542,7 +565,7 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               }
             } else {
               TEXPANDS(a1_ub, 0.0f);
-              pipe_barrier(PIPE_V);
+              PipeBarrierVec();
               TCVT(a1_ub_half, a1_ub, pto::RoundMode::CAST_NONE);
             }
 
@@ -551,16 +574,22 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 
             // A2 = A * beta_2d
             TCVT(beta_ub, beta_ub_half, pto::RoundMode::CAST_NONE);
-            pipe_barrier(PIPE_V);
+            PipeBarrierVec();
             TMOV(beta_r_ub, beta_ub);
-            pipe_barrier(PIPE_V);
+            PipeBarrierVec();
             TCOLEXPAND(beta_2d_ub, beta_r_ub);
 
             TCVT(a1_ub, a1_ub_half, pto::RoundMode::CAST_NONE);
             TMUL(a2_ub, a1_ub, beta_2d_ub);
             TCVT(a2_ub_half, a2_ub, pto::RoundMode::CAST_NONE);
 
-            if (!first_iter_v) wait_flag_dev(3);
+            if (!first_iter_v) {
+#if __CCE_AICORE__ == 220
+              wait_flag_dev(3);
+#else
+              wait_intra_block(PIPE_MTE3, 3);
+#endif
+            }
             set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             {
@@ -573,7 +602,12 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TSTORE(workspace_a2_global, a2_ub_half);
             }
             pipe_barrier(PIPE_ALL);
-            ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (2 << 8));
+            // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (2 << 8));
+#if __CCE_AICORE__ == 220
+            SetCrossFlag<PIPE_MTE3>(2);
+#else
+            set_intra_block(PIPE_MTE3, 2);
+#endif
 
             // Load G
             {
@@ -597,16 +631,22 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
 
             // A1 = A * (exp(g)*beta)_2d
             TEXP(g_ub, g_ub);
-            pipe_barrier(PIPE_V);
+            PipeBarrierVec();
             TMUL(g_ub, g_ub, beta_ub);
-            pipe_barrier(PIPE_V);
+            PipeBarrierVec();
             TMOV(g_r_ub, g_ub);
-            pipe_barrier(PIPE_V);
+            PipeBarrierVec();
             TCOLEXPAND(g_2d_ub, g_r_ub);
             TMUL(a1_ub, a1_ub, g_2d_ub);
             TCVT(a1_ub_half, a1_ub, pto::RoundMode::CAST_NONE);
 
-            if (!first_iter_v) wait_flag_dev(4);
+            if (!first_iter_v) {
+#if __CCE_AICORE__ == 220
+              wait_flag_dev(4);
+#else
+              wait_intra_block(PIPE_MTE3, 4);
+#endif
+            }
             set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             {
@@ -619,7 +659,12 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TSTORE(workspace_a1_global, a1_ub_half);
             }
             pipe_barrier(PIPE_ALL);
-            ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (1 << 8));
+            // ffts_cross_core_sync(PIPE_MTE3, 1 | (2 << 4) | (1 << 8));
+#if __CCE_AICORE__ == 220
+            SetCrossFlag<PIPE_MTE3>(1);
+#else
+            set_intra_block(PIPE_MTE3, 1);
+#endif
             first_iter_v = false;
           }
           gi++;
@@ -684,8 +729,14 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               }
             }
 
-            // Wait Vec: A2 ready (flag 2), then GEMM U = A2 @ V
+            // Cube Waits Vec: A2 ready (flag 2), then GEMM U = A2 @ V
+            // The wait must block MTE2: the consuming op is the GM->L1 TLOAD.
+#if __CCE_AICORE__ == 220
             wait_flag_dev(2);
+#else
+            WaitBothVecOnA5<PIPE_MTE2>(2);
+            pipe_barrier(PIPE_ALL);
+#endif
             {
               GmShape2D a2_shape(ChunkSize, ChunkSize);
               GmStride2D a2_stride(ChunkSize);
@@ -710,11 +761,22 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TASSIGN(u_store, 0);
               TSTORE(u_global, u_store);
             }
-            // Signal Vec: A2 slot free (flag 3)
-            ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (3 << 8));
+            // Cube Signal Vec: A2 slot free (flag 3)
+            // ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (3 << 8));
+#if __CCE_AICORE__ == 220
+            SetCrossFlag<PIPE_FIX>(3);
+#else
+            SignalBothVecOnA5<PIPE_FIX>(3);
+#endif
 
-            // Wait Vec: A1 ready (flag 1), then GEMM W = A1 @ K
+            // Cube Waits Vec: A1 ready (flag 1), then GEMM W = A1 @ K
+            // The wait must block MTE2: the consuming op is the GM->L1 TLOAD.
+#if __CCE_AICORE__ == 220
             wait_flag_dev(1);
+#else
+            WaitBothVecOnA5<PIPE_MTE2>(1);
+            pipe_barrier(PIPE_ALL);
+#endif
             {
               GmShape2D a1_shape(ChunkSize, ChunkSize);
               GmStride2D a1_stride(ChunkSize);
@@ -739,8 +801,12 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TASSIGN(w_store, 65536);
               TSTORE(w_global, w_store);
             }
-            // Signal Vec: A1 slot free (flag 4)
-            ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (4 << 8));
+            // Cube Signal Vec: A1 slot free (flag 4)
+#if __CCE_AICORE__ == 220
+            SetCrossFlag<PIPE_FIX>(4);
+#else
+            SignalBothVecOnA5<PIPE_FIX>(4);
+#endif
           }
           gi++;
         }
@@ -799,7 +865,15 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               }
             }
 
+            // Cube Waits Vec: A2 ready (flag 2), then GEMM U = A2 @ V
+            // The wait must block MTE2: the consuming op is the GM->L1 TLOAD.
+#if __CCE_AICORE__ == 220
             wait_flag_dev(2);
+            pipe_barrier(PIPE_ALL);
+#else
+            WaitBothVecOnA5<PIPE_MTE2>(2);
+            pipe_barrier(PIPE_ALL);
+#endif
             {
               GmShape2D a2_shape(ChunkSize, ChunkSize);
               GmStride2D a2_stride(ChunkSize);
@@ -824,9 +898,22 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TASSIGN(u_store, 0);
               TSTORE(u_global, u_store);
             }
-            ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (3 << 8));
+            // ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (3 << 8));
+#if __CCE_AICORE__ == 220
+            SetCrossFlag<PIPE_FIX>(3);
+#else
+            SignalBothVecOnA5<PIPE_FIX>(3);
+#endif
 
+            // Cube Waits Vec: A1 ready (flag 1), then GEMM W = A1 @ K
+            // The wait must block MTE2: the consuming op is the GM->L1 TLOAD.
+#if __CCE_AICORE__ == 220
             wait_flag_dev(1);
+            pipe_barrier(PIPE_ALL);
+#else
+            WaitBothVecOnA5<PIPE_MTE2>(1);
+            pipe_barrier(PIPE_ALL);
+#endif
             {
               GmShape2D a1_shape(ChunkSize, ChunkSize);
               GmStride2D a1_stride(ChunkSize);
@@ -851,7 +938,13 @@ AICORE void wy_fast_kernel(__gm__ half* K_handle, __gm__ half* V_handle,
               TASSIGN(w_store, 65536);
               TSTORE(w_global, w_store);
             }
-            ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (4 << 8));
+            // Signal both Vecs: A1 slot free (flag 4)
+            // ffts_cross_core_sync(PIPE_FIX, 1 | (2 << 4) | (4 << 8));
+#if __CCE_AICORE__ == 220
+            SetCrossFlag<PIPE_FIX>(4);
+#else
+            SignalBothVecOnA5<PIPE_FIX>(4);
+#endif
           }
           gi++;
         }
