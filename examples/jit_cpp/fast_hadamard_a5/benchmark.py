@@ -27,11 +27,12 @@ import torch
 import torch_npu  # noqa
 
 from jit_a5 import compile_so, entry, stream_ptr
-from jit_util_a5 import N, rows_for
+from jit_util_a5 import DISPATCH_ARGS, N, rows_for
 
 HERE = Path(__file__).resolve().parent
 SRC = HERE / "fast_hadamard_256_a5.cpp"
 CSRC = HERE / "copy_ref_256_a5.cpp"
+BUILDDIR = HERE / "build"
 ROWS_LIST = [16, 32, 64, 128]
 BATCHES = [1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144]  # 2^10..2^18
 COPY_ROWS = 64  # fixed, UB-valid tiling for the copy-floor reference
@@ -45,6 +46,15 @@ def cfg(rows):
     return nbuf, min(2, nbuf - 1)
 
 
+@functools.lru_cache(maxsize=1)
+def dispatch_lib():
+    """The one .so that serves every N; its launcher takes n as a 5th argument."""
+    so = compile_so(
+        SRC, "g256_dispatch", (), out_dir=BUILDDIR, verbose=False, force=True
+    )
+    return entry(so, "call_hadamard", DISPATCH_ARGS)
+
+
 def build(rows, nbuf, pf, tag, src=None, extra=()):
     """Build one variant; returns the ctypes handle with its launcher bound.
 
@@ -53,13 +63,19 @@ def build(rows, nbuf, pf, tag, src=None, extra=()):
     src = Path(src) if src else SRC
     # derived, not passed: a per-call-site launcher argument silently bound the
     # transform's symbol against the copy .so whenever a call site omitted it
-    launcher = "call_copy256" if "copy_ref" in src.name else "call_hadamard256"
+    copy = "copy_ref" in src.name
+    launcher = "call_copy256" if copy else "call_hadamard_tuned"
     defs = (f"-DROWS_PER_TILE={rows}", f"-DNBUF={nbuf}", f"-DPREFETCH={pf}", *extra)
+    if not copy:
+        # The tuning entry point is opt-in and deliberately has no
+        # defaults, so every shape macro must be passed; the grid only
+        # ever sweeps N=256.
+        defs = ("-DHAD_TUNE", f"-DHAD_N={N}", *defs)
     so = compile_so(
         src,
         f"g256_{tag}",
         defs,
-        out_dir=HERE / "build",
+        out_dir=BUILDDIR,
         verbose=False,
         force=True,
     )
@@ -74,7 +90,7 @@ def stream():
     return stream_ptr()
 
 
-def gbs_median(fn, bd, batch, n=N):
+def gbs_median(fn, bd, batch, n=N, dispatch_n=None):
     """Median bandwidth over TRIALS, each trial = r reps over a POOL round-robin."""
     data = 2 * batch * n * 2
     r = 50
@@ -85,7 +101,8 @@ def gbs_median(fn, bd, batch, n=N):
     def one():
         b = pool[it["k"] % POOL]
         it["k"] += 1
-        fn(bd, stream(), ctypes.c_void_p(b.data_ptr()), batch)
+        args = (bd, stream(), ctypes.c_void_p(b.data_ptr()), batch)
+        fn(*args, dispatch_n) if dispatch_n else fn(*args)
 
     for _ in range(8):
         one()
@@ -121,14 +138,15 @@ def hadamard_matrix(n):
     return matrix
 
 
-def rel_err(fn, bd, n, rows):
+def rel_err(fn, bd, n, rows, dispatch_n=None):
     """Max relative error vs a torch reference; gates every timing below."""
     batch = rows * 4
     rng = np.random.default_rng(n)
     x_np = rng.standard_normal((batch, n)).astype(np.float16)
     ref = x_np.astype(np.float32) @ hadamard_matrix(n)
     x = torch.from_numpy(x_np).npu()
-    fn(bd, stream(), ctypes.c_void_p(x.data_ptr()), batch)
+    args = (bd, stream(), ctypes.c_void_p(x.data_ptr()), batch)
+    fn(*args, dispatch_n) if dispatch_n else fn(*args)
     torch.npu.synchronize()
     out = x.cpu().numpy().astype(np.float32)
     return float(np.abs(out - ref).max()) / (float(np.abs(ref).max()) or 1.0)
@@ -141,15 +159,14 @@ def nsweep(bd):
         rows = rows_for(n)
         batch = (NSWEEP_TOTAL_ELEMS // n // rows) * rows
         chunks = max(1, (n // 2) // 128)
-        defs = (f"-DHAD_N={n}",)
-        lib = build(rows, 4, 2, f"n{n}", extra=defs)
-        err = rel_err(lib, bd, n, rows)
+        lib = dispatch_lib()
+        err = rel_err(lib, bd, n, rows, n)
         if err >= 0.03:
             line = f"{n},{chunks},{rows},{batch},{err:.5f},,,"
             print(line + "   # WRONG -- not timed")
             out.append(line)
             continue
-        hg = gbs_median(lib, bd, batch, n=n)
+        hg = gbs_median(lib, bd, batch, n=n, dispatch_n=n)
         cl = build(
             rows,
             4,
@@ -163,7 +180,7 @@ def nsweep(bd):
         print(line)
         sys.stdout.flush()
         out.append(line)
-    (HERE / "build/nsweep256.csv").write_text("\n".join(out) + "\n")
+    (BUILDDIR / "nsweep256.csv").write_text("\n".join(out) + "\n")
     print("NSWEEP DONE")
 
 
@@ -189,13 +206,13 @@ def main():
         for batch in BATCHES:
             if batch % rows != 0:
                 continue
-            hg = gbs_median(lib, bd, batch)
+            hg = gbs_median(lib, bd, batch, dispatch_n=None)
             cg = copy_ref[batch]
             line = f"{rows},{nbuf},{batch},{hg:.1f},{cg:.1f},{hg/cg:.4f}"
             print(line)
             sys.stdout.flush()
             out.append(line)
-    (HERE / "build/grid256.csv").write_text("\n".join(out) + "\n")
+    (BUILDDIR / "grid256.csv").write_text("\n".join(out) + "\n")
     print(
         f"# copy-floor peak = {max(copy_ref.values()):.1f} GB/s (should be < ~3300 = HBM ceiling)"
     )

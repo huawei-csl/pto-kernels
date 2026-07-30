@@ -21,7 +21,14 @@ import pytest
 torch = pytest.importorskip("torch")
 pytest.importorskip("torch_npu")
 
-from jit_util_a5 import N, build_and_load, rows_for  # noqa: E402
+from jit_util_a5 import (  # noqa: E402
+    N,
+    build_and_load,
+    compile_kernel,
+    kernel_rows_for,
+    load_lib,
+    rows_for,
+)
 
 TOLERANCE = 0.03  # fp16 accumulation over log2(N) butterfly stages
 
@@ -61,18 +68,24 @@ def test_matches_torch_reference(hadamard256, batch):
     assert_matches_reference(hadamard256, N, batch, batch, f"batch={batch}")
 
 
-# 64/128 use a partly-filled vector (chunks=1); 256 fills it exactly; 512/1024/2048
+# 32/64/128 pack multiple rows per window; 256 fills a vector exactly; 512/1024/2048
 # are chunks=2/4/8 and are the cases the slot ordering exists for.
-@pytest.mark.parametrize("n", [64, 128, 256, 512, 1024, 2048])
+@pytest.mark.parametrize("n", [32, 64, 128, 256, 512, 1024, 2048])
 def test_matches_torch_reference_at_block_size(n):
     kernel = build_and_load(n=n, verbose=False)
     # a few tiles, so the chunk loop actually iterates
     assert_matches_reference(kernel, n, 4 * rows_for(n), n, f"n={n}")
 
 
-def test_block_size_must_be_power_of_two():
-    with pytest.raises(ValueError, match="power of two"):
-        build_and_load(n=192, verbose=False)
+@pytest.mark.parametrize("bad_n", [16, 192, 4096, 0])
+def test_unsupported_block_size_is_rejected(bad_n):
+    # Not cosmetic: the dispatching launcher's default case is a silent no-op, so
+    # an unvalidated n returns the input unchanged rather than failing. Both
+    # compile_kernel and load_lib must reject it.
+    with pytest.raises(ValueError):
+        build_and_load(n=bad_n, verbose=False)
+    with pytest.raises(ValueError):
+        load_lib(compile_kernel(verbose=False), n=bad_n)
 
 
 # For N<256 the kernel packs 256/N rows into one vector-wide window, so a window can
@@ -105,3 +118,15 @@ def test_padding_cannot_contaminate_packed_rows(n):
     assert np.array_equal(
         outs[0].view(np.uint16), outs[1].view(np.uint16)
     ), f"n={n}: inf/nan padding changed the real rows -- packed rows are mixing"
+
+
+# rows_for() is stated in Python (the padding wrapper needs it before any .so
+# exists) and again as RowsFor<N> in the kernel. Pin them together.
+def test_rows_for_matches_kernel():
+    query = kernel_rows_for(compile_kernel(verbose=False))
+    mismatched = {
+        n: (rows_for(n), query(n))
+        for n in (32, 64, 128, 256, 512, 1024, 2048)
+        if rows_for(n) != query(n)
+    }
+    assert not mismatched, f"host/kernel tiling disagree: {mismatched}"

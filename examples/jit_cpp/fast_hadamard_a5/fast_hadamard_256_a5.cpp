@@ -7,18 +7,23 @@
 #include <utility>
 using namespace pto;
 
-#ifndef HAD_N
-#define HAD_N 256
-#endif
-#ifndef ROWS_PER_TILE
-#define ROWS_PER_TILE 64
-#endif
-#ifndef NBUF
-#define NBUF 4
-#endif
-#ifndef PREFETCH
-#define PREFETCH 2
-#endif
+// Supported block sizes. One instantiation each; call_hadamard dispatches on n.
+#define HAD_SIZES(F) F(32) F(64) F(128) F(256) F(512) F(1024) F(2048)
+
+// Default pipeline shape. ROWS is derived per N below; these two are flat.
+constexpr unsigned DEF_BUFFERS = 4;  // measured: 6 is ~1% slower, not faster
+constexpr unsigned DEF_PREFETCH = 2;
+
+// A 32 KB tile, floored at 8 rows. Must agree with rows_for() in
+// jit_util_a5.py, which the padding wrapper needs before any .so exists; a test
+// pins that. 2u, not sizeof(half): this is read in the host pass, where half is
+// absent.
+constexpr unsigned TILE_BYTES = 32u * 1024u;
+template <unsigned N>
+struct RowsFor {
+  static constexpr unsigned quotient = TILE_BYTES / (N * 2u);
+  static constexpr unsigned value = quotient > 8u ? quotient : 8u;
+};
 
 #ifdef __CCE_AICORE__
 constexpr unsigned F16_LANES = sizeof(vector_f16) / sizeof(half);
@@ -70,6 +75,9 @@ struct KernelShape {
       (tile_elems * sizeof(half) + UB_ALIGN - 1) & ~(UB_ALIGN - 1);
 
   static_assert(N >= 32 && N <= 2048 && !(N & (N - 1)), "N: pow2 in [32,2048]");
+  static_assert(sizeof(half) == 2, "RowsFor assumes 2-byte elements");
+  static_assert(Rows == RowsFor<N>::value || Rows != 0,
+                "Rows must be positive");
   static_assert(chunks <= SLOTS && SLOTS % chunks == 0, "N too wide to unroll");
   static_assert(upper % lanes == 0, "half a group must be whole vectors");
   static_assert(rows_per_window == 1 || chunks == 1,
@@ -236,6 +244,44 @@ __global__ AICORE void hadamard(__gm__ void *x_gm, uint32_t batch) {
 #endif
 }
 
-extern "C" void call_hadamard256(uint32_t bd, void *s, uint8_t *x, uint32_t b) {
-  hadamard<HAD_N, ROWS_PER_TILE, NBUF, PREFETCH><<<bd, nullptr, s>>>(x, b);
+// One .so serves every size: the caller passes n and this picks the
+// instantiation, so no -D and no per-N rebuild.
+extern "C" void call_hadamard(uint32_t bd, void *stream, uint8_t *x,
+                              uint32_t batch, uint32_t n) {
+#define LAUNCH(SZ)                                              \
+  case SZ:                                                      \
+    hadamard<SZ, RowsFor<SZ>::value, DEF_BUFFERS, DEF_PREFETCH> \
+        <<<bd, nullptr, stream>>>(x, batch);                    \
+    return;
+  switch (n) {
+    HAD_SIZES(LAUNCH)
+    default:
+      return;  // unsupported n; the caller validates before getting here
+  }
+#undef LAUNCH
 }
+
+// So the host does not have to restate the tiling rule.
+extern "C" uint32_t hadamard_rows_for(uint32_t n) {
+#define ROWS_CASE(SZ) \
+  case SZ:            \
+    return RowsFor<SZ>::value;
+  switch (n) {
+    HAD_SIZES(ROWS_CASE)
+    default:
+      return 0;
+  }
+#undef ROWS_CASE
+}
+
+// Tuning entry point for the benchmark's (ROWS x NBUF) sweep, which varies
+// shape beyond what the dispatcher fixes. Deliberately has NO defaults: a
+// tuning build must pass all four -D, or it fails to compile rather than
+// silently measuring 256/64/4/2.
+#ifdef HAD_TUNE
+extern "C" void call_hadamard_tuned(uint32_t bd, void *stream, uint8_t *x,
+                                    uint32_t batch) {
+  hadamard<HAD_N, ROWS_PER_TILE, NBUF, PREFETCH>
+      <<<bd, nullptr, stream>>>(x, batch);
+}
+#endif
