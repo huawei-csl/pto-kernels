@@ -1,10 +1,10 @@
 // fast_hadamard_256_a5 — Walsh-Hadamard by deinterleave-load butterfly.
-// The even/odd split rides the MTE2 load (vlds DINTLV_B16) and the
-// halves-concat recombine rides the MTE3 store, so only vadd/vsub reach the
-// vector pipe. In-place on a UB tile. N = 32..2048, each within 0.90..0.96 of
-// its own DMA copy floor; the floor reference is copy_ref_256_a5.cpp, built
-// separately.
+// The even/odd split rides the MTE2 load (vlds DINTLV_B16) and the concat
+// of halves rides the MTE3 store, so only vadd/vsub reach the vector pipe.
+// In-place on a UB tile. N = 32..2048, each within 0.90..0.96 of its own DMA
+// copy floor; that floor is measured by copy_ref_256_a5.cpp, built separately.
 #include <pto/pto-inst.hpp>
+#include <utility>
 using namespace pto;
 
 #ifndef HAD_N
@@ -21,173 +21,215 @@ using namespace pto;
 #endif
 
 #ifdef __CCE_AICORE__
-constexpr unsigned VL16 = sizeof(vector_f16) / sizeof(half);  // lanes/register
-constexpr unsigned WIN = 2 * VL16;  // butterfly window: two registers
-constexpr unsigned SLOTS = 8;       // DOU() below is hand-written this wide
-static_assert(SLOTS == 8, "DOU() emits 8 slots; GPI is derived from SLOTS");
-constexpr unsigned EVENTS = 8;  // size of ev[] below
+constexpr unsigned F16_LANES = sizeof(vector_f16) / sizeof(half);
+constexpr unsigned WINDOW = 2 * F16_LANES;  // butterfly window: two registers
+constexpr unsigned SLOTS = 8;        // unroll width: register sets per sweep
+constexpr unsigned EVENT_SLOTS = 8;  // size of buffer_free[] below
 constexpr unsigned UB_ALIGN = 512;
-// The toolkit's own UB size: 256 KB on A5, 192 on A2/A3, 128 on Kirin. Defined
-// only in the device pass, like __DAV_VEC__, which is why it is read in here.
+// 256 KB on A5, 192 on A2/A3, 128 on Kirin. Defined in the device pass only.
 constexpr unsigned UB_BYTES = PTO_UBUF_SIZE_BYTES;
 
-// A constexpr *function* cannot be called from [aicore] code; a value template
-// can.
-template <unsigned N>
+// A constexpr *function* cannot be called from [aicore] code; a value
+// template can.
+template <unsigned Value>
 struct Log2 {
-  static constexpr unsigned v = 1 + Log2<(N >> 1)>::v;
+  static constexpr unsigned value = 1 + Log2<(Value >> 1)>::value;
 };
 template <>
 struct Log2<1> {
-  static constexpr unsigned v = 0;
+  static constexpr unsigned value = 0;
 };
 
-// Shape of one instantiation. A "group" is the unit one unroll slot processes.
-//   N < WIN  PACK:  R rows share a window. The split is on the low bit of the
-//                   within-row index, so rows never mix; the result emerges
-//                   rotated right by log2(N), which ROT vdintlv rounds undo.
-//   N > WIN  CHUNK: stages pair adjacent elements and their output halves
-//                   concatenate, so a row splits into independent WIN chunks.
-// Packing and chunking are mutually exclusive, asserted below.
-template <unsigned N, unsigned ROWS, unsigned NB, unsigned PF>
-struct Cfg {
-  static constexpr unsigned LOG2N = Log2<N>::v, LOG2W = Log2<WIN>::v;
-  static constexpr unsigned R = N < WIN ? WIN / N : 1;  // rows per window
-  static constexpr unsigned GRP = N * R;                // == WIN when N <= WIN
-  static constexpr unsigned ROT = LOG2W - (LOG2N < LOG2W ? LOG2N : LOG2W);
-  static constexpr unsigned PEEL = ROT ? 1 : 0;  // stages peeled off the sweep
-  static constexpr unsigned LANES = GRP / 2;  // half a window, not half a row
-  static constexpr unsigned VL = LANES < VL16 ? LANES : VL16;
-  static constexpr unsigned CHUNKS = LANES / VL;
-  static constexpr unsigned GPI = SLOTS / CHUNKS;  // groups per iteration
-  static constexpr unsigned GROUPS = ROWS / R, ITERS = GROUPS / GPI;
-  static constexpr unsigned FLAT = ROWS * N;  // f16 elements per tile
-  static constexpr unsigned XSTRIDE =
-      (FLAT * sizeof(half) + UB_ALIGN - 1) & ~(UB_ALIGN - 1);
+// Shape of one instantiation. A "group" is the unit one unroll slot handles.
+//
+// PACK (N < WINDOW): rows_per_window rows share a window. The split is on the
+// low bit of the within-row index, so rows never mix; the result emerges
+// rotated right by log2(N), which `rotations` vdintlv rounds undo.
+//
+// CHUNK (N > WINDOW): stages pair adjacent elements and their output halves
+// concatenate, so a row splits into independent WINDOW-sized chunks.
+//
+// The two are mutually exclusive, asserted below.
+template <unsigned N, unsigned Rows, unsigned Buffers, unsigned Prefetch>
+struct KernelShape {
+  static constexpr unsigned log2_n = Log2<N>::value;
+  static constexpr unsigned log2_window = Log2<WINDOW>::value;
+  static constexpr unsigned rows_per_window = N < WINDOW ? WINDOW / N : 1;
+  static constexpr unsigned group =
+      N * rows_per_window;  // == WINDOW if N <= WINDOW
+  static constexpr unsigned rotations =
+      log2_window - (log2_n < log2_window ? log2_n : log2_window);
+  static constexpr unsigned upper = group / 2;  // half a WINDOW, not half a row
+  static constexpr unsigned lanes = upper < F16_LANES ? upper : F16_LANES;
+  static constexpr unsigned chunks = upper / lanes;  // 1 for N <= WINDOW
+  static constexpr unsigned groups_per_iter = SLOTS / chunks;
+  static constexpr unsigned iters = Rows / rows_per_window / groups_per_iter;
+  static constexpr unsigned sweep_stride = groups_per_iter * group;
+  static constexpr unsigned tile_elems = Rows * N;
+  static constexpr unsigned tile_stride =
+      (tile_elems * sizeof(half) + UB_ALIGN - 1) & ~(UB_ALIGN - 1);
 
   static_assert(N >= 32 && N <= 2048 && !(N & (N - 1)), "N: pow2 in [32,2048]");
-  static_assert(CHUNKS <= SLOTS && SLOTS % CHUNKS == 0, "N too wide to unroll");
-  static_assert(LANES % VL == 0, "GRP/2 must be whole vectors");
-  static_assert(R == 1 || CHUNKS == 1, "pack and chunk are exclusive");
-  static_assert(ROWS % R == 0, "ROWS must be a multiple of WIN/N");
-  static_assert(GROUPS % GPI == 0, "GROUPS must be a multiple of GPI");
-  static_assert(NB * XSTRIDE <= UB_BYTES, "UB overflow");
-  static_assert(NB <= EVENTS, "NBUF exceeds the event-id array");
-  static_assert(PF < NB, "PF == NB drains every MTE3->MTE2 token: deadlock");
+  static_assert(chunks <= SLOTS && SLOTS % chunks == 0, "N too wide to unroll");
+  static_assert(upper % lanes == 0, "half a group must be whole vectors");
+  static_assert(rows_per_window == 1 || chunks == 1,
+                "pack and chunk are exclusive");
+  static_assert(Rows % rows_per_window == 0,
+                "Rows must be a multiple of WINDOW/N");
+  static_assert(Rows / rows_per_window % groups_per_iter == 0,
+                "groups per tile must divide by groups_per_iter");
+  static_assert(Buffers * tile_stride <= UB_BYTES, "UB overflow");
+  static_assert(Buffers <= EVENT_SLOTS, "NBUF exceeds the event-id array");
+  static_assert(Prefetch < Buffers,
+                "PREFETCH == NBUF drains every MTE3->MTE2 token: deadlock");
 };
 
 #ifdef __DAV_VEC__
-#define DOU(M) M(0) M(1) M(2) M(3) M(4) M(5) M(6) M(7)
+using RegSet = vector_f16[SLOTS];
 
-template <unsigned N, unsigned ROWS, unsigned NB, unsigned PF>
-__tf__ static AICORE void bfly(__ubuf__ half *wb) {
-  using C = Cfg<N, ROWS, NB, PF>;
-  constexpr unsigned GRP = C::GRP, LANES = C::LANES, VL = C::VL;
-  constexpr unsigned CHUNKS = C::CHUNKS, GPI = C::GPI, ITERS = C::ITERS;
+// One unrolled sweep: SLOTS groups loaded, combined and stored back.
+//
+// Slot i covers (group, chunk) = (i / chunks, i % chunks), so all loads precede
+// all stores. Required, not stylistic: a stage's sums compact into the group's
+// lower half, which a lower-numbered chunk still has to read, so a per-chunk
+// load/store loop aliases in place -- and it passes at group=512 before
+// silently corrupting at larger sizes. The comma fold evaluates left to right,
+// which is what holds that ordering.
+//
+// Slot indices come from an index_sequence pack rather than a loop: a vector
+// register array indexed by a `#pragma unroll` loop variable crashes the
+// backend
+// ("Unsupported Inst must be hoisted"), while a pack index is a true
+// compile-time constant. That is what lets this be ordinary code instead of
+// token-pasting macros.
+//
+// Rotations > 0 fuses the packing tail into this sweep: each vdintlv rotates
+// the window right by one and ping-pongs into the pair vadd/vsub just freed, so
+// it costs no extra registers, no UB traffic, no barrier, and cannot alias --
+// which a rotation through UB would. Device-verified for 1, 2 and 3 rounds
+// against ror(index, k). An odd count leaves the result in (even, odd).
+template <typename Shape, unsigned Rotations, std::size_t... Slot>
+inline AICORE void sweep(__ubuf__ half *tile, uint32_t base, MaskReg all,
+                         RegSet &even, RegSet &odd, RegSet &sum, RegSet &diff,
+                         std::index_sequence<Slot...>) {
+  constexpr unsigned g = Shape::group, up = Shape::upper;
+  constexpr unsigned ln = Shape::lanes, ch = Shape::chunks;
+  (vlds(even[Slot], odd[Slot],
+        tile + base + Slot / ch * g + Slot % ch * 2u * ln, 0, DINTLV_B16),
+   ...);
+  (vadd(sum[Slot], even[Slot], odd[Slot], all), ...);
+  (vsub(diff[Slot], even[Slot], odd[Slot], all), ...);
+  if constexpr (Rotations >= 1) {
+    (vdintlv(even[Slot], odd[Slot], sum[Slot], diff[Slot]), ...);
+  }
+  if constexpr (Rotations >= 2) {
+    (vdintlv(sum[Slot], diff[Slot], even[Slot], odd[Slot]), ...);
+  }
+  if constexpr (Rotations >= 3) {
+    (vdintlv(even[Slot], odd[Slot], sum[Slot], diff[Slot]), ...);
+  }
+  RegSet &lo = (Rotations % 2 == 1) ? even : sum;
+  RegSet &hi = (Rotations % 2 == 1) ? odd : diff;
+  (vsts(lo[Slot], tile + base + Slot / ch * g + Slot % ch * ln, 0, NORM_B16,
+        all),
+   ...);
+  (vsts(hi[Slot], tile + base + Slot / ch * g + up + Slot % ch * ln, 0,
+        NORM_B16, all),
+   ...);
+}
+
+template <unsigned N, unsigned Rows, unsigned Buffers, unsigned Prefetch>
+__tf__ static AICORE void butterfly(__ubuf__ half *tile) {
+  using Shape = KernelShape<N, Rows, Buffers, Prefetch>;
+  constexpr auto slots = std::make_index_sequence<SLOTS>{};
   __VEC_SCOPE__ {
-    uint32_t la = VL;
-    MaskReg pAll = CreatePredicate<half>(la);
-    vector_f16 e0, e1, e2, e3, e4, e5, e6, e7, o0, o1, o2, o3, o4, o5, o6, o7;
-    vector_f16 s0, s1, s2, s3, s4, s5, s6, s7, d0, d1, d2, d3, d4, d5, d6, d7;
-    // Slot i is (group, chunk) = (i / CHUNKS, i % CHUNKS), so all loads precede
-    // all stores. Required: a stage's sums compact into the group's lower half,
-    // which a lower-numbered chunk still has to read, so a per-chunk load/store
-    // loop aliases in place -- and it passes at GRP=512 before silently
-    // corrupting at larger sizes.
-#define GRP_OF(i) (((uint32_t)(i) / CHUNKS) * GRP)
-#define CH_OF(i) ((uint32_t)(i) % CHUNKS)
-#define LD(i) \
-  vlds(e##i, o##i, wb + base + GRP_OF(i) + CH_OF(i) * 2u * VL, 0, DINTLV_B16);
-#define AD(i) vadd(s##i, e##i, o##i, pAll);
-#define SU(i) vsub(d##i, e##i, o##i, pAll);
-#define ST(i, LO, HI)                                                    \
-  vsts(LO##i, wb + base + GRP_OF(i) + CH_OF(i) * VL, 0, NORM_B16, pAll); \
-  vsts(HI##i, wb + base + GRP_OF(i) + LANES + CH_OF(i) * VL, 0, NORM_B16, pAll);
-#define ST_SD(i) ST(i, s, d)
-#define ST_EO(i) ST(i, e, o)
-#define NOROT(i)
-    // Rotation tail, register-only: each vdintlv rotates the window right by
-    // one and ping-pongs into the pair AD/SU just freed. Odd ROT lands in
-    // (e,o).
-#define R1(i) vdintlv(e##i, o##i, s##i, d##i);
-#define R2(i) R1(i) vdintlv(s##i, d##i, e##i, o##i);
-#define R3(i) R2(i) vdintlv(e##i, o##i, s##i, d##i);
-    // Step by a literal 1 with the stride folded into base: the loop analyser
-    // verifies a tripcount only for a literal step, and 1 divides any bound.
-#define PASS(ROT_, ST_)                               \
-  for (uint16_t it = 0; it < (uint16_t)ITERS; ++it) { \
-    const uint32_t base = (uint32_t)it * (GPI * GRP); \
-    DOU(LD) DOU(AD) DOU(SU) DOU(ROT_) DOU(ST_)        \
-  }                                                   \
-  mem_bar(VST_VLD);
-    for (uint16_t st = 0; st < (uint16_t)(C::LOG2N - C::PEEL); ++st) {
-      PASS(NOROT, ST_SD)
+    uint32_t lane_count = Shape::lanes;
+    MaskReg all = CreatePredicate<half>(lane_count);
+    vector_f16 even[SLOTS], odd[SLOTS], sum[SLOTS], diff[SLOTS];
+    // Stepping by a literal 1 with the stride folded into `base` is
+    // load-bearing: the loop analyser verifies a tripcount only for a literal
+    // step, and 1 divides any bound, so `iters` may be template-dependent
+    // without warning.
+    constexpr unsigned plain = Shape::log2_n - (Shape::rotations ? 1 : 0);
+    for (uint16_t stage = 0; stage < (uint16_t)plain; ++stage) {
+      for (uint16_t iter = 0; iter < (uint16_t)Shape::iters; ++iter)
+        sweep<Shape, 0>(tile, (uint32_t)iter * Shape::sweep_stride, all, even,
+                        odd, sum, diff, slots);
+      mem_bar(VST_VLD);
     }
-    // Last stage peeled, not branched: a runtime branch in __VEC_SCOPE__ is
-    // risky.
-    if constexpr (C::ROT == 1) {
-      PASS(R1, ST_EO)
-    } else if constexpr (C::ROT == 2) {
-      PASS(R2, ST_SD)
-    } else if constexpr (C::ROT == 3) {
-      PASS(R3, ST_EO)
+    // Last stage peeled rather than branched: a runtime branch in __VEC_SCOPE__
+    // is riskier than a duplicated call.
+    if constexpr (Shape::rotations > 0) {
+      for (uint16_t iter = 0; iter < (uint16_t)Shape::iters; ++iter)
+        sweep<Shape, Shape::rotations>(tile,
+                                       (uint32_t)iter * Shape::sweep_stride,
+                                       all, even, odd, sum, diff, slots);
+      mem_bar(VST_VLD);
     }
   }
 }
 #endif  // __DAV_VEC__
 #endif  // __CCE_AICORE__
 
-template <unsigned N, unsigned ROWS, unsigned NB, unsigned PF>
+template <unsigned N, unsigned Rows, unsigned Buffers, unsigned Prefetch>
 __global__ AICORE void hadamard(__gm__ void *x_gm, uint32_t batch) {
 #ifdef __DAV_VEC__
-  using C = Cfg<N, ROWS, NB, PF>;
-  constexpr unsigned FLAT = C::FLAT, XSTRIDE = C::XSTRIDE;
+  using Shape = KernelShape<N, Rows, Buffers, Prefetch>;
+  constexpr unsigned elems = Shape::tile_elems, stride = Shape::tile_stride;
   set_mask_norm();
   set_vector_mask(-1, -1);
-  using Sh = pto::Shape<1, 1, 1, 1, FLAT>;
-  using St = pto::Stride<1, 1, 1, FLAT, 1>;
-  using T = Tile<TileType::Vec, half, 1, FLAT, BLayout::RowMajor, 1, FLAT>;
-  const event_t ev[EVENTS] = {EVENT_ID0, EVENT_ID1, EVENT_ID2, EVENT_ID3,
-                              EVENT_ID4, EVENT_ID5, EVENT_ID6, EVENT_ID7};
-  const uint32_t cid = get_block_idx(), nc = get_block_num();
-  const uint32_t tiles = batch / ROWS;
+  using GmShape = pto::Shape<1, 1, 1, 1, elems>;
+  using GmStride = pto::Stride<1, 1, 1, elems, 1>;
+  using UbTile =
+      Tile<TileType::Vec, half, 1, elems, BLayout::RowMajor, 1, elems>;
+  const event_t buffer_free[EVENT_SLOTS] = {EVENT_ID0, EVENT_ID1, EVENT_ID2,
+                                            EVENT_ID3, EVENT_ID4, EVENT_ID5,
+                                            EVENT_ID6, EVENT_ID7};
+  const uint32_t core_id = get_block_idx(), core_count = get_block_num();
+  const uint32_t tiles = batch / Rows;
 
-#define XOFF(i) ((unsigned)(i) * XSTRIDE)
-  // async load of this core's K-th tile into buffer K % NB
-#define ISSUE_LOAD(K)                                        \
-  do {                                                       \
-    uint32_t _tb = cid + (uint32_t)(K) * nc;                 \
-    if (_tb < tiles) {                                       \
-      const int _p = (uint32_t)(K) % NB;                     \
-      wait_flag(PIPE_MTE3, PIPE_MTE2, ev[_p]);               \
-      T _xt;                                                 \
-      TASSIGN(_xt, XOFF(_p));                                \
-      GlobalTensor<half, Sh, St> _g(                         \
-          (__gm__ half *)x_gm + (uint64_t)_tb * FLAT, Sh()); \
-      TLOAD(_xt, _g);                                        \
-      set_flag(PIPE_MTE2, PIPE_V, ev[_p]);                   \
-    }                                                        \
+  // Async load of this core's issue-th tile into buffer issue % Buffers. A
+  // macro, not a lambda: the pipeline flag intrinsics must sit directly in the
+  // kernel body (from a lambda, set_flag/wait_flag do not resolve).
+#define ISSUE_LOAD(issue)                                         \
+  do {                                                            \
+    const uint32_t _t = core_id + (uint32_t)(issue) * core_count; \
+    if (_t < tiles) {                                             \
+      const uint32_t _b = (uint32_t)(issue) % Buffers;            \
+      wait_flag(PIPE_MTE3, PIPE_MTE2, buffer_free[_b]);           \
+      UbTile _ub;                                                 \
+      TASSIGN(_ub, _b *stride);                                   \
+      GlobalTensor<half, GmShape, GmStride> _gm(                  \
+          (__gm__ half *)x_gm + (uint64_t)_t * elems, GmShape()); \
+      TLOAD(_ub, _gm);                                            \
+      set_flag(PIPE_MTE2, PIPE_V, buffer_free[_b]);               \
+    }                                                             \
   } while (0)
 
-  for (unsigned i = 0; i < NB; ++i) set_flag(PIPE_MTE3, PIPE_MTE2, ev[i]);
-  for (unsigned i = 0; i < PF; ++i) ISSUE_LOAD(i);
+  for (unsigned i = 0; i < Buffers; ++i)
+    set_flag(PIPE_MTE3, PIPE_MTE2, buffer_free[i]);
+  for (unsigned i = 0; i < Prefetch; ++i) ISSUE_LOAD(i);
 
-  uint32_t k = 0;
-  for (uint32_t tb = cid; tb < tiles; tb += nc, ++k) {
-    const int p = k % NB;
-    ISSUE_LOAD(k + PF);  // overlaps this tile's compute
-    wait_flag(PIPE_MTE2, PIPE_V, ev[p]);
-    bfly<N, ROWS, NB, PF>((__ubuf__ half *)(uintptr_t)XOFF(p));
-    set_flag(PIPE_V, PIPE_MTE3, ev[p]);
-    wait_flag(PIPE_V, PIPE_MTE3, ev[p]);
-    T xt;
-    TASSIGN(xt, XOFF(p));
-    GlobalTensor<half, Sh, St> g((__gm__ half *)x_gm + (uint64_t)tb * FLAT,
-                                 Sh());
-    TSTORE(g, xt);
-    set_flag(PIPE_MTE3, PIPE_MTE2, ev[p]);
+  uint32_t issued = 0;
+  for (uint32_t tile_index = core_id; tile_index < tiles;
+       tile_index += core_count, ++issued) {
+    const uint32_t buf = issued % Buffers;
+    ISSUE_LOAD(issued + Prefetch);  // overlaps this tile's compute
+    wait_flag(PIPE_MTE2, PIPE_V, buffer_free[buf]);
+    butterfly<N, Rows, Buffers, Prefetch>(
+        (__ubuf__ half *)(uintptr_t)(buf * stride));
+    set_flag(PIPE_V, PIPE_MTE3, buffer_free[buf]);
+    wait_flag(PIPE_V, PIPE_MTE3, buffer_free[buf]);
+    UbTile ub;
+    TASSIGN(ub, buf * stride);
+    GlobalTensor<half, GmShape, GmStride> gm(
+        (__gm__ half *)x_gm + (uint64_t)tile_index * elems, GmShape());
+    TSTORE(gm, ub);
+    set_flag(PIPE_MTE3, PIPE_MTE2, buffer_free[buf]);
   }
-  for (unsigned i = 0; i < NB; ++i) wait_flag(PIPE_MTE3, PIPE_MTE2, ev[i]);
+  for (unsigned i = 0; i < Buffers; ++i)
+    wait_flag(PIPE_MTE3, PIPE_MTE2, buffer_free[i]);
+#undef ISSUE_LOAD
 #else
   (void)x_gm;
   (void)batch;
