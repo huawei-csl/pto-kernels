@@ -15,13 +15,17 @@ aliases in place. It also *passes* at N=512 if the stores happen not to have lan
 yet, then silently corrupts at larger N. These cases pin the ordering.
 """
 
+import ctypes
+
 import numpy as np
 import pytest
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("torch_npu")
 
+from jit_a5 import entry, stream_ptr  # noqa: E402
 from jit_util_a5 import (  # noqa: E402
+    DISPATCH_ARGS,
     N,
     build_and_load,
     compile_kernel,
@@ -130,3 +134,23 @@ def test_rows_for_matches_kernel():
         if rows_for(n) != query(n)
     }
     assert not mismatched, f"host/kernel tiling disagree: {mismatched}"
+
+
+# The 4-argument launcher hardcodes DEFAULT_N. Pin that it really is N, rather than
+# trusting two constants in two languages to stay equal.
+def test_default_launcher_matches_explicit_n():
+    so = compile_kernel(verbose=False)
+    default = entry(so, "call_hadamard256")
+    explicit = entry(so, "call_hadamard", DISPATCH_ARGS)
+
+    rng = np.random.default_rng(11)
+    x_np = rng.standard_normal((4 * rows_for(N), N)).astype(np.float16)
+    outs = []
+    for fn, extra in ((default, ()), (explicit, (N,))):
+        x = torch.from_numpy(x_np.copy()).npu()
+        fn(64, stream_ptr(), ctypes.c_void_p(x.data_ptr()), x.shape[0], *extra)
+        torch.npu.synchronize()
+        outs.append(x.cpu().numpy())
+    assert np.array_equal(
+        outs[0].view(np.uint16), outs[1].view(np.uint16)
+    ), "call_hadamard256 does not agree with call_hadamard(n=N): DEFAULT_N != N"

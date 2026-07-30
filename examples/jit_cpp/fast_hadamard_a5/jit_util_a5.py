@@ -17,7 +17,7 @@ from pathlib import Path
 from jit_a5 import BLOCK_DIM, KERNEL_ARGS, NBUF, PREFETCH, compile_so, entry, stream_ptr
 
 HERE = Path(__file__).resolve().parent
-N = 256  # default block size / row width
+N = 256  # default block size; must match DEFAULT_N in the kernel
 # the dispatching launcher takes n as a fifth argument
 DISPATCH_ARGS = KERNEL_ARGS + [ctypes.c_uint32]
 
