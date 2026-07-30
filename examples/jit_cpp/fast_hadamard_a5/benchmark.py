@@ -102,7 +102,9 @@ def gbs_median(fn, bd, batch, n=N, dispatch_n=None):
         b = pool[it["k"] % POOL]
         it["k"] += 1
         args = (bd, stream(), ctypes.c_void_p(b.data_ptr()), batch)
-        fn(*args, dispatch_n) if dispatch_n else fn(*args)
+        if dispatch_n:
+            args += (dispatch_n,)
+        fn(*args)
 
     for _ in range(8):
         one()
@@ -146,7 +148,9 @@ def rel_err(fn, bd, n, rows, dispatch_n=None):
     ref = x_np.astype(np.float32) @ hadamard_matrix(n)
     x = torch.from_numpy(x_np).npu()
     args = (bd, stream(), ctypes.c_void_p(x.data_ptr()), batch)
-    fn(*args, dispatch_n) if dispatch_n else fn(*args)
+    if dispatch_n:
+        args += (dispatch_n,)
+    fn(*args)
     torch.npu.synchronize()
     out = x.cpu().numpy().astype(np.float32)
     return float(np.abs(out - ref).max()) / (float(np.abs(ref).max()) or 1.0)

@@ -94,7 +94,9 @@ def load_lib(so_path, kind=HADAMARD, block_dim=BLOCK_DIM, n=N, rows_per_tile=Non
             buf[:batch] = x
         ptr = ctypes.c_void_p(buf.data_ptr())
         args = (int(block_dim), stream_ptr(stream), ptr, padded)
-        kernel(*args, n) if kind.dispatch else kernel(*args)
+        if kind.dispatch:  # the dispatching launcher takes n as a 5th argument
+            args += (n,)
+        kernel(*args)
         if padded != batch:
             torch.npu.synchronize()
             x.copy_(buf[:batch])
