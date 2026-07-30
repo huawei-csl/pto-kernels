@@ -14,27 +14,27 @@ the same tiling, benchmarked alongside it.
 ## Files
 
 - `fast_hadamard_256_a5.cpp` — the kernel, standalone. Shape is the template
-  parameter set `<N, ROWS, NBUF, PREFETCH>`; every derived constant and its
-  `static_assert` lives in one `Cfg` struct, checked per instantiation.
-- `jit_util_hadamard256_a5.py` — `bisheng` build + `ctypes` load. The returned
-  callable pads the batch up to a multiple of `ROWS_PER_TILE` and slices back,
-  so **any batch size works** (following the `matmul_swizzle` padding convention).
-- `copy_ref_256_a5.cpp` — the copy-floor reference (`copy256`): a plain
-  `GM → UB → GM` round trip over the same tiling, with no vector-execute work, so
-  it measures the DMA ceiling for the shape. Its own translation unit, so the
-  transform above builds and runs independently of it.
-- `jit_util_copy256_a5.py` — build + load for the copy reference.
-- `jit_a5.py` — the shared `bisheng` invocation both of the above (and the
-  benchmark) build through, so the flag list exists once.
-- `test_copy256_a5.py` — asserts the copy reference is **bit-exact** and covers every
-  tile, so the floor the transform is judged against is known to be a real copy.
-- `test_hadamard256_a5.py` — correctness vs a torch reference across batch sizes,
-  including non-power-of-2 and non-tile-multiple ones.
-- `test_block_sizes_a5.py` — correctness at every supported block size, covering both
-  the packed N<256 and chunked N>256 paths, plus the padding check (see below).
-- `benchmark.py` — sweeps batch × `ROWS_PER_TILE`, or block size `N` with `--nsweep`,
-  reporting `hadamard / copy` in both cases.
-- Plotting lives in a separate repo, [`pto-kernels-plots`](https://github.com/Mocchibird/pto-kernels-plots/tree/main/fast_hadamard_a5),
+  parameter set `<N, Rows, Buffers, Prefetch>`; every derived constant and its
+  `static_assert` lives in one `KernelShape` struct, checked per instantiation.
+- `copy_ref_256_a5.cpp` — the copy-floor reference: a plain `GM → UB → GM` round
+  trip over the same tiling with no vector-execute work, so it measures the DMA
+  ceiling for the shape. Its own translation unit, so the transform builds and
+  runs independently of it.
+- `jit_a5.py` — the shared `bisheng` invocation everything builds through, so the
+  flag list exists once.
+- `jit_util_a5.py` — build + load for both kernels, a `Kernel` descriptor carrying
+  what differs. The transform's callable pads the batch to a multiple of
+  `ROWS_PER_TILE` and slices back, so **any batch size works** (the
+  `matmul_swizzle` convention).
+- `test_hadamard_a5.py` — correctness vs a torch reference over batch sizes
+  (including non-power-of-2 and non-tile-multiple) and over every supported `N`,
+  plus the packed-row padding check described below.
+- `test_copy256_a5.py` — asserts the copy reference is **bit-exact** and covers
+  every tile, so the floor the transform is judged against is a real copy.
+- `benchmark.py` — sweeps batch × `ROWS_PER_TILE`, or block size `N` with
+  `--nsweep`, reporting `hadamard / copy` in both cases.
+- Plotting lives in a separate repo,
+  [`pto-kernels-plots`](https://github.com/Mocchibird/pto-kernels-plots/tree/main/fast_hadamard_a5),
   alongside the generated figures. The CSV below is the contract between them.
 
 ## Build & run
@@ -45,7 +45,7 @@ Requires a real A5 device with `torch`/`torch_npu` and the CANN toolkit
 ```bash
 bash run_benchmark.sh 64                 # block_dim = number of AI cores
 python benchmark.py 64 --nsweep          # block-size sweep -> build/nsweep256.csv
-pytest test_hadamard256_a5.py            # correctness (incl. non-power-of-2 batches)
+pytest test_hadamard_a5.py               # correctness over batch sizes and N
 ```
 
 ## Block size
@@ -92,7 +92,7 @@ previously left N=32 at 0.30 of the floor and N=128 at 0.76.
    just wrote and would need a `mem_bar(VST_VLD)`; omitting it is the same silent-corruption
    trap as (1). The fused `vdintlv` tail cannot hit it.
 
-`test_block_sizes_a5.py` pins both, and additionally asserts that batch padding sharing a
+`test_hadamard_a5.py` pins both, and additionally asserts that batch padding sharing a
 packed window with real rows cannot contaminate them — checked against `inf`/`nan` padding,
 bit-exactly, since that is the one hazard packing introduces.
 

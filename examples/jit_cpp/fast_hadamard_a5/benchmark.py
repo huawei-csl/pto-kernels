@@ -27,9 +27,11 @@ import torch
 import torch_npu  # noqa
 
 from jit_a5 import compile_so, entry, stream_ptr
+from jit_util_a5 import N, rows_for
 
 HERE = Path(__file__).resolve().parent
-N = 256
+SRC = HERE / "fast_hadamard_256_a5.cpp"
+CSRC = HERE / "copy_ref_256_a5.cpp"
 ROWS_LIST = [16, 32, 64, 128]
 BATCHES = [1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144]  # 2^10..2^18
 COPY_ROWS = 64  # fixed, UB-valid tiling for the copy-floor reference
@@ -37,8 +39,10 @@ POOL = 8  # working set >> L2 to avoid cache-resident (too-fast) copies
 TRIALS = 7  # median over trials rejects timer glitches
 
 
-def nbuf_for(rows):
-    return max(1, min(4, (192 * 1024) // (rows * N * 2)))
+def cfg(rows):
+    """(nbuf, prefetch) for a tiling. prefetch < nbuf or the pipeline deadlocks."""
+    nbuf = max(1, min(4, (192 * 1024) // (rows * N * 2)))
+    return nbuf, min(2, nbuf - 1)
 
 
 def build(rows, nbuf, pf, tag, src=None, extra=()):
@@ -46,7 +50,7 @@ def build(rows, nbuf, pf, tag, src=None, extra=()):
 
     force=True: a benchmark must never time a stale .so.
     """
-    src = Path(src) if src else HERE / "fast_hadamard_256_a5.cpp"
+    src = Path(src) if src else SRC
     # derived, not passed: a per-call-site launcher argument silently bound the
     # transform's symbol against the copy .so whenever a call site omitted it
     launcher = "call_copy256" if "copy_ref" in src.name else "call_hadamard256"
@@ -134,7 +138,7 @@ def nsweep(bd):
     print("n,chunks,rows,batch,rel_err,had_gbs,copy_gbs,ratio")
     out = ["n,chunks,rows,batch,rel_err,had_gbs,copy_gbs,ratio"]
     for n in NSWEEP_NS:
-        rows = max(8, NSWEEP_TILE_BYTES // (n * 2))
+        rows = rows_for(n)
         batch = (NSWEEP_TOTAL_ELEMS // n // rows) * rows
         chunks = max(1, (n // 2) // 128)
         defs = (f"-DHAD_N={n}",)
@@ -151,7 +155,7 @@ def nsweep(bd):
             4,
             2,
             f"cpn{n}",
-            src=HERE / "copy_ref_256_a5.cpp",
+            src=CSRC,
             extra=(f"-DCOPY_N={n}",),
         )
         cg = gbs_median(cl, bd, batch, n=n)
@@ -172,13 +176,7 @@ def main():
 
     # ---- fixed copy-floor reference (ROWS=64), measured once per batch ----
     # built from its own TU (copy_ref_256_a5.cpp) so the transform stays standalone
-    cref_lib = build(
-        COPY_ROWS,
-        nbuf_for(COPY_ROWS),
-        min(2, nbuf_for(COPY_ROWS) - 1),
-        "copyref",
-        src=HERE / "copy_ref_256_a5.cpp",
-    )
+    cref_lib = build(COPY_ROWS, *cfg(COPY_ROWS), "copyref", src=CSRC)
     copy_ref = {}
     for batch in BATCHES:
         copy_ref[batch] = gbs_median(cref_lib, bd, batch)
@@ -186,8 +184,7 @@ def main():
     print("rows,nbuf,batch,had_gbs,copy_gbs,ratio")
     out = ["rows,nbuf,batch,had_gbs,copy_gbs,ratio"]
     for rows in ROWS_LIST:
-        nbuf = nbuf_for(rows)
-        pf = min(2, max(0, nbuf - 1))
+        nbuf, pf = cfg(rows)
         lib = build(rows, nbuf, pf, str(rows))
         for batch in BATCHES:
             if batch % rows != 0:
