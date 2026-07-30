@@ -17,12 +17,12 @@ import pytest
 torch = pytest.importorskip("torch")
 pytest.importorskip("torch_npu")
 
-from jit_util_copy256_a5 import N, ROWS_PER_TILE, build_and_load  # noqa: E402
+from jit_util_a5 import COPY, N, ROWS_PER_TILE, build_and_load  # noqa: E402
 
 
 @pytest.fixture(scope="module")
 def copy256():
-    return build_and_load(verbose=False)
+    return build_and_load(COPY, verbose=False)
 
 
 # every batch is a multiple of ROWS_PER_TILE: the copy kernel has no padding

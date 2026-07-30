@@ -18,6 +18,7 @@ Methodology notes:
 Emits CSV: rows,nbuf,batch,had_gbs,copy_gbs,ratio -> build/grid256.csv (+ stdout).
 copy_gbs is the fixed ROWS=64 reference for that batch (same across the ROWS axis)."""
 import ctypes
+import functools
 import sys
 from pathlib import Path
 
@@ -25,7 +26,7 @@ import numpy as np
 import torch
 import torch_npu  # noqa
 
-from jit_a5 import KERNEL_ARGS, compile_so
+from jit_a5 import compile_so, entry, stream_ptr
 
 HERE = Path(__file__).resolve().parent
 N = 256
@@ -45,27 +46,28 @@ def build(rows, nbuf, pf, tag, src=None, extra=()):
 
     force=True: a benchmark must never time a stale .so.
     """
+    src = Path(src) if src else HERE / "fast_hadamard_256_a5.cpp"
+    # derived, not passed: a per-call-site launcher argument silently bound the
+    # transform's symbol against the copy .so whenever a call site omitted it
+    launcher = "call_copy256" if "copy_ref" in src.name else "call_hadamard256"
     defs = (f"-DROWS_PER_TILE={rows}", f"-DNBUF={nbuf}", f"-DPREFETCH={pf}", *extra)
     so = compile_so(
-        src or HERE / "fast_hadamard_256_a5.cpp",
+        src,
         f"g256_{tag}",
         defs,
         out_dir=HERE / "build",
         verbose=False,
         force=True,
     )
-    lib = ctypes.CDLL(str(so))
-    # each TU exports exactly one launcher; bind whichever is present
-    for name in ("call_hadamard256", "call_copy256"):
-        fn = getattr(lib, name, None)
-        if fn is not None:
-            fn.argtypes = list(KERNEL_ARGS)
-            fn.restype = None
-    return lib
+    return entry(so, launcher)
 
 
-def sp():
-    return torch.npu.current_stream()._as_parameter_  # noqa
+@functools.lru_cache(maxsize=1)
+def stream():
+    """Resolved once per process, but lazily: re-resolving inside a timed loop
+    skews the measurement, and doing it at import time would make importing this
+    module require a live device."""
+    return stream_ptr()
 
 
 def gbs_median(fn, bd, batch, n=N):
@@ -79,7 +81,7 @@ def gbs_median(fn, bd, batch, n=N):
     def one():
         b = pool[it["k"] % POOL]
         it["k"] += 1
-        fn(bd, sp(), ctypes.c_void_p(b.data_ptr()), batch)
+        fn(bd, stream(), ctypes.c_void_p(b.data_ptr()), batch)
 
     for _ in range(8):
         one()
@@ -122,7 +124,7 @@ def rel_err(fn, bd, n, rows):
     x_np = rng.standard_normal((batch, n)).astype(np.float16)
     ref = x_np.astype(np.float32) @ hadamard_matrix(n)
     x = torch.from_numpy(x_np).npu()
-    fn(bd, sp(), ctypes.c_void_p(x.data_ptr()), batch)
+    fn(bd, stream(), ctypes.c_void_p(x.data_ptr()), batch)
     torch.npu.synchronize()
     out = x.cpu().numpy().astype(np.float32)
     return float(np.abs(out - ref).max()) / (float(np.abs(ref).max()) or 1.0)
@@ -137,13 +139,13 @@ def nsweep(bd):
         chunks = max(1, (n // 2) // 128)
         defs = (f"-DHAD_N={n}",)
         lib = build(rows, 4, 2, f"n{n}", extra=defs)
-        err = rel_err(lib.call_hadamard256, bd, n, rows)
+        err = rel_err(lib, bd, n, rows)
         if err >= 0.03:
             line = f"{n},{chunks},{rows},{batch},{err:.5f},,,"
             print(line + "   # WRONG -- not timed")
             out.append(line)
             continue
-        hg = gbs_median(lib.call_hadamard256, bd, batch, n=n)
+        hg = gbs_median(lib, bd, batch, n=n)
         cl = build(
             rows,
             4,
@@ -152,7 +154,7 @@ def nsweep(bd):
             src=HERE / "copy_ref_256_a5.cpp",
             extra=(f"-DCOPY_N={n}",),
         )
-        cg = gbs_median(cl.call_copy256, bd, batch, n=n)
+        cg = gbs_median(cl, bd, batch, n=n)
         line = f"{n},{chunks},{rows},{batch},{err:.5f},{hg:.1f},{cg:.1f},{hg / cg:.4f}"
         print(line)
         sys.stdout.flush()
@@ -179,7 +181,7 @@ def main():
     )
     copy_ref = {}
     for batch in BATCHES:
-        copy_ref[batch] = gbs_median(cref_lib.call_copy256, bd, batch)
+        copy_ref[batch] = gbs_median(cref_lib, bd, batch)
 
     print("rows,nbuf,batch,had_gbs,copy_gbs,ratio")
     out = ["rows,nbuf,batch,had_gbs,copy_gbs,ratio"]
@@ -190,7 +192,7 @@ def main():
         for batch in BATCHES:
             if batch % rows != 0:
                 continue
-            hg = gbs_median(lib.call_hadamard256, bd, batch)
+            hg = gbs_median(lib, bd, batch)
             cg = copy_ref[batch]
             line = f"{rows},{nbuf},{batch},{hg:.1f},{cg:.1f},{hg/cg:.4f}"
             print(line)

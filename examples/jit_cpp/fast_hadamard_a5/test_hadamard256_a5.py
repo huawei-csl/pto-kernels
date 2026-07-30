@@ -13,7 +13,7 @@ import pytest
 torch = pytest.importorskip("torch")
 pytest.importorskip("torch_npu")
 
-from jit_util_hadamard256_a5 import N, build_and_load  # noqa: E402
+from jit_util_a5 import N, build_and_load  # noqa: E402
 
 TOLERANCE = 0.03  # fp16 accumulation over log2(256)=8 butterfly stages
 

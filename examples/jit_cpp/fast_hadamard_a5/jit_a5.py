@@ -1,8 +1,8 @@
 """Shared bisheng JIT build for the A5 kernels in this directory.
 
 The repo-wide ``examples/jit_cpp`` helper targets dav-c220 (``-DMEMORY_BASE``);
-these kernels are A5 (``dav-c310-vec``, ``-DREGISTER_BASE``), so bisheng is
-invoked directly. Building needs only a working bisheng (``ASCEND_HOME_PATH`` or
+these are A5 (``dav-c310-vec``, ``-DREGISTER_BASE``), so bisheng is invoked
+directly. Building needs a working bisheng (``ASCEND_HOME_PATH`` or
 ``ASCEND_TOOLKIT_HOME``); running additionally needs ``torch_npu``.
 """
 
@@ -16,6 +16,16 @@ NBUF = 4  # pipeline depth (UB buffers)
 PREFETCH = 2  # tiles prefetched ahead
 # every launcher here takes (block_dim, stream, ptr, batch)
 KERNEL_ARGS = [ctypes.c_uint32, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32]
+# Flags that never vary. Written as one string and split: black re-explodes a list
+# of short strings to one entry per line, but leaves this alone.
+FIXED_FLAGS = (
+    "-O2 -std=c++17 -fPIC -Wno-ignored-attributes -Wno-macro-redefined "
+    "-mllvm -cce-aicore-stack-size=0x8000 "
+    "-mllvm -cce-aicore-function-stack-size=0x8000 "
+    "-mllvm -cce-aicore-addr-transform "
+    "-mllvm -cce-aicore-dcci-insert-for-scalar=false "
+    "-Xhost-start -Xhost-end"
+).split()
 
 
 def ascend_home() -> str:
@@ -28,9 +38,9 @@ def ascend_home() -> str:
 def compile_so(src, tag, defs=(), out_dir=None, verbose=True, force=False) -> Path:
     """Compile and link one .cpp to a device .so.
 
-    ``tag`` names the artifact and must carry every macro that changes codegen,
-    or distinct configurations would collide on one file. An up-to-date .so is
-    reused unless ``force``.
+    ``tag`` names the artifact and must carry every macro that changes codegen, or
+    distinct configurations collide on one file. An up-to-date .so is reused
+    unless ``force``.
     """
     src = Path(src)
     out_dir = Path(out_dir) if out_dir else src.parent / "build"
@@ -42,46 +52,14 @@ def compile_so(src, tag, defs=(), out_dir=None, verbose=True, force=False) -> Pa
         return so
     home = ascend_home()
     bisheng = f"{home}/bin/bisheng"
-    flags = [
-        "--cce-aicore-arch=dav-c310-vec",
-        "-DREGISTER_BASE",
-        *defs,
-        "-O2",
-        "-std=c++17",
-        "-fPIC",
-        "-Wno-ignored-attributes",
-        "-Wno-macro-redefined",
-        "-mllvm",
-        "-cce-aicore-stack-size=0x8000",
-        "-mllvm",
-        "-cce-aicore-function-stack-size=0x8000",
-        "-mllvm",
-        "-cce-aicore-addr-transform",
-        "-mllvm",
-        "-cce-aicore-dcci-insert-for-scalar=false",
-        "-Xhost-start",
-        "-Xhost-end",
-        f"-I{home}/aarch64-linux/include",
-        f"-I{home}/include",
-    ]
+    arch = ["--cce-aicore-arch=dav-c310-vec", "-DREGISTER_BASE"]
+    inc = [f"-I{home}/aarch64-linux/include", f"-I{home}/include"]
     if verbose:
         print(f"[compile] {tag}: {' '.join(defs)}")
-    subprocess.run(
-        [bisheng, "-xcce", *flags, "-c", str(src), "-o", str(obj)], check=True
-    )
-    subprocess.run(
-        [
-            bisheng,
-            "-fPIC",
-            "-shared",
-            "--cce-fatobj-link",
-            f"-Wl,-soname,{so.name}",
-            str(obj),
-            "-o",
-            str(so),
-        ],
-        check=True,
-    )
+    cmd = [bisheng, "-xcce", *arch, *defs, *FIXED_FLAGS, *inc]
+    subprocess.run([*cmd, "-c", str(src), "-o", str(obj)], check=True)
+    link = f"-fPIC -shared --cce-fatobj-link -Wl,-soname,{so.name}".split()
+    subprocess.run([bisheng, *link, str(obj), "-o", str(so)], check=True)
     return so
 
 
