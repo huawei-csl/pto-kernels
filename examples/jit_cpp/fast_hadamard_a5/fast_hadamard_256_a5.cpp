@@ -19,9 +19,6 @@ using namespace pto;
 #ifndef PREFETCH
 #define PREFETCH 2
 #endif
-#ifndef UB_USABLE_BYTES  // what NBUF=4 needs here, not a hardware limit
-#define UB_USABLE_BYTES (192u * 1024u)
-#endif
 
 #ifdef __CCE_AICORE__
 constexpr unsigned VL16 = sizeof(vector_f16) / sizeof(half);  // lanes/register
@@ -30,6 +27,9 @@ constexpr unsigned SLOTS = 8;       // DOU() below is hand-written this wide
 static_assert(SLOTS == 8, "DOU() emits 8 slots; GPI is derived from SLOTS");
 constexpr unsigned EVENTS = 8;  // size of ev[] below
 constexpr unsigned UB_ALIGN = 512;
+// The toolkit's own UB size: 256 KB on A5, 192 on A2/A3, 128 on Kirin. Defined
+// only in the device pass, like __DAV_VEC__, which is why it is read in here.
+constexpr unsigned UB_BYTES = PTO_UBUF_SIZE_BYTES;
 
 // A constexpr *function* cannot be called from [aicore] code; a value template
 // can.
@@ -71,7 +71,7 @@ struct Cfg {
   static_assert(R == 1 || CHUNKS == 1, "pack and chunk are exclusive");
   static_assert(ROWS % R == 0, "ROWS must be a multiple of WIN/N");
   static_assert(GROUPS % GPI == 0, "GROUPS must be a multiple of GPI");
-  static_assert(NB * XSTRIDE <= UB_USABLE_BYTES, "UB overflow");
+  static_assert(NB * XSTRIDE <= UB_BYTES, "UB overflow");
   static_assert(NB <= EVENTS, "NBUF exceeds the event-id array");
   static_assert(PF < NB, "PF == NB drains every MTE3->MTE2 token: deadlock");
 };

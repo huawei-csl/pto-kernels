@@ -29,13 +29,11 @@ constexpr unsigned aln(unsigned b) { return (b + 511u) & ~511u; }
 // which is all this kernel needs to reach the DMA ceiling. Deeper buffering
 // would change the reference the transform is measured against.
 #define COPY_NBUF 2
-#ifndef UB_USABLE_BYTES
-#define UB_USABLE_BYTES (192u * 1024u)
-#endif
-// Without this the two buffers silently overrun UB at large ROWS_PER_TILE
-// (e.g. ROWS_PER_TILE=256 needs 2 x 128 KB = 256 KB), which corrupts the
-// measured floor instead of failing.
-static_assert(COPY_NBUF * aln(X_BYTES) <= UB_USABLE_BYTES,
+// Without this the two buffers silently overrun UB at large ROWS_PER_TILE,
+// corrupting the measured floor instead of failing. ROWS_PER_TILE=256 is the
+// boundary: 2 x 128 KB exactly fills A5's 256 KB, so it passes with no headroom
+// and is not swept; 512 and up are rejected.
+static_assert(COPY_NBUF * aln(X_BYTES) <= PTO_UBUF_SIZE_BYTES,
               "UB overflow: ROWS_PER_TILE too large for the ping/pong copy");
 #endif  // __CCE_AICORE__
 

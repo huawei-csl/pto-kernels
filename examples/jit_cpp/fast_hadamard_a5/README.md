@@ -34,8 +34,8 @@ the same tiling, benchmarked alongside it.
   the packed N<256 and chunked N>256 paths, plus the padding check (see below).
 - `benchmark.py` — sweeps batch × `ROWS_PER_TILE`, or block size `N` with `--nsweep`,
   reporting `hadamard / copy` in both cases.
-- `plot_hadamard256_a5.py` — heatmap + bandwidth-vs-batch plot for the batch sweep.
-- `plot_hadamard_nsweep_a5.py` — the block-size sweep from `benchmark.py --nsweep`.
+- Plotting lives in a separate repo, [`pto-kernels-plots`](https://github.com/Mocchibird/pto-kernels-plots/tree/main/fast_hadamard_a5),
+  alongside the generated figures. The CSV below is the contract between them.
 
 ## Build & run
 
@@ -46,7 +46,6 @@ Requires a real A5 device with `torch`/`torch_npu` and the CANN toolkit
 bash run_benchmark.sh 64                 # block_dim = number of AI cores
 python benchmark.py 64 --nsweep          # block-size sweep -> build/nsweep256.csv
 pytest test_hadamard256_a5.py            # correctness (incl. non-power-of-2 batches)
-python plot_hadamard256_a5.py            # -> build/hadamard256_grid.png (needs matplotlib)
 ```
 
 ## Block size
