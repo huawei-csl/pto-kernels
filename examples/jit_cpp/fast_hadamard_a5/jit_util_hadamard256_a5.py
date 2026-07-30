@@ -82,6 +82,7 @@ def compile_kernel(
         "--cce-aicore-arch=dav-c310-vec",
         "-DREGISTER_BASE",
         f"-DHAD_N={n}",
+        f"-DHAD_LOG2N={log2n}",
         f"-DROWS_PER_TILE={rows_per_tile}",
         f"-DNBUF={nbuf}",
         f"-DPREFETCH={prefetch}",
