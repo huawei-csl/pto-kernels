@@ -215,35 +215,35 @@ __tf__ static AICORE void butterfly(__ubuf__ half *tile) {
   }
 }
 
-// Start the async GM -> UB copy for this core's nth tile, if it has one.
-// A function, not a lambda: set_flag/wait_flag do not resolve inside a lambda.
+// Move one tile between GM and UB buffer `buf`. Both directions share the view
+// setup; only the final TLOAD/TSTORE differs.
+template <typename Shape, bool ToUb>
+inline AICORE void transfer(uint32_t tile_index, uint32_t buf,
+                            __gm__ void *x_gm) {
+  constexpr unsigned elems = Shape::tile_elems;
+  UbTile<elems> ub;
+  TASSIGN(ub, buf * Shape::tile_stride);
+  GlobalTensor<half, GmShape<elems>, GmStride<elems>> gm(
+      (__gm__ half *)x_gm + (uint64_t)tile_index * elems, GmShape<elems>());
+  if constexpr (ToUb) {
+    TLOAD(ub, gm);
+  } else {
+    TSTORE(gm, ub);
+  }
+}
+
+// Start the async load of this core's nth tile, if it has one. A function, not
+// a lambda: set_flag/wait_flag do not resolve inside a lambda.
 template <typename Shape>
 inline AICORE void issue_load(uint32_t nth, uint32_t core_id,
                               uint32_t core_count, uint32_t tiles,
                               const event_t *buffer_free, __gm__ void *x_gm) {
-  constexpr unsigned elems = Shape::tile_elems;
   const uint32_t tile_index = core_id + nth * core_count;
   if (tile_index >= tiles) return;
   const uint32_t buf = nth % Shape::buffers;
   wait_flag(PIPE_MTE3, PIPE_MTE2, buffer_free[buf]);
-  UbTile<elems> ub;
-  TASSIGN(ub, buf * Shape::tile_stride);
-  GlobalTensor<half, GmShape<elems>, GmStride<elems>> gm(
-      (__gm__ half *)x_gm + (uint64_t)tile_index * elems, GmShape<elems>());
-  TLOAD(ub, gm);
+  transfer<Shape, true>(tile_index, buf, x_gm);
   set_flag(PIPE_MTE2, PIPE_V, buffer_free[buf]);
-}
-
-// Write a finished UB buffer back over the tile it came from.
-template <typename Shape>
-inline AICORE void store_tile(uint32_t tile_index, uint32_t buf,
-                              __gm__ void *x_gm) {
-  constexpr unsigned elems = Shape::tile_elems;
-  UbTile<elems> ub;
-  TASSIGN(ub, buf * Shape::tile_stride);
-  GlobalTensor<half, GmShape<elems>, GmStride<elems>> gm(
-      (__gm__ half *)x_gm + (uint64_t)tile_index * elems, GmShape<elems>());
-  TSTORE(gm, ub);
 }
 #endif  // __DAV_VEC__
 #endif  // __CCE_AICORE__
@@ -278,7 +278,7 @@ __global__ AICORE void hadamard(__gm__ void *x_gm, uint32_t batch) {
     butterfly<Shape>((__ubuf__ half *)(uintptr_t)(buf * Shape::tile_stride));
     set_flag(PIPE_V, PIPE_MTE3, buffer_free[buf]);
     wait_flag(PIPE_V, PIPE_MTE3, buffer_free[buf]);
-    store_tile<Shape>(tile_index, buf, x_gm);
+    transfer<Shape, false>(tile_index, buf, x_gm);
     set_flag(PIPE_MTE3, PIPE_MTE2, buffer_free[buf]);
   }
   for (unsigned i = 0; i < NBuffers; ++i)  // drain
