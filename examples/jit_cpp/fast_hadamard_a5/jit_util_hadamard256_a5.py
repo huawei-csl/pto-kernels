@@ -146,9 +146,9 @@ def load_lib(
     """ctypes-load the ``.so`` and return an in-place ``hadamard256(x)`` callable.
 
     The kernel computes the unnormalized transform ``x @ H`` (H = the +/-1
-    Hadamard matrix); scale by ``1/sqrt(256)`` for the orthonormal WHT. The
-    callable pads the batch to a multiple of ``rows_per_tile`` so any batch size
-    is accepted, and writes the result back in place into ``x``.
+    Hadamard matrix of order ``n``); scale by ``1/sqrt(n)`` for the orthonormal
+    WHT. The callable pads the batch to a multiple of ``rows_per_tile`` so any
+    batch size is accepted, and writes the result back in place into ``x``.
     """
     import torch  # noqa: F401
 

@@ -1,9 +1,10 @@
 // fast_hadamard_256_a5 — Walsh-Hadamard via DEINTERLEAVE-LOAD butterfly.
-// Default and best-performing block size is HAD_N=256; N=32..2048 are
-// supported. Each stage does the even/odd split on the MTE2 load (vlds
-// DINTLV_B16) and the concat-halves recombine on the MTE3 store (vsts to
-// [0:128] / [128:256]), leaving only vadd/vsub on the vector-execute pipe.
-// In-place on a UB tile.
+// Default block size is HAD_N=256; N=32..2048 are supported and all of them run
+// within 0.90..0.96 of their own DMA copy floor, so none is "the fast one" --
+// N=32 in fact measures highest (0.96) because it needs the fewest stages.
+// Each stage does the even/odd split on the MTE2 load (vlds DINTLV_B16) and the
+// concat-halves recombine on the MTE3 store, leaving only vadd/vsub on the
+// vector-execute pipe. In-place on a UB tile.
 //
 // Standalone: this TU builds and runs on its own. The copy-floor reference it
 // is benchmarked against lives in copy_ref_256_a5.cpp, which the benchmark

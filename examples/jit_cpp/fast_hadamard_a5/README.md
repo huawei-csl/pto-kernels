@@ -1,12 +1,12 @@
-# fast_hadamard_256_a5 — N=256 Walsh–Hadamard on Ascend A5
+# fast_hadamard_256_a5 — Walsh–Hadamard on Ascend A5
 
-A register/DMA-fused fast Walsh–Hadamard transform (WHT) for block size **N=256**
-on the Ascend 950 / A5 (`dav-c310`) vector core, exposed via JIT `bisheng`
-compilation + `ctypes`.
+A register/DMA-fused fast Walsh–Hadamard transform (WHT) on the Ascend 950 / A5
+(`dav-c310`) vector core, exposed via JIT `bisheng` compilation + `ctypes`.
+Block size is a build-time macro: **N = 32…2048**, default 256.
 
-Each of the `log2(256)=8` butterfly stages does the even/odd split on the
+Each of the `log2(N)` butterfly stages does the even/odd split on the
 deinterleave **load** (`vlds DINTLV_B16`) and the concat-halves recombine on the
-**store** (`vsts` to `[0:128]` / `[128:256]`), so only `vadd`/`vsub` ever touch
+**store** (`vsts` to the group's two halves), so only `vadd`/`vsub` ever touch
 the vector-execute pipe. The transform is therefore **memory-bound** and runs at
 essentially HBM copy speed — the natural yardstick is a plain `GM→UB→GM` copy of
 the same tiling, benchmarked alongside it.
@@ -24,14 +24,14 @@ the same tiling, benchmarked alongside it.
 - `jit_util_copy256_a5.py` — build + load for the copy reference.
 - `test_copy256_a5.py` — asserts the copy reference is **bit-exact** and covers every
   tile, so the floor the transform is judged against is known to be a real copy.
-- `test_block_sizes_a5.py` — correctness at every supported block size, including the
-  chunked N>256 path (see below).
-- `plot_hadamard_nsweep_a5.py` — renders the block-size sweep from
-  `benchmark.py --nsweep`.
-- `benchmark.py` — sweeps batch × `ROWS_PER_TILE` and reports `hadamard / copy`.
-- `plot_hadamard256_a5.py` — heatmap + bandwidth-vs-batch plot from the CSV.
 - `test_hadamard256_a5.py` — correctness vs a torch reference across batch sizes,
   including non-power-of-2 and non-tile-multiple ones.
+- `test_block_sizes_a5.py` — correctness at every supported block size, covering both
+  the packed N<256 and chunked N>256 paths, plus the padding check (see below).
+- `benchmark.py` — sweeps batch × `ROWS_PER_TILE`, or block size `N` with `--nsweep`,
+  reporting `hadamard / copy` in both cases.
+- `plot_hadamard256_a5.py` — heatmap + bandwidth-vs-batch plot for the batch sweep.
+- `plot_hadamard_nsweep_a5.py` — the block-size sweep from `benchmark.py --nsweep`.
 
 ## Build & run
 
@@ -95,8 +95,10 @@ bit-exactly, since that is the one hazard packing introduces.
 ## Notes
 
 - The kernel computes the **unnormalized** transform `x @ H` (H the ±1 Hadamard
-  matrix); multiply by `1/sqrt(256)` for the orthonormal WHT.
-- At the kernel level, `batch` must be a multiple of `ROWS_PER_TILE` (default 64);
+  matrix); multiply by `1/sqrt(N)` for the orthonormal WHT.
+- At the kernel level, `batch` must be a multiple of `ROWS_PER_TILE` (which
+  defaults to `16384/N`, i.e. 64 at N=256, so that a tile is 32 KB at every `N`);
   the Python wrapper pads to satisfy this, so callers may pass any batch.
-- At large batch the kernel reaches roughly **2.8 TB/s — about 90–100% of the HBM
-  copy floor**. Generated plots live in the companion `pto-kernels-plots` repo.
+- At large batch the kernel reaches **2.55–2.71 TB/s depending on `N`, which is
+  0.90–0.96 of the measured copy floor for that `N`**. Generated plots live in the
+  companion `pto-kernels-plots` repo.
