@@ -18,8 +18,6 @@ Methodology notes:
 Emits CSV: rows,nbuf,batch,had_gbs,copy_gbs,ratio -> build/grid256.csv (+ stdout).
 copy_gbs is the fixed ROWS=64 reference for that batch (same across the ROWS axis)."""
 import ctypes
-import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -27,9 +25,10 @@ import numpy as np
 import torch
 import torch_npu  # noqa
 
+from jit_a5 import KERNEL_ARGS, compile_so
+
 HERE = Path(__file__).resolve().parent
 N = 256
-h = os.environ.get("ASCEND_HOME_PATH") or os.environ["ASCEND_TOOLKIT_HOME"]
 ROWS_LIST = [16, 32, 64, 128]
 BATCHES = [1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144]  # 2^10..2^18
 COPY_ROWS = 64  # fixed, UB-valid tiling for the copy-floor reference
@@ -42,66 +41,26 @@ def nbuf_for(rows):
 
 
 def build(rows, nbuf, pf, tag, src=None, extra=()):
-    src = Path(src) if src else HERE / "fast_hadamard_256_a5.cpp"
-    obj = HERE / f"build/g256_{tag}.o"
-    so = HERE / f"build/g256_{tag}.so"
-    (HERE / "build").mkdir(exist_ok=True)
-    common = [
-        "--cce-aicore-arch=dav-c310-vec",
-        "-DREGISTER_BASE",
-        f"-DROWS_PER_TILE={rows}",
-        f"-DNBUF={nbuf}",
-        f"-DPREFETCH={pf}",
-        *extra,
-        "-O2",
-        "-std=c++17",
-        "-fPIC",
-        "-Wno-ignored-attributes",
-        "-Wno-macro-redefined",
-        "-mllvm",
-        "-cce-aicore-stack-size=0x8000",
-        "-mllvm",
-        "-cce-aicore-function-stack-size=0x8000",
-        "-mllvm",
-        "-cce-aicore-addr-transform",
-        "-mllvm",
-        "-cce-aicore-dcci-insert-for-scalar=false",
-        "-Xhost-start",
-        "-Xhost-end",
-        f"-I{h}/aarch64-linux/include",
-        f"-I{h}/include",
-    ]
-    subprocess.run(
-        [f"{h}/bin/bisheng", "-xcce", *common, "-c", str(src), "-o", str(obj)],
-        check=True,
-    )
-    subprocess.run(
-        [
-            f"{h}/bin/bisheng",
-            "-fPIC",
-            "-shared",
-            "--cce-fatobj-link",
-            f"-Wl,-soname,{so.name}",
-            str(obj),
-            "-o",
-            str(so),
-        ],
-        check=True,
+    """Build one variant; returns the ctypes handle with its launcher bound.
+
+    force=True: a benchmark must never time a stale .so.
+    """
+    defs = (f"-DROWS_PER_TILE={rows}", f"-DNBUF={nbuf}", f"-DPREFETCH={pf}", *extra)
+    so = compile_so(
+        src or HERE / "fast_hadamard_256_a5.cpp",
+        f"g256_{tag}",
+        defs,
+        out_dir=HERE / "build",
+        verbose=False,
+        force=True,
     )
     lib = ctypes.CDLL(str(so))
     # each TU exports exactly one launcher; bind whichever is present
-    for nm in ("call_hadamard256", "call_copy256"):
-        try:
-            fn = getattr(lib, nm)
-        except AttributeError:
-            continue
-        fn.argtypes = [
-            ctypes.c_uint32,
-            ctypes.c_void_p,
-            ctypes.c_void_p,
-            ctypes.c_uint32,
-        ]
-        fn.restype = None
+    for name in ("call_hadamard256", "call_copy256"):
+        fn = getattr(lib, name, None)
+        if fn is not None:
+            fn.argtypes = list(KERNEL_ARGS)
+            fn.restype = None
     return lib
 
 
@@ -175,9 +134,8 @@ def nsweep(bd):
     for n in NSWEEP_NS:
         rows = max(8, NSWEEP_TILE_BYTES // (n * 2))
         batch = (NSWEEP_TOTAL_ELEMS // n // rows) * rows
-        log2n = n.bit_length() - 1
         chunks = max(1, (n // 2) // 128)
-        defs = (f"-DHAD_N={n}", f"-DHAD_LOG2N={log2n}")
+        defs = (f"-DHAD_N={n}",)
         lib = build(rows, 4, 2, f"n{n}", extra=defs)
         err = rel_err(lib.call_hadamard256, bd, n, rows)
         if err >= 0.03:

@@ -13,7 +13,9 @@ the same tiling, benchmarked alongside it.
 
 ## Files
 
-- `fast_hadamard_256_a5.cpp` — the kernel (`hadamard256`), standalone.
+- `fast_hadamard_256_a5.cpp` — the kernel, standalone. Shape is the template
+  parameter set `<N, ROWS, NBUF, PREFETCH>`; every derived constant and its
+  `static_assert` lives in one `Cfg` struct, checked per instantiation.
 - `jit_util_hadamard256_a5.py` — `bisheng` build + `ctypes` load. The returned
   callable pads the batch up to a multiple of `ROWS_PER_TILE` and slices back,
   so **any batch size works** (following the `matmul_swizzle` padding convention).
@@ -22,6 +24,8 @@ the same tiling, benchmarked alongside it.
   it measures the DMA ceiling for the shape. Its own translation unit, so the
   transform above builds and runs independently of it.
 - `jit_util_copy256_a5.py` — build + load for the copy reference.
+- `jit_a5.py` — the shared `bisheng` invocation both of the above (and the
+  benchmark) build through, so the flag list exists once.
 - `test_copy256_a5.py` — asserts the copy reference is **bit-exact** and covers every
   tile, so the floor the transform is judged against is known to be a real copy.
 - `test_hadamard256_a5.py` — correctness vs a torch reference across batch sizes,
@@ -47,14 +51,15 @@ python plot_hadamard256_a5.py            # -> build/hadamard256_grid.png (needs 
 
 ## Block size
 
-`N` (`HAD_N`) is a build-time macro, default **256**, supported over **N = 32…2048**.
+`N` is a template parameter, default **256**, supported over **N = 32…2048**;
+`-DHAD_N` only selects which instantiation the `extern "C"` entry point exposes.
 A butterfly stage splits its unit of work into two half-rows; one 128-element fp16 vector
 holds 128 of them, and the kernel keeps that vector full at every `N` in two directions:
 
 - **N < 256 — packing.** `R = 256/N` rows share one 256-element window, so every stage
   drives all 128 lanes. Rows never mix: the split is on the low bit of the *within-row*
   index and `N` is even, so row `r`'s evens always land contiguously in group `r`. A packed
-  window emerges with its index rotated right by `log2(N)`, which `HAD_ROT = 8 − log2(N)`
+  window emerges with its index rotated right by `log2(N)`, which `ROT = log2(WIN) − log2(N)`
   `vdintlv` finish — one register-to-register op per rotation, no UB traffic, fused into
   the final stage using the `(e,o)` registers that are dead by then.
 - **N > 256 — chunking.** A row spans `CHUNKS = (N/2)/128` windows, processed as
