@@ -15,8 +15,30 @@ using namespace pto;
 #ifndef HAD_N
 #define HAD_N 256
 #endif
-#ifndef HAD_LOG2N
+// LOG2N is DERIVED from HAD_N, not a second parameter: accepting both invites a
+// caller passing an inconsistent pair, which silently runs the wrong number of
+// stages. A preprocessor ladder rather than a constexpr because HAD_ROT below
+// is consumed by #if, and #if cannot see constexpr. (Everything else here could
+// be a template parameter -- tested: a templated __global__ compiles and `if
+// constexpr` works inside __VEC_SCOPE__. The one genuine exception is the loop
+// STEP below, which the vector loop analyser only verifies when it is a literal
+// token; a template non-type parameter warns exactly like a constexpr.)
+#if HAD_N == 32
+#define HAD_LOG2N 5
+#elif HAD_N == 64
+#define HAD_LOG2N 6
+#elif HAD_N == 128
+#define HAD_LOG2N 7
+#elif HAD_N == 256
 #define HAD_LOG2N 8
+#elif HAD_N == 512
+#define HAD_LOG2N 9
+#elif HAD_N == 1024
+#define HAD_LOG2N 10
+#elif HAD_N == 2048
+#define HAD_LOG2N 11
+#else
+#error "HAD_N must be a power of two in [32, 2048]"
 #endif
 #ifndef ROWS_PER_TILE
 #define ROWS_PER_TILE 64
@@ -92,7 +114,6 @@ static_assert(
     "groups-per-iteration literal disagrees with HAD_UNROLL / CHUNKS");
 static_assert(HAD_UNROLL % CHUNKS == 0, "HAD_UNROLL must divide by CHUNKS");
 static_assert(LANES % VL == 0, "HAD_GRP/2 must be a whole number of vectors");
-static_assert((1u << HAD_LOG2N) == HAD_N, "HAD_LOG2N must be log2(HAD_N)");
 static_assert((1u << HAD_ROT) == HAD_R, "HAD_ROT must be log2(HAD_R)");
 static_assert(HAD_R == 1 || CHUNKS == 1,
               "packing and chunking are mutually exclusive by construction");

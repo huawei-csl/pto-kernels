@@ -175,9 +175,8 @@ def nsweep(bd):
     for n in NSWEEP_NS:
         rows = max(8, NSWEEP_TILE_BYTES // (n * 2))
         batch = (NSWEEP_TOTAL_ELEMS // n // rows) * rows
-        log2n = n.bit_length() - 1
         chunks = max(1, (n // 2) // 128)
-        defs = (f"-DHAD_N={n}", f"-DHAD_LOG2N={log2n}")
+        defs = (f"-DHAD_N={n}",)  # HAD_LOG2N is derived in the kernel
         lib = build(rows, 4, 2, f"n{n}", extra=defs)
         err = rel_err(lib.call_hadamard256, bd, n, rows)
         if err >= 0.03:
