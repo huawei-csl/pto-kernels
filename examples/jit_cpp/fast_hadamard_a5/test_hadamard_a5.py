@@ -61,15 +61,15 @@ def assert_matches_reference(kernel, n, batch, seed, label):
 
 
 @pytest.fixture(scope="module")
-def hadamard256():
+def hadamard_default():
     return build_and_load(verbose=False)
 
 
 # 64/256/1024 are tile-aligned powers of two; 1000/4097 are non-multiples of the
 # 64-row tile (exercise padding); 1536/3200 are non-power-of-2 multiples.
 @pytest.mark.parametrize("batch", [64, 256, 1000, 1024, 1536, 3200, 4097, 65536])
-def test_matches_torch_reference(hadamard256, batch):
-    assert_matches_reference(hadamard256, N, batch, batch, f"batch={batch}")
+def test_matches_torch_reference(hadamard_default, batch):
+    assert_matches_reference(hadamard_default, N, batch, batch, f"batch={batch}")
 
 
 # 32/64/128 pack multiple rows per window; 256 fills a vector exactly; 512/1024/2048
@@ -140,7 +140,7 @@ def test_rows_for_matches_kernel():
 # trusting two constants in two languages to stay equal.
 def test_default_launcher_matches_explicit_n():
     so = compile_kernel(verbose=False)
-    default = entry(so, "call_hadamard256")
+    default = entry(so, "call_hadamard_default")
     explicit = entry(so, "call_hadamard", DISPATCH_ARGS)
 
     rng = np.random.default_rng(11)
@@ -153,4 +153,4 @@ def test_default_launcher_matches_explicit_n():
         outs.append(x.cpu().numpy())
     assert np.array_equal(
         outs[0].view(np.uint16), outs[1].view(np.uint16)
-    ), "call_hadamard256 does not agree with call_hadamard(n=N): DEFAULT_N != N"
+    ), "call_hadamard_default does not agree with call_hadamard(n=N): DEFAULT_N != N"

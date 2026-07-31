@@ -22,8 +22,8 @@ N = 256  # default block size; must match DEFAULT_N in the kernel
 DISPATCH_ARGS = KERNEL_ARGS + [ctypes.c_uint32]
 
 Kernel = namedtuple("Kernel", "src launcher tag pad dispatch macro")
-HADAMARD = Kernel("fast_hadamard_256_a5.cpp", "call_hadamard", "fht", True, True, None)
-COPY = Kernel("copy_ref_256_a5.cpp", "call_copy256", "copy", False, False, "COPY_N")
+HADAMARD = Kernel("fast_hadamard_a5.cpp", "call_hadamard", "fht", True, True, None)
+COPY = Kernel("copy_ref_a5.cpp", "call_copy", "copy", False, False, "COPY_N")
 
 
 def check_n(n):

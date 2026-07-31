@@ -1,8 +1,10 @@
-# fast_hadamard_256_a5 — Walsh–Hadamard on Ascend A5
+# fast_hadamard_a5 — Walsh–Hadamard on Ascend A5
 
 A register/DMA-fused fast Walsh–Hadamard transform (WHT) on the Ascend 950 / A5
 (`dav-c310`) vector core, exposed via JIT `bisheng` compilation + `ctypes`.
-Block size is a build-time macro: **N = 32…2048**, default 256.
+Block size is a template parameter: **N = 32…2048**, default 256. One .so
+holds an instantiation per N and the launcher dispatches on it, so there is no
+rebuild per size.
 
 Each of the `log2(N)` butterfly stages does the even/odd split on the
 deinterleave **load** (`vlds DINTLV_B16`) and the concat-halves recombine on the
@@ -13,10 +15,10 @@ the same tiling, benchmarked alongside it.
 
 ## Files
 
-- `fast_hadamard_256_a5.cpp` — the kernel, standalone. Shape is the template
+- `fast_hadamard_a5.cpp` — the kernel, standalone. Shape is the template
   parameter set `<N, Rows, Buffers, Prefetch>`; every derived constant and its
   `static_assert` lives in one `KernelShape` struct, checked per instantiation.
-- `copy_ref_256_a5.cpp` — the copy-floor reference: a plain `GM → UB → GM` round
+- `copy_ref_a5.cpp` — the copy-floor reference: a plain `GM → UB → GM` round
   trip over the same tiling with no vector-execute work, so it measures the DMA
   ceiling for the shape. Its own translation unit, so the transform builds and
   runs independently of it.
@@ -29,7 +31,7 @@ the same tiling, benchmarked alongside it.
 - `test_hadamard_a5.py` — correctness vs a torch reference over batch sizes
   (including non-power-of-2 and non-tile-multiple) and over every supported `N`,
   plus the packed-row padding check described below.
-- `test_copy256_a5.py` — asserts the copy reference is **bit-exact** and covers
+- `test_copy_a5.py` — asserts the copy reference is **bit-exact** and covers
   every tile, so the floor the transform is judged against is a real copy.
 - `benchmark.py` — sweeps batch × `ROWS_PER_TILE`, or block size `N` with
   `--nsweep`, reporting `hadamard / copy` in both cases.
@@ -44,7 +46,7 @@ Requires a real A5 device with `torch`/`torch_npu` and the CANN toolkit
 
 ```bash
 bash run_benchmark.sh 64                 # block_dim = number of AI cores
-python benchmark.py 64 --nsweep          # block-size sweep -> build/nsweep256.csv
+python benchmark.py 64 --nsweep          # block-size sweep -> build/nsweep.csv
 pytest test_hadamard_a5.py               # correctness over batch sizes and N
 ```
 
@@ -74,14 +76,14 @@ copy floor (`python benchmark.py 64 --nsweep`):
 | N | 32 | 64 | 128 | **256** | 512 | 1024 | 2048 |
 |---|---|---|---|---|---|---|---|
 | rows packed (R) | 8 | 4 | 2 | **1** | 1 | 1 | 1 |
-| GB/s | 2886 | 3027 | 2879 | **2897** | 2722 | 2813 | 2714 |
-| copy floor GB/s | 3248 | 3136 | 3243 | **3254** | 3243 | 3258 | 3246 |
-| fraction of floor | 0.89 | 0.97 | 0.89 | **0.89** | 0.84 | 0.86 | 0.84 |
+| GB/s | 2868 | 2974 | 2810 | **2764** | 2709 | 2675 | 2593 |
+| copy floor GB/s | 3316 | 3245 | 3084 | **3085** | 3076 | 3095 | 3090 |
+| fraction of floor | 0.86 | 0.92 | 0.91 | **0.90** | 0.88 | 0.86 | 0.84 |
 
-Bandwidth counts read + write traffic, and every number above is from the same
-`build/nsweep256.csv` the plots are generated from. Repeating the sweep three
-times gives median fractions of 0.94/0.93/0.93/0.88/0.89/0.88/0.85 with spread up
-to 0.06 at some `N`, so read these as +/-0.03 rather than exact.
+Bandwidth counts read + write traffic. Every number is the median of three
+measurements per `N` (`benchmark.py 64 --nsweep --repeat 3`), which is also the
+`build/nsweep.csv` the plots are generated from. A single sweep varies by up to
+0.06 in the fraction, so medians rather than one-shot readings.
 
 The transform is now memory-bound at every supported `N`. Vector-op cost per element is
 `(5·log2(N) + log2(R)) / 256`, lowest at N=32 — packing removes the lane waste that
@@ -109,9 +111,8 @@ bit-exactly, since that is the one hazard packing introduces.
 - At the kernel level, `batch` must be a multiple of `ROWS_PER_TILE` (which
   defaults to `16384/N`, i.e. 64 at N=256, so that a tile is 32 KB at every `N`);
   the Python wrapper pads to satisfy this, so callers may pass any batch.
-- At large batch the kernel reaches **2.71–3.03 TB/s depending on `N`, which is
-  0.84–0.97 of the measured copy floor for that `N`** (0.85–0.94 as three-run
-  medians). Generated plots live in the
+- At large batch the kernel reaches **2.59–2.97 TB/s depending on `N`, which is
+  0.84–0.92 of the measured copy floor for that `N`**. Generated plots live in the
   companion `pto-kernels-plots` repo.
 - The copy floor is ~3.25 TB/s and is a fair ceiling: a torch device-to-device
   copy of the same size measures 3.22–3.28 TB/s, so the reference kernel is

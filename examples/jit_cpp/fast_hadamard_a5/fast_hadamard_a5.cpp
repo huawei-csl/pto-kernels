@@ -1,4 +1,4 @@
-// fast_hadamard_256_a5 — Walsh-Hadamard transform on the Ascend A5 (dav-c310).
+// fast_hadamard_a5 — Walsh-Hadamard transform on the Ascend A5 (dav-c310).
 //
 // For each row of a (batch, N) fp16 matrix, y = x * H in place, where H is the
 // +/-1 Hadamard matrix of order N. Unnormalized: scale by 1/sqrt(N). N is
@@ -273,8 +273,8 @@ extern "C" void call_hadamard(uint32_t bd, void *stream, uint8_t *x,
 }
 
 // Default shape, N = DEFAULT_N, for callers that do not choose.
-extern "C" void call_hadamard256(uint32_t bd, void *stream, uint8_t *x,
-                                 uint32_t batch) {
+extern "C" void call_hadamard_default(uint32_t bd, void *stream, uint8_t *x,
+                                      uint32_t batch) {
   call_hadamard(bd, stream, x, batch, DEFAULT_N);
 }
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Grid-benchmark fast_hadamard_256_a5 over (batch x ROWS_PER_TILE).
+"""Grid-benchmark fast_hadamard_a5 over (batch x ROWS_PER_TILE).
 
-The transform (fast_hadamard_256_a5.cpp) and the copy-floor reference
-(copy_ref_256_a5.cpp) are separate translation units, built here from their own
+The transform (fast_hadamard_a5.cpp) and the copy-floor reference
+(copy_ref_a5.cpp) are separate translation units, built here from their own
 sources with a matching ROWS_PER_TILE.
 
 Methodology notes:
@@ -16,10 +16,13 @@ Methodology notes:
     16384), so the copy floor is HBM bandwidth and not cache bandwidth.
   * ROWS_PER_TILE=256 is not swept (NBUF=1, buffering-limited, not useful).
 
-Emits CSV: rows,nbuf,batch,had_gbs,copy_gbs,ratio -> build/grid256.csv (+ stdout).
+Emits CSV: rows,nbuf,batch,had_gbs,copy_gbs,ratio -> build/grid.csv (+ stdout).
+`--nsweep --repeat K` medians K measurements per N; a single sweep varies by up
+to 0.06 in the ratio, so published figures should use K > 1.
 copy_gbs is the fixed ROWS=64 reference for that batch (same across the ROWS axis)."""
 import ctypes
 import functools
+import statistics
 import sys
 from pathlib import Path
 
@@ -31,8 +34,8 @@ from jit_a5 import compile_so, entry, stream_ptr
 from jit_util_a5 import DISPATCH_ARGS, N, rows_for
 
 HERE = Path(__file__).resolve().parent
-SRC = HERE / "fast_hadamard_256_a5.cpp"
-CSRC = HERE / "copy_ref_256_a5.cpp"
+SRC = HERE / "fast_hadamard_a5.cpp"
+CSRC = HERE / "copy_ref_a5.cpp"
 BUILDDIR = HERE / "build"
 ROWS_LIST = [16, 32, 64, 128]
 BATCHES = [1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144]  # 2^10..2^18
@@ -54,7 +57,7 @@ def cfg(rows):
 def dispatch_lib():
     """The one .so that serves every N; its launcher takes n as a 5th argument."""
     so = compile_so(
-        SRC, "g256_dispatch", (), out_dir=BUILDDIR, verbose=False, force=True
+        SRC, "bench_dispatch", (), out_dir=BUILDDIR, verbose=False, force=True
     )
     return entry(so, "call_hadamard", DISPATCH_ARGS)
 
@@ -68,7 +71,7 @@ def build(rows, nbuf, pf, tag, src=None, extra=()):
     # derived, not passed: a per-call-site launcher argument silently bound the
     # transform's symbol against the copy .so whenever a call site omitted it
     copy = "copy_ref" in src.name
-    launcher = "call_copy256" if copy else "call_hadamard_tuned"
+    launcher = "call_copy" if copy else "call_hadamard_tuned"
     defs = (f"-DROWS_PER_TILE={rows}", f"-DNBUF={nbuf}", f"-DPREFETCH={pf}", *extra)
     if not copy:
         # The tuning entry point is opt-in and deliberately has no
@@ -77,7 +80,7 @@ def build(rows, nbuf, pf, tag, src=None, extra=()):
         defs = ("-DHAD_TUNE", f"-DHAD_N={N}", *defs)
     so = compile_so(
         src,
-        f"g256_{tag}",
+        f"bench_{tag}",
         defs,
         out_dir=BUILDDIR,
         verbose=False,
@@ -132,7 +135,7 @@ def gbs_median(fn, bd, batch, n=N, dispatch_n=None):
 
 
 # ---- block-size sweep -------------------------------------------------------
-# N is a build-time macro. Up to 256 each half-row fits one 128-element fp16
+# Up to N=256 each half-row fits one 128-element fp16
 # vector; beyond that the row is split into CHUNKS = (N/2)/128 pieces. Hold the
 # tile size and the total bytes moved constant so N is the only variable, and
 # rebuild the copy floor at each N so every ratio is against its own DMA ceiling.
@@ -164,7 +167,7 @@ def rel_err(fn, bd, n, rows, dispatch_n=None):
     return float(np.abs(out - ref).max()) / (float(np.abs(ref).max()) or 1.0)
 
 
-def nsweep(bd):
+def nsweep(bd, repeat=1):
     print("n,chunks,rows,batch,rel_err,had_gbs,copy_gbs,ratio")
     out = ["n,chunks,rows,batch,rel_err,had_gbs,copy_gbs,ratio"]
     for n in NSWEEP_NS:
@@ -178,7 +181,9 @@ def nsweep(bd):
             print(line + "   # WRONG -- not timed")
             out.append(line)
             continue
-        hg = gbs_median(lib, bd, batch, n=n, dispatch_n=n)
+        hg = statistics.median(
+            gbs_median(lib, bd, batch, n=n, dispatch_n=n) for _ in range(repeat)
+        )
         cl = build(
             rows,
             4,
@@ -187,24 +192,31 @@ def nsweep(bd):
             src=CSRC,
             extra=(f"-DCOPY_N={n}",),
         )
-        cg = gbs_median(cl, bd, batch, n=n)
+        cg = statistics.median(gbs_median(cl, bd, batch, n=n) for _ in range(repeat))
         line = f"{n},{chunks},{rows},{batch},{err:.5f},{hg:.1f},{cg:.1f},{hg / cg:.4f}"
         print(line)
         sys.stdout.flush()
         out.append(line)
-    (BUILDDIR / "nsweep256.csv").write_text("\n".join(out) + "\n")
+    (BUILDDIR / "nsweep.csv").write_text("\n".join(out) + "\n")
     print("NSWEEP DONE")
 
 
 def main():
-    args = [a for a in sys.argv[1:] if a != "--nsweep"]
+    flags = {"--nsweep"}
+    repeat = 1
+    argv = list(sys.argv[1:])
+    if "--repeat" in argv:
+        i = argv.index("--repeat")
+        repeat = int(argv[i + 1])
+        del argv[i : i + 2]
+    args = [a for a in argv if a not in flags]
     bd = int(args[0]) if args else 64
-    if "--nsweep" in sys.argv:
-        nsweep(bd)
+    if "--nsweep" in argv:
+        nsweep(bd, repeat)
         return
 
     # ---- fixed copy-floor reference (ROWS=64), measured once per batch ----
-    # built from its own TU (copy_ref_256_a5.cpp) so the transform stays standalone
+    # built from its own TU (copy_ref_a5.cpp) so the transform stays standalone
     cref_lib = build(COPY_ROWS, *cfg(COPY_ROWS), "copyref", src=CSRC)
     copy_ref = {}
     for batch in BATCHES:
@@ -224,10 +236,10 @@ def main():
             print(line)
             sys.stdout.flush()
             out.append(line)
-    (BUILDDIR / "grid256.csv").write_text("\n".join(out) + "\n")
+    (BUILDDIR / "grid.csv").write_text("\n".join(out) + "\n")
     lo, hi = min(copy_ref.values()), max(copy_ref.values())
     print(f"# copy floor {lo:.1f}..{hi:.1f} GB/s (read+write) across batches")
-    print("GRID256 DONE")
+    print("GRID DONE")
 
 
 if __name__ == "__main__":

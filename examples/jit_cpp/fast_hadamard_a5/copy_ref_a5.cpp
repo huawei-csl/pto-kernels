@@ -1,4 +1,4 @@
-// copy_ref_256_a5 — the copy-floor reference for fast_hadamard_256_a5.
+// copy_ref_a5 — the copy-floor reference for fast_hadamard_a5.
 //
 // A plain GM -> UB -> GM round trip over the *same* tiling as the transform it
 // is compared against, and nothing else: no vector-execute work at all, just a
@@ -37,7 +37,7 @@ static_assert(COPY_NBUF * aln(X_BYTES) <= PTO_UBUF_SIZE_BYTES,
               "UB overflow: ROWS_PER_TILE too large for the ping/pong copy");
 #endif  // __CCE_AICORE__
 
-__global__ AICORE void copy256(__gm__ void *x_gm, uint32_t batch) {
+__global__ AICORE void copy_ref(__gm__ void *x_gm, uint32_t batch) {
 #ifdef __DAV_VEC__
   using Sh = pto::Shape<1, 1, 1, 1, FLAT>;
   using St = pto::Stride<1, 1, 1, FLAT, 1>;
@@ -67,6 +67,6 @@ __global__ AICORE void copy256(__gm__ void *x_gm, uint32_t batch) {
 #endif
 }
 
-extern "C" void call_copy256(uint32_t bd, void *s, uint8_t *x, uint32_t b) {
-  copy256<<<bd, nullptr, s>>>(x, b);
+extern "C" void call_copy(uint32_t bd, void *s, uint8_t *x, uint32_t b) {
+  copy_ref<<<bd, nullptr, s>>>(x, b);
 }
