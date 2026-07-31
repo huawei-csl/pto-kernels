@@ -1,38 +1,21 @@
 // fast_hadamard_256_a5 — Walsh-Hadamard transform on the Ascend A5 (dav-c310).
 //
-// WHAT IT COMPUTES
-//   For each row of a (batch, N) fp16 matrix, y = x * H in place, where H is
-//   the
-//   +/-1 Hadamard matrix of order N. Unnormalized: scale by 1/sqrt(N) for the
-//   orthonormal transform. N is 32..2048, a power of two.
+// For each row of a (batch, N) fp16 matrix, y = x * H in place, where H is the
+// +/-1 Hadamard matrix of order N. Unnormalized: scale by 1/sqrt(N). N is
+// 32..2048, a power of two.
 //
-// WHY IT IS SHAPED THIS WAY
-//   Each row is read once and written once, so the transform is memory-bound --
-//   the ceiling is HBM bandwidth, not arithmetic. The whole design is therefore
-//   about spending as little as possible on the vector pipe. One stage turns
-//   every adjacent pair (a, b) into (a+b, a-b), and both the pairing and the
-//   regrouping ride along on the data movement:
+// Memory-bound: each row is read and written once, so the design spends as
+// little as possible on the vector pipe. One stage turns adjacent pairs (a, b)
+// into (a+b, a-b); the load splits even/odd lanes for free and the store's two
+// halves concatenate into the next stage's input, leaving only vadd/vsub.
 //
-//     LOAD     vlds(..., DINTLV_B16) splits even and odd lanes as it loads,
-//              so forming the pairs costs no vector instruction:
-//                  [x0 x1 x2 x3 ...]  ->  even [x0 x2 ...]  odd [x1 x3 ...]
-//     COMPUTE  vadd -> sums, vsub -> diffs      <- the only vector-pipe work
-//     STORE    vsts sums to the low half, diffs to the high half; the halves
-//              concatenate into exactly the layout the next stage wants
+// Layout: KernelShape holds every derived size, sweep does one stage over SLOTS
+// groups, butterfly does log2(N) stages over a UB tile, hadamard runs the
+// GM<->UB pipeline, and call_hadamard dispatches on n so one .so serves every
+// N.
 //
-//   Repeat log2(N) times on a tile held in UB and the rows are transformed.
-//   Measured at 0.90..0.97 of a plain GM->UB->GM copy of the same tiling at
-//   every N, i.e. near the memory ceiling; copy_ref_256_a5.cpp is that copy.
-//
-// HOW TO READ THIS FILE
-//   KernelShape   every derived size for one <N, Rows, Buffers, Prefetch>, with
-//                 the static_asserts that make an invalid combination
-//                 unbuildable
-//   sweep         one stage across SLOTS groups, 8-way unrolled
-//   butterfly     log2(N) stages over one UB tile
-//   hadamard      the GM<->UB pipeline: prefetch, transform, store, repeat
-//   call_hadamard picks the instantiation for n at run time, so one .so covers
-//                 every N and no -D chooses the shape
+// README.md has the rationale, the measured numbers, and the three
+// non-obvious constraints this file is shaped around.
 #include <pto/pto-inst.hpp>
 #include <utility>
 using namespace pto;
@@ -77,21 +60,11 @@ struct Log2<1> {
   static constexpr unsigned value = 0;
 };
 
-// Every derived size for one instantiation. A "group" is the unit one unroll
-// slot processes, and it is always one butterfly WINDOW wide:
-//
-//   PACK  (N < WINDOW): rows_per_window rows share a window, so a stage still
-//         drives all 128 lanes. The split is on the low bit of the WITHIN-ROW
-//         index, so rows never mix; the result comes out rotated right by
-//         log2(N), which `rotations` vdintlv rounds undo.
-//   CHUNK (N > WINDOW): a stage pairs only adjacent elements and its output
-//         halves concatenate, so a row splits into independent WINDOW chunks.
-//
-// The two are mutually exclusive, asserted below.
+// Every derived size for one instantiation; a "group" is one unroll slot's work
+// and is always one WINDOW wide. N < WINDOW packs several rows per window,
+// N > WINDOW splits a row into chunks; see README "Block size".
 template <unsigned N, unsigned Rows, unsigned NBuffers, unsigned NPrefetch>
 struct KernelShape {
-  static constexpr unsigned buffers = NBuffers;
-  static constexpr unsigned prefetch = NPrefetch;
   static constexpr unsigned log2_n = Log2<N>::value;
   static constexpr unsigned log2_window = Log2<WINDOW>::value;
   static constexpr unsigned rows_per_window = N < WINDOW ? WINDOW / N : 1;
@@ -136,25 +109,11 @@ using UbTile = Tile<TileType::Vec, half, 1, Elems, BLayout::RowMajor, 1, Elems>;
 
 using RegSet = vector_f16[SLOTS];
 
-// One unrolled sweep: SLOTS groups loaded, combined, stored back.
-//
-// Slot i covers (group, chunk) = (i / chunks, i % chunks), which puts ALL loads
-// ahead of ALL stores. That is required, not stylistic: a stage's sums compact
-// into the group's lower half, which a lower-numbered chunk still has to read,
-// so a per-chunk load/store loop aliases in place -- and it passes at group=512
-// before silently corrupting at larger sizes. The comma fold evaluates left to
-// right, which is what holds that ordering.
-//
-// Slot indices come from an index_sequence pack, not a loop: a vector register
-// array indexed by a `#pragma unroll` loop variable crashes the backend
-// ("Unsupported Inst must be hoisted"), while a pack index is a true
-// compile-time constant.
-//
-// Rotations > 0 fuses the packing tail into this sweep: each vdintlv rotates
-// the window right by one and ping-pongs into the pair vadd/vsub just freed, so
-// it costs no extra registers, no UB traffic, no barrier, and cannot alias --
-// which a rotation through UB would. Device-verified for 1, 2 and 3 rounds
-// against ror(index, k). An odd count leaves the result in (even, odd).
+// One unrolled sweep: SLOTS groups loaded, combined, stored back. Slot i covers
+// (group, chunk) = (i / chunks, i % chunks), which keeps every load ahead of
+// every store -- required, not stylistic. Rotations > 0 fuses the packing tail
+// in. Pack indices rather than a loop variable, and why the ordering matters:
+// see README "Implementation notes".
 template <typename Shape, unsigned Rotations, std::size_t... Slot>
 inline AICORE void sweep(__ubuf__ half *tile, uint32_t base, MaskReg all,
                          RegSet &even, RegSet &odd, RegSet &sum, RegSet &diff,
@@ -234,13 +193,13 @@ inline AICORE void transfer(uint32_t tile_index, uint32_t buf,
 
 // Start the async load of this core's nth tile, if it has one. A function, not
 // a lambda: set_flag/wait_flag do not resolve inside a lambda.
-template <typename Shape>
+template <typename Shape, unsigned Buffers>
 inline AICORE void issue_load(uint32_t nth, uint32_t core_id,
                               uint32_t core_count, uint32_t tiles,
                               const event_t *buffer_free, __gm__ void *x_gm) {
   const uint32_t tile_index = core_id + nth * core_count;
   if (tile_index >= tiles) return;
-  const uint32_t buf = nth % Shape::buffers;
+  const uint32_t buf = nth % Buffers;
   wait_flag(PIPE_MTE3, PIPE_MTE2, buffer_free[buf]);
   transfer<Shape, true>(tile_index, buf, x_gm);
   set_flag(PIPE_MTE2, PIPE_V, buffer_free[buf]);
@@ -265,15 +224,16 @@ __global__ AICORE void hadamard(__gm__ void *x_gm, uint32_t batch) {
   for (unsigned i = 0; i < NBuffers; ++i)  // every buffer starts free
     set_flag(PIPE_MTE3, PIPE_MTE2, buffer_free[i]);
   for (unsigned i = 0; i < NPrefetch; ++i)
-    issue_load<Shape>(i, core_id, core_count, tiles, buffer_free, x_gm);
+    issue_load<Shape, NBuffers>(i, core_id, core_count, tiles, buffer_free,
+                                x_gm);
 
   uint32_t issued = 0;
   for (uint32_t tile_index = core_id; tile_index < tiles;
        tile_index += core_count, ++issued) {
     const uint32_t buf = issued % NBuffers;
     // issued ahead of the wait below, so this load overlaps this tile's compute
-    issue_load<Shape>(issued + NPrefetch, core_id, core_count, tiles,
-                      buffer_free, x_gm);
+    issue_load<Shape, NBuffers>(issued + NPrefetch, core_id, core_count, tiles,
+                                buffer_free, x_gm);
     wait_flag(PIPE_MTE2, PIPE_V, buffer_free[buf]);
     butterfly<Shape>((__ubuf__ half *)(uintptr_t)(buf * Shape::tile_stride));
     set_flag(PIPE_V, PIPE_MTE3, buffer_free[buf]);

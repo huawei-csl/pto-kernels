@@ -73,9 +73,15 @@ copy floor (`python benchmark.py 64 --nsweep`):
 
 | N | 32 | 64 | 128 | **256** | 512 | 1024 | 2048 |
 |---|---|---|---|---|---|---|---|
-| rows packed (R) | 8 | 4 | 2 | 1 | 1 | 1 | 1 |
-| GB/s | 2712 | 2700 | 2691 | **2664** | 2624 | 2590 | 2554 |
-| fraction of copy floor | 0.96 | 0.94 | 0.94 | **0.94** | 0.92 | 0.91 | 0.90 |
+| rows packed (R) | 8 | 4 | 2 | **1** | 1 | 1 | 1 |
+| GB/s | 2886 | 3027 | 2879 | **2897** | 2722 | 2813 | 2714 |
+| copy floor GB/s | 3248 | 3136 | 3243 | **3254** | 3243 | 3258 | 3246 |
+| fraction of floor | 0.89 | 0.97 | 0.89 | **0.89** | 0.84 | 0.86 | 0.84 |
+
+Bandwidth counts read + write traffic, and every number above is from the same
+`build/nsweep256.csv` the plots are generated from. Repeating the sweep three
+times gives median fractions of 0.94/0.93/0.93/0.88/0.89/0.88/0.85 with spread up
+to 0.06 at some `N`, so read these as +/-0.03 rather than exact.
 
 The transform is now memory-bound at every supported `N`. Vector-op cost per element is
 `(5·log2(N) + log2(R)) / 256`, lowest at N=32 — packing removes the lane waste that
@@ -103,6 +109,51 @@ bit-exactly, since that is the one hazard packing introduces.
 - At the kernel level, `batch` must be a multiple of `ROWS_PER_TILE` (which
   defaults to `16384/N`, i.e. 64 at N=256, so that a tile is 32 KB at every `N`);
   the Python wrapper pads to satisfy this, so callers may pass any batch.
-- At large batch the kernel reaches **2.55–2.71 TB/s depending on `N`, which is
-  0.90–0.96 of the measured copy floor for that `N`**. Generated plots live in the
+- At large batch the kernel reaches **2.71–3.03 TB/s depending on `N`, which is
+  0.84–0.97 of the measured copy floor for that `N`** (0.85–0.94 as three-run
+  medians). Generated plots live in the
   companion `pto-kernels-plots` repo.
+- The copy floor is ~3.25 TB/s and is a fair ceiling: a torch device-to-device
+  copy of the same size measures 3.22–3.28 TB/s, so the reference kernel is
+  memory-limited rather than limited by its own 2-buffer ping/pong.
+- Sizing the benchmark's buffer pool matters more than it looks. A pool-size sweep
+  at batch 16384 (16 MiB buffers) gave 3532/3569/3577/3415 GB/s for working sets of
+  8/16/32/64 MiB and 2595/2547/2547 for 128/256/512 MiB — a cache knee between 64
+  and 128 MiB. An earlier fixed 8-buffer pool sat at 64 MiB for that batch, so the
+  "floor" it reported was partly cache bandwidth and every ratio measured against
+  it was flattering. `WORKING_SET_BYTES` now derives the buffer count per batch.
+
+## Implementation notes
+
+Three constraints shape the kernel, none of them obvious from reading it.
+
+**Loads must all precede stores within an unroll set.** A stage's sums compact into
+the lower half of its group — exactly where a lower-numbered chunk still has to read
+from — so a per-chunk load/store loop aliases in place. It *passes* at
+`group = 512`, where the stores happen not to have landed yet, and then corrupts
+silently at larger `N`. Slot `i` therefore covers `(group, chunk) = (i / chunks,
+i % chunks)` so the addresses are fixed at compile time, and the comma fold's
+guaranteed left-to-right evaluation is what holds the order.
+
+**The unroll must be indexed by a parameter pack, not a loop.** An array of vector
+registers indexed by a `#pragma unroll` loop variable fails to compile —
+`fatal error: error in backend: Unsupported Inst must be hoisted` — because the
+index is not a compile-time constant. `std::index_sequence` gives indices that are,
+which is what lets the sweep be ordinary C++ instead of token-pasting macros.
+Related toolchain limits: a `constexpr` *function* cannot be called from `[aicore]`
+code (hence `Log2` and `RowsFor` are value templates), and `set_flag`/`wait_flag`
+do not resolve inside a lambda though they do inside a plain function.
+
+**The loop step must be a literal.** The vector loop analyser only verifies a
+tripcount when the step is a literal token; a template parameter warns exactly like
+a `constexpr`. Stepping by `1` and folding the stride into `base` sidesteps this
+entirely, because 1 divides any bound — which is what allows `iters` to be
+template-dependent.
+
+The packing tail is fused into the last stage rather than run separately: each
+`vdintlv` rotates the 256-element window right by one, ping-ponging into the
+register pair `vadd`/`vsub` has just freed, so it costs no extra registers, no UB
+traffic and no barrier. A rotation through UB would have to re-read the window it
+just wrote. Device-verified for 1–3 rounds against `ror(index, k)`; an odd count
+leaves the result in `(even, odd)`, which is why the store source is selected on
+parity.

@@ -12,7 +12,8 @@ Methodology notes:
     static_asserts this rather than producing garbage timings).
   * MEDIAN of several trials, which rejects the occasional event-timer glitch
     that reads ~2x too fast.
-  * the buffer pool is larger than L2, so the copy hits HBM rather than cache.
+  * the buffer pool is sized past the measured cache knee (64..128 MiB at batch
+    16384), so the copy floor is HBM bandwidth and not cache bandwidth.
   * ROWS_PER_TILE=256 is not swept (NBUF=1, buffering-limited, not useful).
 
 Emits CSV: rows,nbuf,batch,had_gbs,copy_gbs,ratio -> build/grid256.csv (+ stdout).
@@ -36,7 +37,10 @@ BUILDDIR = HERE / "build"
 ROWS_LIST = [16, 32, 64, 128]
 BATCHES = [1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144]  # 2^10..2^18
 COPY_ROWS = 64  # fixed, UB-valid tiling for the copy-floor reference
-POOL = 8  # working set >> L2 to avoid cache-resident (too-fast) copies
+# Round-robin working set. Must clear cache or the measured copy floor is cache
+# bandwidth: at batch 16384 the knee is between 64 and 128 MiB, and a fixed
+# 8-buffer pool sat at 64 MiB -- inside it. Buffer count is derived per batch.
+WORKING_SET_BYTES = 384 * 1024 * 1024
 TRIALS = 7  # median over trials rejects timer glitches
 
 
@@ -91,15 +95,19 @@ def stream():
 
 
 def gbs_median(fn, bd, batch, n=N, dispatch_n=None):
-    """Median bandwidth over TRIALS, each trial = r reps over a POOL round-robin."""
+    """Median bandwidth over TRIALS, each trial = r reps round-robin over the pool."""
     data = 2 * batch * n * 2
     r = 50
-    pool = [torch.randn(batch, n, dtype=torch.float16).npu() for _ in range(POOL)]
+    # one allocation, sliced: at small batches the pool needs hundreds of
+    # buffers to clear cache, and that many separate allocations is slow
+    depth = max(2, -(-WORKING_SET_BYTES // (batch * n * 2)))
+    block = torch.randn(depth * batch, n, dtype=torch.float16).npu()
+    pool = [block[i * batch : (i + 1) * batch] for i in range(depth)]
     torch.npu.synchronize()
     it = {"k": 0}
 
     def one():
-        b = pool[it["k"] % POOL]
+        b = pool[it["k"] % depth]
         it["k"] += 1
         args = (bd, stream(), ctypes.c_void_p(b.data_ptr()), batch)
         if dispatch_n:
@@ -217,9 +225,8 @@ def main():
             sys.stdout.flush()
             out.append(line)
     (BUILDDIR / "grid256.csv").write_text("\n".join(out) + "\n")
-    print(
-        f"# copy-floor peak = {max(copy_ref.values()):.1f} GB/s (should be < ~3300 = HBM ceiling)"
-    )
+    lo, hi = min(copy_ref.values()), max(copy_ref.values())
+    print(f"# copy floor {lo:.1f}..{hi:.1f} GB/s (read+write) across batches")
     print("GRID256 DONE")
 
 
