@@ -80,9 +80,10 @@ copy floor (`python benchmark.py 64 --nsweep`):
 | copy floor GB/s | 3060 | 3072 | 3078 | **3053** | 3052 | 3016 | 3072 |
 | fraction of floor | 0.89 | 0.95 | 0.95 | **0.94** | 0.92 | 0.93 | 0.86 |
 
-Bandwidth counts read + write traffic; every number is the median of three
-measurements (`benchmark.py 64 --nsweep --repeat 3`) and is the `build/nsweep.csv`
-the plots come from. These batches are large enough that the 8-buffer pool is a
+Bandwidth counts read + write traffic. These are from a single sweep
+(`benchmark.py 64 --nsweep`) and are the `build/nsweep.csv` the plots come from.
+Repeated sweeps move the fraction by up to 0.06 at some `N`, so read them as
+indicative rather than exact -- averaging is not yet wired into this mode. These batches are large enough that the 8-buffer pool is a
 ~256 MiB working set, past the cache knee, so the floor here is real DMA
 bandwidth. The `--nsweep` figures are the ones to quote; the batch x ROWS grid
 sweeps smaller batches where 8 buffers can sit inside cache and its mid-batch
