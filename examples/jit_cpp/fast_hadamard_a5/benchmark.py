@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """Benchmark fast_hadamard_a5 against a torch device-to-device copy.
 
-Sweeps GM<->UB tile size against block size, plus bandwidth against batch; with
---nsweep, block size alone. Bandwidth counts read + write traffic.
+Sweeps ROWS_PER_TILE against batch; with --tiles, GM<->UB tile size against
+block size; with --nsweep, block size alone. Bandwidth counts read + write
+traffic.
 
 Every measurement holds the memory footprint at WORKING_SET_BYTES by deriving the
 pool depth, and moves TRIAL_BYTES per trial by deriving the rep count. Each row
 reports the pool depth, rep count and microseconds per launch behind it, and a
 status column: `ok`, or why the row is not a usable bandwidth ratio.
 
-Emits build/grid.csv (tile size x N), build/batch.csv (bandwidth against batch,
-no ratio) and, under --nsweep, build/nsweep.csv. README "Tiling" and "On reading
-the numbers" cover what these measure and how they are read."""
+Emits build/grid.csv (ROWS_PER_TILE x batch), build/tiles.csv under --tiles
+(tile size x N) and build/nsweep.csv under --nsweep."""
 import argparse
 import ctypes
 import functools
@@ -29,7 +29,8 @@ from jit_util_a5 import DISPATCH_ARGS, N, rows_for
 HERE = Path(__file__).resolve().parent
 SRC = HERE / "fast_hadamard_a5.cpp"
 BUILDDIR = HERE / "build"
-TILE_KIBS = [8, 16, 32, 64]  # GM<->UB tile sizes; ROWS_PER_TILE is derived per N
+ROWS_LIST = [16, 32, 64, 128]  # ROWS_PER_TILE values swept by the grid
+TILE_KIBS = [8, 16, 32, 64]  # tile sizes swept by --tiles
 BATCHES = [65536, 131072, 262144, 524288]
 WORKING_SET_BYTES = 256 * 1024 * 1024  # footprint held constant across batches
 POOL_MIN, POOL_MAX = 2, 16  # round-robin needs two; sixteen bounds allocation
@@ -205,10 +206,8 @@ def rel_err(fn, bd, n, rows, dispatch_n=None):
 NSWEEP_HEADER = (
     "n,chunks,rows,batch,pool,reps,micros,rel_err,had_gbs,copy_gbs,ratio,status"
 )
-GRID_HEADER = (
-    "n,tile_kib,rows,nbuf,batch,pool,reps,micros,had_gbs,copy_gbs,ratio,status"
-)
-SCAN_HEADER = "rows,nbuf,batch,pool,reps,micros,had_gbs,copy_gbs"
+GRID_HEADER = "rows,nbuf,batch,pool,reps,micros,had_gbs,copy_gbs,ratio,status"
+TILE_HEADER = "n,tile_kib,rows,nbuf,batch,micros,had_gbs,copy_gbs,ratio,status"
 
 
 def median_of(values):
@@ -257,15 +256,54 @@ def nsweep(bd, repeat):
 
 
 def grid(bd, repeat):
-    """Sweep tile size against block size, every cell at one memory footprint.
+    """Sweep ROWS_PER_TILE against batch at the default N, with the ratio."""
+    print(GRID_HEADER)
+    out = [GRID_HEADER]
+    broken = []
+    copy_ref = {}
+    for rows in ROWS_LIST:
+        nbuf, pf = cfg(rows, N)
+        lib = build(rows, nbuf, pf, f"grid{rows}", n=N)
+        for batch in BATCHES:
+            if batch % rows != 0:
+                continue
+            if batch not in copy_ref:
+                copy_ref[batch] = torch_copy_gbs(batch, N)[0]
+            trials = [
+                gbs_median(lib, bd, batch, dispatch_n=None) for _ in range(repeat)
+            ]
+            hg = median_of([had for had, _ in trials])
+            micros = median_of([us for _, us in trials])
+            cg = copy_ref[batch]
+            status = verdict(hg, cg, micros)
+            if status != "ok":
+                broken.append((rows, batch, status))
+            line = (
+                f"{rows},{nbuf},{batch},{pool_depth(batch, N)},"
+                f"{reps_for(batch, N)},{micros:.1f},{hg:.1f},{cg:.1f},"
+                f"{hg / cg:.4f},{status}"
+            )
+            print(line)
+            sys.stdout.flush()
+            out.append(line)
+    (BUILDDIR / "grid.csv").write_text("\n".join(out) + "\n", encoding="utf-8")
+    floors = list(copy_ref.values())
+    print(f"# copy floor {min(floors):.1f}..{max(floors):.1f} GB/s (read+write)")
+    if broken:
+        print(f"# {len(broken)} cell(s) flagged: {broken}")
+    print("GRID DONE")
+
+
+def tiles(bd, repeat):
+    """Sweep GM<->UB tile size against block size at one memory footprint.
 
     Each cell moves NSWEEP_TOTAL_ELEMS, so the reference depends only on N and is
     measured once per N. A tiling the kernel's static_asserts reject is reported
     as unbuildable rather than predicted here.
     """
-    print(GRID_HEADER)
-    out = [GRID_HEADER]
-    broken, unbuildable = [], []
+    print(TILE_HEADER)
+    out = [TILE_HEADER]
+    unbuildable = []
     for n in NSWEEP_NS:
         copy_gbs = None
         for tile_kib in TILE_KIBS:
@@ -275,7 +313,7 @@ def grid(bd, repeat):
                 continue
             nbuf, pf = cfg(rows, n)
             try:
-                lib = build(rows, nbuf, pf, f"{n}_{tile_kib}", n=n)
+                lib = build(rows, nbuf, pf, f"tile{n}_{tile_kib}", n=n)
             except subprocess.CalledProcessError:
                 unbuildable.append((n, tile_kib, f"rows={rows} rejected by kernel"))
                 continue
@@ -287,54 +325,18 @@ def grid(bd, repeat):
             ]
             hg = median_of([had for had, _ in trials])
             micros = median_of([us for _, us in trials])
-            status = verdict(hg, copy_gbs, micros)
-            if status != "ok":
-                broken.append((n, tile_kib, status))
             line = (
-                f"{n},{tile_kib},{rows},{nbuf},{batch},{pool_depth(batch, n)},"
-                f"{reps_for(batch, n)},{micros:.1f},{hg:.1f},{copy_gbs:.1f},"
-                f"{hg / copy_gbs:.4f},{status}"
+                f"{n},{tile_kib},{rows},{nbuf},{batch},{micros:.1f},"
+                f"{hg:.1f},{copy_gbs:.1f},{hg / copy_gbs:.4f},"
+                f"{verdict(hg, copy_gbs, micros)}"
             )
             print(line)
             sys.stdout.flush()
             out.append(line)
-    (BUILDDIR / "grid.csv").write_text("\n".join(out) + "\n", encoding="utf-8")
+    (BUILDDIR / "tiles.csv").write_text("\n".join(out) + "\n", encoding="utf-8")
     if unbuildable:
         print(f"# {len(unbuildable)} tiling(s) not buildable: {unbuildable}")
-    if broken:
-        print(f"# {len(broken)} cell(s) not usable as a bandwidth ratio: {broken}")
-    else:
-        print("# every buildable cell is a usable bandwidth ratio")
-    print("GRID DONE")
-
-
-def batch_scan(bd, repeat):
-    """Bandwidth against batch at the shipped tiling, transform and reference.
-
-    No ratio: over this axis the in-place transform and the out-of-place
-    reference are not comparable.
-    """
-    rows = rows_for(N)
-    nbuf, pf = cfg(rows, N)
-    lib = build(rows, nbuf, pf, f"scan{rows}", n=N)
-    print(SCAN_HEADER)
-    out = [SCAN_HEADER]
-    for batch in BATCHES:
-        if batch % rows != 0:
-            continue
-        trials = [gbs_median(lib, bd, batch, dispatch_n=None) for _ in range(repeat)]
-        hg = median_of([had for had, _ in trials])
-        micros = median_of([us for _, us in trials])
-        cg = torch_copy_gbs(batch, N)[0]
-        line = (
-            f"{rows},{nbuf},{batch},{pool_depth(batch, N)},{reps_for(batch, N)},"
-            f"{micros:.1f},{hg:.1f},{cg:.1f}"
-        )
-        print(line)
-        sys.stdout.flush()
-        out.append(line)
-    (BUILDDIR / "batch.csv").write_text("\n".join(out) + "\n", encoding="utf-8")
-    print("SCAN DONE")
+    print("TILES DONE")
 
 
 def parse_args(argv=None):
@@ -345,6 +347,9 @@ def parse_args(argv=None):
     )
     parser.add_argument(
         "--nsweep", action="store_true", help="sweep block size N instead of the grid"
+    )
+    parser.add_argument(
+        "--tiles", action="store_true", help="sweep tile size against block size"
     )
     parser.add_argument(
         "--repeat",
@@ -361,9 +366,10 @@ def main(argv=None):
         raise ValueError(f"--repeat must be >= 1, got {args.repeat}")
     if args.nsweep:
         nsweep(args.block_dim, args.repeat)
+    elif args.tiles:
+        tiles(args.block_dim, args.repeat)
     else:
         grid(args.block_dim, args.repeat)
-        batch_scan(args.block_dim, args.repeat)
 
 
 if __name__ == "__main__":
