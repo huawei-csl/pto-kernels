@@ -18,10 +18,6 @@ the same tiling, benchmarked alongside it.
 - `fast_hadamard_a5.cpp` — the kernel, standalone. Shape is the template
   parameter set `<N, Rows, Buffers, Prefetch>`; every derived constant and its
   `static_assert` lives in one `KernelShape` struct, checked per instantiation.
-- `copy_ref_a5.cpp` — the copy-floor reference: a plain `GM → UB → GM` round
-  trip over the same tiling with no vector-execute work, so it measures the DMA
-  ceiling for the shape. Its own translation unit, so the transform builds and
-  runs independently of it.
 - `jit_a5.py` — the shared `bisheng` invocation everything builds through, so the
   flag list exists once.
 - `jit_util_a5.py` — build + load for both kernels, a `Kernel` descriptor carrying
@@ -31,8 +27,6 @@ the same tiling, benchmarked alongside it.
 - `test_hadamard_a5.py` — correctness vs a torch reference over batch sizes
   (including non-power-of-2 and non-tile-multiple) and over every supported `N`,
   plus the packed-row padding check described below.
-- `test_copy_a5.py` — asserts the copy reference is **bit-exact** and covers
-  every tile, so the floor the transform is judged against is a real copy.
 - `benchmark.py` — sweeps batch × `ROWS_PER_TILE`, or block size `N` with
   `--nsweep`, reporting `hadamard / copy` in both cases.
 - Plotting lives in a separate repo,
@@ -76,14 +70,15 @@ copy floor (`python benchmark.py 64 --nsweep`):
 | N | 32 | 64 | 128 | **256** | 512 | 1024 | 2048 |
 |---|---|---|---|---|---|---|---|
 | rows packed (R) | 8 | 4 | 2 | **1** | 1 | 1 | 1 |
-| GB/s | 2735 | 2918 | 2909 | **2856** | 2822 | 2814 | 2629 |
-| copy floor GB/s | 3060 | 3072 | 3078 | **3053** | 3052 | 3016 | 3072 |
-| fraction of floor | 0.89 | 0.95 | 0.95 | **0.94** | 0.92 | 0.93 | 0.86 |
+| GB/s | 2719 | 2728 | 2716 | **2679** | 2641 | 2621 | 2558 |
+| torch copy GB/s | 3070 | 3066 | 3076 | **3073** | 3069 | 3072 | 3070 |
+| fraction of copy | 0.89 | 0.89 | 0.88 | **0.87** | 0.86 | 0.85 | 0.83 |
 
-Bandwidth counts read + write traffic. These are from a single sweep
-(`benchmark.py 64 --nsweep`) and are the `build/nsweep.csv` the plots come from.
-Repeated sweeps move the fraction by up to 0.06 at some `N`, so read them as
-indicative rather than exact -- averaging is not yet wired into this mode. These batches are large enough that the 8-buffer pool is a
+Bandwidth counts read + write traffic. The reference is a torch
+device-to-device copy of the same bytes, which measures 3066..3076 GB/s across
+every `N` -- a 0.3% spread -- so the ratio reflects the kernel rather than the
+reference. From a single sweep (`benchmark.py 64 --nsweep`), the same
+`build/nsweep.csv` the plots come from. These batches are large enough that the 8-buffer pool is a
 ~256 MiB working set, past the cache knee, so the floor here is real DMA
 bandwidth. The `--nsweep` figures are the ones to quote; the batch x ROWS grid
 sweeps smaller batches where 8 buffers can sit inside cache and its mid-batch
@@ -115,9 +110,9 @@ bit-exactly, since that is the one hazard packing introduces.
 - At the kernel level, `batch` must be a multiple of `ROWS_PER_TILE` (which
   defaults to `16384/N`, i.e. 64 at N=256, so that a tile is 32 KB at every `N`);
   the Python wrapper pads to satisfy this, so callers may pass any batch.
-- At large batch the kernel reaches **2.63–2.92 TB/s depending on `N`, which is
-  0.86–0.95 of the measured copy floor for that `N`**. Generated plots live in the
-  companion `pto-kernels-plots` repo.
+- At large batch the kernel reaches **2.56–2.73 TB/s depending on `N`, which is
+  0.83–0.89 of a torch device-to-device copy of the same bytes**. Generated plots
+  live in the companion `pto-kernels-plots` repo.
 - The copy floor is ~3.25 TB/s and is a fair ceiling: a torch device-to-device
   copy of the same size measures 3.22–3.28 TB/s, so the reference kernel is
   memory-limited rather than limited by its own 2-buffer ping/pong.

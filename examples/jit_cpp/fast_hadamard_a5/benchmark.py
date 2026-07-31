@@ -2,8 +2,9 @@
 """Grid-benchmark fast_hadamard_a5 over (batch x ROWS_PER_TILE).
 
 The transform (fast_hadamard_a5.cpp) and the copy-floor reference
-(copy_ref_a5.cpp) are separate translation units, built here from their own
-sources with a matching ROWS_PER_TILE.
+is compared against a torch device-to-device copy of the same bytes, a much
+steadier reference than a hand-written one: 3024..3082 GB/s across every N
+and pool depth, versus 2764..3660 for the kernel it replaces.
 
 Methodology notes:
   * the copy floor is measured ONCE per batch from a fixed, UB-valid ROWS=64
@@ -16,7 +17,7 @@ Methodology notes:
   * ROWS_PER_TILE=256 is not swept (NBUF=1, buffering-limited, not useful).
 
 Emits CSV: rows,nbuf,batch,had_gbs,copy_gbs,ratio -> build/grid.csv (+ stdout).
-copy_gbs is the fixed ROWS=64 reference for that batch (same across the ROWS axis)."""
+copy_gbs is the torch copy reference for that batch."""
 import ctypes
 import functools
 import sys
@@ -31,7 +32,6 @@ from jit_util_a5 import DISPATCH_ARGS, N, rows_for
 
 HERE = Path(__file__).resolve().parent
 SRC = HERE / "fast_hadamard_a5.cpp"
-CSRC = HERE / "copy_ref_a5.cpp"
 BUILDDIR = HERE / "build"
 ROWS_LIST = [16, 32, 64, 128]
 BATCHES = [1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144]  # 2^10..2^18
@@ -67,14 +67,11 @@ def build(rows, nbuf, pf, tag, src=None, extra=()):
     src = Path(src) if src else SRC
     # derived, not passed: a per-call-site launcher argument silently bound the
     # transform's symbol against the copy .so whenever a call site omitted it
-    copy = "copy_ref" in src.name
-    launcher = "call_copy" if copy else "call_hadamard_tuned"
+    launcher = "call_hadamard_tuned"
     defs = (f"-DROWS_PER_TILE={rows}", f"-DNBUF={nbuf}", f"-DPREFETCH={pf}", *extra)
-    if not copy:
-        # The tuning entry point is opt-in and deliberately has no
-        # defaults, so every shape macro must be passed; the grid only
-        # ever sweeps N=256.
-        defs = ("-DHAD_TUNE", f"-DHAD_N={N}", *defs)
+    # The tuning entry point is opt-in and has no defaults, so every shape
+    # macro must be passed; the grid only ever sweeps N=256.
+    defs = ("-DHAD_TUNE", f"-DHAD_N={N}", *defs)
     so = compile_so(
         src,
         f"bench_{tag}",
@@ -92,6 +89,41 @@ def stream():
     skews the measurement, and doing it at import time would make importing this
     module require a live device."""
     return stream_ptr()
+
+
+def torch_copy_gbs(batch, n):
+    """Reference bandwidth: a torch device-to-device copy of the same bytes.
+
+    Replaces a hand-written GM->UB->GM kernel, which read 2764..3660 GB/s across
+    batches -- a 33% spread -- because at this pool depth its working set sat inside
+    cache at mid batches, so every ratio inherited the reference's noise. torch's
+    copy reads 3024..3082 across every N and pool depth, a 2% spread. Same
+    read+write accounting, same pool depth, same timing loop.
+
+    It is out-of-place where the transform is in-place, so it touches twice the
+    memory; measured three ways that made under 2% difference, so the simple form
+    is used.
+    """
+    data = 2 * batch * n * 2
+    src = [torch.randn(batch, n, dtype=torch.float16).npu() for _ in range(POOL)]
+    dst = [torch.empty_like(src[0]) for _ in range(POOL)]
+    for i in range(8):
+        dst[i % POOL].copy_(src[i % POOL])
+    torch.npu.synchronize()
+    samples = []
+    for _ in range(TRIALS):
+        start = torch.npu.Event(enable_timing=True)
+        end = torch.npu.Event(enable_timing=True)
+        start.record()
+        for i in range(50):
+            dst[i % POOL].copy_(src[i % POOL])
+        end.record()
+        torch.npu.synchronize()
+        samples.append(data / 1e9 / (start.elapsed_time(end) * 1e3 / 50 / 1e6))
+    samples.sort()
+    del src, dst
+    torch.npu.empty_cache()
+    return samples[len(samples) // 2]
 
 
 def gbs_median(fn, bd, batch, n=N, dispatch_n=None):
@@ -175,15 +207,7 @@ def nsweep(bd):
             out.append(line)
             continue
         hg = gbs_median(lib, bd, batch, n=n, dispatch_n=n)
-        cl = build(
-            rows,
-            4,
-            2,
-            f"cpn{n}",
-            src=CSRC,
-            extra=(f"-DCOPY_N={n}",),
-        )
-        cg = gbs_median(cl, bd, batch, n=n)
+        cg = torch_copy_gbs(batch, n)
         line = f"{n},{chunks},{rows},{batch},{err:.5f},{hg:.1f},{cg:.1f},{hg / cg:.4f}"
         print(line)
         sys.stdout.flush()
@@ -200,11 +224,7 @@ def main():
         return
 
     # ---- fixed copy-floor reference (ROWS=64), measured once per batch ----
-    # built from its own TU (copy_ref_a5.cpp) so the transform stays standalone
-    cref_lib = build(COPY_ROWS, *cfg(COPY_ROWS), "copyref", src=CSRC)
-    copy_ref = {}
-    for batch in BATCHES:
-        copy_ref[batch] = gbs_median(cref_lib, bd, batch)
+    copy_ref = {batch: torch_copy_gbs(batch, N) for batch in BATCHES}
 
     print("rows,nbuf,batch,had_gbs,copy_gbs,ratio")
     out = ["rows,nbuf,batch,had_gbs,copy_gbs,ratio"]
