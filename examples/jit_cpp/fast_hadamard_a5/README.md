@@ -76,14 +76,17 @@ copy floor (`python benchmark.py 64 --nsweep`):
 | N | 32 | 64 | 128 | **256** | 512 | 1024 | 2048 |
 |---|---|---|---|---|---|---|---|
 | rows packed (R) | 8 | 4 | 2 | **1** | 1 | 1 | 1 |
-| GB/s | 2868 | 2974 | 2810 | **2764** | 2709 | 2675 | 2593 |
-| copy floor GB/s | 3316 | 3245 | 3084 | **3085** | 3076 | 3095 | 3090 |
-| fraction of floor | 0.86 | 0.92 | 0.91 | **0.90** | 0.88 | 0.86 | 0.84 |
+| GB/s | 2735 | 2918 | 2909 | **2856** | 2822 | 2814 | 2629 |
+| copy floor GB/s | 3060 | 3072 | 3078 | **3053** | 3052 | 3016 | 3072 |
+| fraction of floor | 0.89 | 0.95 | 0.95 | **0.94** | 0.92 | 0.93 | 0.86 |
 
-Bandwidth counts read + write traffic. Every number is the median of three
-measurements per `N` (`benchmark.py 64 --nsweep --repeat 3`), which is also the
-`build/nsweep.csv` the plots are generated from. A single sweep varies by up to
-0.06 in the fraction, so medians rather than one-shot readings.
+Bandwidth counts read + write traffic; every number is the median of three
+measurements (`benchmark.py 64 --nsweep --repeat 3`) and is the `build/nsweep.csv`
+the plots come from. These batches are large enough that the 8-buffer pool is a
+~256 MiB working set, past the cache knee, so the floor here is real DMA
+bandwidth. The `--nsweep` figures are the ones to quote; the batch x ROWS grid
+sweeps smaller batches where 8 buffers can sit inside cache and its mid-batch
+copy readings run high.
 
 The transform is now memory-bound at every supported `N`. Vector-op cost per element is
 `(5·log2(N) + log2(R)) / 256`, lowest at N=32 — packing removes the lane waste that
@@ -111,8 +114,8 @@ bit-exactly, since that is the one hazard packing introduces.
 - At the kernel level, `batch` must be a multiple of `ROWS_PER_TILE` (which
   defaults to `16384/N`, i.e. 64 at N=256, so that a tile is 32 KB at every `N`);
   the Python wrapper pads to satisfy this, so callers may pass any batch.
-- At large batch the kernel reaches **2.59–2.97 TB/s depending on `N`, which is
-  0.84–0.92 of the measured copy floor for that `N`**. Generated plots live in the
+- At large batch the kernel reaches **2.63–2.92 TB/s depending on `N`, which is
+  0.86–0.95 of the measured copy floor for that `N`**. Generated plots live in the
   companion `pto-kernels-plots` repo.
 - The copy floor is ~3.25 TB/s and is a fair ceiling: a torch device-to-device
   copy of the same size measures 3.22–3.28 TB/s, so the reference kernel is

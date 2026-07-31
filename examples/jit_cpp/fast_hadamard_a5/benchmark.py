@@ -12,17 +12,13 @@ Methodology notes:
     static_asserts this rather than producing garbage timings).
   * MEDIAN of several trials, which rejects the occasional event-timer glitch
     that reads ~2x too fast.
-  * the buffer pool is sized past the measured cache knee (64..128 MiB at batch
-    16384), so the copy floor is HBM bandwidth and not cache bandwidth.
+  * the buffer pool is larger than L2, so the copy hits HBM rather than cache.
   * ROWS_PER_TILE=256 is not swept (NBUF=1, buffering-limited, not useful).
 
 Emits CSV: rows,nbuf,batch,had_gbs,copy_gbs,ratio -> build/grid.csv (+ stdout).
-`--nsweep --repeat K` medians K measurements per N; a single sweep varies by up
-to 0.06 in the ratio, so published figures should use K > 1.
 copy_gbs is the fixed ROWS=64 reference for that batch (same across the ROWS axis)."""
 import ctypes
 import functools
-import statistics
 import sys
 from pathlib import Path
 
@@ -40,10 +36,11 @@ BUILDDIR = HERE / "build"
 ROWS_LIST = [16, 32, 64, 128]
 BATCHES = [1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144]  # 2^10..2^18
 COPY_ROWS = 64  # fixed, UB-valid tiling for the copy-floor reference
-# Round-robin working set. Must clear cache or the measured copy floor is cache
-# bandwidth: at batch 16384 the knee is between 64 and 128 MiB, and a fixed
-# 8-buffer pool sat at 64 MiB -- inside it. Buffer count is derived per batch.
-WORKING_SET_BYTES = 384 * 1024 * 1024
+# Round-robin buffers, matching the A2 fast_hadamard harness. Note this is 8 x
+# one batch, so at mid batches the working set is inside the ~64..128 MiB cache
+# knee and both the transform and its copy floor are partly cache-fed. The ratio
+# is the meaningful quantity, and both sides see the same pool.
+POOL = 8
 TRIALS = 7  # median over trials rejects timer glitches
 
 
@@ -98,19 +95,15 @@ def stream():
 
 
 def gbs_median(fn, bd, batch, n=N, dispatch_n=None):
-    """Median bandwidth over TRIALS, each trial = r reps round-robin over the pool."""
+    """Median bandwidth over TRIALS, each trial = r reps over a POOL round-robin."""
     data = 2 * batch * n * 2
     r = 50
-    # one allocation, sliced: at small batches the pool needs hundreds of
-    # buffers to clear cache, and that many separate allocations is slow
-    depth = max(2, -(-WORKING_SET_BYTES // (batch * n * 2)))
-    block = torch.randn(depth * batch, n, dtype=torch.float16).npu()
-    pool = [block[i * batch : (i + 1) * batch] for i in range(depth)]
+    pool = [torch.randn(batch, n, dtype=torch.float16).npu() for _ in range(POOL)]
     torch.npu.synchronize()
     it = {"k": 0}
 
     def one():
-        b = pool[it["k"] % depth]
+        b = pool[it["k"] % POOL]
         it["k"] += 1
         args = (bd, stream(), ctypes.c_void_p(b.data_ptr()), batch)
         if dispatch_n:
@@ -135,7 +128,7 @@ def gbs_median(fn, bd, batch, n=N, dispatch_n=None):
 
 
 # ---- block-size sweep -------------------------------------------------------
-# Up to N=256 each half-row fits one 128-element fp16
+# N is a build-time macro. Up to 256 each half-row fits one 128-element fp16
 # vector; beyond that the row is split into CHUNKS = (N/2)/128 pieces. Hold the
 # tile size and the total bytes moved constant so N is the only variable, and
 # rebuild the copy floor at each N so every ratio is against its own DMA ceiling.
@@ -167,7 +160,7 @@ def rel_err(fn, bd, n, rows, dispatch_n=None):
     return float(np.abs(out - ref).max()) / (float(np.abs(ref).max()) or 1.0)
 
 
-def nsweep(bd, repeat=1):
+def nsweep(bd):
     print("n,chunks,rows,batch,rel_err,had_gbs,copy_gbs,ratio")
     out = ["n,chunks,rows,batch,rel_err,had_gbs,copy_gbs,ratio"]
     for n in NSWEEP_NS:
@@ -181,9 +174,7 @@ def nsweep(bd, repeat=1):
             print(line + "   # WRONG -- not timed")
             out.append(line)
             continue
-        hg = statistics.median(
-            gbs_median(lib, bd, batch, n=n, dispatch_n=n) for _ in range(repeat)
-        )
+        hg = gbs_median(lib, bd, batch, n=n, dispatch_n=n)
         cl = build(
             rows,
             4,
@@ -192,7 +183,7 @@ def nsweep(bd, repeat=1):
             src=CSRC,
             extra=(f"-DCOPY_N={n}",),
         )
-        cg = statistics.median(gbs_median(cl, bd, batch, n=n) for _ in range(repeat))
+        cg = gbs_median(cl, bd, batch, n=n)
         line = f"{n},{chunks},{rows},{batch},{err:.5f},{hg:.1f},{cg:.1f},{hg / cg:.4f}"
         print(line)
         sys.stdout.flush()
@@ -202,17 +193,10 @@ def nsweep(bd, repeat=1):
 
 
 def main():
-    flags = {"--nsweep"}
-    repeat = 1
-    argv = list(sys.argv[1:])
-    if "--repeat" in argv:
-        i = argv.index("--repeat")
-        repeat = int(argv[i + 1])
-        del argv[i : i + 2]
-    args = [a for a in argv if a not in flags]
+    args = [a for a in sys.argv[1:] if a != "--nsweep"]
     bd = int(args[0]) if args else 64
-    if "--nsweep" in argv:
-        nsweep(bd, repeat)
+    if "--nsweep" in sys.argv:
+        nsweep(bd)
         return
 
     # ---- fixed copy-floor reference (ROWS=64), measured once per batch ----
