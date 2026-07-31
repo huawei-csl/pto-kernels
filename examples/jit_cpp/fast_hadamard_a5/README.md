@@ -10,7 +10,7 @@ Each of the `log2(N)` butterfly stages does the even/odd split on the
 deinterleave **load** (`vlds DINTLV_B16`) and the concat-halves recombine on the
 **store** (`vsts` to the group's two halves), so only `vadd`/`vsub` ever touch
 the vector-execute pipe. The transform is therefore **memory-bound** and runs at
-**0.87–0.95 of a torch device-to-device copy of the same bytes**, which is the
+**0.88–0.97 of a torch device-to-device copy of the same bytes**, which is the
 yardstick throughout. What is left is the `log2(N)` UB round trips the butterfly
 needs, so the fraction widens with `log2(N)`.
 
@@ -77,15 +77,21 @@ copy of the same bytes (`python benchmark.py 64 --nsweep --repeat 3`):
 
 | N | Packed | Chunked | Throughput (GB/s) | Copy (GB/s) | Ratio |
 |---|---|---|---|---|---|
-| 32 | 8 | 1 | 2848 | 3012 | 0.945 |
-| 64 | 4 | 1 | 2851 | 3014 | 0.946 |
-| 128 | 2 | 1 | 2790 | 3010 | 0.927 |
-| **256** | **1** | **1** | **2812** | **3013** | **0.933** |
-| 512 | 1 | 2 | 2760 | 3016 | 0.915 |
-| 1024 | 1 | 4 | 2766 | 3013 | 0.918 |
-| 2048 | 1 | 8 | 2637 | 3012 | 0.875 |
+| 32 | 8 | 1 | 2923 | 3012 | 0.970 |
+| 64 | 4 | 1 | 2919 | 3013 | 0.969 |
+| 128 | 2 | 1 | 2909 | 3013 | 0.965 |
+| **256** | **1** | **1** | **2871** | **3013** | **0.953** |
+| 512 | 1 | 2 | 2790 | 3014 | 0.925 |
+| 1024 | 1 | 4 | 2715 | 3009 | 0.902 |
+| 2048 | 1 | 8 | 2664 | 3015 | 0.884 |
 
-Bandwidth counts read + write traffic. The reference measures **3010..3016 GB/s
+The GM<->UB tile is 16 KB, which `--tiles` shows is a genuine optimum and not
+just a good guess: at N=256 the ratio is 0.80 / **0.94** / 0.91 / 0.87 for
+8 / 16 / 32 / 64 KB tiles, and 16 KB wins at every `N`. Smaller tiles mean
+fewer bytes per UB pass, which is what a UB-round-trip-bound kernel wants,
+until per-tile overhead takes over below 16 KB.
+
+Bandwidth counts read + write traffic. The reference measures **3009..3015 GB/s
 across every `N` — a 0.2% spread** — so the ratio reflects the kernel and not the
 reference. Every `N` moves the same 16.7 M elements through a derived pool depth,
 so the working set is an identical ~256 MiB in every row, past the cache knee.
@@ -143,8 +149,8 @@ PREFETCH=4`).
 - At the kernel level, `batch` must be a multiple of `ROWS_PER_TILE` (which
   defaults to `8192/N`, i.e. 32 at N=256, so that a tile is 16 KB at every `N`);
   the Python wrapper pads to satisfy this, so callers may pass any batch.
-- At large batch the kernel reaches **2.64–2.85 TB/s depending on `N`, which is
-  0.87–0.95 of a torch device-to-device copy of the same bytes**. Generated plots
+- At large batch the kernel reaches **2.66–2.92 TB/s depending on `N`, which is
+  0.88–0.97 of a torch device-to-device copy of the same bytes**. Generated plots
   live in the companion `pto-kernels-plots` repo.
 - Sizing the benchmark's buffer pool matters more than it looks. A pool-size sweep
   at batch 16384 (16 MiB buffers) gave 3532/3569/3577/3415 GB/s for working sets of
