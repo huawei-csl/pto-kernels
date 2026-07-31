@@ -25,19 +25,19 @@ constexpr unsigned SUPPORTED_N[] = {32, 64, 128, 256, 512, 1024, 2048};
 constexpr unsigned SUPPORTED_COUNT =
     sizeof(SUPPORTED_N) / sizeof(SUPPORTED_N[0]);
 constexpr unsigned DEFAULT_N = 256;   // used when a caller does not choose
-constexpr unsigned DEF_BUFFERS = 4;   // measured: 6 is ~1% slower, not faster
+constexpr unsigned DEF_BUFFERS = 4;   // UB buffers in the GM<->UB pipeline
 constexpr unsigned DEF_PREFETCH = 2;  // tiles in flight ahead of the compute
 
-// Rows per GM<->UB tile: a 32 KB tile, floored at 8 rows. Must agree with
+// Rows per GM<->UB tile: a 16 KB tile, floored at 4 rows. Must agree with
 // rows_for() in jit_util_a5.py, which needs it before any .so exists;
 // test_rows_for_matches_kernel pins the two together. 2u rather than
 // sizeof(half) because this is read in the HOST pass, where half does not
-// exist.
-constexpr unsigned TILE_BYTES = 32u * 1024u;
+// exist. README "Tiling" has the sweep behind 16 KB.
+constexpr unsigned TILE_BYTES = 16u * 1024u;
 template <unsigned N>
 struct RowsFor {
   static constexpr unsigned quotient = TILE_BYTES / (N * 2u);
-  static constexpr unsigned value = quotient > 8u ? quotient : 8u;
+  static constexpr unsigned value = quotient > 4u ? quotient : 4u;
 };
 
 #ifdef __CCE_AICORE__

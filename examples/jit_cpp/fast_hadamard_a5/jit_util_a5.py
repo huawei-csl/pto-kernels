@@ -1,4 +1,4 @@
-"""Build + load for the A5 Walsh-Hadamard kernel and its copy-floor reference.
+"""Build + load for the A5 Walsh-Hadamard kernel.
 
 The transform needs no ``-D``: one .so holds an instantiation per supported ``N``
 and its launcher dispatches on ``n``, so every block size shares one build. It pads
@@ -26,13 +26,16 @@ def check_n(n):
 
 
 def rows_for(n: int = N) -> int:
-    """ROWS_PER_TILE for block size ``n``: a 32 KB tile, floored at 8 rows.
+    """ROWS_PER_TILE for block size ``n``: a 16 KB tile, floored at 4 rows.
 
     The padding wrapper needs this before any .so exists, so it is stated here as
     well as in the kernel's RowsFor<N>. test_rows_for_matches_kernel pins the two
     together rather than trusting them to stay in step.
+
+    16 KB is measured, not assumed: it is the fastest tile at every supported N
+    (see README "Block size"). 8192 is 16 KB of fp16.
     """
-    return max(8, 16384 // check_n(n))
+    return max(4, 8192 // check_n(n))
 
 
 ROWS_PER_TILE = rows_for(N)
