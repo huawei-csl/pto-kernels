@@ -124,23 +124,23 @@ elements, so the reference depends only on `N` and the ratios are comparable:
 
 | tile | N=32 | 64 | 128 | 256 | 512 | 1024 | 2048 |
 |---|---|---|---|---|---|---|---|
-| 8 KB | 0.819 | 0.811 | 0.811 | 0.798 | 0.767 | 0.747 | 0.736 |
-| **16 KB** | **0.957** | **0.943** | **0.961** | **0.923** | **0.907** | **0.892** | **0.874** |
-| 32 KB | 0.932 | 0.925 | 0.928 | 0.889 | 0.879 | 0.870 | 0.852 |
-| 64 KB | 0.906 | 0.897 | 0.896 | 0.851 | 0.831 | 0.805 | 0.782 |
+| 8 KB | 0.820 | 0.817 | 0.812 | 0.797 | 0.785 | 0.763 | 0.749 |
+| **16 KB** | **0.950** | **0.943** | **0.950** | **0.937** | **0.920** | **0.909** | **0.876** |
+| 32 KB | 0.926 | 0.925 | 0.924 | 0.913 | 0.900 | 0.889 | 0.868 |
+| 64 KB | 0.904 | 0.896 | 0.898 | 0.874 | 0.849 | 0.822 | 0.799 |
 
-**16 KB is fastest at every supported `N`** — by 2.0% at N=64 and up to 3.8% at
-N=256, and it came out ahead in four independent sweeps — which is why
+**16 KB is fastest at every supported `N`** — 32 KB is the runner-up everywhere,
+by 0.9% at N=2048 up to 2.8% at N=128 — which is why
 `TILE_BYTES` is 16 KB and `ROWS_PER_TILE` defaults to `8192/N`. An earlier sweep
 compared 32 / 64 / 128 KB, found 32 KB best, and never tried smaller. 8 KB is much worse
 because at `NBUF=4` it leaves too little in flight to hide the DMA; a 16 KB tile at
 `NBUF=4` uses only 64 KB of the 256 KB UB, so what binds there is pipeline depth,
 not space.
 
-`NBUF` was swept too, at 16 KB and N=256: 4/5/6/7/8 buffers at `PREFETCH=2` gave
-0.941/0.945/0.952/0.950/0.945, a 1.1% span with nothing to choose between them, so
-the default stays at 4. `PREFETCH` above 2 was no better (0.929 at `NBUF=8,
-PREFETCH=4`).
+`cfg()` caps `NBUF` at 4 and `PREFETCH` at 2, and `PREFETCH` must stay below
+`NBUF` or the pipeline deadlocks. Going past that cap needs a patched build — the
+harness exposes no flag for it — so no `NBUF` figures are quoted here; every
+number in this file comes from a sweep `benchmark.py` can reproduce.
 
 ## Notes
 
