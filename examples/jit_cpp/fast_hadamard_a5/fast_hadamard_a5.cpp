@@ -45,6 +45,10 @@ constexpr unsigned F16_LANES = sizeof(vector_f16) / sizeof(half);
 constexpr unsigned WINDOW = 2 * F16_LANES;  // butterfly window: two registers
 constexpr unsigned SLOTS = 8;        // unroll width: register sets per sweep
 constexpr unsigned EVENT_SLOTS = 8;  // size of the event-id array
+// hadamard() writes eight EVENT_IDs into buffer_free by hand. A larger array
+// zero-fills, aliasing every extra buffer onto EVENT_ID0 (which is 0), and the
+// NBuffers <= EVENT_SLOTS assert below would still pass.
+static_assert(EVENT_SLOTS == 8, "extend buffer_free's initialiser first");
 constexpr unsigned UB_ALIGN = 512;
 // 256 KB on A5, 192 on A2/A3, 128 on Kirin. Device pass only.
 constexpr unsigned UB_BYTES = PTO_UBUF_SIZE_BYTES;
