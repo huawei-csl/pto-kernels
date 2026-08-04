@@ -162,7 +162,12 @@ number in this file comes from a sweep `benchmark.py` can reproduce.
   and 128 MiB. A fixed 8-buffer pool sat at 64 MiB for that batch, so the "floor"
   it reported was partly cache bandwidth and every ratio measured against it was
   flattering. `WORKING_SET_BYTES` now derives the pool depth per batch, holding
-  the working set at ~256 MiB.
+  the working set at ~256 MiB. `POOL_MAX` has to stay loose enough for the
+  smallest batch to reach it — 512 buffers of 0.5 MiB at batch 1024 — or the
+  footprint grows with batch again and the sweep varies two things at once. A cap
+  of 16 did exactly that: it pinned the footprint only from batch 32768 up, and
+  bandwidth-vs-batch kinked where the smaller batches crossed the knee (batch
+  16384 read 2542 GB/s cache-fed against 2131 measured at a full footprint).
 - **Three measurement rules the harness now enforces rather than assumes**, each
   because it went wrong first: a batch whose device time is under 20 µs per launch
   is refused (host dispatch outruns the device — batch 1024 read 216 GB/s for the

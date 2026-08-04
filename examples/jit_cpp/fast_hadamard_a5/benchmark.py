@@ -33,7 +33,12 @@ ROWS_LIST = [16, 32, 64, 128]  # ROWS_PER_TILE values swept by the grid
 TILE_KIBS = [8, 16, 32, 64]  # tile sizes swept by --tiles
 BATCHES = [1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144]
 WORKING_SET_BYTES = 256 * 1024 * 1024  # footprint held constant across batches
-POOL_MIN, POOL_MAX = 2, 16  # round-robin needs two; sixteen bounds allocation
+# The cap has to be loose enough that the smallest batch still reaches
+# WORKING_SET_BYTES, or the footprint grows with batch and the sweep varies two
+# things at once: batch 1024 at N=256 needs 512 buffers of 0.5 MB. A cap of 16
+# pinned the footprint only from batch 32768 up, so smaller batches were partly
+# cache-resident and the bandwidth-vs-batch curve kinked at the cache knee.
+POOL_MIN, POOL_MAX = 2, 512  # round-robin needs two; 512 bounds allocation
 TRIAL_BYTES = 8 * 1024**3  # bytes moved per trial
 REPS_MIN, REPS_MAX = 20, 2000
 MIN_DEVICE_MICROS = 20.0  # under this, a launch is host-bound rather than timed
