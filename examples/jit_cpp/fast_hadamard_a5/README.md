@@ -10,7 +10,7 @@ Each of the `log2(N)` butterfly stages does the even/odd split on the
 deinterleave **load** (`vlds DINTLV_B16`) and the concat-halves recombine on the
 **store** (`vsts` to the group's two halves), so only `vadd`/`vsub` ever touch
 the vector-execute pipe. The transform is therefore **memory-bound** and runs at
-**0.88–0.97 of a torch device-to-device copy of the same bytes**, which is the
+**0.87–0.95 of a torch device-to-device copy of the same bytes**, which is the
 yardstick throughout. What is left is the `log2(N)` UB round trips the butterfly
 needs, so the fraction widens with `log2(N)`.
 
@@ -77,22 +77,22 @@ copy of the same bytes (`python benchmark.py 64 --nsweep --repeat 3`):
 
 | N | Packed | Chunked | Throughput (GB/s) | Copy (GB/s) | Ratio |
 |---|---|---|---|---|---|
-| 32 | 8 | 1 | 2878 | 3014 | 0.955 |
-| 64 | 4 | 1 | 2913 | 3012 | 0.967 |
-| 128 | 2 | 1 | 2871 | 3012 | 0.953 |
-| **256** | **1** | **1** | **2872** | **3016** | **0.952** |
-| 512 | 1 | 2 | 2814 | 3018 | 0.932 |
-| 1024 | 1 | 4 | 2768 | 3014 | 0.918 |
-| 2048 | 1 | 8 | 2639 | 3015 | 0.875 |
+| 32 | 8 | 1 | 2854 | 3024 | 0.943 |
+| 64 | 4 | 1 | 2865 | 3025 | 0.947 |
+| 128 | 2 | 1 | 2845 | 3026 | 0.941 |
+| **256** | **1** | **1** | **2829** | **3025** | **0.935** |
+| 512 | 1 | 2 | 2755 | 3026 | 0.910 |
+| 1024 | 1 | 4 | 2754 | 3025 | 0.910 |
+| 2048 | 1 | 8 | 2640 | 3025 | 0.872 |
 
 The GM<->UB tile is 16 KB, which `--tiles` shows is a genuine optimum and not
-just a good guess: at N=256 the ratio is 0.80 / **0.93** / 0.89 / 0.88 for
+just a good guess: at N=256 the ratio is 0.79 / **0.92** / 0.90 / 0.86 for
 8 / 16 / 32 / 64 KB tiles, and 16 KB wins at every `N`. Smaller tiles mean
 fewer bytes per UB pass, which is what a UB-round-trip-bound kernel wants,
 until per-tile overhead takes over below 16 KB.
 
-Bandwidth counts read + write traffic. The reference measures **3012..3018 GB/s
-across every `N` — a 0.2% spread** — so the ratio reflects the kernel and not the
+Bandwidth counts read + write traffic. The reference measures **3024..3026 GB/s
+across every `N` — a 0.08% spread** — so the ratio reflects the kernel and not the
 reference. Every `N` moves the same 16.7 M elements through a derived pool depth,
 so the working set is an identical ~256 MiB in every row, past the cache knee.
 
@@ -124,16 +124,17 @@ elements, so the reference depends only on `N` and the ratios are comparable:
 
 | tile | N=32 | 64 | 128 | 256 | 512 | 1024 | 2048 |
 |---|---|---|---|---|---|---|---|
-| 8 KB | 0.837 | 0.829 | 0.805 | 0.802 | 0.780 | 0.767 | 0.744 |
-| **16 KB** | **0.943** | **0.965** | **0.937** | **0.933** | **0.909** | **0.905** | **0.860** |
-| 32 KB | 0.910 | 0.912 | 0.902 | 0.894 | 0.879 | 0.877 | 0.850 |
-| 64 KB | 0.935 | 0.920 | 0.897 | 0.876 | 0.852 | 0.826 | 0.793 |
+| 8 KB | 0.821 | 0.804 | 0.792 | 0.785 | 0.768 | 0.753 | 0.734 |
+| **16 KB** | **0.945** | **0.929** | **0.924** | **0.916** | **0.899** | **0.895** | **0.858** |
+| 32 KB | 0.930 | 0.907 | 0.902 | 0.896 | 0.884 | 0.883 | 0.851 |
+| 64 KB | 0.907 | 0.885 | 0.879 | 0.859 | 0.843 | 0.813 | 0.790 |
 
-**16 KB measured fastest at every supported `N`**, by 0.8% (N=32) to 4.8% (N=64)
-over the runner-up. Re-running the whole sweep moves a single cell by up to 2
-points, so only `N`=64..1024 (3.2–4.8%) clears that spread; at N=32 and N=2048 the
-margin is inside it and 16 KB is a near-tie with the runner-up, not a demonstrated
-win. It is still the best single default — which is why
+**16 KB is fastest at every supported `N`.** Every figure here is the median
+of four independent sweeps (each itself `--repeat 3`, so twelve measurements a
+cell), which matters: a single sweep moves a cell by up to 3.5 points, wider
+than the 0.8–2.2 point margins being compared, and reads systematically high.
+Averaging brings the residual under ~0.9 points, and only then is the result
+resolved rather than merely observed — which is why
 `TILE_BYTES` is 16 KB and `ROWS_PER_TILE` defaults to `8192/N`. An earlier sweep
 compared 32 / 64 / 128 KB, found 32 KB best, and never tried smaller. 8 KB is much worse
 because at `NBUF=4` it leaves too little in flight to hide the DMA; a 16 KB tile at
@@ -152,8 +153,8 @@ number in this file comes from a sweep `benchmark.py` can reproduce.
 - At the kernel level, `batch` must be a multiple of `ROWS_PER_TILE` (which
   defaults to `8192/N`, i.e. 32 at N=256, so that a tile is 16 KB at every `N`);
   the Python wrapper pads to satisfy this, so callers may pass any batch.
-- At large batch the kernel reaches **2.64–2.91 TB/s depending on `N`, which is
-  0.88–0.97 of a torch device-to-device copy of the same bytes**. Generated plots
+- At large batch the kernel reaches **2.64–2.87 TB/s depending on `N`, which is
+  0.87–0.95 of a torch device-to-device copy of the same bytes**. Generated plots
   live in the companion `pto-kernels-plots` repo.
 - Sizing the benchmark's buffer pool matters more than it looks. A pool-size sweep
   at batch 16384 (16 MiB buffers) gave 3532/3569/3577/3415 GB/s for working sets of
