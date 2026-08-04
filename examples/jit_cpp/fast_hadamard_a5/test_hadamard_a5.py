@@ -124,6 +124,30 @@ def test_padding_cannot_contaminate_packed_rows(n):
     ), f"n={n}: inf/nan padding changed the real rows -- packed rows are mixing"
 
 
+# The kernel reads its argument as fp16 and as one flat run, and can report
+# neither: a wider dtype is reinterpreted and a strided view is read as if flat,
+# both silently. So the wrapper has to refuse them.
+@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
+def test_wrong_dtype_is_rejected(hadamard_default, dtype):
+    x = torch.zeros((rows_for(N), N), dtype=dtype).npu()
+    with pytest.raises(AssertionError, match="fp16"):
+        hadamard_default(x)
+
+
+# A batch that is an exact multiple of ROWS_PER_TILE is the dangerous case: the
+# padding path is skipped, so the strided view reaches the kernel unmodified.
+# Non-multiples would be copied into a contiguous buffer and quietly work, which
+# is what would make this bug batch-dependent rather than deterministic.
+def test_non_contiguous_is_rejected(hadamard_default):
+    wide = torch.zeros((rows_for(N), 2 * N), dtype=torch.float16).npu()
+    view = wide[:, :N]
+    assert not view.is_contiguous(), "test needs a genuinely strided view"
+    with pytest.raises(AssertionError, match="contiguous"):
+        hadamard_default(view)
+    # and the same data, made contiguous, is accepted
+    hadamard_default(view.contiguous())
+
+
 # rows_for() is stated in Python (the padding wrapper needs it before any .so
 # exists) and again as RowsFor<N> in the kernel. Pin them together.
 def test_rows_for_matches_kernel():

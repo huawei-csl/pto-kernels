@@ -67,6 +67,14 @@ def load_lib(so_path, block_dim=BLOCK_DIM, n=N, rows_per_tile=None):
         assert (
             x.dim() == 2 and x.shape[1] == n
         ), f"expected (batch, {n}) fp16, got {tuple(x.shape)}"
+        # The kernel reads the buffer as half and as one flat run. Neither is
+        # checked by the shape assert, and getting either wrong is silent: a
+        # wider dtype is reinterpreted, and a strided view is read as if flat.
+        # The contiguity case is worse than it looks -- the padding path below
+        # copies into a fresh buffer and happens to work, so without this the
+        # corruption depends on whether batch divides ROWS_PER_TILE.
+        assert x.dtype == torch.float16, f"expected fp16, got {x.dtype}"
+        assert x.is_contiguous(), "expected a contiguous tensor; call .contiguous()"
         batch = int(x.shape[0])
         padded = -(-batch // rows) * rows
         buf = x
