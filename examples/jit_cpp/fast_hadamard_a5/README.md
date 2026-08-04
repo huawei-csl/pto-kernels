@@ -77,21 +77,21 @@ copy of the same bytes (`python benchmark.py 64 --nsweep --repeat 3`):
 
 | N | Packed | Chunked | Throughput (GB/s) | Copy (GB/s) | Ratio |
 |---|---|---|---|---|---|
-| 32 | 8 | 1 | 2923 | 3012 | 0.970 |
-| 64 | 4 | 1 | 2919 | 3013 | 0.969 |
-| 128 | 2 | 1 | 2909 | 3013 | 0.965 |
-| **256** | **1** | **1** | **2871** | **3013** | **0.953** |
-| 512 | 1 | 2 | 2790 | 3014 | 0.925 |
-| 1024 | 1 | 4 | 2715 | 3009 | 0.902 |
-| 2048 | 1 | 8 | 2664 | 3015 | 0.884 |
+| 32 | 8 | 1 | 2878 | 3014 | 0.955 |
+| 64 | 4 | 1 | 2913 | 3012 | 0.967 |
+| 128 | 2 | 1 | 2871 | 3012 | 0.953 |
+| **256** | **1** | **1** | **2872** | **3016** | **0.952** |
+| 512 | 1 | 2 | 2814 | 3018 | 0.932 |
+| 1024 | 1 | 4 | 2768 | 3014 | 0.918 |
+| 2048 | 1 | 8 | 2639 | 3015 | 0.875 |
 
 The GM<->UB tile is 16 KB, which `--tiles` shows is a genuine optimum and not
-just a good guess: at N=256 the ratio is 0.80 / **0.94** / 0.91 / 0.87 for
+just a good guess: at N=256 the ratio is 0.80 / **0.93** / 0.89 / 0.88 for
 8 / 16 / 32 / 64 KB tiles, and 16 KB wins at every `N`. Smaller tiles mean
 fewer bytes per UB pass, which is what a UB-round-trip-bound kernel wants,
 until per-tile overhead takes over below 16 KB.
 
-Bandwidth counts read + write traffic. The reference measures **3009..3015 GB/s
+Bandwidth counts read + write traffic. The reference measures **3012..3018 GB/s
 across every `N` — a 0.2% spread** — so the ratio reflects the kernel and not the
 reference. Every `N` moves the same 16.7 M elements through a derived pool depth,
 so the working set is an identical ~256 MiB in every row, past the cache knee.
@@ -124,13 +124,16 @@ elements, so the reference depends only on `N` and the ratios are comparable:
 
 | tile | N=32 | 64 | 128 | 256 | 512 | 1024 | 2048 |
 |---|---|---|---|---|---|---|---|
-| 8 KB | 0.820 | 0.817 | 0.812 | 0.797 | 0.785 | 0.763 | 0.749 |
-| **16 KB** | **0.950** | **0.943** | **0.950** | **0.937** | **0.920** | **0.909** | **0.876** |
-| 32 KB | 0.926 | 0.925 | 0.924 | 0.913 | 0.900 | 0.889 | 0.868 |
-| 64 KB | 0.904 | 0.896 | 0.898 | 0.874 | 0.849 | 0.822 | 0.799 |
+| 8 KB | 0.837 | 0.829 | 0.805 | 0.802 | 0.780 | 0.767 | 0.744 |
+| **16 KB** | **0.943** | **0.965** | **0.937** | **0.933** | **0.909** | **0.905** | **0.860** |
+| 32 KB | 0.910 | 0.912 | 0.902 | 0.894 | 0.879 | 0.877 | 0.850 |
+| 64 KB | 0.935 | 0.920 | 0.897 | 0.876 | 0.852 | 0.826 | 0.793 |
 
-**16 KB is fastest at every supported `N`** — 32 KB is the runner-up everywhere,
-by 0.9% at N=2048 up to 2.8% at N=128 — which is why
+**16 KB measured fastest at every supported `N`**, by 0.8% (N=32) to 4.8% (N=64)
+over the runner-up. Re-running the whole sweep moves a single cell by up to 2
+points, so only `N`=64..1024 (3.2–4.8%) clears that spread; at N=32 and N=2048 the
+margin is inside it and 16 KB is a near-tie with the runner-up, not a demonstrated
+win. It is still the best single default — which is why
 `TILE_BYTES` is 16 KB and `ROWS_PER_TILE` defaults to `8192/N`. An earlier sweep
 compared 32 / 64 / 128 KB, found 32 KB best, and never tried smaller. 8 KB is much worse
 because at `NBUF=4` it leaves too little in flight to hide the DMA; a 16 KB tile at
@@ -149,7 +152,7 @@ number in this file comes from a sweep `benchmark.py` can reproduce.
 - At the kernel level, `batch` must be a multiple of `ROWS_PER_TILE` (which
   defaults to `8192/N`, i.e. 32 at N=256, so that a tile is 16 KB at every `N`);
   the Python wrapper pads to satisfy this, so callers may pass any batch.
-- At large batch the kernel reaches **2.66–2.92 TB/s depending on `N`, which is
+- At large batch the kernel reaches **2.64–2.91 TB/s depending on `N`, which is
   0.88–0.97 of a torch device-to-device copy of the same bytes**. Generated plots
   live in the companion `pto-kernels-plots` repo.
 - Sizing the benchmark's buffer pool matters more than it looks. A pool-size sweep
