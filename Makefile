@@ -53,6 +53,14 @@ compile_a5_%:
 		$(CSRC_KERNEL_DIR)/kernel_$*.cpp \
 		-o build/lib/libkernel_$*.so
 
+run_a5_%: compile_a5_%
+	export LD_LIBRARY_PATH="${ASCEND_TOOLKIT_HOME}/tools/simulator/Ascend950PR_9599/lib:${LD_LIBRARY_PATH}" && msprof op simulator \
+	  --soc-version=Ascend950PR_9599 \
+	  --timeout=120 \
+	  --output=./outputs/msprof_$* \
+	  python3 scripts/runners/run_$*.py --output-json ./outputs/msprof_$*/result.json
+
+
 install:
 	python3 -m pip install --force-reinstall pto_kernels-*.whl
 
