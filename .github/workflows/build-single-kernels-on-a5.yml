@@ -10,40 +10,38 @@ on:
 
 jobs:
   build_single_kernel_a5:
-    name: Build kernel_${{ matrix.kernel }} for A5 (py${{ matrix.python_version }})
+    name: Build all kernels for A5 (x86_64, py3.12)
     runs-on: ubuntu-latest
     continue-on-error: true
 
-    strategy:
-      fail-fast: false
-      matrix:
-        kernel:
-          - abs
-          - batch_matrix_square
-          - csr_gather
-          #- flash_attention
-          - gdn_chunk_cumsum
-          - gdn_chunk_h
-          - gdn_chunk_o
-          - gdn_scaled_dot_kkt
-          - gdn_wy_fast
-          - kda_chunk_h
-          - kda_chunk_o
-          - kda_gate_cumsum
-          - kda_kkt
-          - kda_wy
-          - scan_ul1
-          - simple_matmul
-          - swiglu
-          - tri_inv_col_sweep
-          - tri_inv_ns
-          - tri_inv_rec_unroll
-          - tri_inv_trick
-        arch: [ x86_64 ]
-        python_version: [ 3.12 ]
-
     container:
-      image: quay.io/ascend/cann:9.1.0-950-ubuntu22.04-py${{ matrix.python_version }}
+      image: quay.io/ascend/cann:9.1.0-950-ubuntu22.04-py3.12
+
+    env:
+      # One kernel per line; comment a line out to skip it.
+      KERNELS: |
+        abs
+        batch_matrix_square
+        csr_gather
+        # flash_attention # TODO: fix this kernel
+        gdn_chunk_cumsum
+        gdn_chunk_h
+        gdn_chunk_o
+        gdn_scaled_dot_kkt
+        gdn_wy_fast
+        kda_chunk_h
+        kda_chunk_o
+        kda_gate_cumsum
+        kda_kkt
+        kda_wy
+        scan_ul1
+        simple_matmul
+        swiglu
+        tri_inv_col_sweep
+        tri_inv_ns
+        tri_inv_rec_unroll
+        tri_inv_trick
+
     steps:
       - name: Show OS
         run: cat /etc/os-release
@@ -51,13 +49,40 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: make compile_a5_${{ matrix.kernel }}
+      - name: Compile every A5 kernel
         shell: bash
         run: |
           source /usr/local/Ascend/ascend-toolkit/set_env.sh
           source /usr/local/Ascend/nnal/atb/set_env.sh
-          export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/Ascend/ascend-toolkit/latest/`uname -i`-linux/devlib # to avoid libascend_hal.so issue
-          make compile_a5_${{ matrix.kernel }}
+          # to avoid libascend_hal.so issue
+          export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/Ascend/ascend-toolkit/latest/$(uname -i)-linux/devlib
 
-      - name: Show built shared library
-        run: ls -lh build/lib/libkernel_${{ matrix.kernel }}.so
+          kernels=$(echo "$KERNELS" | sed 's/#.*//' | tr -d '\r' | xargs)
+          failed=()
+
+          {
+            echo "## A5 kernel compilation"
+            echo
+            echo "| Kernel | Result | Library |"
+            echo "|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          for kernel in $kernels; do
+            echo "::group::make compile_a5_${kernel}"
+            if make compile_a5_"${kernel}"; then
+              lib="build/lib/libkernel_${kernel}.so"
+              ls -lh "$lib"
+              echo "| \`${kernel}\` | ✅ | $(du -h "$lib" | cut -f1) |" >> "$GITHUB_STEP_SUMMARY"
+            else
+              failed+=("${kernel}")
+              echo "::error title=compile_a5_${kernel}::A5 compilation failed for kernel_${kernel}.cpp"
+              echo "| \`${kernel}\` | ❌ | — |" >> "$GITHUB_STEP_SUMMARY"
+            fi
+            echo "::endgroup::"
+          done
+
+          if [ ${#failed[@]} -ne 0 ]; then
+            echo "Failed kernels: ${failed[*]}"
+            exit 1
+          fi
+          echo "All $(echo "$kernels" | wc -w) A5 kernels compiled successfully."
