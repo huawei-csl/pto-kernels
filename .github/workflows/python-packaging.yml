@@ -1,11 +1,11 @@
-name: Multi-platform (x86,aarch64) Manylinux wheels
+name: Multi-platform (x86,aarch64)
 
 on:
   workflow_dispatch:
 
 jobs:
   manylinux-wheels-build:
-    name: manylinux build (${{ matrix.arch }}, py${{ matrix.py_ver }})
+    name: Manylinux wheels (${{ matrix.arch }}, py${{ matrix.py_ver }})
 
     continue-on-error: true
 
@@ -21,13 +21,17 @@ jobs:
             arch: x86_64
             python_version: py3.11
             py_ver: "311"
+          - os: ubuntu-22.04
+            arch: x86_64
+            python_version: py3.12
+            py_ver: "312"
           - os: ubuntu-22.04-arm
             arch: aarch64
             python_version: py3.10
             py_ver: "310"
           - os: ubuntu-22.04-arm
             arch: aarch64
-            python_version: py3.12
+            python_version: py3.11
             py_ver: "311"
           - os: ubuntu-22.04-arm
             arch: aarch64
@@ -37,7 +41,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     container:
-      image: quay.io/ascend/manylinux:9.0.0-910b-manylinux_2_28-${{ matrix.python_version }}
+      image: quay.io/ascend/manylinux:9.1.0-910b-manylinux_2_34-${{ matrix.python_version }}
 
     steps:
       - name: Checkout
@@ -76,7 +80,7 @@ jobs:
           export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/Ascend/ascend-toolkit/latest/`uname -i`-linux/devlib # to avoid libascend_hal.so issue
 
           auditwheel repair \
-            --plat manylinux_2_27_${{ matrix.arch }} \
+            --plat manylinux_2_34_${{ matrix.arch }} \
             --exclude libtorch.so \
             --exclude libtorch_cpu.so \
             --exclude libc10.so \
