@@ -17,6 +17,9 @@ set(LINUX TRUE)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_EXTENSIONS OFF)
+# cce-ld does not support --dependency-file; disable CMake's linker depfile
+# generation (introduced in CMake 3.26) to prevent link failures.
+set(CMAKE_LINK_DEPENDS_USE_LINKER OFF)
 
 option(PIP_INSTALL "True if building via pip" OFF)
 
