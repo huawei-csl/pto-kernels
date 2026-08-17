@@ -80,7 +80,7 @@ jobs:
           export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/Ascend/ascend-toolkit/latest/`uname -i`-linux/devlib # to avoid libascend_hal.so issue
 
           auditwheel repair \
-            --plat manylinux_2_27_${{ matrix.arch }} \
+            --plat manylinux_2_34_${{ matrix.arch }} \
             --exclude libtorch.so \
             --exclude libtorch_cpu.so \
             --exclude libc10.so \
