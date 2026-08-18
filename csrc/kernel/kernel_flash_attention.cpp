@@ -1548,7 +1548,7 @@ AICORE inline void runTFA(
 
   // Generate E[i][j] = i - j once (vec only, causal only). Row 0 is
   // [0,-1,-2,...] via a descending TCI; row i is row 0 + i. This is a one-time
-  // scalar TCI + Vec_S0-1 vector adds, amortized over the whole kernel — the
+  // TCI + cast + Vec_S0-1 vector adds, amortized over the whole kernel — the
   // hot path then just adds a scalar and clamps (no per-diagonal-tile scalar
   // loop).
   if constexpr (DAV_VEC && CAUSAL_MASK) {
@@ -1558,11 +1558,29 @@ AICORE inline void runTFA(
     const uint64_t e_scratch = (uint64_t)triu.data();
     using ERowF =
         Tile<TileType::Vec, float, 1, Tile_S1, BLayout::RowMajor, 1, Tile_S1>;
+    using ERowI32 =
+        Tile<TileType::Vec, int32_t, 1, Tile_S1, BLayout::RowMajor, 1, Tile_S1>;
     using EBlockF = Tile<TileType::Vec, float, Vec_S0, Tile_S1,
                          BLayout::RowMajor, Vec_S0, Tile_S1>;
+    // TCI is integer-only on A5, so generate the iota in int32 and cast to
+    // fp32 (exact: |values| <= Tile_S1). The 3-arg TCI overload selects the
+    // vectorized path (hw vci on A5; tmp is A2-only scratch, >= 768B for b32).
+    // The int32 row and the tmp borrow triu rows Vec_S0-1 and 1: both are
+    // dead once the TCVT below lands, before the TADDS loop overwrites rows
+    // 1..Vec_S0-1. start must stay 0: descending TCI yields start - j on A5
+    // but -(start + j) on A2.
+    static_assert(Vec_S0 >= 3,
+                  "causal E init borrows triu rows 1 and Vec_S0-1");
+    ERowI32 e_row0_i32;
+    TASSIGN(e_row0_i32, e_scratch + static_cast<uint64_t>(Vec_S0 - 1) *
+                                        Tile_S1 * sizeof(float));
+    ERowF tci_tmp;
+    TASSIGN(tci_tmp, e_scratch + Tile_S1 * sizeof(float));
+    TCI<ERowI32, ERowF, int32_t, 1>(e_row0_i32, 0, tci_tmp);
+    pipe_barrier(PIPE_V);
     ERowF e_row0;
     TASSIGN(e_row0, e_scratch);
-    TCI<ERowF, float, 1>(e_row0, 0.0f);  // e_row0[j] = 0 - j
+    TCVT(e_row0, e_row0_i32, RoundMode::CAST_ROUND);  // e_row0[j] = 0 - j
     pipe_barrier(PIPE_V);
     for (int i = 1; i < static_cast<int>(Vec_S0); ++i) {
       ERowF e_rowi;
