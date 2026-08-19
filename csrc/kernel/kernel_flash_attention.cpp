@@ -14,7 +14,11 @@ full text of the License.
 // while pto-inst.hpp is parsed, so this include order is intentional.
 // clang-format off
 #include <pto/pto-inst.hpp>
+#if defined(PTO_NPU_ARCH_A5)
+#include <pto/npu/a5/custom/TSyncCVID.hpp>
+#else
 #include <pto/npu/a2a3/custom/TSyncCVID.hpp>
+#endif
 // clang-format on
 
 #include <pto/common/memory.hpp>
