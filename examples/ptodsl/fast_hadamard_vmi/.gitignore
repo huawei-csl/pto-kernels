@@ -1,0 +1,9 @@
+# cannsim / run artifacts
+__pycache__/
+*.pyc
+sim_outputs/
+log_ca/
+instr.bin
+route_table.txt
+rtb_debug.txt
+scripts/log_ca
