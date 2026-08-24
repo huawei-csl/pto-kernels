@@ -4,6 +4,48 @@ Copied from
 
 https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/900beta2/opdevg/Ascendcopdevg/atlas_ascendc_10_00050.html
 
+## `--cce-aicpu-no-firmware` is required
+
+The compile commands in the documentation linked above omit this flag, and without
+it the kernel never executes. Measured on Ascend 910B2, CANN 9.0.0, driver
+26.0.rc1, 10 runs per build:
+
+| build | runs that print |
+|---|---|
+| exactly as documented | 0/10 |
+| as documented, plus `-fPIC` | 0/10 |
+| plus `--cce-aicpu-no-firmware` | 9/10 |
+
+`-fPIC` and `-g` make no difference; only the flag does.
+
+When the flag is missing, `aclrtSynchronizeStream` returns `507018`
+(`aicpu exception`) and the device reports `errCode=11003` ("get kernel failed") in
+`~/ascend/atrace/*/schedule_event_*/schedule_tracer_*.txt`. A kernel with an empty
+body fails identically, so this is unrelated to `printf`.
+
+**Why the flag is needed is not established.** Both builds embed an `ET_DYN`
+AArch64 shared object with identical symbols and no `SONAME`, differing only in
+size, so the compiler's own help text is the only available explanation:
+
+```
+--cce-aicpu-no-firmware
+      Compile AICpu code with operating system support instead
+      of for firmware-only device
+```
+
+The flag is undocumented, and the documentation section that would cover AI CPU
+compilation -- 2.3.3 "AI CPU算子编译", referenced by 2.2.5 -- is absent from the
+CANN 9.0.0 documentation set. Maintainer input welcome.
+
+### Note on printf reliability
+
+With the flag applied, roughly 6% of runs still lose the output (47/50 printed over
+50 runs). `AscendC::printf` writes into a dump buffer drained by a host-side thread,
+and `DataStoreBarrier()` is only `dsb st` on the device, so teardown can race the
+drain. Inserting a wait before `aclrtDestroyStream` makes it 50/50, but the
+documentation prescribes no such wait, so this looks like a CANN-side issue rather
+than a missing step here.
+
 
 
 

@@ -2,6 +2,7 @@ ASCEND_HOME_DIR := /usr/local/Ascend/cann
 NPU_ARCH    := dav-2201
 
 AICPU_FLAGS := -O2 \
+               --cce-aicpu-no-firmware \
                --cce-aicpu-L$(ASCEND_HOME_DIR)/lib64/device/lib64 \
                --cce-aicpu-laicpu_api \
                -I$(ASCEND_HOME_DIR)/include/ascendc/aicpu_api \
