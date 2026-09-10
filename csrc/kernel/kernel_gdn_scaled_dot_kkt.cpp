@@ -483,6 +483,7 @@ extern "C" __global__ AICORE void gdn_scaled_dot_kkt(
     __gm__ uint8_t* workspace_handle, __gm__ uint8_t* A_handle,
     __gm__ uint8_t* cu_seqlens, int64_t batch_size, int64_t seq_len,
     int64_t total_tokens) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2);
   kkt_kernel<GDN_H, GDN_HG, GDN_D, GDN_C>(
       reinterpret_cast<__gm__ half*>(K_handle),
       reinterpret_cast<__gm__ half*>(Beta_handle),

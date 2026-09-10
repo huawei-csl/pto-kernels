@@ -313,6 +313,7 @@ extern "C" __global__ AICORE void kda_gate_cumsum(__gm__ uint8_t* g_ptr,
                                                   __gm__ uint8_t* cu_seqlens,
                                                   int64_t batch_size,
                                                   int64_t seq_len) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY);
 #if defined(__DAV_VEC__)
   kda_gate_cumsum_kernel<GDN_H, GDN_D, GDN_C>(
       reinterpret_cast<__gm__ half*>(g_ptr),

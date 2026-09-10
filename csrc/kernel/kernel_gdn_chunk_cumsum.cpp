@@ -488,6 +488,7 @@ AICORE void cumsum_kernel_static(__gm__ float* g_ptr, __gm__ float* g_sum_ptr,
 extern "C" __global__ AICORE void gdn_chunk_cumsum_fp32(
     __gm__ uint8_t* g_ptr, __gm__ uint8_t* g_sum_ptr,
     __gm__ uint8_t* cu_seqlens, int64_t batch_size, int64_t seq_len) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY);
 #if defined(__DAV_VEC__)
 
   if (cu_seqlens == nullptr) {

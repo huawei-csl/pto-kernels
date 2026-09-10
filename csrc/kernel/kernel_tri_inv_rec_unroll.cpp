@@ -814,6 +814,7 @@ extern "C" __global__ AICORE void tri_inv_rec_unroll_bf16(
     __gm__ void* tensor_out, __gm__ void* tensor_in, __gm__ void* minus_eye_in,
     uint32_t matrix_size, uint32_t num_matrices, uint32_t num_bsnd_heads,
     uint32_t is_lower, __gm__ void* cu_seqlens) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2);
   __gm__ bfloat16_t* _tensor_out = (__gm__ bfloat16_t*)tensor_out;
   __gm__ bfloat16_t* _tensor_in = (__gm__ bfloat16_t*)tensor_in;
   __gm__ bfloat16_t* _minus_eye_in = (__gm__ bfloat16_t*)minus_eye_in;
@@ -833,6 +834,7 @@ extern "C" __global__ AICORE void tri_inv_rec_unroll_fp16(
     __gm__ void* tensor_out, __gm__ void* tensor_in, __gm__ void* minus_eye_in,
     uint32_t matrix_size, uint32_t num_matrices, uint32_t num_bsnd_heads,
     uint32_t is_lower, __gm__ void* cu_seqlens) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2);
   __gm__ half* _tensor_out = (__gm__ half*)tensor_out;
   __gm__ half* _tensor_in = (__gm__ half*)tensor_in;
   __gm__ half* _minus_eye_in = (__gm__ half*)minus_eye_in;

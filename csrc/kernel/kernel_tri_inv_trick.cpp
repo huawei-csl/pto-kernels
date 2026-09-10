@@ -206,6 +206,7 @@ extern "C" __global__ AICORE void tri_inv_trick_fp16(__gm__ void* tensor_out,
                                                      __gm__ void* identity_in,
                                                      uint32_t matrix_size,
                                                      uint32_t max_block_size) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2);
   run_tri_inv_trick<half>((__gm__ float*)tensor_out, (__gm__ half*)tensor_in,
                           (__gm__ half*)identity_in, matrix_size,
                           max_block_size);

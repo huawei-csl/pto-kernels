@@ -1285,6 +1285,7 @@ extern "C" __global__ AICORE void gdn_chunk_o(
     __gm__ uint8_t* workspace_qk_gated, __gm__ uint8_t* O_handle,
     __gm__ uint8_t* cu_seqlens, int64_t batch_size, int64_t seq_len,
     int64_t total_tokens) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2);
   chunk_o_kernel<GDN_H, GDN_HG, GDN_D, GDN_C>(
       reinterpret_cast<__gm__ half*>(Q_handle),
       reinterpret_cast<__gm__ half*>(K_handle),
