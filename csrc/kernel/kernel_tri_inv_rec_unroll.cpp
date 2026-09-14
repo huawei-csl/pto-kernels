@@ -482,22 +482,6 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
   /* Initializations */
   constexpr uint32_t TileLen = MatrixSize * MatrixSize;
   constexpr uint32_t FractalSize = 16;  // fractal size for half /bf16
-  // How far the doubling phase builds up before the unrolled recursion takes
-  // over. Independent of FractalSize, which the hardware fixes for the input
-  // type: covering more of the matrix here costs recursion levels below, and
-  // at MatrixSize it removes the recursion entirely. Worth 6% at 32 and 18%
-  // at 128, measured on 1024 matrices of side 128.
-  //
-  // It is NOT free, because phase 1 forms the powers A^(2^j) inside a block
-  // and they have to stay inside the input type's range. For the worst case
-  // this kernel is tested on -- a strictly triangular matrix of ones -- the
-  // largest intermediate is 3.4e3 in a block of 16, 1.6e8 at 32 and 6.0e36 at
-  // 128, against fp16's 65504, and the result comes back NaN. In terms of the
-  // input: the largest dense same-sign entry that still fits is 1.45 at a
-  // block of 16, 0.62 at 32, 0.27 at 64 and 0.13 at 128. Raise this only for
-  // inputs known to be inside that, and re-run
-  // tests/test_tri_inv_rec_unroll.py, whose dynamic-range and ones cases cover
-  // it.
   constexpr uint32_t DoublingBlockSize =
       MatrixSize < TRI_INV_DOUBLING_BLOCK ? MatrixSize : TRI_INV_DOUBLING_BLOCK;
   constexpr uint32_t NumFractalsRowWise = MatrixSize / FractalSize;

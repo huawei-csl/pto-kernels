@@ -61,7 +61,7 @@ def block_random_triu_matrix(n, block_dim_x, block_dim_y, scale=0.1):
     return torch.from_numpy(U)
 
 
-def cond_of(A: torch.tensor) -> float:
+def max_condition_number(A: torch.tensor) -> float:
     """Maximum condition number of I + A over all 2D matrices formed on the
     last two dimensions (-2, -1) of A."""
     n = A.shape[-1]
@@ -158,11 +158,11 @@ def _test_tri_inv_rec_unroll(
 
     assert np.allclose(actual_numpy, golden_numpy, atol=atol, rtol=rtol), (
         f"Error at allclose - tensor shape: {A.shape} - rtol: {rtol} - "
-        f"cond(I+A): {cond_of(A):.2f}."
+        f"cond(I+A): {max_condition_number(A):.2f}."
     )
     assert (
         frob_error <= ftol
-    ), f"frob_error: {frob_error} (ftol {ftol}, cond(I+A) {cond_of(A):.2f})"
+    ), f"frob_error: {frob_error} (ftol {ftol}, cond(I+A) {max_condition_number(A):.2f})"
 
 
 # pylint: disable=too-many-function-args,too-many-positional-arguments
@@ -209,11 +209,11 @@ def _test_tri_inv_rec_unroll_bsnd(
 
     assert np.allclose(actual_numpy, golden_numpy, atol=atol, rtol=rtol), (
         f"Error at allclose - tensor shape: {A.shape} - rtol: {rtol} - "
-        f"cond(I+A): {cond_of(A):.2f}."
+        f"cond(I+A): {max_condition_number(A):.2f}."
     )
     assert (
         frob_error <= ftol
-    ), f"frob_error: {frob_error} (ftol {ftol}, cond(I+A) {cond_of(A):.2f})"
+    ), f"frob_error: {frob_error} (ftol {ftol}, cond(I+A) {max_condition_number(A):.2f})"
 
 
 @pytest.mark.parametrize("n", [16, 32, 64, 128])
