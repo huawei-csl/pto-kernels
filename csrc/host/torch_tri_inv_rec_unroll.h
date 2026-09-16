@@ -18,12 +18,12 @@ extern "C" {
 void pto_launch_tri_inv_rec_unroll_bf16(
     uint32_t blockDim, void* stream, void* tensor_out, void* tensor_in,
     void* minus_eye_in, uint32_t matrix_size, uint32_t num_matrices,
-    uint32_t num_bsnd_heads, uint32_t is_lower, void* cu_seqlens);
+    uint32_t num_bsnd_heads, uint32_t is_lower, void* cu_seqlens, uint32_t max_doubling_block_size);
 
 void pto_launch_tri_inv_rec_unroll_fp16(
     uint32_t blockDim, void* stream, void* tensor_out, void* tensor_in,
     void* minus_eye_in, uint32_t matrix_size, uint32_t num_matrices,
-    uint32_t num_bsnd_heads, uint32_t is_lower, void* cu_seqlens);
+    uint32_t num_bsnd_heads, uint32_t is_lower, void* cu_seqlens, uint32_t max_doubling_block_size);
 
 }  // extern "C"
 
@@ -55,13 +55,18 @@ namespace pto_isa_ops {
  * num_bsnd_heads=M.size(-2), which is used to do strided load / store ops.
  * @param is_lower If input matrices are lower-triangular (is_lower == true) or
  * upper-triangular (is_lower == false). Default is upper triangular.
+ * @param max_doubling_block_size The block-size (<= matrix_size) at which the
+ * inversion kernel changes from the recursive doubling to the unrolled algorithm.
+ * Defaults to 16. Values higher than 16 can increase performance but can raise
+ * numerical instabilities.
  * @return at::Tensor Tensor containing inverses of input matrices having same
  * dtype as input.
  */
 at::Tensor run_tri_inv_rec_unroll(const at::Tensor& M,
                                   const at::Tensor& cu_seqlens = at::zeros({1}),
                                   const bool is_bsnd_format = false,
-                                  const bool is_lower = false) {
+                                  const bool is_lower = false,
+                                  const uint32_t max_doubling_block_size = 16) {
   const at::Device device = M.options().device();
   const auto dtype = M.options().dtype();
 
@@ -115,11 +120,11 @@ at::Tensor run_tri_inv_rec_unroll(const at::Tensor& M,
   if (dtype == at::kBFloat16) {
     EXEC_KERNEL_CMD(tri_inv_rec_unroll_bf16, block_dim, M_inv, M, I_neg,
                     matrix_size, total_tiles, num_bsnd_heads, is_lower,
-                    cu_seqlens_ptr);
+                    cu_seqlens_ptr, max_doubling_block_size);
   } else if (dtype == at::kHalf) {
     EXEC_KERNEL_CMD(tri_inv_rec_unroll_fp16, block_dim, M_inv, M, I_neg,
                     matrix_size, total_tiles, num_bsnd_heads, is_lower,
-                    cu_seqlens_ptr);
+                    cu_seqlens_ptr, max_doubling_block_size);
   }
 
   return M_inv;
