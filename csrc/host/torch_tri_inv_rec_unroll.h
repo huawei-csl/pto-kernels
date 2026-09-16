@@ -18,12 +18,14 @@ extern "C" {
 void pto_launch_tri_inv_rec_unroll_bf16(
     uint32_t blockDim, void* stream, void* tensor_out, void* tensor_in,
     void* minus_eye_in, uint32_t matrix_size, uint32_t num_matrices,
-    uint32_t num_bsnd_heads, uint32_t is_lower, void* cu_seqlens, uint32_t max_doubling_block_size);
+    uint32_t num_bsnd_heads, uint32_t is_lower, void* cu_seqlens,
+    uint32_t max_doubling_block_size);
 
 void pto_launch_tri_inv_rec_unroll_fp16(
     uint32_t blockDim, void* stream, void* tensor_out, void* tensor_in,
     void* minus_eye_in, uint32_t matrix_size, uint32_t num_matrices,
-    uint32_t num_bsnd_heads, uint32_t is_lower, void* cu_seqlens, uint32_t max_doubling_block_size);
+    uint32_t num_bsnd_heads, uint32_t is_lower, void* cu_seqlens,
+    uint32_t max_doubling_block_size);
 
 }  // extern "C"
 
@@ -56,9 +58,9 @@ namespace pto_isa_ops {
  * @param is_lower If input matrices are lower-triangular (is_lower == true) or
  * upper-triangular (is_lower == false). Default is upper triangular.
  * @param max_doubling_block_size The block-size (<= matrix_size) at which the
- * inversion kernel changes from the recursive doubling to the unrolled algorithm.
- * Defaults to 16. Values higher than 16 can increase performance but can raise
- * numerical instabilities.
+ * inversion kernel changes from the recursive doubling to the unrolled
+ * algorithm. Defaults to 16. Values higher than 16 can increase performance but
+ * can raise numerical instabilities.
  * @return at::Tensor Tensor containing inverses of input matrices having same
  * dtype as input.
  */
