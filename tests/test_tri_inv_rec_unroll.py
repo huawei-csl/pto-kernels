@@ -61,6 +61,24 @@ def block_random_triu_matrix(n, block_dim_x, block_dim_y, scale=0.1):
     return torch.from_numpy(U)
 
 
+def deltanet_randn_triu_matrix(n, block_dim_x, block_dim_y):
+    K = np.random.randn(block_dim_x, block_dim_y, n, n).astype(np.float64)
+    for i in range(block_dim_x):
+        for j in range(block_dim_y):
+            K[i, j] = K[i, j] / np.linalg.norm(K[i, j], axis=-1, keepdims=True)
+            K[i, j] = np.triu(K[i, j] @ K[i, j].T, k=1)
+    return torch.from_numpy(K)
+
+
+def deltanet_rand_triu_matrix(n, block_dim_x, block_dim_y):
+    K = 0.5 - np.random.rand(block_dim_x, block_dim_y, n, n).astype(np.float64)
+    for i in range(block_dim_x):
+        for j in range(block_dim_y):
+            K[i, j] = K[i, j] / np.linalg.norm(K[i, j], axis=-1, keepdims=True)
+            K[i, j] = np.triu(K[i, j] @ K[i, j].T, k=1)
+    return torch.from_numpy(K)
+
+
 def max_condition_number(A: torch.tensor) -> float:
     """Maximum condition number of I + A over all 2D matrices formed on the
     last two dimensions (-2, -1) of A."""
@@ -131,6 +149,7 @@ def _test_tri_inv_rec_unroll(
     ftol: float,
     is_lower: bool,
     input_dtype: torch.dtype = torch.float16,
+    max_doubling_block_size: int = 16,
 ):
 
     # Make sure A is lower triangular and contiguous in memory.
@@ -144,7 +163,12 @@ def _test_tri_inv_rec_unroll(
     A_npu = A.npu()
 
     torch.npu.synchronize()
-    actual = pto_tri_inv_rec_unroll(A_npu, is_bsnd_format=False, is_lower=is_lower)
+    actual = pto_tri_inv_rec_unroll(
+        A_npu,
+        is_bsnd_format=False,
+        is_lower=is_lower,
+        max_doubling_block_size=max_doubling_block_size,
+    )
     torch.npu.synchronize()
     actual_cpu = actual.cpu()
     torch.npu.synchronize()
@@ -159,6 +183,8 @@ def _test_tri_inv_rec_unroll(
     assert np.allclose(actual_numpy, golden_numpy, atol=atol, rtol=rtol), (
         f"Error at allclose - tensor shape: {A.shape} - rtol: {rtol} - "
         f"cond(I+A): {max_condition_number(A):.2f}."
+        f" max abs error: {np.max(np.abs(actual_numpy-golden_numpy))}."
+        f" frob error: {frob_error}."
     )
     assert (
         frob_error <= ftol
@@ -195,7 +221,9 @@ def _test_tri_inv_rec_unroll_bsnd(
     A_bsnd_npu = A_bsnd.npu()
 
     torch.npu.synchronize()
-    actual = pto_tri_inv_rec_unroll(A_bsnd_npu, is_bsnd_format=True, is_lower=is_lower)
+    actual = pto_tri_inv_rec_unroll(
+        A_bsnd_npu, is_bsnd_format=True, is_lower=is_lower, max_doubling_block_size=16
+    )
     torch.npu.synchronize()
     actual_cpu = actual.cpu()
     torch.npu.synchronize()
@@ -390,7 +418,9 @@ def test_tri_inv_rec_unroll_dynamic_range(
     A = scale * ones_tri_matrix(n, 2, 4)
     A = A.transpose(-1, -2).contiguous() if is_lower else A.contiguous()
     A = A.to(input_dtype)
-    actual = pto_tri_inv_rec_unroll(A.npu(), is_bsnd_format=False, is_lower=is_lower)
+    actual = pto_tri_inv_rec_unroll(
+        A.npu(), is_bsnd_format=False, is_lower=is_lower, max_doubling_block_size=16
+    )
     torch.npu.synchronize()
     finite = torch.isfinite(actual.cpu().to(torch.float64))
     assert finite.all(), (
@@ -399,4 +429,30 @@ def test_tri_inv_rec_unroll_dynamic_range(
         "Phase 1 holds the powers A^(2^j) of each doubling block in the input "
         "dtype, so raising TRI_INV_DOUBLING_BLOCK narrows the input range the "
         "kernel supports; see run_tri_inv_rec_unroll's docstring."
+    )
+
+
+@pytest.mark.parametrize("n", [32, 64, 128])
+@pytest.mark.parametrize("input_dtype", [torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("doubling_block_size", [32, 64, 128])
+@pytest.mark.parametrize(
+    "matrix_gen", [deltanet_rand_triu_matrix, deltanet_randn_triu_matrix]
+)
+def test_tri_inv_rec_unroll_varying_doubling_block_size(
+    n: int, input_dtype: torch.dtype, doubling_block_size: int, matrix_gen
+):
+    A = matrix_gen(n, block_dim_x=7, block_dim_y=13)
+    A = A.to(input_dtype)
+    this_eps = torch.finfo(input_dtype).eps
+    rtol = 0.1 * (doubling_block_size / 16)
+    atol = (this_eps / 10) * (doubling_block_size / 16)
+    ftol = (2 * this_eps / 10) * (doubling_block_size / 16)
+    _test_tri_inv_rec_unroll(
+        A,
+        atol=atol,
+        rtol=rtol,
+        ftol=ftol,
+        is_lower=False,
+        input_dtype=input_dtype,
+        max_doubling_block_size=doubling_block_size,
     )

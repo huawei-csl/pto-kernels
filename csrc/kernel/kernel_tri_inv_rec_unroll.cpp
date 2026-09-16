@@ -708,9 +708,10 @@ template <typename InputT, typename OutputT, uint32_t NumTilesPerCubeIter,
           bool IsBSND>
 AICORE void run_tri_inv_rec_unroll(
     __gm__ OutputT* tensor_out, __gm__ InputT* tensor_in,
-    __gm__ InputT* minus_eye_in, uint32_t matrix_size, uint32_t num_matrices,
-    uint32_t num_bsnd_heads, uint32_t max_doubling_block_size,
-    uint32_t is_lower = 0, __gm__ int32_t* cu_seqlens = nullptr) {
+    __gm__ InputT* minus_eye_in, uint32_t matrix_size,
+    uint32_t max_doubling_block_size, uint32_t num_matrices,
+    uint32_t num_bsnd_heads, uint32_t is_lower = 0,
+    __gm__ int32_t* cu_seqlens = nullptr) {
   static_assert(
       std::is_same_v<InputT, half> or std::is_same_v<InputT, bfloat16_t>,
       "tri_inv_rec_unroll supports only fp16 or bf16.");
