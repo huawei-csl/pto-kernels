@@ -390,6 +390,7 @@ extern "C" __global__ AICORE void tri_inv_ns_fp16(
     __gm__ void* tensor_out, __gm__ void* tensor_in,
     __gm__ void* identity_neg_in, __gm__ void* identity_over_n_in,
     uint32_t matrix_size, uint32_t num_iters, uint32_t num_matrices) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2);
   if (num_matrices <= get_block_num()) {
     run_tri_inv_ns<half, 1>((__gm__ float*)tensor_out, (__gm__ half*)tensor_in,
                             (__gm__ half*)identity_neg_in,

@@ -219,6 +219,7 @@ extern "C" __global__ AICORE void scan_ul1_fp16(__gm__ void* x, __gm__ void* o,
                                                 __gm__ void* u, __gm__ void* l,
                                                 __gm__ void* s,
                                                 uint32_t matrix_size) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2);
   run_scan_ul1((__gm__ half*)x, (__gm__ half*)o, (__gm__ half*)u,
                (__gm__ half*)l, (__gm__ float*)s, matrix_size);
 }
@@ -228,6 +229,7 @@ extern "C" __global__ AICORE void scan_ul1_fp32(__gm__ void* x, __gm__ void* o,
 
                                                 __gm__ void* l, __gm__ void* s,
                                                 uint32_t matrix_size) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2);
   run_scan_ul1((__gm__ float*)x, (__gm__ float*)o, (__gm__ float*)u,
                (__gm__ float*)l, (__gm__ float*)s, matrix_size);
 }

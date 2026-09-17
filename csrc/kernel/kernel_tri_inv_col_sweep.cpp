@@ -145,6 +145,7 @@ AICORE void runTTriInv(__gm__ T* vec_in, __gm__ T* vec_out,
 
 extern "C" __global__ AICORE void triv_inv_col_sweep_fp16(
     GM_ADDR x, GM_ADDR z, uint32_t in_length, uint32_t matrix_size) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY);
 #if defined(__DAV_VEC__)
 
   if (matrix_size == 16) {
@@ -161,6 +162,7 @@ extern "C" __global__ AICORE void triv_inv_col_sweep_fp16(
 
 extern "C" __global__ AICORE void triv_inv_col_sweep_fp32(
     GM_ADDR x, GM_ADDR z, uint32_t in_length, uint32_t matrix_size) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY);
 #if defined(__DAV_VEC__)
 
   if (matrix_size == 16) {

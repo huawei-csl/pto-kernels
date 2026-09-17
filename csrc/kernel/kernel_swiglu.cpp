@@ -398,6 +398,7 @@ AICORE void runTSwiGLU(__gm__ T* x, __gm__ T* y, uint32_t batch,
 extern "C" __global__ AICORE void swiglu_fp16(GM_ADDR x, GM_ADDR y,
                                               uint32_t batch,
                                               uint32_t input_n) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY);
 #if defined(__DAV_VEC__)
   const uint32_t num_cores = get_block_num() * get_subblockdim();
   const uint32_t vid = get_block_idx() * get_subblockdim() + get_subblockid();

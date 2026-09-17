@@ -18,6 +18,16 @@ for the full License text.
 #endif
 // clang-format on
 
+// KERNEL_TASK_TYPE_DEFAULT marks the task type of a __global__ kernel so the
+// compiler does not have to derive it (it warns, and can fail to link, when a
+// kernel is unmarked). The ASC toolchain provides it as a builtin; the legacy
+// ccec toolchain does not, so make it a no-op there.
+// clang-format off
+#ifndef KERNEL_TASK_TYPE_DEFAULT
+#define KERNEL_TASK_TYPE_DEFAULT(kernel_type) ((void)0)
+#endif
+// clang-format on
+
 namespace kernel_utils {
 /**
  * @brief Do a sync step (set-wait flag) between two pipes.

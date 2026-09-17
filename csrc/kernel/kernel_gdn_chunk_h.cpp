@@ -945,6 +945,7 @@ extern "C" __global__ AICORE void gdn_chunk_h(
     __gm__ uint8_t* S, __gm__ uint8_t* V, __gm__ uint8_t* FS,
     __gm__ uint8_t* workspace, __gm__ uint8_t* cu_seqlens, int64_t batch_size,
     int64_t seq_len, int64_t total_tokens) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2);
   chunk_h_kernel<GDN_H, GDN_HG, GDN_D, GDN_C>(
       reinterpret_cast<__gm__ half*>(K), reinterpret_cast<__gm__ half*>(W),
       reinterpret_cast<__gm__ half*>(U), reinterpret_cast<__gm__ float*>(G),
