@@ -7,7 +7,31 @@ from pathlib import Path
 import torch
 
 ASCEND_TOOLKIT_HOME = os.environ["ASCEND_TOOLKIT_HOME"]
-PTO_LIB_PATH = os.environ.get("PTO_LIB_PATH", ASCEND_TOOLKIT_HOME)
+
+
+def _resolve_pto_lib_path() -> str:
+    """Pick the PTO-ISA header root for bisheng's -isystem flag.
+
+    Resolution order:
+      1. ``$PTO_LIB_PATH`` (explicit override).
+      2. The pto-kernels CMake FetchContent mirror at
+         ``<repo>/build/_deps/libpto_isa_headers-src`` (pinned in
+         top-level CMakeLists.txt; populated by any cmake build).
+      3. ``$ASCEND_TOOLKIT_HOME`` (CANN default; may lack newer
+         instructions such as TCOLEXPANDDIV on CANN 8.5.0).
+    """
+    env = os.environ.get("PTO_LIB_PATH")
+    if env:
+        return env
+    # examples/jit_cpp/<example>/jit_util_common.py → parents[3] is the repo root
+    repo_root = Path(__file__).resolve().parents[3]
+    vendored = repo_root / "build" / "_deps" / "libpto_isa_headers-src"
+    if (vendored / "include" / "pto" / "pto-inst.hpp").is_file():
+        return str(vendored)
+    return ASCEND_TOOLKIT_HOME
+
+
+PTO_LIB_PATH = _resolve_pto_lib_path()
 DEFAULT_DEVICE = "npu:0"
 DEFAULT_BLOCK_DIM = 20
 MAX_HADAMARD_N = 16384
