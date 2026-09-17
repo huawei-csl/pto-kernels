@@ -1,0 +1,103 @@
+# matmul_add — Three Cube↔Vector synchronization API styles + naive baseline
+
+Persistent kernels computing `C = A @ B + D` (C2V) and `C = (A + B) @ D` (V2C),
+implemented in three pipelined API styles and one non-pipelined naive baseline.
+
+## Variants
+
+| Subdirectory | Sync API | Pipeline | Note |
+|---|---|---|---|
+| `raw_flag/` | `ffts_cross_core_sync` + `wait_flag_dev` (direct) | round-level overlap | Reference, full multi-round correctness |
+| `pushpop/` | `TPipe` TileData — sync + data-move in one call | round-level overlap | `num_rounds=1` scope; multi-round has shared tileIndex issue |
+| `gm_pipe/` | `TPipe` GlobalData — `TPUSH`/`TPOP` signal only | round-level overlap | Full multi-round; requires pto-isa-master headers |
+| `naive_separate/` | `ffts_cross_core_sync` (one signal per stage) | **none** — stages are sequential | Slower baseline; shows pipeline benefit |
+
+## Kernel Algorithms
+
+| Kernel | Operation | C2V or V2C |
+|--------|-----------|------------|
+| `matmul_add_c2v` | `C = A @ B + D` | Cube GEMM → workspace → Vec add |
+| `add_matmul_v2c` | `C = (A + B) @ D` | Vec add → workspace → Cube GEMM |
+
+## Files
+
+| Subdirectory | Kernels | Python | Note |
+|---|---|---|---|
+| `raw_flag/` | `matmul_add_c2v.cpp`, `add_matmul_v2c.cpp` | `jit_util_*.py`, `run_*.py` | Reference |
+| `pushpop/` | same | `jit_util.py`, `run.py` | Single-round scope |
+| `gm_pipe/` | same | `jit_util.py`, `run.py` | pto-isa-master headers |
+| `naive_separate/` | `naive_separate.cpp` (both kernels) | `jit_util.py`, `run.py` | No pipeline |
+
+## Reproduce
+
+```bash
+BASE=examples/jit_cpp/cross_core_sync_demo/matmul_add
+
+# raw_flag: correctness (30/30 seeds × rounds) + bandwidth
+python $BASE/raw_flag/run_matmul_add_c2v.py
+python $BASE/raw_flag/run_add_matmul_v2c.py
+
+# pushpop: correctness (num_rounds=1 scope) + bandwidth at batch=3072
+python $BASE/pushpop/run.py
+
+# gm_pipe: correctness + bandwidth (both kernels in one script)
+python $BASE/gm_pipe/run.py
+
+# naive_separate: correctness + bandwidth vs torch baseline
+python $BASE/naive_separate/run.py
+```
+
+Each script prints correctness results followed by a bandwidth table.
+Set `NPU_DEVICE=npu:N` to select a specific NPU.
+
+## API Syntax Comparison (C2V direction: `C = A @ B + D`)
+
+```
+                   Sync API                    │  Data API
+──────────────────────────────────────────────────────────────────────────
+raw_flag  Cube: ffts_cross_core_sync(FIX, FLAG_C2V)  │  TSTORE(ws_half, c_l0)
+          Vec:  wait_flag_dev(FLAG_C2V)               │  TLOAD(c_ub, ws)
+                ffts_cross_core_sync(MTE3, FLAG_V2C)  │
+
+pushpop   Cube: TPUSH<C2VPipe, TileL0C, UP_DOWN>(pipe, c_l0)     ← sync + data in one call
+          Vec:  TPOP<C2VPipe, VecTile<float>, UP_DOWN>(pipe, c_ub_float)
+
+gm_pipe   Cube: TALLOC<C2VPipe, SlotHalf, UP_DOWN>(pipe, slot)   ← TPipe allocates slot
+                TSTORE(slot, c_l0)               ← explicit fp32→fp16 (hardware FIX)
+                TPUSH<C2VPipe, SlotHalf, UP_DOWN>(pipe, slot)    ← TPipe signals consumer
+          Vec:  TPOP<C2VPipe, PopHalf, UP_DOWN>(pipe, pop)        ← TPipe waits + slot ptr
+                TLOAD(c_ub, pop)                 ← explicit load
+                TFREE<C2VPipe, PopHalf, UP_DOWN>(pipe, pop)       ← TPipe notifies free
+
+naive     Cube: (all GEMMs) → pipe_barrier → ffts_cross_core_sync(FIX, FLAG_C2V)
+          Vec:  wait_flag_dev(FLAG_C2V) → (all adds)
+               ↑ one signal after ALL rounds, no round overlap
+```
+
+## Measured Bandwidth (910B2, TILE_SIZE=128, 24 Cube cores)
+
+Peak effective external bandwidth (read A+B+D, write C; workspace not counted):
+
+| Variant | matmul_add_c2v peak | add_matmul_v2c peak | Notes |
+|---------|--------------------|--------------------|-------|
+| `raw_flag` | **1357 GB/s** | **1543 GB/s** | Reference pipelined, 64 rounds |
+| `pushpop` | **1954 GB/s** (32 rounds, f32 slot) | 45 GB/s (batch=3072) | C2V: FIFO_DEPTH=1 workaround enables multi-round (f32 slot is 2× larger than f16 → 2× bw); V2C: 2-sub-block producer deadlocks with FIFO_DEPTH=1, remains rounds=1 only |
+| `gm_pipe` | **1837 GB/s** | **1496 GB/s** | 64 rounds; requires pto-isa-master headers |
+| `naive_separate` | 1174 GB/s | 1211 GB/s | No pipeline — **15–30% lower** |
+| `torch.mm + torch.add` | ~2000 GB/s\* | ~2100 GB/s\* | Two separate launches |
+
+\* torch bandwidth appears high because torch's GEMM is a highly tuned library kernel
+that may cache intermediate results on-chip; the naive kernel instead round-trips
+through full-batch HBM workspace, making it slower than torch for large batches.
+The pipelined variants are faster than naive because they overlap Cube and Vec
+round-by-round, reducing the effective latency of cross-core data movement.
+
+## Known Limitations
+
+- **pushpop multi-round (C2V)**: Applying the `FIFO_DEPTH=1` workaround (forces `SyncPeriod=1`, strict alternation) makes `matmul_add_c2v` work for arbitrary `num_rounds`.  Note the C2V slot is `float32` (64 KB), so bandwidth figures are 2× those of the half-slot variants.
+
+- **pushpop multi-round (V2C)**: `add_matmul_v2c` cannot be fixed with `FIFO_DEPTH=1`: with only 1 free signal seeded in the constructor, sub-block 0 consumes it and sub-block 1 deadlocks at `allocate()`.  V2C therefore remains scoped to `num_rounds=1`.  Use `gm_pipe` for multi-round V2C.
+
+- **gm_pipe header requirement**: `TALLOC`/`TPOP(GlobalData)`/`TFREE` are in `pto-isa-master` headers, not the default `/sources/pto-isa`.  The `gm_pipe/jit_util.py` uses `-I/workdir/pto-isa-master/include`.
+
+- **naive_separate workspace**: Uses `workspace[batch, TILE_SIZE]` (full-batch allocation) vs `workspace[num_cores * TILE_SIZE, TILE_SIZE]` for pipelined variants.  The larger workspace means more HBM traffic per kernel call at large batch sizes.
