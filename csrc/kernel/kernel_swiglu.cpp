@@ -196,8 +196,8 @@ AICORE inline void computeSwiGLUTile(TileData& x0Tile, TileData& x1Tile,
   PipeBarrierVec();
 }
 
-// col_count is padded for UB tile sizing; col_count_store is the actual GM
-// element count so tail columns never read past the tensor end.
+// The template dimensions reserve aligned UB storage. Dynamic valid columns
+// must match the actual GM extent, including an unaligned tail.
 template <typename T, uint32_t kTileRows, uint32_t kTileCols>
 AICORE void issueTLoad(__gm__ T* x, uint32_t input_n, uint32_t output_n,
                        const TileWork& tile, unsigned x0_base, unsigned x1_base,
@@ -208,8 +208,8 @@ AICORE void issueTLoad(__gm__ T* x, uint32_t input_n, uint32_t output_n,
   using TileData = Tile<TileType::Vec, T, kTileRows, kTileCols,
                         BLayout::RowMajor, DYNAMIC, DYNAMIC>;
 
-  TileData x0Tile(tile.row_count, tile.col_count);
-  TileData x1Tile(tile.row_count, tile.col_count);
+  TileData x0Tile(tile.row_count, tile.col_count_store);
+  TileData x1Tile(tile.row_count, tile.col_count_store);
   TASSIGN(x0Tile, x0_base);
   TASSIGN(x1Tile, x1_base);
 
@@ -227,8 +227,7 @@ AICORE void issueTLoad(__gm__ T* x, uint32_t input_n, uint32_t output_n,
   set_flag(PIPE_MTE2, PIPE_V, ev);
 }
 
-// col_count is padded for UB tile sizing; col_count_store is the actual GM
-// element count so tail columns never write past the tensor end.
+// Store only the actual valid columns; the template keeps UB rows aligned.
 template <typename T, uint32_t kTileRows, uint32_t kTileCols>
 AICORE void issueTStore(__gm__ T* y, uint32_t output_n, const TileWork& tile,
                         unsigned y_base, event_t ev) {
@@ -238,7 +237,7 @@ AICORE void issueTStore(__gm__ T* y, uint32_t output_n, const TileWork& tile,
   using TileData = Tile<TileType::Vec, T, kTileRows, kTileCols,
                         BLayout::RowMajor, DYNAMIC, DYNAMIC>;
 
-  TileData yTile(tile.row_count, tile.col_count);
+  TileData yTile(tile.row_count, tile.col_count_store);
   TASSIGN(yTile, y_base);
 
   const uint32_t output_offset = tile.row_offset * output_n + tile.col_offset;
@@ -303,9 +302,10 @@ AICORE void runTSwiGLUTiled(__gm__ T* x, __gm__ T* y, uint32_t batch,
                                           next_x0_base, next_x1_base, next_ev);
     }
 
-    TileData x0Tile(current_tile.row_count, current_tile.col_count);
-    TileData x1Tile(current_tile.row_count, current_tile.col_count);
-    TileData yTile(current_tile.row_count, current_tile.col_count);
+    // Mask computation to the same valid extent as the transfers.
+    TileData x0Tile(current_tile.row_count, current_tile.col_count_store);
+    TileData x1Tile(current_tile.row_count, current_tile.col_count_store);
+    TileData yTile(current_tile.row_count, current_tile.col_count_store);
     TASSIGN(x0Tile, current_x0_base);
     TASSIGN(x1Tile, current_x1_base);
     TASSIGN(yTile, current_y_base);
@@ -378,8 +378,8 @@ AICORE void runTSwiGLU(__gm__ T* x, __gm__ T* y, uint32_t batch,
   }
 
   // The 2D path handles all shapes including non-16-aligned output_n via
-  // col_count_store: UB tiles are padded to TILE_ALIGNMENT, HBM
-  // loads/stores use the actual element count.
+  // col_count_store: template dimensions keep UB storage aligned, while
+  // loads, computation and stores use the actual valid element count.
   runTSwiGLUMainTiled(x, y, batch, input_n, num_cores, vid);
 #else
   (void)x;

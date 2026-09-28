@@ -17,6 +17,10 @@ TEST_CASES = [
     if hidden_dim < TEST_LARGE_HIDDEN_DIM_MIN
     or batch <= TEST_LARGE_HIDDEN_DIM_MAX_BATCH
 ]
+# Exercise unaligned tails with one-row, multirow and multiple-column tiles.
+TEST_CASES += [
+    (batch, width) for batch in [2, 48] for width in [1, 15, 17, 31, 33, 129, 16385]
+]
 
 
 def swiglu_ref(x):
@@ -48,3 +52,11 @@ def test_pto_swiglu_rejects_non_last_dim(npu_device):
 
     with pytest.raises(RuntimeError, match="dim=-1"):
         pto_swiglu(x, dim=0)
+
+
+@pytest.mark.parametrize("batch", [2, 48])
+def test_pto_swiglu_unaligned_width_17(npu_device, batch):
+    x = torch.arange(batch * 34, dtype=torch.float32).remainder(68)
+    x = (x.reshape(batch, 34) / 16 - 2).to(DTYPE)
+    actual = pto_swiglu(x.to(npu_device))
+    torch.testing.assert_close(actual.cpu(), swiglu_ref(x), rtol=1e-2, atol=1e-5)
