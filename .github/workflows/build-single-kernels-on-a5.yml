@@ -15,7 +15,7 @@ jobs:
     continue-on-error: true
 
     container:
-      image: quay.io/ascend/cann:9.1.0-950-ubuntu22.04-py3.12
+      image: quay.io/ascend/cann:9.2.0-beta.1-950-ubuntu22.04-py3.12
 
     env:
       # One kernel per line; comment a line out to skip it.
