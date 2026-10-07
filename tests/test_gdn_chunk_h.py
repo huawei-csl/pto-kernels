@@ -1,3 +1,23 @@
+def test_regression_h2_final_state_reuse(npu_device):
+    """H-2: a core must finish storing one state before starting another."""
+    batch = get_aic_cores() // H + 1  # More work items than Cube cores.
+    k = torch.zeros((batch * C, Hg, D), dtype=torch.float16, device=npu_device)
+    w = torch.zeros((batch * C, H, D), dtype=torch.float16, device=npu_device)
+    u = torch.zeros_like(w)
+    k[::C, :, 0] = 1
+    u[::C, :, 0] = 1
+    g = torch.zeros((H, batch * C), dtype=torch.float32, device=npu_device)
+    expected = torch.zeros((batch, H, D, D), dtype=torch.float16)
+    expected[:, :, 0, 0] = 1  # Each sequence has one unit K.T @ U contribution.
+
+    for _ in range(100):
+        _, _, final_state = pto_chunk_h(
+            k, w, u, g, batch_size=batch, seq_len=C, total_chunks=batch
+        )
+        torch.npu.synchronize()
+        torch.testing.assert_close(final_state.cpu(), expected, rtol=0, atol=0)
+
+
 # --------------------------------------------------------------------------------
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # All rights reserved.
@@ -11,7 +31,7 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-from pto_kernels import pto_chunk_h
+from pto_kernels import get_aic_cores, pto_chunk_h
 
 # Compile-time kernel constants (default build: GDN_H=16, GDN_HG=16, GDN_D=128, GDN_C=128)
 C = 128  # chunk size
