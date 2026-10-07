@@ -932,6 +932,9 @@ AICORE void chunk_h_kernel(__gm__ half* K_handle, __gm__ half* W_handle,
       TASSIGN(fs_store, S_UB_HALF);
       TSTORE(fs_global, fs_store);
     }
+    // Finish the final-state DMA before the next work item rewrites S_UB_HALF.
+    set_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
+    wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
   }
 #endif
 }
