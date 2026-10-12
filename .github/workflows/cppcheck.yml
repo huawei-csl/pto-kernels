@@ -1,0 +1,27 @@
+name: cppcheck
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  cppcheck:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install cppcheck
+        run: sudo apt-get update && sudo apt-get install -y cppcheck
+
+      - name: Run cppcheck
+        run: |
+          cppcheck \
+            --force \
+            --enable=all \
+            --std=c++17 \
+            --suppress=missingInclude \
+            --suppress=missingIncludeSystem \
+            --error-exitcode=1 \
+            csrc/
