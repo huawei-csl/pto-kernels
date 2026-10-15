@@ -440,6 +440,166 @@ AICORE inline void InvertSingleTile(TileL1AB X_l1_tile, TileL1AB I_l1_tile,
 }
 
 /**
+ * @brief Where one tile lives inside the global input / output tensors.
+ *
+ * The input and the output tensors share the same geometry, so a single
+ * placement describes both the TLOAD source and the TSTORE destination of a
+ * tile.
+ */
+struct TilePlacement {
+  uint32_t offset;     /**< Element offset of the first element of the tile. */
+  uint32_t valid_size; /**< Rows/cols carrying data (< MatrixSize on tails). */
+  int row_stride;      /**< Element distance between consecutive tile rows. */
+};
+
+/**
+ * @brief Computes the placement of a tile in the global tensors.
+ *
+ * @tparam MatrixSize Size of the entire input/output matrices.
+ * @tparam IsBSND Whether the global tensors are in BSND format.
+ *
+ * @param global_tile_id Index of the tile within the whole global tensor.
+ * @param num_bsnd_heads The number of heads, only for BSND format.
+ * @param cu_seqlens Cumulative sequence lengths, only for varlen BSND.
+ */
+template <uint32_t MatrixSize, bool IsBSND>
+AICORE inline TilePlacement GetTilePlacement(uint32_t global_tile_id,
+                                             uint32_t num_bsnd_heads,
+                                             __gm__ int32_t* cu_seqlens) {
+  if constexpr (!IsBSND) {
+    constexpr uint32_t TileLen = MatrixSize * MatrixSize;
+    return {global_tile_id * TileLen, MatrixSize, static_cast<int>(MatrixSize)};
+  } else {
+    const int row_stride = static_cast<int>(MatrixSize * num_bsnd_heads);
+    if (cu_seqlens != nullptr) {
+      const BSNDVarlenTileInfo tile_info =
+          kernel_utils::GetBSNDVarlenTileInfoFromCuSeqlens(
+              global_tile_id, num_bsnd_heads, MatrixSize, cu_seqlens);
+      return {tile_info.bsnd_offset, tile_info.valid_size, row_stride};
+    }
+    return {kernel_utils::GetBSNDFixedTileOffset(global_tile_id,
+                                                 num_bsnd_heads, MatrixSize),
+            MatrixSize, row_stride};
+  }
+}
+
+/**
+ * @brief Loads one tile from global memory into its L1 staging tile.
+ *
+ * Pure data transfer: no cube compute happens here. The only synchronization
+ * it owns is the MTE2 -> MTE1 handshake that the zero-padding of a short
+ * varlen tile needs; handing the tile over to the compute part is left to the
+ * caller.
+ *
+ * @tparam InputT The type of the input elements.
+ * @tparam MatrixSize Size of the entire input/output matrices.
+ * @tparam IsBSND Whether the global tensor is in BSND format.
+ * @tparam TileL1AB The type of the destination tile in L1.
+ *
+ * @param dst_l1_tile Destination tile in L1.
+ * @param M Pointer to the global tensor matrix in global memory.
+ * @param placement Placement of this tile in the global tensor.
+ * @param event Event used for the internal MTE2 -> MTE1 handshake.
+ */
+template <typename InputT, uint32_t MatrixSize, bool IsBSND, typename TileL1AB>
+AICORE inline void LoadTileGlobalToL1(TileL1AB dst_l1_tile, __gm__ InputT* M,
+                                      const TilePlacement& placement,
+                                      const event_t event) {
+  using GlobalTileShapeIn =
+      TileShape2D<InputT, MatrixSize, MatrixSize, Layout::ND>;
+  using GlobalTileStridesIn = typename std::conditional<
+      !IsBSND, BaseShape2D<InputT, MatrixSize, MatrixSize, Layout::ND>,
+      pto::Stride<1, 1, 1, -1, 1>>::type;
+  using GlobalTileIn =
+      GlobalTensor<InputT, GlobalTileShapeIn, GlobalTileStridesIn, Layout::ND>;
+
+  if constexpr (IsBSND) {
+    using GlobalTileDynamicIn =
+        GlobalTensor<InputT, Shape<1, 1, 1, DYNAMIC, DYNAMIC>,
+                     pto::Stride<1, 1, 1, DYNAMIC, 1>, Layout::ND>;
+    using TileL1ABDynamic =
+        Tile<TileType::Mat, InputT, MatrixSize, MatrixSize, BLayout::ColMajor,
+             DYNAMIC, DYNAMIC, SLayout::RowMajor, 512, PadValue::Zero>;
+
+    if (placement.valid_size < MatrixSize) {
+      const int valid_size = static_cast<int>(placement.valid_size);
+      TileL1ABDynamic dst_dyn_l1_tile(placement.valid_size,
+                                      placement.valid_size);
+      TASSIGN(dst_dyn_l1_tile,
+              reinterpret_cast<std::uintptr_t>(dst_l1_tile.data()));
+      GlobalTileDynamicIn M_global_in_dyn(
+          M + placement.offset, {1, 1, 1, valid_size, valid_size},
+          {1, 1, 1, placement.row_stride, 1});
+      TLOAD(dst_dyn_l1_tile, M_global_in_dyn);
+      set_flag(PIPE_MTE2, PIPE_MTE1, event);
+      wait_flag(PIPE_MTE2, PIPE_MTE1, event);
+      TFILLPAD(dst_dyn_l1_tile, dst_dyn_l1_tile);
+      return;
+    }
+    GlobalTileIn M_global_in(M + placement.offset, {}, {placement.row_stride});
+    TLOAD(dst_l1_tile, M_global_in);
+  } else {
+    GlobalTileIn M_global_in(M + placement.offset);
+    TLOAD(dst_l1_tile, M_global_in);
+  }
+}
+
+/**
+ * @brief Stores the inverse of one tile from the L0C accumulator to global
+ * memory.
+ *
+ * Pure data transfer: the counterpart of LoadTileGlobalToL1 on the way out.
+ *
+ * @tparam OutputT The type of the output elements.
+ * @tparam MatrixSize Size of the entire input/output matrices.
+ * @tparam IsBSND Whether the global tensor is in BSND format.
+ * @tparam TileL0C The type of the source accumulator tile in L0C.
+ *
+ * @param M_inv Pointer to the global memory to store the final inverse.
+ * @param src_l0c_tile Source accumulator tile in L0C holding the inverse.
+ * @param placement Placement of this tile in the global tensor.
+ */
+template <typename OutputT, uint32_t MatrixSize, bool IsBSND, typename TileL0C>
+AICORE inline void StoreTileL0CToGlobal(__gm__ OutputT* M_inv,
+                                        TileL0C src_l0c_tile,
+                                        const TilePlacement& placement) {
+  using GlobalTileShapeOut =
+      TileShape2D<OutputT, MatrixSize, MatrixSize, Layout::ND>;
+  using GlobalTileStridesOut = typename std::conditional<
+      !IsBSND, BaseShape2D<OutputT, MatrixSize, MatrixSize, Layout::ND>,
+      pto::Stride<1, 1, 1, -1, 1>>::type;
+  using GlobalTileOut = GlobalTensor<OutputT, GlobalTileShapeOut,
+                                     GlobalTileStridesOut, Layout::ND>;
+
+  if constexpr (IsBSND) {
+    using GlobalTileDynamicOut =
+        GlobalTensor<OutputT, Shape<1, 1, 1, DYNAMIC, DYNAMIC>,
+                     pto::Stride<1, 1, 1, DYNAMIC, 1>, Layout::ND>;
+    using TileL0CDynamic =
+        TileAcc<float, MatrixSize, MatrixSize, DYNAMIC, DYNAMIC>;
+
+    if (placement.valid_size < MatrixSize) {
+      const int valid_size = static_cast<int>(placement.valid_size);
+      TileL0CDynamic src_dyn_l0c_tile(placement.valid_size,
+                                      placement.valid_size);
+      TASSIGN(src_dyn_l0c_tile,
+              reinterpret_cast<std::uintptr_t>(src_l0c_tile.data()));
+      GlobalTileDynamicOut M_inv_global_out_dyn(
+          M_inv + placement.offset, {1, 1, 1, valid_size, valid_size},
+          {1, 1, 1, placement.row_stride, 1});
+      TSTORE(M_inv_global_out_dyn, src_dyn_l0c_tile);
+      return;
+    }
+    GlobalTileOut M_inv_global_out(M_inv + placement.offset, {},
+                                   {placement.row_stride});
+    TSTORE(M_inv_global_out, src_l0c_tile);
+  } else {
+    GlobalTileOut M_inv_global_out(M_inv + placement.offset);
+    TSTORE(M_inv_global_out, src_l0c_tile);
+  }
+}
+
+/**
  * @brief: Runs the main kernel (inverts all matrices in the tensor)
  *
  * @tparam InputT The type of the input elements. Supports fp16 and bf16.
@@ -473,8 +633,6 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
                                          uint32_t num_bsnd_heads = 0,
                                          uint32_t is_lower = 0,
                                          __gm__ int32_t* cu_seqlens = nullptr) {
-  using pto::Stride;
-
   /* Initializations */
   constexpr uint32_t TileLen = MatrixSize * MatrixSize;
   constexpr uint32_t FractalSize = 16;  // fractal size for half /bf16
@@ -489,43 +647,19 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
 
   using GlobalTileShapeIn =
       TileShape2D<InputT, MatrixSize, MatrixSize, Layout::ND>;
-  using GlobalTileStridesIn = typename std::conditional<
-      !IsBSND, BaseShape2D<InputT, MatrixSize, MatrixSize, Layout::ND>,
-      pto::Stride<1, 1, 1, -1, 1>>::type;
-  using GlobalTileIn =
-      GlobalTensor<InputT, GlobalTileShapeIn, GlobalTileStridesIn, Layout::ND>;
-  using GlobalTileDynamicShape = Shape<1, 1, 1, DYNAMIC, DYNAMIC>;
-  using GlobalTileDynamicStride = pto::Stride<1, 1, 1, DYNAMIC, 1>;
-  using GlobalTileDynamicIn = GlobalTensor<InputT, GlobalTileDynamicShape,
-                                           GlobalTileDynamicStride, Layout::ND>;
   using GlobalTileStridesINeg =
       BaseShape2D<InputT, MatrixSize, MatrixSize, Layout::ND>;
   using GlobalTileINeg = GlobalTensor<InputT, GlobalTileShapeIn,
                                       GlobalTileStridesINeg, Layout::ND>;
 
-  using GlobalTileShapeOut =
-      TileShape2D<OutputT, MatrixSize, MatrixSize, Layout::ND>;
-  using GlobalTileStridesOut = typename std::conditional<
-      !IsBSND, BaseShape2D<OutputT, MatrixSize, MatrixSize, Layout::ND>,
-      pto::Stride<1, 1, 1, -1, 1>>::type;
-  using GlobalTileOut = GlobalTensor<OutputT, GlobalTileShapeOut,
-                                     GlobalTileStridesOut, Layout::ND>;
-  using GlobalTileDynamicOut =
-      GlobalTensor<OutputT, GlobalTileDynamicShape, GlobalTileDynamicStride,
-                   Layout::ND>;
   using TileL1AB =
       Tile<TileType::Mat, InputT, MatrixSize, MatrixSize, BLayout::ColMajor,
            MatrixSize, MatrixSize, SLayout::RowMajor, 512>;
-  using TileL1ABDynamic =
-      Tile<TileType::Mat, InputT, MatrixSize, MatrixSize, BLayout::ColMajor,
-           DYNAMIC, DYNAMIC, SLayout::RowMajor, 512, PadValue::Zero>;
 
   // L0 Memory
   using TileL0A = TileLeft<InputT, MatrixSize, MatrixSize>;
   using TileL0B = TileRight<InputT, MatrixSize, MatrixSize>;
   using TileL0C = TileAcc<float, MatrixSize, MatrixSize>;
-  using TileL0CDynamic =
-      TileAcc<float, MatrixSize, MatrixSize, DYNAMIC, DYNAMIC>;
 
   GlobalTileINeg I_neg_global_in(I_neg);
 
@@ -566,8 +700,7 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
       CeilDiv(total_tiles, (uint32_t)(NumTilesPerCubeIter * get_block_num()));
 
   /* Main iteration - Compute all tiles */
-  uint32_t bsnd_tile_offsets[NumTilesPerCubeIter] = {0};
-  uint32_t bsnd_tile_valid_sizes[NumTilesPerCubeIter] = {0};
+  TilePlacement tile_placements[NumTilesPerCubeIter] = {};
   uint32_t next_tile_id_that_waits_for_pipe_fix_pipe_m = 0;
   set_flag(PIPE_FIX, PIPE_M,
            static_cast<event_t>(next_tile_id_that_waits_for_pipe_fix_pipe_m));
@@ -580,52 +713,21 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
     if (global_index >= total_tiles) {
       break;
     }
+    /* Data transfer in: stage the NumTilesPerCubeIter tiles of this cube
+     * iteration from GM into L1 */
     for (uint32_t tile_id = 0; (tile_id < NumTilesPerCubeIter) &&
                                (global_index + tile_id < total_tiles);
          ++tile_id) {
-      if constexpr (IsBSND) {
-        const uint32_t global_tile_id = global_index + tile_id;
-        if (cu_seqlens != nullptr) {
-          const BSNDVarlenTileInfo tile_info =
-              kernel_utils::GetBSNDVarlenTileInfoFromCuSeqlens(
-                  global_tile_id, num_bsnd_heads, MatrixSize, cu_seqlens);
-          bsnd_tile_offsets[tile_id] = tile_info.bsnd_offset;
-          bsnd_tile_valid_sizes[tile_id] = tile_info.valid_size;
-        } else {
-          bsnd_tile_offsets[tile_id] = kernel_utils::GetBSNDFixedTileOffset(
-              global_tile_id, num_bsnd_heads, MatrixSize);
-          bsnd_tile_valid_sizes[tile_id] = MatrixSize;
-        }
-        const uint32_t bsnd_offset = bsnd_tile_offsets[tile_id];
-        const uint32_t valid_size = bsnd_tile_valid_sizes[tile_id];
-        const int row_stride = static_cast<int>(MatrixSize * num_bsnd_heads);
-        wait_flag(PIPE_M, PIPE_MTE2, static_cast<event_t>(tile_id));
-        if (valid_size < MatrixSize) {
-          TileL1ABDynamic Y_dyn_l1_tile(valid_size, valid_size);
-          TASSIGN(Y_dyn_l1_tile,
-                  0x0 + (5 + tile_id) * TileLen * sizeof(InputT));
-          GlobalTileDynamicIn M_global_in_dyn(
-              M + bsnd_offset,
-              {1, 1, 1, static_cast<int>(valid_size),
-               static_cast<int>(valid_size)},
-              {1, 1, 1, row_stride, 1});
-          TLOAD(Y_dyn_l1_tile, M_global_in_dyn);
-          set_flag(PIPE_MTE2, PIPE_MTE1, static_cast<event_t>(tile_id));
-          wait_flag(PIPE_MTE2, PIPE_MTE1, static_cast<event_t>(tile_id));
-          TFILLPAD(Y_dyn_l1_tile, Y_dyn_l1_tile);
-        } else {
-          GlobalTileIn M_global_in(M + bsnd_offset, {}, {row_stride});
-          TLOAD(Y_l1_tile[tile_id], M_global_in);
-        }
-      } else {
-        GlobalTileIn M_global_in(M + (global_index + tile_id) * TileLen);
-        wait_flag(PIPE_M, PIPE_MTE2, static_cast<event_t>(tile_id));
-        TLOAD(Y_l1_tile[tile_id],
-              M_global_in);  // Copies NumTilesPerCubeIter tiles at once
-      }
-      set_flag(PIPE_MTE2, PIPE_MTE1, static_cast<event_t>(tile_id));
+      const event_t event = static_cast<event_t>(tile_id);
+      tile_placements[tile_id] = GetTilePlacement<MatrixSize, IsBSND>(
+          global_index + tile_id, num_bsnd_heads, cu_seqlens);
+      wait_flag(PIPE_M, PIPE_MTE2, event);
+      LoadTileGlobalToL1<InputT, MatrixSize, IsBSND>(
+          Y_l1_tile[tile_id], M, tile_placements[tile_id], event);
+      set_flag(PIPE_MTE2, PIPE_MTE1, event);
     }
 
+    /* Compute: invert each staged tile, then transfer the result out */
     constexpr uint32_t final_c_buffer_index =
         MatrixSize > DoublingBlockSize ? 1 : 0;
     for (uint32_t tile_id = 0; (tile_id < NumTilesPerCubeIter) &&
@@ -645,30 +747,10 @@ AICORE inline void TriInvRecUnrollKernel(__gm__ OutputT* M_inv,
       // Allow next cube_iter to proceed for this tile_id
       set_flag(PIPE_M, PIPE_MTE2, static_cast<event_t>(tile_id));
 
-      /* Store result */
-      if constexpr (IsBSND) {
-        const uint32_t bsnd_offset = bsnd_tile_offsets[tile_id];
-        const uint32_t valid_size = bsnd_tile_valid_sizes[tile_id];
-        const int row_stride = static_cast<int>(MatrixSize * num_bsnd_heads);
-        if (valid_size < MatrixSize) {
-          TileL0CDynamic c_l0_tail_tile(valid_size, valid_size);
-          TASSIGN(c_l0_tail_tile,
-                  0x0 + final_c_buffer_index * TileLen * sizeof(float));
-          GlobalTileDynamicOut M_inv_global_out_dyn(
-              M_inv + bsnd_offset,
-              {1, 1, 1, static_cast<int>(valid_size),
-               static_cast<int>(valid_size)},
-              {1, 1, 1, row_stride, 1});
-          TSTORE(M_inv_global_out_dyn, c_l0_tail_tile);
-        } else {
-          GlobalTileOut M_inv_global_out(M_inv + bsnd_offset, {}, {row_stride});
-          TSTORE(M_inv_global_out, c_l0_tile[final_c_buffer_index]);
-        }
-      } else {
-        GlobalTileOut M_inv_global_out(M_inv +
-                                       (global_index + tile_id) * TileLen);
-        TSTORE(M_inv_global_out, c_l0_tile[final_c_buffer_index]);
-      }
+      /* Data transfer out: write the inverse from L0C back to GM */
+      StoreTileL0CToGlobal<OutputT, MatrixSize, IsBSND>(
+          M_inv, c_l0_tile[final_c_buffer_index], tile_placements[tile_id]);
+
       next_tile_id_that_waits_for_pipe_fix_pipe_m =
           (tile_id + 1) % NumTilesPerCubeIter;
       set_flag(
