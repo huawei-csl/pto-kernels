@@ -477,8 +477,8 @@ AICORE inline TilePlacement GetTilePlacement(uint32_t global_tile_id,
               global_tile_id, num_bsnd_heads, MatrixSize, cu_seqlens);
       return {tile_info.bsnd_offset, tile_info.valid_size, row_stride};
     }
-    return {kernel_utils::GetBSNDFixedTileOffset(global_tile_id,
-                                                 num_bsnd_heads, MatrixSize),
+    return {kernel_utils::GetBSNDFixedTileOffset(global_tile_id, num_bsnd_heads,
+                                                 MatrixSize),
             MatrixSize, row_stride};
   }
 }
@@ -527,9 +527,9 @@ AICORE inline void LoadTileGlobalToL1(TileL1AB dst_l1_tile, __gm__ InputT* M,
                                       placement.valid_size);
       TASSIGN(dst_dyn_l1_tile,
               reinterpret_cast<std::uintptr_t>(dst_l1_tile.data()));
-      GlobalTileDynamicIn M_global_in_dyn(
-          M + placement.offset, {1, 1, 1, valid_size, valid_size},
-          {1, 1, 1, placement.row_stride, 1});
+      GlobalTileDynamicIn M_global_in_dyn(M + placement.offset,
+                                          {1, 1, 1, valid_size, valid_size},
+                                          {1, 1, 1, placement.row_stride, 1});
       TLOAD(dst_dyn_l1_tile, M_global_in_dyn);
       set_flag(PIPE_MTE2, PIPE_MTE1, event);
       wait_flag(PIPE_MTE2, PIPE_MTE1, event);
