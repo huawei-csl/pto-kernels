@@ -203,7 +203,7 @@ extern "C" __global__ AICORE void triv_inv_col_sweep_fp16(
   KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY);
 #if defined(__DAV_VEC__)
 
- // Input/output dtype
+  // Input/output dtype
   using fp16_t = __gm__ half*;
 
   if (matrix_size == 16) {
