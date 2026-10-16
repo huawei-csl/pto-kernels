@@ -79,7 +79,7 @@ def ones_np_tril(batch_size: int, n: int, dtype: np.dtype):
     return A.astype(dtype)
 
 
-@pytest.mark.parametrize("batch_size", [2, 4, 40, 256])
+@pytest.mark.parametrize("batch_size", [3, 5, 19, 31, 63])
 @pytest.mark.parametrize("matrix_size", [16, 32, 64, 128])
 @pytest.mark.parametrize("data_type", [np.float16, np.float32], ids=str)
 @pytest.mark.parametrize(

@@ -47,7 +47,7 @@ namespace pto_isa_ops {
  * @param [in] cu_seqlens A 1-dimensional tensor with the cumulative sums of
  * the input sequence lengths, for variable-length BSND input. The last chunk
  * of a sequence is then shorter than the chunk size, and only that leading
- * square block of it is inverted and written back.
+ * square block of it is inverted; the rest of its valid rows is set to zero.
  * @return at::Tensor Tensor of same shape as input where matrices are inverted.
  */
 
@@ -93,9 +93,9 @@ at::Tensor run_tri_inv_col_sweep(
     block_dim = total_tiles;
   }
 
-  // A varlen BSND tensor has padding that no tile covers, and the kernel only
-  // writes the valid blocks back, so the output has to start out zeroed.
-  const at::Tensor z = is_bsnd_format ? at::zeros_like(x) : at::empty_like(x);
+  // Every element of the output is written by the kernel: tail chunks of a
+  // varlen BSND tensor store their valid rows at full width, zero padded.
+  const at::Tensor z = at::empty_like(x);
 
   TORCH_CHECK(dtype == at::kHalf || dtype == at::kFloat,
               "tri_inv: dtype must be fp16 or float32, got ", dtype);

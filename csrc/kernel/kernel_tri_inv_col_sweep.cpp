@@ -112,7 +112,8 @@ AICORE inline void InitIdentity(uint32_t addr) {
  * into the top-left corner of the S x S buffer and the rest is zero-filled,
  * which makes the buffer the block matrix diag(A, 0). The sweep never reads
  * the diagonal -- it assumes a unit one -- so it inverts diag(A, I) and the
- * top-left block of the result is A^-1; only that block is stored back.
+ * top-left block of the result is A^-1. The valid rows are stored back at
+ * full width, so the padding columns of the output come out as zeros.
  *
  * @tparam T Input data type (fp16 or fp32).
  * @tparam S Matrix size. Supports 16, 32, 64, 128.
@@ -319,13 +320,16 @@ AICORE void runTTriInvRankOne(__gm__ T* vec_in, __gm__ T* vec_out,
     wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
     if constexpr (IsBSND) {
       if (valid_size < S) {
-        // Only the inverted block goes back; the padding is not ours to write.
-        TailTile tail_out(valid_size, valid_size);
+        // Store the full width of the valid rows: the result is
+        // diag(A^-1, I), so the columns past valid_size are exact zeros and
+        // the output needs no zero-fill. The rows past valid_size belong to
+        // the next sequence and are left alone.
+        TailTile tail_out(valid_size, S);
         TASSIGN(tail_out, OUT_UB_ADDR);
-        GlobalDataDyn global_out_dyn(vec_out + tile_offset,
-                                     {1, 1, 1, static_cast<int>(valid_size),
-                                      static_cast<int>(valid_size)},
-                                     {1, 1, 1, row_stride, 1});
+        GlobalDataDyn global_out_dyn(
+            vec_out + tile_offset,
+            {1, 1, 1, static_cast<int>(valid_size), static_cast<int>(S)},
+            {1, 1, 1, row_stride, 1});
         TSTORE(global_out_dyn, tail_out);
       } else {
         GlobalDataStrided global_out_strided(vec_out + tile_offset, {},
