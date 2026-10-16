@@ -15,8 +15,6 @@ using namespace kernel_utils;
 /**
  * @brief Inverts unit lower triangular matrices with rank-1 updates.
  *
- * Same back substitution as runTTriInv above, but solved for every basis
- * vector at once instead of one sweep per basis vector.
  *
  * The UB tile holds L (unit lower triangular, row-major) and the kernel has
  * to store X = L^-1. Writing Y = X^T, back substitution over all right-hand
@@ -205,14 +203,17 @@ extern "C" __global__ AICORE void triv_inv_col_sweep_fp16(
   KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY);
 #if defined(__DAV_VEC__)
 
+ // Input/output dtype
+  using fp16_t = __gm__ half*;
+
   if (matrix_size == 16) {
-    runTTriInvRankOne<half, 16>((__gm__ half*)x, (__gm__ half*)z, in_length);
+    runTTriInvRankOne<half, 16>((fp16_t)x, (fp16_t)z, in_length);
   } else if (matrix_size == 32) {
-    runTTriInvRankOne<half, 32>((__gm__ half*)x, (__gm__ half*)z, in_length);
+    runTTriInvRankOne<half, 32>((fp16_t)x, (fp16_t)z, in_length);
   } else if (matrix_size == 64) {
-    runTTriInvRankOne<half, 64>((__gm__ half*)x, (__gm__ half*)z, in_length);
+    runTTriInvRankOne<half, 64>((fp16_t)x, (fp16_t)z, in_length);
   } else if (matrix_size == 128) {
-    runTTriInvRankOne<half, 128>((__gm__ half*)x, (__gm__ half*)z, in_length);
+    runTTriInvRankOne<half, 128>((fp16_t)x, (fp16_t)z, in_length);
   }
 #endif
 }
@@ -222,22 +223,21 @@ extern "C" __global__ AICORE void triv_inv_col_sweep_fp32(
   KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY);
 #if defined(__DAV_VEC__)
 
+  // Input/output dtype
+  using fp32_t = __gm__ float*;
+
   if (matrix_size == 16) {
-    runTTriInvRankOne<float, 16>((__gm__ float*)x, (__gm__ float*)z, in_length);
+    runTTriInvRankOne<float, 16>((fp32_t)x, (fp32_t)z, in_length);
   } else if (matrix_size == 32) {
-    runTTriInvRankOne<float, 32>((__gm__ float*)x, (__gm__ float*)z, in_length);
+    runTTriInvRankOne<float, 32>((fp32_t)x, (fp32_t)z, in_length);
   } else if (matrix_size == 64) {
-    runTTriInvRankOne<float, 64>((__gm__ float*)x, (__gm__ float*)z, in_length);
+    runTTriInvRankOne<float, 64>((fp32_t)x, (fp32_t)z, in_length);
   } else if (matrix_size == 128) {
-    runTTriInvRankOne<float, 128>((__gm__ float*)x, (__gm__ float*)z,
-                                  in_length);
+    runTTriInvRankOne<float, 128>((fp32_t)x, (fp32_t)z, in_length);
   }
 #endif
 }
 
-// Host-callable launch shims: the `<<<>>>` syntax is only
-// understood by the kernel compiler, so the launch lives here
-// rather than in the host wrappers under csrc/host/.
 extern "C" void pto_launch_triv_inv_col_sweep_fp16(uint32_t blockDim,
                                                    void* stream, void* x,
                                                    void* z, uint32_t in_length,
