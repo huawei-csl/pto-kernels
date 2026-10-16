@@ -92,7 +92,9 @@ PYBIND11_MODULE(pto_kernels_ops, m) {
   m.def("pto_tri_inv_ns", &pto_isa_ops::run_tri_inv_ns, py::arg("M"),
         py::arg("num_iters") = 0, py::arg("scale_value") = 0.0f);
   m.def("pto_tri_inv_col_sweep", &pto_isa_ops::run_tri_inv_col_sweep,
-        py::arg("x"), py::arg("is_lower") = true);
+        py::arg("x"), py::arg("is_lower") = true,
+        py::arg("is_bsnd_format") = false,
+        py::arg("cu_seqlens") = at::zeros({1}));
   m.def("pto_gdn_wy_fast", &pto_isa_ops::run_gdn_wy_fast, py::arg("K"),
         py::arg("V"), py::arg("Beta"), py::arg("G"), py::arg("A"),
         py::arg("batch_size"), py::arg("seq_len"),
