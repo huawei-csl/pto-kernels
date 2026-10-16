@@ -35,7 +35,7 @@ namespace pto_isa_ops {
  * @return at::Tensor Tensor of same shape as input where matrices are inverted.
  */
 
-at::Tensor run_tri_inv(const at::Tensor& x) {
+at::Tensor run_tri_inv_col_sweep(const at::Tensor& x) {
   const at::Device device = x.options().device();
   const auto dtype = x.options().dtype();
   TORCH_CHECK(device.type() == DEVICE_TYPE,

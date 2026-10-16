@@ -7,7 +7,7 @@
 # --------------------------------------------------------------------------------
 
 import torch
-from pto_kernels import pto_tri_inv
+from pto_kernels import pto_tri_inv_col_sweep
 import pytest
 import numpy as np
 import random
@@ -88,7 +88,7 @@ def test_tri_inv_col_sweep(
     expected = torch.from_numpy(expected_cpu).npu()
 
     torch.npu.synchronize()
-    actual = pto_tri_inv(input_x)
+    actual = pto_tri_inv_col_sweep(input_x)
     torch.npu.synchronize()
     # Transpose matrices back to row-major order
     actual = actual.transpose(2, 1)
@@ -123,7 +123,7 @@ def test_tri_inv_col_sweep_np_linalg_inv(
     golden_numpy_as_torch = torch.from_numpy(golden_numpy_cpu).npu()
 
     torch.npu.synchronize()
-    actual = pto_tri_inv(input_x)
+    actual = pto_tri_inv_col_sweep(input_x)
     torch.npu.synchronize()
 
     # rtol must be scaled w.r.t to the input size, see Higham's paper, Eq. (2.3)
