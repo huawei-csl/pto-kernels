@@ -7,8 +7,9 @@
 # --------------------------------------------------------------------------------
 PTO_LIB_PATH    ?= $(ASCEND_TOOLKIT_HOME)
 CSRC_KERNEL_DIR := csrc/kernel
+CLANG_FORMAT    ?= clang-format
 
-.PHONY: clean setup_once build wheel install docs test test_tri_inv
+.PHONY: clean setup_once build wheel install docs test test_tri_inv clang_format
 
 clean:
 	rm -rf build/ dist/ extra-info/ *.egg-info/ kernel_meta/ pto_kernels-*.whl
@@ -64,3 +65,7 @@ test:
 
 test_tri_inv:
 	pytest tests/test_tri_inv_*.py
+
+# 'make clang_format' formats all tracked C/C++ sources in place using .clang-format.
+clang_format:
+	git ls-files -z '*.cpp' '*.cc' '*.h' '*.hpp' | xargs -0 -r $(CLANG_FORMAT) -i --style=file
