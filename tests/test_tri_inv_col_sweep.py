@@ -150,14 +150,22 @@ def test_tri_inv_col_sweep_np_linalg_inv(
 
 @pytest.mark.parametrize("batch_size", [1, 4, 40])
 @pytest.mark.parametrize("matrix_size", [16, 32, 64, 128])
-@pytest.mark.parametrize("data_type", [np.float16, np.float32], ids=str)
 @pytest.mark.parametrize("is_lower", [True, False])
 @pytest.mark.parametrize(
-    "mat_gen,atol,rtol",
-    # Observed max |actual - golden| / max |golden| is up to ~2.2e-6 for float32
-    # at n = 128 (40 seeds); see _assert_close_to_inverse.
-    [(rand_np_tril, 4.1e-6, 1e-5), (ones_np_tril, 0, 0)],
+    "data_type,mat_gen,atol,rtol",
+    # Observed max |actual - golden| / max |golden| at n = 128 is up to ~2.2e-6
+    # for float32 (40 seeds) and ~1.4e-2 for float16 (20 seeds, batch 40); see
+    # _assert_close_to_inverse. The float16 inverse stays finite (max entry
+    # ~2.5e3 at n = 128), it is only less accurate.
+    [
+        (np.float16, rand_np_tril, 2.5e-2, 1e-5),
+        (np.float16, ones_np_tril, 0, 0),
+        (np.float32, rand_np_tril, 4.1e-6, 1e-5),
+        (np.float32, ones_np_tril, 0, 0),
+    ],
+    ids=lambda v: getattr(v, "__name__", None),
 )
+# pylint: disable=too-many-positional-arguments
 def test_tri_inv_col_sweep_is_lower(
     batch_size: int,
     matrix_size: int,
@@ -167,9 +175,6 @@ def test_tri_inv_col_sweep_is_lower(
     atol: float,
     rtol: float,
 ):
-    if data_type == np.float16 and mat_gen is rand_np_tril:
-        pytest.skip("inverse of random unit triangular matrices overflows fp16")
-
     input_x_cpu = mat_gen(batch_size, matrix_size, data_type)
     if not is_lower:
         input_x_cpu = np.ascontiguousarray(input_x_cpu.transpose(0, 2, 1))
