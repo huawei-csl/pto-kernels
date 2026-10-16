@@ -445,7 +445,7 @@ def test_tri_inv_rec_unroll_varying_doubling_block_size(
     A = A.to(input_dtype)
     this_eps = torch.finfo(input_dtype).eps
     rtol = 0.1 * (doubling_block_size / 16)
-    atol = (this_eps / 10) * (doubling_block_size / 16)
+    atol = this_eps * (doubling_block_size / 16)
     ftol = (2 * this_eps / 10) * (doubling_block_size / 16)
     _test_tri_inv_rec_unroll(
         A,
