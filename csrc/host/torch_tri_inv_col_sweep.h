@@ -17,11 +17,13 @@ extern "C" {
 
 void pto_launch_triv_inv_col_sweep_fp16(uint32_t blockDim, void* stream,
                                         void* x, void* z, uint32_t in_length,
-                                        uint32_t matrix_size);
+                                        uint32_t matrix_size,
+                                        uint32_t is_lower);
 
 void pto_launch_triv_inv_col_sweep_fp32(uint32_t blockDim, void* stream,
                                         void* x, void* z, uint32_t in_length,
-                                        uint32_t matrix_size);
+                                        uint32_t matrix_size,
+                                        uint32_t is_lower);
 
 }  // extern "C"
 
@@ -31,11 +33,14 @@ namespace pto_isa_ops {
  * @brief Runs triangular inverse using vector-only column sweep method.
  *
  * @param [in] x Input tensor whose last two dimensions contain square
- * triangular matrices to invert.
+ * unit triangular matrices to invert.
+ * @param [in] is_lower If input matrices are lower-triangular (true)
+ * or upper-triangular (false). Default is lower triangular.
  * @return at::Tensor Tensor of same shape as input where matrices are inverted.
  */
 
-at::Tensor run_tri_inv_col_sweep(const at::Tensor& x) {
+at::Tensor run_tri_inv_col_sweep(const at::Tensor& x,
+                                 const bool is_lower = true) {
   const at::Device device = x.options().device();
   const auto dtype = x.options().dtype();
   TORCH_CHECK(device.type() == DEVICE_TYPE,
@@ -63,10 +68,10 @@ at::Tensor run_tri_inv_col_sweep(const at::Tensor& x) {
               "tri_inv: dtype must be fp16 or float32, got ", dtype);
   if (dtype == at::kHalf) {
     EXEC_KERNEL_CMD(triv_inv_col_sweep_fp16, block_dim, x, z, num_elems,
-                    matrix_size);
+                    matrix_size, is_lower);
   } else {
     EXEC_KERNEL_CMD(triv_inv_col_sweep_fp32, block_dim, x, z, num_elems,
-                    matrix_size);
+                    matrix_size, is_lower);
   }
 
   return z;

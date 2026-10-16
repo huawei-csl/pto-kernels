@@ -13,7 +13,69 @@ using namespace pto;
 using namespace kernel_utils;
 
 /**
- * @brief Inverts unit lower triangular matrices with rank-1 updates.
+ * @brief Transposes the S x S tile at `src_addr` into `dst_addr` in UB.
+ *
+ * When the scratch buffer only holds S / 2 rows (fp32 at S = 128), the
+ * transpose is done in two halves: half the columns of the source transpose
+ * into half the rows of the destination.
+ */
+template <typename T, unsigned S, uint32_t ScratchRows>
+AICORE inline void TransposeTile(uint32_t dst_addr, uint32_t src_addr,
+                                 uint32_t scratch_addr) {
+  if constexpr (ScratchRows == S) {
+    using MatTile = Tile<TileType::Vec, T, S, S, BLayout::RowMajor, S, S>;
+    MatTile src;
+    TASSIGN(src, src_addr);
+    MatTile dst;
+    TASSIGN(dst, dst_addr);
+    MatTile tmp;
+    TASSIGN(tmp, scratch_addr);
+    TTRANS(dst, src, tmp);
+  } else {
+    static_assert(2 * ScratchRows == S, "scratch must hold S or S / 2 rows");
+    using HalfSrc = Tile<TileType::Vec, T, S, S, BLayout::RowMajor, S, S / 2>;
+    using HalfDst = Tile<TileType::Vec, T, S, S, BLayout::RowMajor, S / 2, S>;
+    using HalfTmp =
+        Tile<TileType::Vec, T, S / 2, S, BLayout::RowMajor, S / 2, S>;
+    for (uint32_t half = 0; half < 2; ++half) {
+      HalfSrc src_half;
+      TASSIGN(src_half, src_addr + half * (S / 2) * sizeof(T));
+      HalfDst dst_half;
+      TASSIGN(dst_half, dst_addr + half * (S / 2) * S * sizeof(T));
+      HalfTmp half_tmp;
+      TASSIGN(half_tmp, scratch_addr);
+      TTRANS(dst_half, src_half, half_tmp);
+      PipeBarrierVec();
+    }
+  }
+  PipeBarrierVec();
+}
+
+/**
+ * @brief Sets the S x S tile at `addr` in UB to the identity.
+ *
+ * Leaves an S -> V flag set; the caller waits on it before the next vector op
+ * that reads the tile.
+ */
+template <typename T, unsigned S>
+AICORE inline void InitIdentity(uint32_t addr) {
+  using MatTile = Tile<TileType::Vec, T, S, S, BLayout::RowMajor, S, S>;
+  using RowTile = Tile<TileType::Vec, T, 1, S, BLayout::RowMajor, 1, S>;
+  MatTile mat;
+  TASSIGN(mat, addr);
+  TEXPANDS(mat, static_cast<T>(0));
+  set_flag(PIPE_V, PIPE_S, EVENT_ID0);
+  wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
+  for (uint32_t i = 0; i < S; ++i) {
+    RowTile diag;
+    TASSIGN(diag, addr + i * S * sizeof(T));
+    diag.SetValue(i, static_cast<T>(1));
+  }
+  set_flag(PIPE_S, PIPE_V, EVENT_ID0);
+}
+
+/**
+ * @brief Inverts unit lower or upper triangular matrices with rank-1 updates.
  *
  *
  * The UB tile holds L (unit lower triangular, row-major) and the kernel has
@@ -35,14 +97,21 @@ using namespace kernel_utils;
  * all: ~3S vector instructions per matrix instead of ~S^2/2 AXPYs each
  * wrapped in two pipe serializations.
  *
+ * Upper triangular input U is reduced to the lower case: U is loaded into the
+ * Y buffer and transposed into the L buffer, L = U^T. The sweep then yields
+ * Y = (L^-1)^T = U^-1, which is stored as-is, so the upper case also costs a
+ * single transpose.
+ *
  * @tparam T Input data type (fp16 or fp32).
  * @tparam S Matrix size. Supports 16, 32, 64, 128.
+ * @tparam IsLower Whether the input matrices are lower (true) or upper
+ * (false) triangular.
  *
  * @param vec_in Pointer to input buffer in global memory.
  * @param vec_out Pointer to output buffer in global memory.
  * @param total_length Input tensor length, i.e., numel().
  */
-template <typename T, unsigned S /* Matrix Size */>
+template <typename T, unsigned S /* Matrix Size */, bool IsLower>
 AICORE void runTTriInvRankOne(__gm__ T* vec_in, __gm__ T* vec_out,
                               uint32_t total_length) {
   set_mask_norm();
@@ -80,24 +149,23 @@ AICORE void runTTriInvRankOne(__gm__ T* vec_in, __gm__ T* vec_out,
   constexpr uint32_t UsableUbBytes = 184 * 1024;
   constexpr uint32_t OuterRows = (3 * tile_bytes <= UsableUbBytes) ? S : S / 2;
   constexpr uint32_t outer_bytes = OuterRows * S * sizeof(T);
-  constexpr uint32_t TransposeSplits = (OuterRows == S) ? 1 : 2;
   static_assert(2 * tile_bytes + outer_bytes <= UsableUbBytes,
                 "tri_inv col sweep: UB budget exceeded");
 
   constexpr uint32_t L_UB_ADDR = 0x0;
   constexpr uint32_t Y_UB_ADDR = L_UB_ADDR + tile_bytes;
   constexpr uint32_t SCRATCH_UB_ADDR = Y_UB_ADDR + tile_bytes;
+  // Lower input loads straight into the L buffer. Upper input loads into the
+  // Y buffer, which is free until it gets transposed into the L buffer.
+  constexpr uint32_t IN_UB_ADDR = IsLower ? L_UB_ADDR : Y_UB_ADDR;
+  // Lower: the input is dead once the sweep ends, so the transposed result
+  // lands on top of it rather than in a fourth buffer. Upper: Y is the result.
+  constexpr uint32_t OUT_UB_ADDR = IsLower ? L_UB_ADDR : Y_UB_ADDR;
 
-  MatTile l_tile(S);
-  TASSIGN(l_tile, L_UB_ADDR);
-  // The input is dead once the sweep ends, so the transposed result lands on
-  // top of it rather than in a fourth buffer.
+  MatTile in_tile(S);
+  TASSIGN(in_tile, IN_UB_ADDR);
   MatTile out_tile(S);
-  TASSIGN(out_tile, L_UB_ADDR);
-  MatTile y_tile(S);
-  TASSIGN(y_tile, Y_UB_ADDR);
-  MatTile scratch(OuterRows);
-  TASSIGN(scratch, SCRATCH_UB_ADDR);
+  TASSIGN(out_tile, OUT_UB_ADDR);
 
   GlobalData global_in(vec_in);
   GlobalData global_out(vec_out);
@@ -110,17 +178,10 @@ AICORE void runTTriInvRankOne(__gm__ T* vec_in, __gm__ T* vec_out,
        (tile_id < num_tiles_per_aiv) &&
        (global_tile_id + tile_id < total_length / tile_len);
        ++tile_id) {
-    // Y starts as the identity.
     wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
-    TEXPANDS(y_tile, static_cast<T>(0));
-    set_flag(PIPE_V, PIPE_S, EVENT_ID0);
-    wait_flag(PIPE_V, PIPE_S, EVENT_ID0);
-    for (uint32_t i = 0; i < S; ++i) {
-      RowTile y_diag;
-      TASSIGN(y_diag, Y_UB_ADDR + i * row_bytes);
-      y_diag.SetValue(i, static_cast<T>(1));
+    if constexpr (IsLower) {
+      InitIdentity<T, S>(Y_UB_ADDR);
     }
-    set_flag(PIPE_S, PIPE_V, EVENT_ID0);
 
     set_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
     wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID0);
@@ -128,10 +189,15 @@ AICORE void runTTriInvRankOne(__gm__ T* vec_in, __gm__ T* vec_out,
 
     TASSIGN(global_in, vec_in + (global_tile_id + tile_id) * tile_len);
     TASSIGN(global_out, vec_out + (global_tile_id + tile_id) * tile_len);
-    TLOAD(l_tile, global_in);
+    TLOAD(in_tile, global_in);
 
     set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
     wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+    if constexpr (!IsLower) {
+      // L = U^T, then Y can take over the input's buffer.
+      TransposeTile<T, S, OuterRows>(L_UB_ADDR, Y_UB_ADDR, SCRATCH_UB_ADDR);
+      InitIdentity<T, S>(Y_UB_ADDR);
+    }
     wait_flag(PIPE_S, PIPE_V, EVENT_ID0);
 
     // Rank-1 sweep. Row m of Y is final when step m starts, so the pivot row
@@ -167,26 +233,10 @@ AICORE void runTTriInvRankOne(__gm__ T* vec_in, __gm__ T* vec_out,
       }
     }
 
-    if constexpr (TransposeSplits == 1) {
-      TTRANS(out_tile, y_tile, scratch);  // X = Y^T
-    } else {
-      // Half the columns of Y transpose into half the rows of X.
-      using HalfSrc = Tile<TileType::Vec, T, S, S, BLayout::RowMajor, S, S / 2>;
-      using HalfDst = Tile<TileType::Vec, T, S, S, BLayout::RowMajor, S / 2, S>;
-      using HalfTmp =
-          Tile<TileType::Vec, T, S / 2, S, BLayout::RowMajor, S / 2, S>;
-      for (uint32_t half = 0; half < TransposeSplits; ++half) {
-        HalfSrc y_half;
-        TASSIGN(y_half, Y_UB_ADDR + half * (S / 2) * sizeof(T));
-        HalfDst x_half;
-        TASSIGN(x_half, L_UB_ADDR + half * (S / 2) * row_bytes);
-        HalfTmp half_tmp;
-        TASSIGN(half_tmp, SCRATCH_UB_ADDR);
-        TTRANS(x_half, y_half, half_tmp);
-        PipeBarrierVec();
-      }
+    if constexpr (IsLower) {
+      // X = Y^T
+      TransposeTile<T, S, OuterRows>(L_UB_ADDR, Y_UB_ADDR, SCRATCH_UB_ADDR);
     }
-    PipeBarrierVec();
 
     set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
     wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
@@ -198,8 +248,20 @@ AICORE void runTTriInvRankOne(__gm__ T* vec_in, __gm__ T* vec_out,
   wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
 }
 
-extern "C" __global__ AICORE void triv_inv_col_sweep_fp16(
-    GM_ADDR x, GM_ADDR z, uint32_t in_length, uint32_t matrix_size) {
+template <typename T, unsigned S>
+AICORE void dispatchTriInv(__gm__ T* vec_in, __gm__ T* vec_out,
+                           uint32_t total_length, uint32_t is_lower) {
+  if (is_lower) {
+    runTTriInvRankOne<T, S, true>(vec_in, vec_out, total_length);
+  } else {
+    runTTriInvRankOne<T, S, false>(vec_in, vec_out, total_length);
+  }
+}
+
+extern "C" __global__ AICORE void triv_inv_col_sweep_fp16(GM_ADDR x, GM_ADDR z,
+                                                          uint32_t in_length,
+                                                          uint32_t matrix_size,
+                                                          uint32_t is_lower) {
   KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY);
 #if defined(__DAV_VEC__)
 
@@ -207,19 +269,21 @@ extern "C" __global__ AICORE void triv_inv_col_sweep_fp16(
   using fp16_t = __gm__ half*;
 
   if (matrix_size == 16) {
-    runTTriInvRankOne<half, 16>((fp16_t)x, (fp16_t)z, in_length);
+    dispatchTriInv<half, 16>((fp16_t)x, (fp16_t)z, in_length, is_lower);
   } else if (matrix_size == 32) {
-    runTTriInvRankOne<half, 32>((fp16_t)x, (fp16_t)z, in_length);
+    dispatchTriInv<half, 32>((fp16_t)x, (fp16_t)z, in_length, is_lower);
   } else if (matrix_size == 64) {
-    runTTriInvRankOne<half, 64>((fp16_t)x, (fp16_t)z, in_length);
+    dispatchTriInv<half, 64>((fp16_t)x, (fp16_t)z, in_length, is_lower);
   } else if (matrix_size == 128) {
-    runTTriInvRankOne<half, 128>((fp16_t)x, (fp16_t)z, in_length);
+    dispatchTriInv<half, 128>((fp16_t)x, (fp16_t)z, in_length, is_lower);
   }
 #endif
 }
 
-extern "C" __global__ AICORE void triv_inv_col_sweep_fp32(
-    GM_ADDR x, GM_ADDR z, uint32_t in_length, uint32_t matrix_size) {
+extern "C" __global__ AICORE void triv_inv_col_sweep_fp32(GM_ADDR x, GM_ADDR z,
+                                                          uint32_t in_length,
+                                                          uint32_t matrix_size,
+                                                          uint32_t is_lower) {
   KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY);
 #if defined(__DAV_VEC__)
 
@@ -227,13 +291,13 @@ extern "C" __global__ AICORE void triv_inv_col_sweep_fp32(
   using fp32_t = __gm__ float*;
 
   if (matrix_size == 16) {
-    runTTriInvRankOne<float, 16>((fp32_t)x, (fp32_t)z, in_length);
+    dispatchTriInv<float, 16>((fp32_t)x, (fp32_t)z, in_length, is_lower);
   } else if (matrix_size == 32) {
-    runTTriInvRankOne<float, 32>((fp32_t)x, (fp32_t)z, in_length);
+    dispatchTriInv<float, 32>((fp32_t)x, (fp32_t)z, in_length, is_lower);
   } else if (matrix_size == 64) {
-    runTTriInvRankOne<float, 64>((fp32_t)x, (fp32_t)z, in_length);
+    dispatchTriInv<float, 64>((fp32_t)x, (fp32_t)z, in_length, is_lower);
   } else if (matrix_size == 128) {
-    runTTriInvRankOne<float, 128>((fp32_t)x, (fp32_t)z, in_length);
+    dispatchTriInv<float, 128>((fp32_t)x, (fp32_t)z, in_length, is_lower);
   }
 #endif
 }
@@ -241,15 +305,17 @@ extern "C" __global__ AICORE void triv_inv_col_sweep_fp32(
 extern "C" void pto_launch_triv_inv_col_sweep_fp16(uint32_t blockDim,
                                                    void* stream, void* x,
                                                    void* z, uint32_t in_length,
-                                                   uint32_t matrix_size) {
+                                                   uint32_t matrix_size,
+                                                   uint32_t is_lower) {
   triv_inv_col_sweep_fp16<<<blockDim, nullptr, stream>>>(
-      (GM_ADDR)x, (GM_ADDR)z, in_length, matrix_size);
+      (GM_ADDR)x, (GM_ADDR)z, in_length, matrix_size, is_lower);
 }
 
 extern "C" void pto_launch_triv_inv_col_sweep_fp32(uint32_t blockDim,
                                                    void* stream, void* x,
                                                    void* z, uint32_t in_length,
-                                                   uint32_t matrix_size) {
+                                                   uint32_t matrix_size,
+                                                   uint32_t is_lower) {
   triv_inv_col_sweep_fp32<<<blockDim, nullptr, stream>>>(
-      (GM_ADDR)x, (GM_ADDR)z, in_length, matrix_size);
+      (GM_ADDR)x, (GM_ADDR)z, in_length, matrix_size, is_lower);
 }
