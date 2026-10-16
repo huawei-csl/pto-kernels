@@ -369,6 +369,7 @@ extern "C" __global__ AICORE void kda_kkt(
     __gm__ uint8_t* mask_ptr, __gm__ uint8_t* L_out_ptr,
     __gm__ uint8_t* cu_seqlens, int64_t batch_size, int64_t seq_len,
     int64_t total_tokens) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY);
 #if defined(__DAV_VEC__)
   kda_kkt_kernel<KDA_KKT_H, KDA_KKT_D, KDA_KKT_C>(
       reinterpret_cast<__gm__ half*>(k_ptr),

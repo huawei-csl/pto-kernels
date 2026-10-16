@@ -878,6 +878,7 @@ extern "C" __global__ AICORE void tri_inv_rec_unroll_bf16(
     uint32_t matrix_size, uint32_t num_matrices, uint32_t num_bsnd_heads,
     uint32_t is_lower, __gm__ void* cu_seqlens,
     uint32_t max_doubling_block_size) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIC_ONLY);
   __gm__ bfloat16_t* _tensor_out = (__gm__ bfloat16_t*)tensor_out;
   __gm__ bfloat16_t* _tensor_in = (__gm__ bfloat16_t*)tensor_in;
   __gm__ bfloat16_t* _minus_eye_in = (__gm__ bfloat16_t*)minus_eye_in;
@@ -898,6 +899,7 @@ extern "C" __global__ AICORE void tri_inv_rec_unroll_fp16(
     uint32_t matrix_size, uint32_t num_matrices, uint32_t num_bsnd_heads,
     uint32_t is_lower, __gm__ void* cu_seqlens,
     uint32_t max_doubling_block_size) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIC_ONLY);
   __gm__ half* _tensor_out = (__gm__ half*)tensor_out;
   __gm__ half* _tensor_in = (__gm__ half*)tensor_in;
   __gm__ half* _minus_eye_in = (__gm__ half*)minus_eye_in;
@@ -918,9 +920,9 @@ extern "C" void pto_launch_tri_inv_rec_unroll_bf16(
     uint32_t num_bsnd_heads, uint32_t is_lower, void* cu_seqlens,
     uint32_t max_doubling_block_size) {
   tri_inv_rec_unroll_bf16<<<blockDim, nullptr, stream>>>(
-      (__gm__ void*)tensor_out, (__gm__ void*)tensor_in,
-      (__gm__ void*)minus_eye_in, matrix_size, num_matrices, num_bsnd_heads,
-      is_lower, (__gm__ void*)cu_seqlens, max_doubling_block_size);
+      (GM_ADDR)tensor_out, (GM_ADDR)tensor_in, (GM_ADDR)minus_eye_in,
+      matrix_size, num_matrices, num_bsnd_heads, is_lower, (GM_ADDR)cu_seqlens,
+      max_doubling_block_size);
 }
 
 extern "C" void pto_launch_tri_inv_rec_unroll_fp16(

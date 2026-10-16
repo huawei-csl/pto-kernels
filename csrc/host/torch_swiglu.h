@@ -58,7 +58,7 @@ at::Tensor run_swiglu(const at::Tensor& x, int64_t dim = -1) {
 
   const uint32_t batch = static_cast<uint32_t>(batch_i64);
   const uint32_t input_n = static_cast<uint32_t>(input_n_i64);
-  const uint32_t block_dim = GetNumCubeCores();
+  const uint32_t block_dim = GetNumVectorCores();
 
   at::Tensor y = at::empty({batch_i64, output_n_i64}, x.options());
   EXEC_KERNEL_CMD(swiglu_fp16, block_dim, x, y, batch, input_n);

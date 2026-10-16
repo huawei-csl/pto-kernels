@@ -1981,6 +1981,7 @@ extern "C" __global__ AICORE void fa_fp16(
     uint32_t num_kv_heads, int64_t q_batch_stride, int64_t q_head_stride,
     int64_t q_seq_stride, int64_t kv_batch_stride, int64_t kv_head_stride,
     int64_t kv_seq_stride, bool causal) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2);
   if (causal) {
     runTFA<128, 128, kFaCubeS1, kFaTileS1, kFaCvFifoSize, false, true,
            kFaCvFifoConsSyncPeriod>(
