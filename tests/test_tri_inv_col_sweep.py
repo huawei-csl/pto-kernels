@@ -79,7 +79,7 @@ def ones_np_tril(batch_size: int, n: int, dtype: np.dtype):
     return A.astype(dtype)
 
 
-@pytest.mark.parametrize("batch_size", [2, 4, 40, 256])
+@pytest.mark.parametrize("batch_size", [3, 5, 19, 31, 63])
 @pytest.mark.parametrize("matrix_size", [16, 32, 64, 128])
 @pytest.mark.parametrize("data_type", [np.float16, np.float32], ids=str)
 @pytest.mark.parametrize(
@@ -200,7 +200,7 @@ def test_tri_inv_col_sweep_default_is_lower(matrix_size: int):
 
 
 # ---------------------------------------------------------------------------
-# Tests replicated from test_tri_inv_rec_unroll.py (BSND tests excluded).
+# Tests replicated from test_tri_inv_rec_unroll.py.
 #
 # The generators below return strictly upper triangular A of shape
 # (block_dim_x, block_dim_y, n, n); the kernel inverts the unit triangular
@@ -437,3 +437,183 @@ def test_tri_inv_col_sweep_deltanet(n: int, input_dtype: torch.dtype, matrix_gen
         is_lower=False,
         input_dtype=input_dtype,
     )
+
+
+# ---------------------------------------------------------------------------
+# BSND layouts: the matrices to invert are the S x S blocks over the (chunked)
+# sequence dimension of a [B, S, N, D] tensor, so consecutive rows of a tile
+# are N * D elements apart in memory. With cu_seqlens the sequences have
+# variable length and the last chunk of a sequence is only partly filled.
+# ---------------------------------------------------------------------------
+
+
+def _to_bsnd(tiles: torch.Tensor, B: int, S: int, N: int, C: int) -> torch.Tensor:
+    """(B * S // C, N, C, C) tiles -> [B, S, N, C] BSND tensor."""
+    return tiles.transpose(1, 2).contiguous().reshape(B, S, N, C)
+
+
+def _test_tri_inv_col_sweep_bsnd(
+    A: torch.Tensor,
+    B: int,
+    S: int,
+    N: int,
+    C: int,
+    atol: float,
+    rtol: float,
+    ftol: float,
+    is_lower: bool,
+    input_dtype: torch.dtype,
+):
+    _, M = _to_unit_tri(A, is_lower, input_dtype)
+    golden_cpu = _to_bsnd(torch.linalg.inv(M.double()), B, S, N, C)
+
+    actual = pto_tri_inv_col_sweep(
+        _to_bsnd(M, B, S, N, C).npu(), is_lower=is_lower, is_bsnd_format=True
+    )
+    torch.npu.synchronize()
+    actual_cpu = actual.cpu().to(torch.float64)
+
+    frob_error = torch.sqrt(
+        torch.sum((golden_cpu - actual_cpu) ** 2) / torch.sum(golden_cpu**2)
+    )
+    assert np.allclose(actual_cpu.numpy(), golden_cpu.numpy(), atol=atol, rtol=rtol), (
+        f"Error at allclose - BSND shape: {tuple(actual.shape)} - rtol: {rtol}."
+        f" max abs error: "
+        f"{np.max(np.abs(actual_cpu.numpy() - golden_cpu.numpy()))}."
+        f" frob error: {frob_error}."
+    )
+    assert frob_error <= ftol, f"frob_error: {frob_error} (ftol {ftol})"
+
+
+@pytest.mark.parametrize("B", [1, 4])
+@pytest.mark.parametrize("S", [128, 1024])
+@pytest.mark.parametrize("N", [4, 8])
+@pytest.mark.parametrize("C", [16, 32, 64, 128])
+@pytest.mark.parametrize("is_lower", [False, True])
+@pytest.mark.parametrize(
+    "matrix_gen,atol,rtol,ftol,input_dtype",
+    [
+        (block_ones_triu_matrix, 0, 0, 0, torch.float16),
+        (ones_tri_matrix, 0, 0, 0, torch.float16),
+        (block_random_triu_matrix, 5e-5, 0.1, 1e-4, torch.float16),
+        (random_tri_matrix, 3.4e-4, 0.1, 6.7e-4, torch.float16),
+        (block_ones_triu_matrix, 0, 0, 0, torch.float32),
+        (random_tri_matrix, 1e-6, 1e-3, 1e-6, torch.float32),
+    ],
+)
+# pylint: disable=too-many-positional-arguments
+def test_tri_inv_col_sweep_bsnd(
+    B: int,
+    S: int,
+    N: int,
+    C: int,
+    matrix_gen: Callable,
+    atol: float,
+    rtol: float,
+    ftol: float,
+    is_lower: bool,
+    input_dtype: torch.dtype,
+):
+    """Same matrices as the dense tests, laid out as [B, S, N, C]."""
+    A = matrix_gen(C, B * S // C, N)
+    _test_tri_inv_col_sweep_bsnd(A, B, S, N, C, atol, rtol, ftol, is_lower, input_dtype)
+
+
+def generate_random_sequence_lengths(
+    num_sequences: int, total_tokens: int
+) -> list[int]:
+    """num_sequences random sequence lengths summing to total_tokens."""
+    if total_tokens < num_sequences:
+        raise ValueError("total_tokens must be >= num_sequences.")
+    cuts = sorted(
+        (
+            np.random.choice(total_tokens - 2, num_sequences - 1, replace=False) + 1
+        ).tolist()
+    )
+    bounds = [0, *cuts, total_tokens]
+    return [bounds[i + 1] - bounds[i] for i in range(len(bounds) - 1)]
+
+
+def _varlen_bsnd_input(
+    seq_lens: list[int],
+    num_heads: int,
+    chunk_size: int,
+    is_lower: bool,
+    input_dtype: torch.dtype,
+    scale: float = 0.1,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Packed [1, total_tokens, N, C] input and its per-chunk inverse.
+
+    Every chunk holds a unit triangular matrix of its own valid size; the
+    padding of a short chunk, and of the C columns beyond it, stays zero in
+    both the input and the golden output.
+    """
+    cu_seqlens = np.cumsum([0, *seq_lens], dtype=np.int64)
+    total_tokens = int(cu_seqlens[-1])
+    shape = (1, total_tokens, num_heads, chunk_size)
+    packed = torch.zeros(shape, dtype=input_dtype)
+    golden = torch.zeros(shape, dtype=torch.float64)
+
+    for seq_start, seq_end in zip(cu_seqlens[:-1], cu_seqlens[1:], strict=False):
+        for chunk_start in range(int(seq_start), int(seq_end), chunk_size):
+            valid = min(chunk_size, int(seq_end) - chunk_start)
+            strict = scale * torch.rand((num_heads, valid, valid))
+            strict = torch.tril(strict, -1) if is_lower else torch.triu(strict, 1)
+            unit = (strict + torch.eye(valid)).to(input_dtype)
+            packed[0, chunk_start : chunk_start + valid, :, :valid] = unit.permute(
+                1, 0, 2
+            )
+            golden[0, chunk_start : chunk_start + valid, :, :valid] = torch.linalg.inv(
+                unit.double()
+            ).permute(1, 0, 2)
+
+    cu_seqlens_tensor = torch.tensor(cu_seqlens.tolist(), dtype=torch.int32)
+    return packed.contiguous(), golden, cu_seqlens_tensor
+
+
+@pytest.mark.parametrize("B", [1, 7, 32])
+@pytest.mark.parametrize("N", [4])
+@pytest.mark.parametrize("chunk_size", [16, 32, 64, 128])
+@pytest.mark.parametrize("total_tokens", [1024, 3031])
+@pytest.mark.parametrize("is_lower", [False, True])
+@pytest.mark.parametrize(
+    "input_dtype,atol,rtol,ftol",
+    [(torch.float16, 1e-3, 5e-2, 1e-3), (torch.float32, 1e-6, 1e-3, 1e-6)],
+)
+# pylint: disable=too-many-positional-arguments
+def test_tri_inv_col_sweep_varlen_bsnd(
+    B: int,
+    N: int,
+    chunk_size: int,
+    total_tokens: int,
+    is_lower: bool,
+    input_dtype: torch.dtype,
+    atol: float,
+    rtol: float,
+    ftol: float,
+):
+    """Variable-length sequences: the tail chunk of a sequence is shorter than
+    the chunk size, and the padding around it must come back untouched."""
+    seq_lens = generate_random_sequence_lengths(B, total_tokens)
+    packed, golden, cu_seqlens = _varlen_bsnd_input(
+        seq_lens, N, chunk_size, is_lower, input_dtype
+    )
+
+    actual = pto_tri_inv_col_sweep(
+        packed.npu(),
+        is_lower=is_lower,
+        is_bsnd_format=True,
+        cu_seqlens=cu_seqlens.npu(),
+    )
+    torch.npu.synchronize()
+    actual_cpu = actual.cpu().to(torch.float64)
+
+    frob_error = torch.sqrt(
+        torch.sum((golden - actual_cpu) ** 2) / torch.sum(golden**2)
+    )
+    assert np.allclose(actual_cpu.numpy(), golden.numpy(), atol=atol, rtol=rtol), (
+        f"Error at allclose - shape: {tuple(actual.shape)}."
+        f" max abs error: {np.max(np.abs(actual_cpu.numpy() - golden.numpy()))}."
+        f" frob error: {frob_error}."
+    )
+    assert frob_error <= ftol, f"frob_error: {frob_error} (ftol {ftol})"
