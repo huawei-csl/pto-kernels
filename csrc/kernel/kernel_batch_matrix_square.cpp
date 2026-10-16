@@ -101,7 +101,7 @@ AICORE void run_batch_matrix_square(__gm__ float* z, __gm__ InputT* x,
 
 extern "C" __global__ AICORE void batch_matrix_square_fp16(
     __gm__ void* z, __gm__ void* x, uint32_t matrix_size) {
-  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2);
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIC_ONLY);
 #if defined(__DAV_CUBE__)  // AIC
   run_batch_matrix_square<half>((__gm__ float*)z, (__gm__ half*)x, matrix_size);
 #else
@@ -114,7 +114,7 @@ extern "C" __global__ AICORE void batch_matrix_square_fp16(
 
 extern "C" __global__ AICORE void batch_matrix_square_fp32(
     __gm__ void* z, __gm__ void* x, uint32_t matrix_size) {
-  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2);
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIC_ONLY);
 #if defined(__DAV_CUBE__)  // AIC
 
   run_batch_matrix_square<float>((__gm__ float*)z, (__gm__ float*)x,
