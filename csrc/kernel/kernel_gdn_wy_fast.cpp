@@ -962,6 +962,7 @@ extern "C" __global__ AICORE void gdn_wy_fast(
     __gm__ uint8_t* workspace_a2_handle, __gm__ uint8_t* W_handle,
     __gm__ uint8_t* U_handle, __gm__ uint8_t* cu_seqlens, int64_t batch_size,
     int64_t seq_len, int64_t total_tokens) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2);
   wy_fast_kernel<GDN_H, GDN_HG, GDN_D, GDN_C>(
       reinterpret_cast<__gm__ half*>(K_handle),
       reinterpret_cast<__gm__ half*>(V_handle),

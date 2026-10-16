@@ -210,6 +210,7 @@ extern "C" __global__ AICORE void csr_gather_fp16(GM_ADDR values,
                                                   GM_ADDR indices, GM_ADDR x,
                                                   GM_ADDR z, uint32_t x_size,
                                                   uint32_t indices_size) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY);
 #if defined(__DAV_VEC__)
 
   constexpr uint32_t TILE_SIZE = 512;
@@ -224,6 +225,7 @@ extern "C" __global__ AICORE void csr_gather_fp32(GM_ADDR values,
                                                   GM_ADDR indices, GM_ADDR x,
                                                   GM_ADDR z, uint32_t x_size,
                                                   uint32_t indices_size) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY);
 #if defined(__DAV_VEC__)
 
   constexpr uint32_t TILE_SIZE = 512;

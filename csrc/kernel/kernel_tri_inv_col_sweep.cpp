@@ -144,7 +144,8 @@ AICORE void runTTriInv(__gm__ T* vec_in, __gm__ T* vec_out,
 }
 
 extern "C" __global__ AICORE void triv_inv_col_sweep_fp16(
-    __gm__ void* x, __gm__ void* z, uint32_t in_length, uint32_t matrix_size) {
+    GM_ADDR x, GM_ADDR z, uint32_t in_length, uint32_t matrix_size) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY);
 #if defined(__DAV_VEC__)
 
   if (matrix_size == 16) {
@@ -160,7 +161,8 @@ extern "C" __global__ AICORE void triv_inv_col_sweep_fp16(
 }
 
 extern "C" __global__ AICORE void triv_inv_col_sweep_fp32(
-    __gm__ void* x, __gm__ void* z, uint32_t in_length, uint32_t matrix_size) {
+    GM_ADDR x, GM_ADDR z, uint32_t in_length, uint32_t matrix_size) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY);
 #if defined(__DAV_VEC__)
 
   if (matrix_size == 16) {
@@ -183,7 +185,7 @@ extern "C" void pto_launch_triv_inv_col_sweep_fp16(uint32_t blockDim,
                                                    void* z, uint32_t in_length,
                                                    uint32_t matrix_size) {
   triv_inv_col_sweep_fp16<<<blockDim, nullptr, stream>>>(
-      (__gm__ void*)x, (__gm__ void*)z, in_length, matrix_size);
+      (GM_ADDR)x, (GM_ADDR)z, in_length, matrix_size);
 }
 
 extern "C" void pto_launch_triv_inv_col_sweep_fp32(uint32_t blockDim,
@@ -191,5 +193,5 @@ extern "C" void pto_launch_triv_inv_col_sweep_fp32(uint32_t blockDim,
                                                    void* z, uint32_t in_length,
                                                    uint32_t matrix_size) {
   triv_inv_col_sweep_fp32<<<blockDim, nullptr, stream>>>(
-      (__gm__ void*)x, (__gm__ void*)z, in_length, matrix_size);
+      (GM_ADDR)x, (GM_ADDR)z, in_length, matrix_size);
 }
