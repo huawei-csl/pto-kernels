@@ -24,7 +24,7 @@ ALGOS = {
     ),
     "col_sweep": (
         lambda U: U.transpose(-1, -2).contiguous(),
-        lambda inp: pto_tri_inv_col_sweep(inp),
+        pto_tri_inv_col_sweep,
     ),
 }
 
@@ -78,7 +78,7 @@ def bench(path: str = "benchmark_data/tri_inv_rec_unroll_vs_col_sweep.csv"):
             for block_dim_x, block_dim_y in ((20, 4), (20, 16)):
                 U = random_triu_matrix(n, block_dim_x, block_dim_y).to(dtype)
                 U = make_input(U).npu()
-                ms = do_bench(lambda inp=U: algo(inp), unit="ms")
+                ms = do_bench(lambda inp=U, fn=algo: fn(inp), unit="ms")
                 n_el = U.numel()
                 # I/O: Input and output have 16 bits, so (2 + 2) bytes per element
                 gbps = (2 + 2) * n_el / (ms / 1e3) / 1e9
