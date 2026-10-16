@@ -146,25 +146,26 @@ AICORE void runTTriInvRankOne(__gm__ T* vec_in, __gm__ T* vec_out,
       TASSIGN(y_pivot, Y_UB_ADDR + rows * row_bytes);
 
       for (uint32_t r0 = 0; r0 < rows; r0 += OuterRows) {
-      const uint32_t chunk = (rows - r0 < OuterRows) ? (rows - r0) : OuterRows;
-      ColTile l_col(chunk);
-      TASSIGN(l_col, L_UB_ADDR + (rows * S + r0) * sizeof(T));
-      MatTile outer(chunk);
-      TASSIGN(outer, SCRATCH_UB_ADDR);
-      MatTile y_blk(chunk);
-      TASSIGN(y_blk, Y_UB_ADDR + r0 * row_bytes);
+        const uint32_t chunk =
+            (rows - r0 < OuterRows) ? (rows - r0) : OuterRows;
+        ColTile l_col(chunk);
+        TASSIGN(l_col, L_UB_ADDR + (rows * S + r0) * sizeof(T));
+        MatTile outer(chunk);
+        TASSIGN(outer, SCRATCH_UB_ADDR);
+        MatTile y_blk(chunk);
+        TASSIGN(y_blk, Y_UB_ADDR + r0 * row_bytes);
 
-      // Broadcast the pivot row down the block first, then scale each row by
-      // L[m][i]. Doing the row direction with the 3-argument TROWEXPANDMUL
-      // matters enormously: the 2-argument TROWEXPAND lowers to one
-      // vector_dup per row, which measured ~89% of the whole sweep, while
-      // this form goes through the vbrcb path and issues one instruction.
-      TCOLEXPAND(outer, y_pivot);            // outer[i][j]  = Y[m][j]
-      PipeBarrierVec();
-      TROWEXPANDMUL(outer, outer, l_col);    // outer[i][j] *= L[m][i]
-      PipeBarrierVec();
-      TSUB(y_blk, y_blk, outer);             // Y[i][j] -= L[m][i] * Y[m][j]
-      PipeBarrierVec();
+        // Broadcast the pivot row down the block first, then scale each row by
+        // L[m][i]. Doing the row direction with the 3-argument TROWEXPANDMUL
+        // matters enormously: the 2-argument TROWEXPAND lowers to one
+        // vector_dup per row, which measured ~89% of the whole sweep, while
+        // this form goes through the vbrcb path and issues one instruction.
+        TCOLEXPAND(outer, y_pivot);  // outer[i][j]  = Y[m][j]
+        PipeBarrierVec();
+        TROWEXPANDMUL(outer, outer, l_col);  // outer[i][j] *= L[m][i]
+        PipeBarrierVec();
+        TSUB(y_blk, y_blk, outer);  // Y[i][j] -= L[m][i] * Y[m][j]
+        PipeBarrierVec();
       }
     }
 
@@ -172,10 +173,8 @@ AICORE void runTTriInvRankOne(__gm__ T* vec_in, __gm__ T* vec_out,
       TTRANS(out_tile, y_tile, scratch);  // X = Y^T
     } else {
       // Half the columns of Y transpose into half the rows of X.
-      using HalfSrc =
-          Tile<TileType::Vec, T, S, S, BLayout::RowMajor, S, S / 2>;
-      using HalfDst =
-          Tile<TileType::Vec, T, S, S, BLayout::RowMajor, S / 2, S>;
+      using HalfSrc = Tile<TileType::Vec, T, S, S, BLayout::RowMajor, S, S / 2>;
+      using HalfDst = Tile<TileType::Vec, T, S, S, BLayout::RowMajor, S / 2, S>;
       using HalfTmp =
           Tile<TileType::Vec, T, S / 2, S, BLayout::RowMajor, S / 2, S>;
       for (uint32_t half = 0; half < TransposeSplits; ++half) {
@@ -230,7 +229,8 @@ extern "C" __global__ AICORE void triv_inv_col_sweep_fp32(
   } else if (matrix_size == 64) {
     runTTriInvRankOne<float, 64>((__gm__ float*)x, (__gm__ float*)z, in_length);
   } else if (matrix_size == 128) {
-    runTTriInvRankOne<float, 128>((__gm__ float*)x, (__gm__ float*)z, in_length);
+    runTTriInvRankOne<float, 128>((__gm__ float*)x, (__gm__ float*)z,
+                                  in_length);
   }
 #endif
 }
