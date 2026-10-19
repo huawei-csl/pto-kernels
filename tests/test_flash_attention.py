@@ -13,7 +13,6 @@ import torch
 
 from pto_kernels import pto_flash_attention
 
-
 HEAD_SIZE = 128
 NON_CAUSAL_ATOL = 1e-4
 CAUSAL_ATOL = 5e-4

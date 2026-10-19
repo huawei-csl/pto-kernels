@@ -54,9 +54,7 @@ ALGOS = {
         ),
         "col_sweep": (
             to_bsnd,
-            lambda inp: pto_tri_inv_col_sweep(
-                inp, is_lower=False, is_bsnd_format=True
-            ),
+            lambda inp: pto_tri_inv_col_sweep(inp, is_lower=False, is_bsnd_format=True),
         ),
     },
 }
