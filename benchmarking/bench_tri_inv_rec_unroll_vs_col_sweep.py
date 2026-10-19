@@ -82,7 +82,7 @@ def plot_csv(path, layout: str = "dense"):
     algos = sorted({algo for algo, _, _ in series})
     bdys = sorted({bdy for _, _, bdy in series}, key=int)
     colors = {algo: f"C{k}" for k, algo in enumerate(algos)}
-    hatches = {bdy: h for bdy, h in zip(bdys, ("", "//", "..", "xx"))}
+    hatches = dict(zip(bdys, ("", "//", "..", "xx")))
     for i, ((algo, bdx, bdy), vals) in enumerate(
         sorted(series.items(), key=lambda kv: (kv[0][0], int(kv[0][1]), int(kv[0][2])))
     ):
