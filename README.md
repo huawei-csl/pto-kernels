@@ -109,6 +109,7 @@ y = pto_swiglu(x)  # fused SwiGLU on Ascend NPU
 | Linear algebra | `pto_simple_matmul`, `pto_batch_matrix_square`, `pto_tri_inv_col_sweep`, `pto_tri_inv_ns`, `pto_tri_inv_rec_unroll`, `pto_tri_inv_trick` |
 | Scan / gather | `pto_scan_ul1`, `pto_csr_gather` |
 | GDN (Gated DeltaNet) | `pto_gdn_chunk_cumsum`, `pto_gdn_chunk_o`, `pto_gdn_scaled_dot_kkt`, `pto_gdn_wy_fast` |
+| GDN fused | `pto_gdn_mega` — the whole chunk-GDN forward pass in one launch (cumsum, transpose, KKT, solve_tril, WY, chunk_h, chunk_o) |
 | KDA (Kimi Delta Attention) | `pto_kda_chunk_h`, `pto_kda_chunk_o`, `pto_kda_gate_cumsum`, `pto_kda_kkt`, `pto_kda_wy` |
 
 More end-to-end usage patterns live under [`examples/`](examples) (JIT C++ kernels, AI CPU custom ops) and [`tests/`](tests) (correctness against reference/`torch_npu` implementations).

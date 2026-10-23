@@ -16,6 +16,7 @@ for the full License text.
 #include "torch_gdn_chunk_cumsum.h"
 #include "torch_gdn_chunk_h.h"
 #include "torch_gdn_chunk_o.h"
+#include "torch_gdn_mega.h"
 #include "torch_gdn_scaled_dot_kkt.h"
 #include "torch_gdn_wy_fast.h"
 #include "torch_kda_chunk_h.h"
@@ -80,6 +81,19 @@ PYBIND11_MODULE(pto_kernels_ops, m) {
         py::arg("K"), py::arg("V"), py::arg("S"), py::arg("G"), py::arg("Msk"),
         py::arg("batch_size"), py::arg("seq_len"),
         py::arg("cu_seqlens") = at::zeros({1}));
+  m.def("pto_gdn_mega", &pto_isa_ops::run_gdn_mega, py::arg("q"), py::arg("k"),
+        py::arg("v"), py::arg("g"), py::arg("beta"), py::arg("mask_lower"),
+        py::arg("mask_full"), py::arg("minus_identity"), py::arg("cu_seqlens"),
+        py::arg("out"), py::arg("g_sum"), py::arg("g_t"), py::arg("beta_t"),
+        py::arg("A"), py::arg("A_inv_f32"), py::arg("A_inv"), py::arg("w"),
+        py::arg("u"), py::arg("s"), py::arg("v_new"), py::arg("final_state"),
+        py::arg("initial_state"), py::arg("has_initial_state"),
+        py::arg("kkt_workspace"), py::arg("wy_workspace_a1"),
+        py::arg("wy_workspace_a2"), py::arg("h_workspace"),
+        py::arg("o_workspace_qk"), py::arg("o_workspace_qs"),
+        py::arg("o_workspace_gated"), py::arg("block_dim"),
+        py::arg("batch_size"), py::arg("seq_len"), py::arg("total_tokens"),
+        py::arg("num_matrices"));
   m.def("pto_scan_ul1", &pto_isa_ops::run_scan_ul1);
   m.def("pto_simple_matmul", &pto_isa_ops::run_simple_matmul);
   m.def("pto_swiglu", &pto_isa_ops::run_swiglu, py::arg("x"),
