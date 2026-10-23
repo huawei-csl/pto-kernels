@@ -68,11 +68,16 @@ def chmod_output_path(path: str | Path) -> None:
         pass
 
 
+VEC_ARCH = "dav-c220-vec"
+CUBE_ARCH = "dav-c220-cube"
+
+
 def compile_cpp(
     kernel_cpp: str,
     verbose: bool = False,
     timeout: int = 120,
     so_dir: str | None = None,
+    arch: str = VEC_ARCH,
 ) -> str:
     kernel_path = Path(kernel_cpp).resolve()
     out_dir = (
@@ -90,7 +95,7 @@ def compile_cpp(
         "-O2",
         "-std=c++17",
         "-Wno-ignored-attributes",
-        "--cce-aicore-arch=dav-c220-vec",
+        f"--cce-aicore-arch={arch}",
         "-isystem",
         f"{PTO_LIB_PATH}/include",
     ]
@@ -310,10 +315,11 @@ def jit_compile_with_loader(
     so_dir=None,
     device: str | int = DEFAULT_DEVICE,
     block_dim=None,
+    arch: str = VEC_ARCH,
 ):
     resolved_device = normalize_npu_device(device)
     resolved_block_dim = resolve_block_dim(resolved_device, block_dim)
-    lib_path = compile_cpp(src_path, verbose=verbose, so_dir=so_dir)
+    lib_path = compile_cpp(src_path, verbose=verbose, so_dir=so_dir, arch=arch)
     func = load_lib(lib_path, block_dim=resolved_block_dim)
     if clean_up:
         os.remove(lib_path)
