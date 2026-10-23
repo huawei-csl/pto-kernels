@@ -12,10 +12,13 @@ import argparse
 import csv
 from pathlib import Path
 
+import matplotlib
 import matplotlib.pyplot as plt
 import torch
 from pto_kernels import pto_tri_inv_col_sweep, pto_tri_inv_rec_unroll
 from utils import do_bench
+
+matplotlib.use("Agg")
 
 
 def to_bsnd(U: torch.Tensor) -> torch.Tensor:
