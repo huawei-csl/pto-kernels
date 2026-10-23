@@ -1,0 +1,2503 @@
+{
+  "created_utc": "2026-10-23T08:42:15.096258+00:00",
+  "source_commit": "1e9273766c7ec52fef2231b2b80cbba89e161427",
+  "heads": [
+    8,
+    12,
+    16,
+    24,
+    32,
+    48,
+    64
+  ],
+  "lengths": [
+    128,
+    256,
+    1024,
+    4096,
+    8192,
+    16384,
+    32768
+  ],
+  "group_size": 4,
+  "gate_scale": 1.0,
+  "initial_state": true,
+  "device": "npu:0",
+  "chunk_size": 128,
+  "head_dim": 128,
+  "seed": 0,
+  "warmups": 5,
+  "trials": 15,
+  "calls_per_trial": 20,
+  "timing": "Median device-event time per graph-replayed call, warm cache; allocation and checks excluded",
+  "library_sha256": {
+    "baseline": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec",
+    "current": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+  },
+  "records": [
+    {
+      "heads": 8,
+      "key_heads": 2,
+      "length": 128,
+      "baseline_ms": 0.21831998825073243,
+      "current_ms": 0.03683899939060211,
+      "speedup": 5.92632785532246,
+      "baseline": {
+        "length": 128,
+        "heads": 8,
+        "key_heads": 2,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 218.31998825073242,
+        "min_us": 218.06299686431885,
+        "max_us": 223.93898963928223,
+        "output_error": {
+          "max_abs": 4.766881465911865e-05,
+          "relative_rmse": 0.0003817104152403772
+        },
+        "state_error": {
+          "max_abs": 0.00034314393997192383,
+          "relative_rmse": 0.0003037721908185631
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec"
+      },
+      "current": {
+        "length": 128,
+        "heads": 8,
+        "key_heads": 2,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 36.83899939060211,
+        "min_us": 36.667001247406006,
+        "max_us": 43.24299991130829,
+        "output_error": {
+          "max_abs": 4.5903027057647705e-05,
+          "relative_rmse": 0.0004255952371750027
+        },
+        "state_error": {
+          "max_abs": 0.0006049275398254395,
+          "relative_rmse": 0.0003612308937590569
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 8,
+      "key_heads": 2,
+      "length": 256,
+      "baseline_ms": 0.2537970066070557,
+      "current_ms": 0.04437200129032135,
+      "speedup": 5.719755684367006,
+      "baseline": {
+        "length": 256,
+        "heads": 8,
+        "key_heads": 2,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 253.79700660705566,
+        "min_us": 253.56199741363525,
+        "max_us": 254.64599132537842,
+        "output_error": {
+          "max_abs": 3.2709911465644836e-05,
+          "relative_rmse": 0.0003849394852295518
+        },
+        "state_error": {
+          "max_abs": 0.0003898143768310547,
+          "relative_rmse": 0.00031015658169053495
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec"
+      },
+      "current": {
+        "length": 256,
+        "heads": 8,
+        "key_heads": 2,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 44.37200129032135,
+        "min_us": 44.21499967575073,
+        "max_us": 44.86199915409088,
+        "output_error": {
+          "max_abs": 5.7190656661987305e-05,
+          "relative_rmse": 0.00043415502295829356
+        },
+        "state_error": {
+          "max_abs": 0.0003898143768310547,
+          "relative_rmse": 0.0003620594216044992
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 8,
+      "key_heads": 2,
+      "length": 1024,
+      "baseline_ms": 0.37937901020050047,
+      "current_ms": 0.08725000023841858,
+      "speedup": 4.348183486118198,
+      "baseline": {
+        "length": 1024,
+        "heads": 8,
+        "key_heads": 2,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 379.3790102005005,
+        "min_us": 377.81100273132324,
+        "max_us": 384.4640016555786,
+        "output_error": {
+          "max_abs": 4.145503044128418e-05,
+          "relative_rmse": 0.000382248341338709
+        },
+        "state_error": {
+          "max_abs": 0.00035578012466430664,
+          "relative_rmse": 0.00032356547308154404
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec"
+      },
+      "current": {
+        "length": 1024,
+        "heads": 8,
+        "key_heads": 2,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 87.25000023841858,
+        "min_us": 87.1429979801178,
+        "max_us": 92.17000007629395,
+        "output_error": {
+          "max_abs": 5.143508315086365e-05,
+          "relative_rmse": 0.00042909462354145944
+        },
+        "state_error": {
+          "max_abs": 0.0005165338516235352,
+          "relative_rmse": 0.0003817530523519963
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 8,
+      "key_heads": 2,
+      "length": 4096,
+      "baseline_ms": 0.9832659721374511,
+      "current_ms": 0.25956900119781495,
+      "speedup": 3.7880716402961925,
+      "baseline": {
+        "length": 4096,
+        "heads": 8,
+        "key_heads": 2,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 983.2659721374512,
+        "min_us": 979.3000221252441,
+        "max_us": 988.7260437011719,
+        "output_error": {
+          "max_abs": 6.049126386642456e-05,
+          "relative_rmse": 0.0003818202530965209
+        },
+        "state_error": {
+          "max_abs": 0.00034171342849731445,
+          "relative_rmse": 0.00030510261422023177
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec"
+      },
+      "current": {
+        "length": 4096,
+        "heads": 8,
+        "key_heads": 2,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 259.56900119781494,
+        "min_us": 259.1279983520508,
+        "max_us": 260.9649896621704,
+        "output_error": {
+          "max_abs": 6.938353180885315e-05,
+          "relative_rmse": 0.00042863795533776283
+        },
+        "state_error": {
+          "max_abs": 0.0006552934646606445,
+          "relative_rmse": 0.00037445168709382415
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 8,
+      "key_heads": 2,
+      "length": 8192,
+      "baseline_ms": 1.7339630126953125,
+      "current_ms": 0.48857998847961426,
+      "speedup": 3.548984922798698,
+      "baseline": {
+        "length": 8192,
+        "heads": 8,
+        "key_heads": 2,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 1733.9630126953125,
+        "min_us": 1728.8480758666992,
+        "max_us": 1745.2680587768555,
+        "output_error": {
+          "max_abs": 6.302446126937866e-05,
+          "relative_rmse": 0.0003824252635240555
+        },
+        "state_error": {
+          "max_abs": 0.00024273991584777832,
+          "relative_rmse": 0.00032194575760513544
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec"
+      },
+      "current": {
+        "length": 8192,
+        "heads": 8,
+        "key_heads": 2,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 488.57998847961426,
+        "min_us": 487.7739906311035,
+        "max_us": 494.0110206604004,
+        "output_error": {
+          "max_abs": 7.497891783714294e-05,
+          "relative_rmse": 0.0004296443657949567
+        },
+        "state_error": {
+          "max_abs": 0.00036522746086120605,
+          "relative_rmse": 0.00038865453097969294
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 8,
+      "key_heads": 2,
+      "length": 16384,
+      "baseline_ms": 3.4426380157470704,
+      "current_ms": 0.99622802734375,
+      "speedup": 3.4556727187511487,
+      "baseline": {
+        "length": 16384,
+        "heads": 8,
+        "key_heads": 2,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 3442.6380157470703,
+        "min_us": 3424.687957763672,
+        "max_us": 3464.3421173095703,
+        "output_error": {
+          "max_abs": 6.681308150291443e-05,
+          "relative_rmse": 0.0003830742498394102
+        },
+        "state_error": {
+          "max_abs": 0.00044155120849609375,
+          "relative_rmse": 0.0003162358480039984
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec"
+      },
+      "current": {
+        "length": 16384,
+        "heads": 8,
+        "key_heads": 2,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 996.22802734375,
+        "min_us": 995.4409599304199,
+        "max_us": 997.1070289611816,
+        "output_error": {
+          "max_abs": 9.017437696456909e-05,
+          "relative_rmse": 0.0004294082464184612
+        },
+        "state_error": {
+          "max_abs": 0.00044155120849609375,
+          "relative_rmse": 0.0003788950270973146
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 8,
+      "key_heads": 2,
+      "length": 32768,
+      "baseline_ms": 6.618325805664062,
+      "current_ms": 2.0234920501708986,
+      "speedup": 3.2707446540771423,
+      "baseline": {
+        "length": 32768,
+        "heads": 8,
+        "key_heads": 2,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 6618.3258056640625,
+        "min_us": 6596.266174316406,
+        "max_us": 6652.667236328125,
+        "output_error": {
+          "max_abs": 7.215887308120728e-05,
+          "relative_rmse": 0.00038328341906890273
+        },
+        "state_error": {
+          "max_abs": 0.00040733814239501953,
+          "relative_rmse": 0.00032726617064327
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec"
+      },
+      "current": {
+        "length": 32768,
+        "heads": 8,
+        "key_heads": 2,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 2023.4920501708984,
+        "min_us": 2021.493911743164,
+        "max_us": 2028.7260055541992,
+        "output_error": {
+          "max_abs": 8.782744407653809e-05,
+          "relative_rmse": 0.00043019282747991383
+        },
+        "state_error": {
+          "max_abs": 0.0004729628562927246,
+          "relative_rmse": 0.0003874048707075417
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 12,
+      "key_heads": 3,
+      "length": 128,
+      "baseline_ms": 0.27184300422668456,
+      "current_ms": 0.03611100018024445,
+      "speedup": 7.527983242496951,
+      "baseline": {
+        "length": 128,
+        "heads": 12,
+        "key_heads": 3,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 271.84300422668457,
+        "min_us": 271.6320037841797,
+        "max_us": 277.9860019683838,
+        "output_error": {
+          "max_abs": 3.954395651817322e-05,
+          "relative_rmse": 0.0003795334487222135
+        },
+        "state_error": {
+          "max_abs": 0.00032788515090942383,
+          "relative_rmse": 0.00032395601738244295
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec"
+      },
+      "current": {
+        "length": 128,
+        "heads": 12,
+        "key_heads": 3,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 36.111000180244446,
+        "min_us": 35.752999782562256,
+        "max_us": 42.0060008764267,
+        "output_error": {
+          "max_abs": 4.131719470024109e-05,
+          "relative_rmse": 0.0004257713444530964
+        },
+        "state_error": {
+          "max_abs": 0.0003394186496734619,
+          "relative_rmse": 0.000378034426830709
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 12,
+      "key_heads": 3,
+      "length": 256,
+      "baseline_ms": 0.3282449960708618,
+      "current_ms": 0.04553399980068207,
+      "speedup": 7.2087889820288735,
+      "baseline": {
+        "length": 256,
+        "heads": 12,
+        "key_heads": 3,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 328.2449960708618,
+        "min_us": 326.993989944458,
+        "max_us": 328.7489891052246,
+        "output_error": {
+          "max_abs": 3.541633486747742e-05,
+          "relative_rmse": 0.0003787264577113092
+        },
+        "state_error": {
+          "max_abs": 0.0004979968070983887,
+          "relative_rmse": 0.0003198049671482295
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec"
+      },
+      "current": {
+        "length": 256,
+        "heads": 12,
+        "key_heads": 3,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 45.53399980068207,
+        "min_us": 45.39999961853027,
+        "max_us": 46.41300141811371,
+        "output_error": {
+          "max_abs": 4.9717724323272705e-05,
+          "relative_rmse": 0.000428411818575114
+        },
+        "state_error": {
+          "max_abs": 0.0005611777305603027,
+          "relative_rmse": 0.000384685059543699
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 12,
+      "key_heads": 3,
+      "length": 1024,
+      "baseline_ms": 0.47022500038146975,
+      "current_ms": 0.08815100193023681,
+      "speedup": 5.3343126009345685,
+      "baseline": {
+        "length": 1024,
+        "heads": 12,
+        "key_heads": 3,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 470.2250003814697,
+        "min_us": 469.01397705078125,
+        "max_us": 476.73301696777344,
+        "output_error": {
+          "max_abs": 6.618350744247437e-05,
+          "relative_rmse": 0.00038253734237514436
+        },
+        "state_error": {
+          "max_abs": 0.0003281831741333008,
+          "relative_rmse": 0.0003072660183534026
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec"
+      },
+      "current": {
+        "length": 1024,
+        "heads": 12,
+        "key_heads": 3,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 88.15100193023682,
+        "min_us": 87.77499794960022,
+        "max_us": 93.09399724006653,
+        "output_error": {
+          "max_abs": 6.618350744247437e-05,
+          "relative_rmse": 0.00042879744432866573
+        },
+        "state_error": {
+          "max_abs": 0.00045031309127807617,
+          "relative_rmse": 0.0003786245360970497
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 12,
+      "key_heads": 3,
+      "length": 4096,
+      "baseline_ms": 1.2396140098571777,
+      "current_ms": 0.2627890110015869,
+      "speedup": 4.717145534862917,
+      "baseline": {
+        "length": 4096,
+        "heads": 12,
+        "key_heads": 3,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 1239.6140098571777,
+        "min_us": 1231.919002532959,
+        "max_us": 1246.5929985046387,
+        "output_error": {
+          "max_abs": 6.727874279022217e-05,
+          "relative_rmse": 0.0003853161178994924
+        },
+        "state_error": {
+          "max_abs": 0.00044220685958862305,
+          "relative_rmse": 0.00031306565506383777
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec"
+      },
+      "current": {
+        "length": 4096,
+        "heads": 12,
+        "key_heads": 3,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 262.7890110015869,
+        "min_us": 262.280011177063,
+        "max_us": 264.0810012817383,
+        "output_error": {
+          "max_abs": 7.78883695602417e-05,
+          "relative_rmse": 0.0004318959836382419
+        },
+        "state_error": {
+          "max_abs": 0.0004531443119049072,
+          "relative_rmse": 0.00038000394124537706
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 12,
+      "key_heads": 3,
+      "length": 8192,
+      "baseline_ms": 2.2829610824584963,
+      "current_ms": 0.5004099845886231,
+      "speedup": 4.5621813168561625,
+      "baseline": {
+        "length": 8192,
+        "heads": 12,
+        "key_heads": 3,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 2282.961082458496,
+        "min_us": 2263.344955444336,
+        "max_us": 2293.0519104003906,
+        "output_error": {
+          "max_abs": 8.143484592437744e-05,
+          "relative_rmse": 0.0003825478779617697
+        },
+        "state_error": {
+          "max_abs": 0.0004082918167114258,
+          "relative_rmse": 0.000315141340252012
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec"
+      },
+      "current": {
+        "length": 8192,
+        "heads": 12,
+        "key_heads": 3,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 500.40998458862305,
+        "min_us": 500.0160217285156,
+        "max_us": 505.93700408935547,
+        "output_error": {
+          "max_abs": 7.342547178268433e-05,
+          "relative_rmse": 0.0004296200640965253
+        },
+        "state_error": {
+          "max_abs": 0.0004674196243286133,
+          "relative_rmse": 0.0003799285041168332
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 12,
+      "key_heads": 3,
+      "length": 16384,
+      "baseline_ms": 4.435208129882812,
+      "current_ms": 1.0540120124816894,
+      "speedup": 4.207929394884256,
+      "baseline": {
+        "length": 16384,
+        "heads": 12,
+        "key_heads": 3,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 4435.2081298828125,
+        "min_us": 4397.758102416992,
+        "max_us": 4453.861999511719,
+        "output_error": {
+          "max_abs": 6.866455078125e-05,
+          "relative_rmse": 0.0003835161041934043
+        },
+        "state_error": {
+          "max_abs": 0.0003935098648071289,
+          "relative_rmse": 0.0003211779985576868
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec"
+      },
+      "current": {
+        "length": 16384,
+        "heads": 12,
+        "key_heads": 3,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 1054.0120124816895,
+        "min_us": 1051.587963104248,
+        "max_us": 1056.818962097168,
+        "output_error": {
+          "max_abs": 8.0157071352005e-05,
+          "relative_rmse": 0.0004298914864193648
+        },
+        "state_error": {
+          "max_abs": 0.00045013427734375,
+          "relative_rmse": 0.00037657044595107436
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 12,
+      "key_heads": 3,
+      "length": 32768,
+      "baseline_ms": 8.894271850585938,
+      "current_ms": 2.1541690826416016,
+      "speedup": 4.128864313510211,
+      "baseline": {
+        "length": 32768,
+        "heads": 12,
+        "key_heads": 3,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 8894.271850585938,
+        "min_us": 8849.407958984375,
+        "max_us": 8926.840209960938,
+        "output_error": {
+          "max_abs": 7.838010787963867e-05,
+          "relative_rmse": 0.00038324669003486633
+        },
+        "state_error": {
+          "max_abs": 0.0003558695316314697,
+          "relative_rmse": 0.0003046755155082792
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec"
+      },
+      "current": {
+        "length": 32768,
+        "heads": 12,
+        "key_heads": 3,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 2154.1690826416016,
+        "min_us": 2140.7039642333984,
+        "max_us": 2162.1660232543945,
+        "output_error": {
+          "max_abs": 8.620694279670715e-05,
+          "relative_rmse": 0.000430230371421203
+        },
+        "state_error": {
+          "max_abs": 0.0005167722702026367,
+          "relative_rmse": 0.0003626291290856898
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 16,
+      "key_heads": 4,
+      "length": 128,
+      "baseline_ms": 0.10590100288391113,
+      "current_ms": 0.03295600116252899,
+      "speedup": 3.213405727279822,
+      "baseline": {
+        "length": 128,
+        "heads": 16,
+        "key_heads": 4,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 105.90100288391113,
+        "min_us": 105.47499656677246,
+        "max_us": 111.43499612808228,
+        "output_error": {
+          "max_abs": 4.4193118810653687e-05,
+          "relative_rmse": 0.0003865827457047999
+        },
+        "state_error": {
+          "max_abs": 0.0004252791404724121,
+          "relative_rmse": 0.0003090843674726784
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec"
+      },
+      "current": {
+        "length": 128,
+        "heads": 16,
+        "key_heads": 4,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 32.95600116252899,
+        "min_us": 32.756999135017395,
+        "max_us": 38.9490008354187,
+        "output_error": {
+          "max_abs": 5.245581269264221e-05,
+          "relative_rmse": 0.0004295405524317175
+        },
+        "state_error": {
+          "max_abs": 0.0005626678466796875,
+          "relative_rmse": 0.0003712022153194994
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 16,
+      "key_heads": 4,
+      "length": 256,
+      "baseline_ms": 0.1454319953918457,
+      "current_ms": 0.039993000030517575,
+      "speedup": 3.636436258366976,
+      "baseline": {
+        "length": 256,
+        "heads": 16,
+        "key_heads": 4,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 145.4319953918457,
+        "min_us": 145.25599479675293,
+        "max_us": 147.23299741744995,
+        "output_error": {
+          "max_abs": 5.729496479034424e-05,
+          "relative_rmse": 0.00038355911965481937
+        },
+        "state_error": {
+          "max_abs": 0.00048792362213134766,
+          "relative_rmse": 0.00032192724756896496
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec"
+      },
+      "current": {
+        "length": 256,
+        "heads": 16,
+        "key_heads": 4,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 39.99300003051758,
+        "min_us": 39.80500102043152,
+        "max_us": 40.55599868297577,
+        "output_error": {
+          "max_abs": 6.063282489776611e-05,
+          "relative_rmse": 0.00043061267933808267
+        },
+        "state_error": {
+          "max_abs": 0.0005974769592285156,
+          "relative_rmse": 0.00038284363108687103
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 16,
+      "key_heads": 4,
+      "length": 1024,
+      "baseline_ms": 0.3135819911956787,
+      "current_ms": 0.08369200229644776,
+      "speedup": 3.746857317201365,
+      "baseline": {
+        "length": 1024,
+        "heads": 16,
+        "key_heads": 4,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 313.5819911956787,
+        "min_us": 312.42098808288574,
+        "max_us": 318.1540012359619,
+        "output_error": {
+          "max_abs": 6.582960486412048e-05,
+          "relative_rmse": 0.000380729790776968
+        },
+        "state_error": {
+          "max_abs": 0.0004044175148010254,
+          "relative_rmse": 0.0003173704899381846
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec"
+      },
+      "current": {
+        "length": 1024,
+        "heads": 16,
+        "key_heads": 4,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 83.69200229644775,
+        "min_us": 83.25499892234802,
+        "max_us": 89.3850028514862,
+        "output_error": {
+          "max_abs": 5.4176896810531616e-05,
+          "relative_rmse": 0.0004272350633982569
+        },
+        "state_error": {
+          "max_abs": 0.0004768967628479004,
+          "relative_rmse": 0.0003867042833007872
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 16,
+      "key_heads": 4,
+      "length": 4096,
+      "baseline_ms": 0.8827159881591797,
+      "current_ms": 0.25597898960113524,
+      "speedup": 3.4483923447569733,
+      "baseline": {
+        "length": 4096,
+        "heads": 16,
+        "key_heads": 4,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 882.7159881591797,
+        "min_us": 881.6120147705078,
+        "max_us": 883.745002746582,
+        "output_error": {
+          "max_abs": 6.70403242111206e-05,
+          "relative_rmse": 0.0003823543374892324
+        },
+        "state_error": {
+          "max_abs": 0.00034686923027038574,
+          "relative_rmse": 0.00032333386479876935
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec"
+      },
+      "current": {
+        "length": 4096,
+        "heads": 16,
+        "key_heads": 4,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 255.97898960113525,
+        "min_us": 255.66599369049072,
+        "max_us": 257.2380065917969,
+        "output_error": {
+          "max_abs": 7.738173007965088e-05,
+          "relative_rmse": 0.00042942672735080123
+        },
+        "state_error": {
+          "max_abs": 0.0005012154579162598,
+          "relative_rmse": 0.00038848031545057893
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 16,
+      "key_heads": 4,
+      "length": 8192,
+      "baseline_ms": 1.7272079467773438,
+      "current_ms": 0.5446599960327149,
+      "speedup": 3.17116725913096,
+      "baseline": {
+        "length": 8192,
+        "heads": 16,
+        "key_heads": 4,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 1727.2079467773438,
+        "min_us": 1725.5849838256836,
+        "max_us": 1734.4169616699219,
+        "output_error": {
+          "max_abs": 6.393343210220337e-05,
+          "relative_rmse": 0.0003840666322503239
+        },
+        "state_error": {
+          "max_abs": 0.0005191564559936523,
+          "relative_rmse": 0.00031860594754107296
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec"
+      },
+      "current": {
+        "length": 8192,
+        "heads": 16,
+        "key_heads": 4,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 544.6599960327148,
+        "min_us": 542.9240226745605,
+        "max_us": 548.330020904541,
+        "output_error": {
+          "max_abs": 7.720291614532471e-05,
+          "relative_rmse": 0.00043065703357569873
+        },
+        "state_error": {
+          "max_abs": 0.0005034804344177246,
+          "relative_rmse": 0.0003776903613470495
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 16,
+      "key_heads": 4,
+      "length": 16384,
+      "baseline_ms": 3.499681091308594,
+      "current_ms": 1.1129139900207519,
+      "speedup": 3.1446105653172145,
+      "baseline": {
+        "length": 16384,
+        "heads": 16,
+        "key_heads": 4,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 3499.6810913085938,
+        "min_us": 3497.528839111328,
+        "max_us": 3501.2210845947266,
+        "output_error": {
+          "max_abs": 7.78399407863617e-05,
+          "relative_rmse": 0.0003836507967207581
+        },
+        "state_error": {
+          "max_abs": 0.00037661194801330566,
+          "relative_rmse": 0.0003223855746909976
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec"
+      },
+      "current": {
+        "length": 16384,
+        "heads": 16,
+        "key_heads": 4,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 1112.913990020752,
+        "min_us": 1107.841968536377,
+        "max_us": 1115.8160209655762,
+        "output_error": {
+          "max_abs": 9.015947580337524e-05,
+          "relative_rmse": 0.0004303339228499681
+        },
+        "state_error": {
+          "max_abs": 0.0006365180015563965,
+          "relative_rmse": 0.0003812165523413569
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 16,
+      "key_heads": 4,
+      "length": 32768,
+      "baseline_ms": 6.925273895263672,
+      "current_ms": 2.3011859893798827,
+      "speedup": 3.009436841361039,
+      "baseline": {
+        "length": 32768,
+        "heads": 16,
+        "key_heads": 4,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 6925.273895263672,
+        "min_us": 6922.215270996094,
+        "max_us": 6931.083679199219,
+        "output_error": {
+          "max_abs": 8.670985698699951e-05,
+          "relative_rmse": 0.0003831160138361156
+        },
+        "state_error": {
+          "max_abs": 0.00039952993392944336,
+          "relative_rmse": 0.0003255293413531035
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec"
+      },
+      "current": {
+        "length": 32768,
+        "heads": 16,
+        "key_heads": 4,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 2301.185989379883,
+        "min_us": 2297.6160049438477,
+        "max_us": 2305.146026611328,
+        "output_error": {
+          "max_abs": 8.670985698699951e-05,
+          "relative_rmse": 0.0004297483537811786
+        },
+        "state_error": {
+          "max_abs": 0.0006023049354553223,
+          "relative_rmse": 0.00038058904465287924
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 24,
+      "key_heads": 6,
+      "length": 128,
+      "baseline_ms": 0.13640700578689574,
+      "current_ms": 0.03668400049209595,
+      "speedup": 3.7184332122197645,
+      "baseline": {
+        "length": 128,
+        "heads": 24,
+        "key_heads": 6,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 136.40700578689575,
+        "min_us": 135.86299419403076,
+        "max_us": 142.13600158691406,
+        "output_error": {
+          "max_abs": 4.0549784898757935e-05,
+          "relative_rmse": 0.00037967340904287994
+        },
+        "state_error": {
+          "max_abs": 0.00043594837188720703,
+          "relative_rmse": 0.0003090842510573566
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec"
+      },
+      "current": {
+        "length": 128,
+        "heads": 24,
+        "key_heads": 6,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 36.68400049209595,
+        "min_us": 36.3429993391037,
+        "max_us": 42.993998527526855,
+        "output_error": {
+          "max_abs": 7.136538624763489e-05,
+          "relative_rmse": 0.00042803509859368205
+        },
+        "state_error": {
+          "max_abs": 0.0005943775177001953,
+          "relative_rmse": 0.0003686112177092582
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 24,
+      "key_heads": 6,
+      "length": 256,
+      "baseline_ms": 0.17414699792861937,
+      "current_ms": 0.04340400099754334,
+      "speedup": 4.012233755558067,
+      "baseline": {
+        "length": 256,
+        "heads": 24,
+        "key_heads": 6,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 174.14699792861938,
+        "min_us": 173.97700548171997,
+        "max_us": 177.35799551010132,
+        "output_error": {
+          "max_abs": 4.312396049499512e-05,
+          "relative_rmse": 0.000383402977604419
+        },
+        "state_error": {
+          "max_abs": 0.0003770589828491211,
+          "relative_rmse": 0.0003161562781315297
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec"
+      },
+      "current": {
+        "length": 256,
+        "heads": 24,
+        "key_heads": 6,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 43.404000997543335,
+        "min_us": 43.27400028705597,
+        "max_us": 44.18500065803528,
+        "output_error": {
+          "max_abs": 5.9992074966430664e-05,
+          "relative_rmse": 0.00042815538472495973
+        },
+        "state_error": {
+          "max_abs": 0.0005117058753967285,
+          "relative_rmse": 0.00037494144635275006
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 24,
+      "key_heads": 6,
+      "length": 1024,
+      "baseline_ms": 0.36072099208831787,
+      "current_ms": 0.0870169997215271,
+      "speedup": 4.145408290824801,
+      "baseline": {
+        "length": 1024,
+        "heads": 24,
+        "key_heads": 6,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 360.72099208831787,
+        "min_us": 359.82398986816406,
+        "max_us": 365.13099670410156,
+        "output_error": {
+          "max_abs": 5.394592881202698e-05,
+          "relative_rmse": 0.00038537144428119063
+        },
+        "state_error": {
+          "max_abs": 0.00042301416397094727,
+          "relative_rmse": 0.0003132516285404563
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec"
+      },
+      "current": {
+        "length": 1024,
+        "heads": 24,
+        "key_heads": 6,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 87.0169997215271,
+        "min_us": 86.0539972782135,
+        "max_us": 92.5279974937439,
+        "output_error": {
+          "max_abs": 8.018314838409424e-05,
+          "relative_rmse": 0.0004317327111493796
+        },
+        "state_error": {
+          "max_abs": 0.00046455860137939453,
+          "relative_rmse": 0.0003718750085681677
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 24,
+      "key_heads": 6,
+      "length": 4096,
+      "baseline_ms": 1.1524809837341308,
+      "current_ms": 0.26998300552368165,
+      "speedup": 4.26871677163043,
+      "baseline": {
+        "length": 4096,
+        "heads": 24,
+        "key_heads": 6,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 1152.4809837341309,
+        "min_us": 1150.1660346984863,
+        "max_us": 1157.4979782104492,
+        "output_error": {
+          "max_abs": 7.283687591552734e-05,
+          "relative_rmse": 0.00038253277307376266
+        },
+        "state_error": {
+          "max_abs": 0.0003210306167602539,
+          "relative_rmse": 0.0003159715561196208
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec"
+      },
+      "current": {
+        "length": 4096,
+        "heads": 24,
+        "key_heads": 6,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 269.98300552368164,
+        "min_us": 268.8930034637451,
+        "max_us": 272.7449893951416,
+        "output_error": {
+          "max_abs": 7.283687591552734e-05,
+          "relative_rmse": 0.0004292765515856445
+        },
+        "state_error": {
+          "max_abs": 0.0004985928535461426,
+          "relative_rmse": 0.00038034559111110866
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 24,
+      "key_heads": 6,
+      "length": 8192,
+      "baseline_ms": 2.2743389129638674,
+      "current_ms": 0.6100069999694824,
+      "speedup": 3.7283816629606683,
+      "baseline": {
+        "length": 8192,
+        "heads": 24,
+        "key_heads": 6,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 2274.338912963867,
+        "min_us": 2272.3339080810547,
+        "max_us": 2278.325080871582,
+        "output_error": {
+          "max_abs": 7.0132315158844e-05,
+          "relative_rmse": 0.00038360111648216844
+        },
+        "state_error": {
+          "max_abs": 0.0005350112915039062,
+          "relative_rmse": 0.0003168312250636518
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec"
+      },
+      "current": {
+        "length": 8192,
+        "heads": 24,
+        "key_heads": 6,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 610.0069999694824,
+        "min_us": 608.2159996032715,
+        "max_us": 614.5530223846436,
+        "output_error": {
+          "max_abs": 8.492916822433472e-05,
+          "relative_rmse": 0.00042979486170224845
+        },
+        "state_error": {
+          "max_abs": 0.0006241798400878906,
+          "relative_rmse": 0.0003777301753871143
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 24,
+      "key_heads": 6,
+      "length": 16384,
+      "baseline_ms": 4.741973876953125,
+      "current_ms": 1.2793000221252442,
+      "speedup": 3.7066941256480987,
+      "baseline": {
+        "length": 16384,
+        "heads": 24,
+        "key_heads": 6,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 4741.973876953125,
+        "min_us": 4736.653900146484,
+        "max_us": 4745.738983154297,
+        "output_error": {
+          "max_abs": 7.108226418495178e-05,
+          "relative_rmse": 0.0003833814989775419
+        },
+        "state_error": {
+          "max_abs": 0.0003781318664550781,
+          "relative_rmse": 0.0003106076328549534
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec"
+      },
+      "current": {
+        "length": 16384,
+        "heads": 24,
+        "key_heads": 6,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 1279.3000221252441,
+        "min_us": 1276.1560440063477,
+        "max_us": 1284.0869903564453,
+        "output_error": {
+          "max_abs": 8.720159530639648e-05,
+          "relative_rmse": 0.0004301881999708712
+        },
+        "state_error": {
+          "max_abs": 0.0005984306335449219,
+          "relative_rmse": 0.0003758823440875858
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 24,
+      "key_heads": 6,
+      "length": 32768,
+      "baseline_ms": 9.303096771240234,
+      "current_ms": 2.651487922668457,
+      "speedup": 3.5086325273085155,
+      "baseline": {
+        "length": 32768,
+        "heads": 24,
+        "key_heads": 6,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 9303.096771240234,
+        "min_us": 9298.670196533203,
+        "max_us": 9310.73226928711,
+        "output_error": {
+          "max_abs": 7.639825344085693e-05,
+          "relative_rmse": 0.0003835232346318662
+        },
+        "state_error": {
+          "max_abs": 0.00048542022705078125,
+          "relative_rmse": 0.0003131661214865744
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec"
+      },
+      "current": {
+        "length": 32768,
+        "heads": 24,
+        "key_heads": 6,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 2651.487922668457,
+        "min_us": 2643.630027770996,
+        "max_us": 2661.384963989258,
+        "output_error": {
+          "max_abs": 7.958710193634033e-05,
+          "relative_rmse": 0.00043005027691833675
+        },
+        "state_error": {
+          "max_abs": 0.0006311535835266113,
+          "relative_rmse": 0.00037437668652273715
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 32,
+      "key_heads": 8,
+      "length": 128,
+      "baseline_ms": 0.1547919988632202,
+      "current_ms": 0.046437999606132506,
+      "speedup": 3.333304625007549,
+      "baseline": {
+        "length": 128,
+        "heads": 32,
+        "key_heads": 8,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 154.79199886322021,
+        "min_us": 153.5290002822876,
+        "max_us": 160.95399856567383,
+        "output_error": {
+          "max_abs": 4.778429865837097e-05,
+          "relative_rmse": 0.0003802832798101008
+        },
+        "state_error": {
+          "max_abs": 0.0004878044128417969,
+          "relative_rmse": 0.0003115213185083121
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec"
+      },
+      "current": {
+        "length": 128,
+        "heads": 32,
+        "key_heads": 8,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 46.43799960613251,
+        "min_us": 45.51199972629547,
+        "max_us": 52.22899913787842,
+        "output_error": {
+          "max_abs": 5.172565579414368e-05,
+          "relative_rmse": 0.00042603007750585675
+        },
+        "state_error": {
+          "max_abs": 0.0005815625190734863,
+          "relative_rmse": 0.0003713438054546714
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 32,
+      "key_heads": 8,
+      "length": 256,
+      "baseline_ms": 0.21041200160980225,
+      "current_ms": 0.061229997873306276,
+      "speedup": 3.4364202011761478,
+      "baseline": {
+        "length": 256,
+        "heads": 32,
+        "key_heads": 8,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 210.41200160980225,
+        "min_us": 209.82799530029297,
+        "max_us": 211.3379955291748,
+        "output_error": {
+          "max_abs": 4.836916923522949e-05,
+          "relative_rmse": 0.0003800099657382816
+        },
+        "state_error": {
+          "max_abs": 0.0004584789276123047,
+          "relative_rmse": 0.00031546721584163606
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec"
+      },
+      "current": {
+        "length": 256,
+        "heads": 32,
+        "key_heads": 8,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 61.229997873306274,
+        "min_us": 60.19499897956848,
+        "max_us": 62.707000970840454,
+        "output_error": {
+          "max_abs": 5.669519305229187e-05,
+          "relative_rmse": 0.0004280403954908252
+        },
+        "state_error": {
+          "max_abs": 0.0005702376365661621,
+          "relative_rmse": 0.0003726760623976588
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 32,
+      "key_heads": 8,
+      "length": 1024,
+      "baseline_ms": 0.4986849784851074,
+      "current_ms": 0.14499399662017823,
+      "speedup": 3.4393491462370482,
+      "baseline": {
+        "length": 1024,
+        "heads": 32,
+        "key_heads": 8,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 498.6849784851074,
+        "min_us": 498.2900142669678,
+        "max_us": 503.31201553344727,
+        "output_error": {
+          "max_abs": 5.9351325035095215e-05,
+          "relative_rmse": 0.0003828174958471209
+        },
+        "state_error": {
+          "max_abs": 0.0004813671112060547,
+          "relative_rmse": 0.00031531890272162855
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec"
+      },
+      "current": {
+        "length": 1024,
+        "heads": 32,
+        "key_heads": 8,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 144.99399662017822,
+        "min_us": 144.03400421142578,
+        "max_us": 152.62600183486938,
+        "output_error": {
+          "max_abs": 7.003918290138245e-05,
+          "relative_rmse": 0.0004294303944334388
+        },
+        "state_error": {
+          "max_abs": 0.000701904296875,
+          "relative_rmse": 0.00037834959221072495
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 32,
+      "key_heads": 8,
+      "length": 4096,
+      "baseline_ms": 1.696718978881836,
+      "current_ms": 0.5588039875030517,
+      "speedup": 3.036340142208756,
+      "baseline": {
+        "length": 4096,
+        "heads": 32,
+        "key_heads": 8,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 1696.718978881836,
+        "min_us": 1693.6460494995117,
+        "max_us": 1699.4590759277344,
+        "output_error": {
+          "max_abs": 6.365031003952026e-05,
+          "relative_rmse": 0.0003833385999314487
+        },
+        "state_error": {
+          "max_abs": 0.0003935694694519043,
+          "relative_rmse": 0.0003136529412586242
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec"
+      },
+      "current": {
+        "length": 4096,
+        "heads": 32,
+        "key_heads": 8,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 558.8039875030518,
+        "min_us": 556.4459800720215,
+        "max_us": 561.5749835968018,
+        "output_error": {
+          "max_abs": 8.36104154586792e-05,
+          "relative_rmse": 0.0004301150911487639
+        },
+        "state_error": {
+          "max_abs": 0.0006473064422607422,
+          "relative_rmse": 0.00037801326834596694
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 32,
+      "key_heads": 8,
+      "length": 8192,
+      "baseline_ms": 3.48291015625,
+      "current_ms": 1.1456660270690917,
+      "speedup": 3.0400745714352544,
+      "baseline": {
+        "length": 8192,
+        "heads": 32,
+        "key_heads": 8,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 3482.91015625,
+        "min_us": 3480.6060791015625,
+        "max_us": 3486.083984375,
+        "output_error": {
+          "max_abs": 7.142871618270874e-05,
+          "relative_rmse": 0.0003832787333521992
+        },
+        "state_error": {
+          "max_abs": 0.0004885196685791016,
+          "relative_rmse": 0.000315730256261304
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec"
+      },
+      "current": {
+        "length": 8192,
+        "heads": 32,
+        "key_heads": 8,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 1145.6660270690918,
+        "min_us": 1142.0639991760254,
+        "max_us": 1151.7539978027344,
+        "output_error": {
+          "max_abs": 9.055435657501221e-05,
+          "relative_rmse": 0.0004300667787902057
+        },
+        "state_error": {
+          "max_abs": 0.0005532503128051758,
+          "relative_rmse": 0.00037326381425373256
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 32,
+      "key_heads": 8,
+      "length": 16384,
+      "baseline_ms": 6.935146331787109,
+      "current_ms": 2.3371049880981447,
+      "speedup": 2.9674089812416566,
+      "baseline": {
+        "length": 16384,
+        "heads": 32,
+        "key_heads": 8,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 6935.146331787109,
+        "min_us": 6926.042938232422,
+        "max_us": 6941.203308105469,
+        "output_error": {
+          "max_abs": 7.39172101020813e-05,
+          "relative_rmse": 0.0003831682843156159
+        },
+        "state_error": {
+          "max_abs": 0.0004456639289855957,
+          "relative_rmse": 0.0003151317359879613
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec"
+      },
+      "current": {
+        "length": 16384,
+        "heads": 32,
+        "key_heads": 8,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 2337.1049880981445,
+        "min_us": 2329.7000885009766,
+        "max_us": 2343.058967590332,
+        "output_error": {
+          "max_abs": 8.96155834197998e-05,
+          "relative_rmse": 0.00042985117761418223
+        },
+        "state_error": {
+          "max_abs": 0.0004513859748840332,
+          "relative_rmse": 0.00037373328814283013
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 32,
+      "key_heads": 8,
+      "length": 32768,
+      "baseline_ms": 13.703335571289063,
+      "current_ms": 4.714654922485352,
+      "speedup": 2.9065405202689334,
+      "baseline": {
+        "length": 32768,
+        "heads": 32,
+        "key_heads": 8,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 13703.335571289062,
+        "min_us": 13686.575317382812,
+        "max_us": 13713.801574707031,
+        "output_error": {
+          "max_abs": 8.287280797958374e-05,
+          "relative_rmse": 0.0003830394125543535
+        },
+        "state_error": {
+          "max_abs": 0.00040906667709350586,
+          "relative_rmse": 0.0003205027023795992
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec"
+      },
+      "current": {
+        "length": 32768,
+        "heads": 32,
+        "key_heads": 8,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 4714.654922485352,
+        "min_us": 4702.169036865234,
+        "max_us": 4725.968933105469,
+        "output_error": {
+          "max_abs": 9.056180715560913e-05,
+          "relative_rmse": 0.00042980260332114995
+        },
+        "state_error": {
+          "max_abs": 0.00048285722732543945,
+          "relative_rmse": 0.00037968202377669513
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 48,
+      "key_heads": 12,
+      "length": 128,
+      "baseline_ms": 0.15734200477600097,
+      "current_ms": 0.05079100131988525,
+      "speedup": 3.0978323066531037,
+      "baseline": {
+        "length": 128,
+        "heads": 48,
+        "key_heads": 12,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 157.34200477600098,
+        "min_us": 155.89200258255005,
+        "max_us": 163.0020022392273,
+        "output_error": {
+          "max_abs": 5.599111318588257e-05,
+          "relative_rmse": 0.0003794467484112829
+        },
+        "state_error": {
+          "max_abs": 0.0004900097846984863,
+          "relative_rmse": 0.00032000470673665404
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec",
+        "environment": {
+          "device_name": "Ascend910B2",
+          "cube_cores": 24,
+          "vector_cores": 48,
+          "torch_version": "2.10.0+cpu",
+          "torch_npu_version": "2.10.0"
+        }
+      },
+      "current": {
+        "length": 128,
+        "heads": 48,
+        "key_heads": 12,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 50.791001319885254,
+        "min_us": 50.21499991416931,
+        "max_us": 55.44400215148926,
+        "output_error": {
+          "max_abs": 6.628036499023438e-05,
+          "relative_rmse": 0.0004260675050318241
+        },
+        "state_error": {
+          "max_abs": 0.0006364583969116211,
+          "relative_rmse": 0.0003833649680018425
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 48,
+      "key_heads": 12,
+      "length": 256,
+      "baseline_ms": 0.22583999633789062,
+      "current_ms": 0.06519299745559692,
+      "speedup": 3.4641756807042148,
+      "baseline": {
+        "length": 256,
+        "heads": 48,
+        "key_heads": 12,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 225.83999633789062,
+        "min_us": 224.91400241851807,
+        "max_us": 226.3200044631958,
+        "output_error": {
+          "max_abs": 6.194412708282471e-05,
+          "relative_rmse": 0.00038394212606363
+        },
+        "state_error": {
+          "max_abs": 0.0003706216812133789,
+          "relative_rmse": 0.0003181530919391662
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec",
+        "environment": {
+          "device_name": "Ascend910B2",
+          "cube_cores": 24,
+          "vector_cores": 48,
+          "torch_version": "2.10.0+cpu",
+          "torch_npu_version": "2.10.0"
+        }
+      },
+      "current": {
+        "length": 256,
+        "heads": 48,
+        "key_heads": 12,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 65.19299745559692,
+        "min_us": 64.93099927902222,
+        "max_us": 66.4650022983551,
+        "output_error": {
+          "max_abs": 7.135793566703796e-05,
+          "relative_rmse": 0.0004304551111999899
+        },
+        "state_error": {
+          "max_abs": 0.0004774332046508789,
+          "relative_rmse": 0.0003785493900068104
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 48,
+      "key_heads": 12,
+      "length": 1024,
+      "baseline_ms": 0.591372013092041,
+      "current_ms": 0.15030900239944459,
+      "speedup": 3.934375211409335,
+      "baseline": {
+        "length": 1024,
+        "heads": 48,
+        "key_heads": 12,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 591.372013092041,
+        "min_us": 590.0959968566895,
+        "max_us": 597.8129863739014,
+        "output_error": {
+          "max_abs": 7.724016904830933e-05,
+          "relative_rmse": 0.00038473299355246127
+        },
+        "state_error": {
+          "max_abs": 0.00040793418884277344,
+          "relative_rmse": 0.00031385867623612285
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec",
+        "environment": {
+          "device_name": "Ascend910B2",
+          "cube_cores": 24,
+          "vector_cores": 48,
+          "torch_version": "2.10.0+cpu",
+          "torch_npu_version": "2.10.0"
+        }
+      },
+      "current": {
+        "length": 1024,
+        "heads": 48,
+        "key_heads": 12,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 150.30900239944458,
+        "min_us": 149.82500076293945,
+        "max_us": 154.68000173568726,
+        "output_error": {
+          "max_abs": 7.956475019454956e-05,
+          "relative_rmse": 0.0004315498808864504
+        },
+        "state_error": {
+          "max_abs": 0.0005016922950744629,
+          "relative_rmse": 0.0003748656890820712
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 48,
+      "key_heads": 12,
+      "length": 4096,
+      "baseline_ms": 2.2759479522705077,
+      "current_ms": 0.6391759872436523,
+      "speedup": 3.560753216160672,
+      "baseline": {
+        "length": 4096,
+        "heads": 48,
+        "key_heads": 12,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 2275.947952270508,
+        "min_us": 2274.087905883789,
+        "max_us": 2279.8389434814453,
+        "output_error": {
+          "max_abs": 7.870793342590332e-05,
+          "relative_rmse": 0.0003842271980829537
+        },
+        "state_error": {
+          "max_abs": 0.0004361271858215332,
+          "relative_rmse": 0.0003142263740301132
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec",
+        "environment": {
+          "device_name": "Ascend910B2",
+          "cube_cores": 24,
+          "vector_cores": 48,
+          "torch_version": "2.10.0+cpu",
+          "torch_npu_version": "2.10.0"
+        }
+      },
+      "current": {
+        "length": 4096,
+        "heads": 48,
+        "key_heads": 12,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 639.1759872436523,
+        "min_us": 635.3419780731201,
+        "max_us": 641.1990165710449,
+        "output_error": {
+          "max_abs": 7.339194416999817e-05,
+          "relative_rmse": 0.00043016052222810686
+        },
+        "state_error": {
+          "max_abs": 0.0006934404373168945,
+          "relative_rmse": 0.00037207259447313845
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 48,
+      "key_heads": 12,
+      "length": 8192,
+      "baseline_ms": 4.736188125610352,
+      "current_ms": 1.3282320022583007,
+      "speedup": 3.565783776898719,
+      "baseline": {
+        "length": 8192,
+        "heads": 48,
+        "key_heads": 12,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 4736.188125610352,
+        "min_us": 4732.849884033203,
+        "max_us": 4742.081069946289,
+        "output_error": {
+          "max_abs": 8.130073547363281e-05,
+          "relative_rmse": 0.0003833439259324223
+        },
+        "state_error": {
+          "max_abs": 0.00039947032928466797,
+          "relative_rmse": 0.00031341586145572364
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec",
+        "environment": {
+          "device_name": "Ascend910B2",
+          "cube_cores": 24,
+          "vector_cores": 48,
+          "torch_version": "2.10.0+cpu",
+          "torch_npu_version": "2.10.0"
+        }
+      },
+      "current": {
+        "length": 8192,
+        "heads": 48,
+        "key_heads": 12,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 1328.2320022583008,
+        "min_us": 1322.109031677246,
+        "max_us": 1331.9049835205078,
+        "output_error": {
+          "max_abs": 8.81776213645935e-05,
+          "relative_rmse": 0.00042987297638319433
+        },
+        "state_error": {
+          "max_abs": 0.0007380247116088867,
+          "relative_rmse": 0.0003776056692004204
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 48,
+      "key_heads": 12,
+      "length": 16384,
+      "baseline_ms": 9.337447357177734,
+      "current_ms": 2.732621955871582,
+      "speedup": 3.417028593038408,
+      "baseline": {
+        "length": 16384,
+        "heads": 48,
+        "key_heads": 12,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 9337.447357177734,
+        "min_us": 9331.085205078125,
+        "max_us": 9344.983673095703,
+        "output_error": {
+          "max_abs": 8.296966552734375e-05,
+          "relative_rmse": 0.00038328501977957785
+        },
+        "state_error": {
+          "max_abs": 0.00043380260467529297,
+          "relative_rmse": 0.0003149725671391934
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec",
+        "environment": {
+          "device_name": "Ascend910B2",
+          "cube_cores": 24,
+          "vector_cores": 48,
+          "torch_version": "2.10.0+cpu",
+          "torch_npu_version": "2.10.0"
+        }
+      },
+      "current": {
+        "length": 16384,
+        "heads": 48,
+        "key_heads": 12,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 2732.621955871582,
+        "min_us": 2725.1659393310547,
+        "max_us": 2744.9140548706055,
+        "output_error": {
+          "max_abs": 9.194761514663696e-05,
+          "relative_rmse": 0.00042991514783352613
+        },
+        "state_error": {
+          "max_abs": 0.000542759895324707,
+          "relative_rmse": 0.0003777711826842278
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 48,
+      "key_heads": 12,
+      "length": 32768,
+      "baseline_ms": 18.398068237304688,
+      "current_ms": 5.400033187866211,
+      "speedup": 3.4070287343131254,
+      "baseline": {
+        "length": 32768,
+        "heads": 48,
+        "key_heads": 12,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 18398.068237304688,
+        "min_us": 18387.884521484375,
+        "max_us": 18419.18487548828,
+        "output_error": {
+          "max_abs": 8.299946784973145e-05,
+          "relative_rmse": 0.000383636710466817
+        },
+        "state_error": {
+          "max_abs": 0.0004470944404602051,
+          "relative_rmse": 0.0003162971406709403
+        },
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec",
+        "environment": {
+          "device_name": "Ascend910B2",
+          "cube_cores": 24,
+          "vector_cores": 48,
+          "torch_version": "2.10.0+cpu",
+          "torch_npu_version": "2.10.0"
+        }
+      },
+      "current": {
+        "length": 32768,
+        "heads": 48,
+        "key_heads": 12,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 5400.033187866211,
+        "min_us": 5381.113052368164,
+        "max_us": 5413.103103637695,
+        "output_error": {
+          "max_abs": 8.902698755264282e-05,
+          "relative_rmse": 0.00043014719267375767
+        },
+        "state_error": {
+          "max_abs": 0.0006366968154907227,
+          "relative_rmse": 0.0003789804468397051
+        },
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60"
+      },
+      "status": "passed"
+    },
+    {
+      "heads": 64,
+      "key_heads": 16,
+      "length": 128,
+      "status": "passed",
+      "baseline_ms": 0.20786499977111816,
+      "current_ms": 0.0642799973487854,
+      "speedup": 3.233743129192053,
+      "baseline": {
+        "length": 128,
+        "heads": 64,
+        "key_heads": 16,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 207.86499977111816,
+        "min_us": 207.2309970855713,
+        "max_us": 213.77899646759033,
+        "output_error": {
+          "max_abs": 4.385411739349365e-05,
+          "relative_rmse": 0.00038359721656888723
+        },
+        "state_error": {
+          "max_abs": 0.00042301416397094727,
+          "relative_rmse": 0.000318097387207672
+        },
+        "status": "passed",
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec",
+        "environment": {
+          "device_name": "Ascend910B2",
+          "cube_cores": 24,
+          "vector_cores": 48,
+          "torch_version": "2.10.0+cpu",
+          "torch_npu_version": "2.10.0"
+        }
+      },
+      "current": {
+        "length": 128,
+        "heads": 64,
+        "key_heads": 16,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 64.2799973487854,
+        "min_us": 63.97299766540527,
+        "max_us": 70.5810010433197,
+        "output_error": {
+          "max_abs": 4.53852117061615e-05,
+          "relative_rmse": 0.00042839706293307245
+        },
+        "state_error": {
+          "max_abs": 0.0005812644958496094,
+          "relative_rmse": 0.00037450226955115795
+        },
+        "status": "passed",
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60",
+        "environment": {
+          "device_name": "Ascend910B2",
+          "cube_cores": 24,
+          "vector_cores": 48,
+          "torch_version": "2.10.0+cpu",
+          "torch_npu_version": "2.10.0"
+        }
+      }
+    },
+    {
+      "heads": 64,
+      "key_heads": 16,
+      "length": 256,
+      "status": "passed",
+      "baseline_ms": 0.31345300674438475,
+      "current_ms": 0.08709800243377686,
+      "speedup": 3.5988541411464885,
+      "baseline": {
+        "length": 256,
+        "heads": 64,
+        "key_heads": 16,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 313.45300674438477,
+        "min_us": 312.6240015029907,
+        "max_us": 316.91300868988037,
+        "output_error": {
+          "max_abs": 5.2288174629211426e-05,
+          "relative_rmse": 0.0003814925439655781
+        },
+        "state_error": {
+          "max_abs": 0.00043714046478271484,
+          "relative_rmse": 0.00031574975582771003
+        },
+        "status": "passed",
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec",
+        "environment": {
+          "device_name": "Ascend910B2",
+          "cube_cores": 24,
+          "vector_cores": 48,
+          "torch_version": "2.10.0+cpu",
+          "torch_npu_version": "2.10.0"
+        }
+      },
+      "current": {
+        "length": 256,
+        "heads": 64,
+        "key_heads": 16,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 87.09800243377686,
+        "min_us": 86.18199825286865,
+        "max_us": 87.56999969482422,
+        "output_error": {
+          "max_abs": 6.013736128807068e-05,
+          "relative_rmse": 0.000428328406997025
+        },
+        "state_error": {
+          "max_abs": 0.0005668997764587402,
+          "relative_rmse": 0.0003772652999032289
+        },
+        "status": "passed",
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60",
+        "environment": {
+          "device_name": "Ascend910B2",
+          "cube_cores": 24,
+          "vector_cores": 48,
+          "torch_version": "2.10.0+cpu",
+          "torch_npu_version": "2.10.0"
+        }
+      }
+    },
+    {
+      "heads": 64,
+      "key_heads": 16,
+      "length": 1024,
+      "status": "passed",
+      "baseline_ms": 0.8174019813537597,
+      "current_ms": 0.21337199211120605,
+      "speedup": 3.8308775826948414,
+      "baseline": {
+        "length": 1024,
+        "heads": 64,
+        "key_heads": 16,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 817.4019813537598,
+        "min_us": 816.1379814147949,
+        "max_us": 822.5509643554688,
+        "output_error": {
+          "max_abs": 6.535649299621582e-05,
+          "relative_rmse": 0.0003827040200121701
+        },
+        "state_error": {
+          "max_abs": 0.000491797924041748,
+          "relative_rmse": 0.00031654152553528547
+        },
+        "status": "passed",
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec",
+        "environment": {
+          "device_name": "Ascend910B2",
+          "cube_cores": 24,
+          "vector_cores": 48,
+          "torch_version": "2.10.0+cpu",
+          "torch_npu_version": "2.10.0"
+        }
+      },
+      "current": {
+        "length": 1024,
+        "heads": 64,
+        "key_heads": 16,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 213.37199211120605,
+        "min_us": 213.09900283813477,
+        "max_us": 218.70999336242676,
+        "output_error": {
+          "max_abs": 8.498504757881165e-05,
+          "relative_rmse": 0.00042880699038505554
+        },
+        "state_error": {
+          "max_abs": 0.0005718469619750977,
+          "relative_rmse": 0.0003828136541415006
+        },
+        "status": "passed",
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60",
+        "environment": {
+          "device_name": "Ascend910B2",
+          "cube_cores": 24,
+          "vector_cores": 48,
+          "torch_version": "2.10.0+cpu",
+          "torch_npu_version": "2.10.0"
+        }
+      }
+    },
+    {
+      "heads": 64,
+      "key_heads": 16,
+      "length": 4096,
+      "status": "passed",
+      "baseline_ms": 3.152013969421387,
+      "current_ms": 0.9382410049438477,
+      "speedup": 3.359492873166453,
+      "baseline": {
+        "length": 4096,
+        "heads": 64,
+        "key_heads": 16,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 3152.0139694213867,
+        "min_us": 3148.1990814208984,
+        "max_us": 3155.1990509033203,
+        "output_error": {
+          "max_abs": 8.157268166542053e-05,
+          "relative_rmse": 0.00038283219328150153
+        },
+        "state_error": {
+          "max_abs": 0.0004342198371887207,
+          "relative_rmse": 0.00030724270618520677
+        },
+        "status": "passed",
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec",
+        "environment": {
+          "device_name": "Ascend910B2",
+          "cube_cores": 24,
+          "vector_cores": 48,
+          "torch_version": "2.10.0+cpu",
+          "torch_npu_version": "2.10.0"
+        }
+      },
+      "current": {
+        "length": 4096,
+        "heads": 64,
+        "key_heads": 16,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 938.2410049438477,
+        "min_us": 933.1110000610352,
+        "max_us": 940.7090187072754,
+        "output_error": {
+          "max_abs": 8.906424045562744e-05,
+          "relative_rmse": 0.0004296239640098065
+        },
+        "state_error": {
+          "max_abs": 0.0006219744682312012,
+          "relative_rmse": 0.0003693891630973667
+        },
+        "status": "passed",
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60",
+        "environment": {
+          "device_name": "Ascend910B2",
+          "cube_cores": 24,
+          "vector_cores": 48,
+          "torch_version": "2.10.0+cpu",
+          "torch_npu_version": "2.10.0"
+        }
+      }
+    },
+    {
+      "heads": 64,
+      "key_heads": 16,
+      "length": 8192,
+      "status": "passed",
+      "baseline_ms": 6.356758117675781,
+      "current_ms": 1.9143659591674804,
+      "speedup": 3.320555344830833,
+      "baseline": {
+        "length": 8192,
+        "heads": 64,
+        "key_heads": 16,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 6356.758117675781,
+        "min_us": 6347.787094116211,
+        "max_us": 6368.585968017578,
+        "output_error": {
+          "max_abs": 7.399171590805054e-05,
+          "relative_rmse": 0.0003828149347100407
+        },
+        "state_error": {
+          "max_abs": 0.00044715404510498047,
+          "relative_rmse": 0.000316706980811432
+        },
+        "status": "passed",
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec",
+        "environment": {
+          "device_name": "Ascend910B2",
+          "cube_cores": 24,
+          "vector_cores": 48,
+          "torch_version": "2.10.0+cpu",
+          "torch_npu_version": "2.10.0"
+        }
+      },
+      "current": {
+        "length": 8192,
+        "heads": 64,
+        "key_heads": 16,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 1914.3659591674805,
+        "min_us": 1908.2759857177734,
+        "max_us": 1928.3849716186523,
+        "output_error": {
+          "max_abs": 7.849931716918945e-05,
+          "relative_rmse": 0.00042956197285093367
+        },
+        "state_error": {
+          "max_abs": 0.0006147623062133789,
+          "relative_rmse": 0.00037980027263984084
+        },
+        "status": "passed",
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60",
+        "environment": {
+          "device_name": "Ascend910B2",
+          "cube_cores": 24,
+          "vector_cores": 48,
+          "torch_version": "2.10.0+cpu",
+          "torch_npu_version": "2.10.0"
+        }
+      }
+    },
+    {
+      "heads": 64,
+      "key_heads": 16,
+      "length": 16384,
+      "status": "passed",
+      "baseline_ms": 12.51141128540039,
+      "current_ms": 3.826921844482422,
+      "speedup": 3.269314554578398,
+      "baseline": {
+        "length": 16384,
+        "heads": 64,
+        "key_heads": 16,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 12511.41128540039,
+        "min_us": 12507.595825195312,
+        "max_us": 12517.050170898438,
+        "output_error": {
+          "max_abs": 8.636340498924255e-05,
+          "relative_rmse": 0.00038327844231389463
+        },
+        "state_error": {
+          "max_abs": 0.00040978193283081055,
+          "relative_rmse": 0.0003129448741674423
+        },
+        "status": "passed",
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec",
+        "environment": {
+          "device_name": "Ascend910B2",
+          "cube_cores": 24,
+          "vector_cores": 48,
+          "torch_version": "2.10.0+cpu",
+          "torch_npu_version": "2.10.0"
+        }
+      },
+      "current": {
+        "length": 16384,
+        "heads": 64,
+        "key_heads": 16,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 3826.921844482422,
+        "min_us": 3819.240951538086,
+        "max_us": 3836.9258880615234,
+        "output_error": {
+          "max_abs": 9.282678365707397e-05,
+          "relative_rmse": 0.00042979061254300177
+        },
+        "state_error": {
+          "max_abs": 0.00044846534729003906,
+          "relative_rmse": 0.0003733488847501576
+        },
+        "status": "passed",
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60",
+        "environment": {
+          "device_name": "Ascend910B2",
+          "cube_cores": 24,
+          "vector_cores": 48,
+          "torch_version": "2.10.0+cpu",
+          "torch_npu_version": "2.10.0"
+        }
+      }
+    },
+    {
+      "heads": 64,
+      "key_heads": 16,
+      "length": 32768,
+      "status": "failed",
+      "baseline_ms": null,
+      "current_ms": 7.512596893310547,
+      "speedup": null,
+      "baseline": {
+        "length": 32768,
+        "heads": 64,
+        "key_heads": 16,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "status": "failed",
+        "error": "out: max_abs=0.044520 rmse_ratio=0.087424",
+        "kernel_library_sha256": "4bf4218a7473d3632369a542b45f7c58eb3286069d9e5750e40b01090e660aec",
+        "environment": {
+          "device_name": "Ascend910B2",
+          "cube_cores": 24,
+          "vector_cores": 48,
+          "torch_version": "2.10.0+cpu",
+          "torch_npu_version": "2.10.0"
+        }
+      },
+      "current": {
+        "length": 32768,
+        "heads": 64,
+        "key_heads": 16,
+        "initial_state": true,
+        "gate_scale": 1.0,
+        "median_us": 7512.596893310547,
+        "min_us": 7502.095794677734,
+        "max_us": 7523.709869384766,
+        "output_error": {
+          "max_abs": 8.875131607055664e-05,
+          "relative_rmse": 0.0004300104337744415
+        },
+        "state_error": {
+          "max_abs": 0.0006381869316101074,
+          "relative_rmse": 0.0003774526121560484
+        },
+        "status": "passed",
+        "kernel_library_sha256": "a1e1be91cfb087f8ab4f1fc1d4df9f185135fd672ba66c11780110533155ec60",
+        "environment": {
+          "device_name": "Ascend910B2",
+          "cube_cores": 24,
+          "vector_cores": 48,
+          "torch_version": "2.10.0+cpu",
+          "torch_npu_version": "2.10.0"
+        }
+      }
+    }
+  ],
+  "environment": {
+    "device_name": "Ascend910B2",
+    "cube_cores": 24,
+    "vector_cores": 48,
+    "torch_version": "2.10.0+cpu",
+    "torch_npu_version": "2.10.0"
+  },
+  "validation_notes": [
+    "Current passes all 49 shapes. Baseline passes 48; H=64, T=32768 fails output correctness in two processes: relative RMSE 0.087156 initially and 0.087424 on recheck. No baseline timing or speedup is reported for that cell."
+  ]
+}

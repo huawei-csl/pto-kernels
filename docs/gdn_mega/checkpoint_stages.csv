@@ -1,0 +1,11 @@
+version,stage,matrix_gflops,device_phase_ms
+baseline,gate scan,,0.015539067655940644
+baseline,transpose,,0.007319560826350419
+baseline,KK,2.147483648,0.11443313401195929
+baseline,inverse,51.740934144,0.2837829730216187
+baseline,extra barrier,,0.0023798572085674857
+baseline,WY,4.294967296,0.07059576425414475
+baseline,state,4.294967296,0.20658760474371538
+baseline,output,6.442450944,0.15663060216387018
+current,scan/layout + shared KK/QK,1.073741824,0.020638761674299542
+current,fused preparation/inverse/WY/state/output,17.054040064,0.2264864108153511
