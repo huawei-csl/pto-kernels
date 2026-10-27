@@ -13,22 +13,22 @@ for the full License text.
 /**
  * @brief Inverts the tiles of a tensor on both engines at once.
  *
- * The tensor is cut in two halves along the tile index. The first half goes
- * to the cube units, which invert it with the recursive-doubling / unrolled
- * recursion of tri_inv_rec_unroll; the second half goes to the vector units,
- * which invert it with the rank-1 column sweep of tri_inv_col_sweep. Both
- * algorithms already own a disjoint set of tiles -- and therefore disjoint
- * rows of the output -- so the two halves need no cross-core synchronization
- * and simply run concurrently for the length of the kernel.
+ * The tensor is cut in two parts along the tile index. The first
+ * num_cube_tiles tiles go to the cube units, which invert it with the
+ * recursive-doubling / unrolled recursion of tri_inv_rec_unroll; the remaining
+ * tiles go to the vector units, which invert it with the rank-1 column sweep of
+ * tri_inv_col_sweep. Both algorithms already own a disjoint set of tiles -- and
+ * therefore disjoint rows of the output -- so the two halves need no cross-core
+ * synchronization and simply run concurrently for the length of the kernel.
  *
  * Splitting the work this way is what the AIC_1_2 mix mode buys: a cube-only
  * kernel leaves the 2 * blockDim vector cores idle and a vector-only kernel
  * leaves the blockDim cube cores idle, while here each engine works on its
  * own half of the tiles with the algorithm that suits it.
  *
- * The halves are equal in tile count, not in runtime: the engines are not
- * equally fast per tile, so for a given shape one half can finish before the
- * other and the kernel ends with the slower engine.
+ * The engines are not equally fast, so the split point is chosen on the host
+ * (see run_tri_inv_mix) to give each engine a share of the tiles proportional
+ * to its throughput, so that both finish at about the same time.
  *
  * @tparam T Input and output data type. Only fp16 is supported: the cube
  * half also accepts bf16, but the rank-1 sweep needs TSUB and TROWEXPANDMUL,
@@ -40,6 +40,8 @@ for the full License text.
  * cube half only.
  * @param matrix_size Size of each individual matrix / tile: 16, 32, 64 or 128.
  * @param num_matrices Total number of matrices / tiles in the tensor.
+ * @param num_cube_tiles Number of leading tiles inverted on the cube units,
+ * at most num_matrices; the rest are inverted on the vector units.
  * @param num_bsnd_heads Number of heads N for BSND input, or 0 when each tile
  * is stored contiguously and row-wise.
  * @param is_lower Whether the input matrices are lower (1) or upper (0)
@@ -52,13 +54,14 @@ for the full License text.
 template <typename T>
 AICORE inline void runTriInvMix(__gm__ T* tensor_out, __gm__ T* tensor_in,
                                 __gm__ T* minus_eye_in, uint32_t matrix_size,
-                                uint32_t num_matrices, uint32_t num_bsnd_heads,
-                                uint32_t is_lower, __gm__ int32_t* cu_seqlens,
+                                uint32_t num_matrices, uint32_t num_cube_tiles,
+                                uint32_t num_bsnd_heads, uint32_t is_lower,
+                                __gm__ int32_t* cu_seqlens,
                                 uint32_t max_doubling_block_size) {
   // Tiles [0, num_cube_tiles) belong to the cube half, the rest to the
-  // vector half. The odd tile goes to the vector half, which has twice as
-  // many cores to spread it over.
-  const uint32_t num_cube_tiles = num_matrices / 2;
+  // vector half.
+  num_cube_tiles =
+      num_cube_tiles < num_matrices ? num_cube_tiles : num_matrices;
   const uint32_t num_vector_tiles = num_matrices - num_cube_tiles;
 
 #if defined(__DAV_CUBE__)
@@ -93,14 +96,14 @@ AICORE inline void runTriInvMix(__gm__ T* tensor_out, __gm__ T* tensor_in,
  */
 extern "C" __global__ AICORE void tri_inv_mix_fp16(
     __gm__ void* tensor_out, __gm__ void* tensor_in, __gm__ void* minus_eye_in,
-    uint32_t matrix_size, uint32_t num_matrices, uint32_t num_bsnd_heads,
-    uint32_t is_lower, __gm__ void* cu_seqlens,
+    uint32_t matrix_size, uint32_t num_matrices, uint32_t num_cube_tiles,
+    uint32_t num_bsnd_heads, uint32_t is_lower, __gm__ void* cu_seqlens,
     uint32_t max_doubling_block_size) {
   KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2);
   runTriInvMix<half>((__gm__ half*)tensor_out, (__gm__ half*)tensor_in,
                      (__gm__ half*)minus_eye_in, matrix_size, num_matrices,
-                     num_bsnd_heads, is_lower, (__gm__ int32_t*)cu_seqlens,
-                     max_doubling_block_size);
+                     num_cube_tiles, num_bsnd_heads, is_lower,
+                     (__gm__ int32_t*)cu_seqlens, max_doubling_block_size);
 }
 
 // Host-callable launch shims: the `<<<>>>` syntax is only
@@ -109,10 +112,11 @@ extern "C" __global__ AICORE void tri_inv_mix_fp16(
 extern "C" void pto_launch_tri_inv_mix_fp16(
     uint32_t blockDim, void* stream, void* tensor_out, void* tensor_in,
     void* minus_eye_in, uint32_t matrix_size, uint32_t num_matrices,
-    uint32_t num_bsnd_heads, uint32_t is_lower, void* cu_seqlens,
-    uint32_t max_doubling_block_size) {
+    uint32_t num_cube_tiles, uint32_t num_bsnd_heads, uint32_t is_lower,
+    void* cu_seqlens, uint32_t max_doubling_block_size) {
   tri_inv_mix_fp16<<<blockDim, nullptr, stream>>>(
       (__gm__ void*)tensor_out, (__gm__ void*)tensor_in,
-      (__gm__ void*)minus_eye_in, matrix_size, num_matrices, num_bsnd_heads,
-      is_lower, (__gm__ void*)cu_seqlens, max_doubling_block_size);
+      (__gm__ void*)minus_eye_in, matrix_size, num_matrices, num_cube_tiles,
+      num_bsnd_heads, is_lower, (__gm__ void*)cu_seqlens,
+      max_doubling_block_size);
 }

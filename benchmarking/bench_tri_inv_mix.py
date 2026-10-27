@@ -2,13 +2,14 @@
 Performance benchmark comparing the mixed cube/vector triangular inverse
 kernel against the two single-engine kernels it is built from.
 
-``tri_inv_mix`` gives the first half of the tiles to the cube units, which run
-the recursive unroll algorithm, and the second half to the vector units, which
-run the column sweep. The question this benchmark answers is whether that beats
-running either algorithm alone over all the tiles, and from which problem size
-onwards: the split is by tile count, not by runtime, so the kernel ends with
-whichever engine is slower on its half, and at small sizes the launch dominates
-anyway.
+``tri_inv_mix`` gives the leading ``cube_fraction`` of the tiles (a measured
+per-matrix-size default) to the cube units, which run the recursive unroll algorithm, and the
+rest to the vector units, which run the column sweep. The question this
+benchmark answers is whether that beats running either algorithm alone over all
+the tiles, and from which problem size onwards. Pass ``--cube-fraction`` to
+override the split, e.g. to find the fraction at which both engines finish
+together: it is balanced when it equals t_vec / (t_cube + t_vec), with t_cube
+and t_vec the rec_unroll and col_sweep times over the same tiles.
 
 Run with ``--layout dense`` (default) for contiguous row-major tiles of shape
 (block_dim_x, block_dim_y, n, n), or ``--layout bsnd`` for the same tiles laid
@@ -39,6 +40,9 @@ def to_bsnd(U: torch.Tensor) -> torch.Tensor:
     return U.transpose(1, 2).contiguous().reshape(1, num_chunks * n, num_heads, n)
 
 
+# Extra keyword arguments of pto_tri_inv_mix, set from --cube-fraction.
+MIX_KWARGS: dict = {}
+
 # Each entry maps an algorithm to (make_input, run), where make_input turns a
 # strictly upper triangular (block_dim_x, block_dim_y, n, n) tensor into the
 # kernel's input. All three kernels take an implicit unit diagonal, so the same
@@ -54,7 +58,9 @@ ALGOS = {
     "dense": {
         "mix": (
             lambda U: U,
-            lambda inp: pto_tri_inv_mix(inp, is_bsnd_format=False, is_lower=False),
+            lambda inp: pto_tri_inv_mix(
+                inp, is_bsnd_format=False, is_lower=False, **MIX_KWARGS
+            ),
         ),
         "rec_unroll": (
             lambda U: U,
@@ -70,7 +76,9 @@ ALGOS = {
     "bsnd": {
         "mix": (
             to_bsnd,
-            lambda inp: pto_tri_inv_mix(inp, is_bsnd_format=True, is_lower=False),
+            lambda inp: pto_tri_inv_mix(
+                inp, is_bsnd_format=True, is_lower=False, **MIX_KWARGS
+            ),
         ),
         "rec_unroll": (
             to_bsnd,
@@ -254,7 +262,18 @@ if __name__ == "__main__":
         + " ".join(f"{x},{y}" for x, y in BLOCK_DIMS)
         + "); each pair benchmarks bdx * bdy tiles",
     )
+    parser.add_argument(
+        "--cube-fraction",
+        type=float,
+        default=None,
+        help="fraction of the tiles the mix kernel runs on the cube units "
+        "(default: the kernel's per-matrix-size value)",
+    )
     args = parser.parse_args()
+    if args.cube_fraction is not None:
+        if not 0.0 <= args.cube_fraction <= 1.0:
+            parser.error("--cube-fraction must be in [0, 1]")
+        MIX_KWARGS["cube_fraction"] = args.cube_fraction
     if args.output is not None and len(args.layout) > 1:
         parser.error("--output requires a single --layout")
     block_dims = BLOCK_DIMS

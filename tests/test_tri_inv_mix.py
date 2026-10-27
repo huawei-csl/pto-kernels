@@ -6,9 +6,9 @@
 # for the full License text.
 # --------------------------------------------------------------------------------
 
-"""Tests for pto_tri_inv_mix, which inverts the first half of the tiles on the
-cube units (the tri_inv_rec_unroll algorithm) and the second half on the vector
-units (the tri_inv_col_sweep algorithm).
+"""Tests for pto_tri_inv_mix, which inverts the leading cube_fraction of the
+tiles on the cube units (the tri_inv_rec_unroll algorithm) and the rest on the
+vector units (the tri_inv_col_sweep algorithm).
 
 The input convention is the one of pto_tri_inv_rec_unroll: the tensor holds the
 strictly triangular A and the kernel returns the inverse of I + A.
@@ -27,6 +27,9 @@ import pytest
 import torch
 
 from pto_kernels import pto_tri_inv_col_sweep, pto_tri_inv_mix, pto_tri_inv_rec_unroll
+
+# Mirrors DefaultTriInvMixCubeFraction in csrc/host/torch_tri_inv_mix.h.
+DEFAULT_CUBE_FRACTION = {16: 0.50, 32: 0.60, 64: 0.65, 128: 0.55}
 
 random.seed(42)
 torch.manual_seed(42)
@@ -155,8 +158,8 @@ def test_tri_inv_mix(
 
 
 @pytest.mark.parametrize("n", [16, 32, 64, 128])
-# An odd tile count makes the two halves differ in size; 1 tile leaves the cube
-# half empty, which must still produce the full output.
+# Tile counts below the cube core count run on the cube only and leave the
+# vector part empty; the larger ones are not divided evenly by the split.
 @pytest.mark.parametrize("num_tiles", [1, 2, 3, 47, 48, 97])
 @pytest.mark.parametrize("is_lower", [False, True])
 def test_tri_inv_mix_tile_counts(n: int, num_tiles: int, is_lower: bool):
@@ -180,9 +183,14 @@ def test_tri_inv_mix_deltanet(n: int, is_lower: bool):
 @pytest.mark.parametrize("n", [16, 32, 64, 128])
 @pytest.mark.parametrize("num_tiles", [2, 3, 48, 97])
 @pytest.mark.parametrize("is_lower", [False, True])
-def test_tri_inv_mix_matches_both_halves(n: int, num_tiles: int, is_lower: bool):
-    """The contract of the kernel: the first half of the tiles comes out of the
-    cube algorithm and the second half out of the vector one, bit for bit.
+@pytest.mark.parametrize("cube_fraction", [None, 0.0, 0.5, 0.8, 1.0])
+def test_tri_inv_mix_matches_both_halves(
+    n: int, num_tiles: int, is_lower: bool, cube_fraction: float | None
+):
+    """The contract of the kernel: the leading round(cube_fraction * num_tiles)
+    tiles come out of the cube algorithm and the rest out of the vector one,
+    bit for bit. None checks the per-size default fraction. With fewer tiles
+    than cube cores the fraction is ignored and every tile runs on the cube.
 
     The column sweep never reads the diagonal of its input -- it assumes a unit
     one -- so the strictly triangular tensor the recursion expects means the
@@ -191,14 +199,26 @@ def test_tri_inv_mix_matches_both_halves(n: int, num_tiles: int, is_lower: bool)
     A = _to_strict_tri(random_tri_matrix(n, num_tiles, 1), is_lower, torch.float16)
     A_npu = A.npu()
 
-    mixed = pto_tri_inv_mix(A_npu, is_lower=is_lower).cpu()
+    kwargs = {} if cube_fraction is None else {"cube_fraction": cube_fraction}
+    mixed = pto_tri_inv_mix(A_npu, is_lower=is_lower, **kwargs).cpu()
     cube_only = pto_tri_inv_rec_unroll(A_npu, is_lower=is_lower).cpu()
     vector_only = pto_tri_inv_col_sweep(A_npu, is_lower=is_lower).cpu()
     torch.npu.synchronize()
 
-    num_cube_tiles = num_tiles // 2
+    num_cube_tiles = num_tiles
+    if num_tiles >= torch.npu.get_device_properties(0).cube_core_num:
+        # Round half away from zero, as std::lround does on the host.
+        fraction = DEFAULT_CUBE_FRACTION[n] if cube_fraction is None else cube_fraction
+        num_cube_tiles = int(np.floor(fraction * num_tiles + 0.5))
     assert torch.equal(mixed[:num_cube_tiles], cube_only[:num_cube_tiles])
     assert torch.equal(mixed[num_cube_tiles:], vector_only[num_cube_tiles:])
+
+
+@pytest.mark.parametrize("cube_fraction", [-0.1, 1.5])
+def test_tri_inv_mix_rejects_bad_cube_fraction(cube_fraction: float):
+    A = random_tri_matrix(32, 4, 1).to(torch.float16).npu()
+    with pytest.raises(RuntimeError, match="cube_fraction"):
+        pto_tri_inv_mix(A, cube_fraction=cube_fraction)
 
 
 @pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
