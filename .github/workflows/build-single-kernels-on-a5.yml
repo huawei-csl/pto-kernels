@@ -23,7 +23,7 @@ jobs:
         abs
         batch_matrix_square
         csr_gather
-        # flash_attention # TODO: fix this kernel
+        flash_attention
         gdn_chunk_cumsum
         gdn_chunk_h
         gdn_chunk_o
