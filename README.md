@@ -166,7 +166,7 @@ BSD-3-Clause-Clear — see [LICENSE](LICENSE) for details.
 ## Publications
 The following publications are related to the theory and the implementations of the implemented kernels.
 
-- [Parallel Scan on Ascend AI Accelerators](https://ieeexplore.ieee.org/document/11106103)
+1. [Parallel Scan on Ascend AI Accelerators](https://ieeexplore.ieee.org/document/11106103)
     <details> 
     <summary> 
     Bibtex  
@@ -186,7 +186,7 @@ The following publications are related to the theory and the implementations of 
 
 </details>
 
-- [A Parallel Scan Algorithm in the Tensor Core Unit Model](https://link.springer.com/chapter/10.1007/978-3-031-39698-4_33)
+2. [A Parallel Scan Algorithm in the Tensor Core Unit Model](https://link.springer.com/chapter/10.1007/978-3-031-39698-4_33)
     <details>
     <summary>
     Bibtex
@@ -211,7 +211,7 @@ The following publications are related to the theory and the implementations of 
 
     </details>
 
-- [Segmented Operations Using Matrix Multiplications](https://arxiv.org/abs/2506.23906)
+3. [Segmented Operations Using Matrix Multiplications](https://arxiv.org/abs/2506.23906)
     <details>
     <summary>
     Bibtex
@@ -226,6 +226,28 @@ The following publications are related to the theory and the implementations of 
         url={https://arxiv.org/abs/2506.23906},
         doi={10.48550/arXiv.2506.23906},
         year={2025}
+    }
+    ```
+
+    </details>
+
+
+4. [Fast and Stable Triangular Inversion for Delta-Rule Linear Transformers]()
+    <details>
+    <summary>
+    Bibtex
+    </summary>
+    
+    ```
+    @article{sobczyk2026arxiv,
+        doi = {10.48550/ARXIV.2605.21325},
+        url = {https://arxiv.org/abs/2605.21325},
+        author = {Sobczyk,  Aleksandros and Gottardo,  Gioele and Matzoros,  Christos K. and De Vita,  Mirko and Skogh,  Filip and Zouzias,  Anastasios and Zhuang,  Jiawei},
+        keywords = {Machine Learning (cs.LG),  FOS: Computer and information sciences,  FOS: Computer and information sciences},
+        title = {{Fast and Stable Triangular Inversion for Delta-Rule Linear Transformers}},
+        publisher = {arXiv},
+        journal = {arXiv},
+        year = {2026},
     }
     ```
 
