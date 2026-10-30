@@ -209,7 +209,7 @@ The following publications are related to the theory and the implementations of 
     }
     ```
 
-    </details>
+</details>
 
 3. [Segmented Operations Using Matrix Multiplications](https://arxiv.org/abs/2506.23906)
     <details>
@@ -229,7 +229,7 @@ The following publications are related to the theory and the implementations of 
     }
     ```
 
-    </details>
+</details>
 
 
 4. [Fast and Stable Triangular Inversion for Delta-Rule Linear Transformers]()
@@ -251,4 +251,4 @@ The following publications are related to the theory and the implementations of 
     }
     ```
 
-    </details>
+</details>
