@@ -28,6 +28,7 @@ for the full License text.
 #include "torch_simple_matmul.h"
 #include "torch_swiglu.h"
 #include "torch_tri_inv_col_sweep.h"
+#include "torch_tri_inv_mix.h"
 #include "torch_tri_inv_ns.h"
 #include "torch_tri_inv_rec_unroll.h"
 #include "torch_tri_inv_trick.h"
@@ -103,6 +104,11 @@ PYBIND11_MODULE(pto_kernels_ops, m) {
         py::arg("M"), py::arg("cu_seqlens") = at::zeros({1}),
         py::arg("is_bsnd_format") = false, py::arg("is_lower") = false,
         py::arg("max_doubling_block_size") = 16);
+  m.def("pto_tri_inv_mix", &pto_isa_ops::run_tri_inv_mix, py::arg("M"),
+        py::arg("cu_seqlens") = at::zeros({1}),
+        py::arg("is_bsnd_format") = false, py::arg("is_lower") = false,
+        py::arg("max_doubling_block_size") = 16,
+        py::arg("cube_fraction") = py::none());
   m.def("pto_tri_inv_ns", &pto_isa_ops::run_tri_inv_ns, py::arg("M"),
         py::arg("num_iters") = 0, py::arg("scale_value") = 0.0f);
   m.def("pto_tri_inv_col_sweep", &pto_isa_ops::run_tri_inv_col_sweep,
