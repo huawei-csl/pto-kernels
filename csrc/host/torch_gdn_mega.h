@@ -106,7 +106,8 @@ void gdn_mega_check_shape(const at::Tensor& q, const at::Tensor& k,
  * @brief Fused chunk GatedDeltaNet forward pass (GDN mega kernel).
  *
  * Runs the whole chunk-GDN pipeline in a single kernel launch:
- *   cumsum -> transpose -> kkt -> solve_tril -> wy_fast -> chunk_h -> chunk_o
+ *   1. Gate scan/layout and shared KK/QK products, concurrently.
+ *   2. Persistent preparation/inverse/WY/state/output pipeline.
  *
  * Value heads (H) and key heads (Hg) are passed at runtime; H dispatches to a
  * finite set of compile-time specialisations (8, 12, 16, 24, 32, 48, 64).
@@ -114,7 +115,9 @@ void gdn_mega_check_shape(const at::Tensor& q, const at::Tensor& k,
  *
  * This entry point is caller-allocates: every output, intermediate and
  * per-core workspace is supplied by the caller and written in place. See the
- * Python wrapper for the required shapes.
+ * shapes below. Intermediate buffers are opaque scratch: their historical
+ * mathematical names do not promise post-call contents. The signature and
+ * allocation sizes are preserved for existing callers.
  *
  * @param [in]     q               Queries [1, T, Hg, D] fp16.
  * @param [in]     k               Keys [1, T, Hg, D] fp16.
@@ -129,25 +132,27 @@ void gdn_mega_check_shape(const at::Tensor& q, const at::Tensor& k,
  * @param [in,out] g_sum           Cumulative gates [1, T, H] fp32.
  * @param [in,out] g_t             Transposed gates [H, T] fp32.
  * @param [in,out] beta_t          Transposed beta [H, T] fp16.
- * @param [in,out] a               K K^T [1, T, H, C] fp16.
- * @param [in,out] a_inv_f32       Inverse of (I - A) [1, T, H, C] fp32.
- * @param [in,out] a_inv           Inverse of (I - A) [1, T, H, C] fp16.
- * @param [in,out] w               wy_fast W [1, T, H, D] fp16.
- * @param [in,out] u               wy_fast U [1, T, H, D] fp16.
- * @param [in,out] s               Per-chunk states [num_chunks*H, D, D] fp16.
- * @param [in,out] v_new           Residual-corrected values [1, T, H, D] fp16.
+ * @param [in,out] a               Opaque scratch [1, T, H, C] fp16.
+ * @param [in,out] a_inv_f32       Opaque scratch [1, T, H, C] fp32 storage.
+ * @param [in,out] a_inv           Opaque scratch [1, T, H, C] fp16.
+ * @param [in,out] w               Opaque scratch [1, T, H, D] fp16.
+ * @param [in,out] u               Opaque scratch [1, T, H, D] fp16.
+ * @param [in,out] s               Reserved scratch [num_chunks*H, D, D] fp16.
+ * @param [in,out] v_new           Opaque scratch [1, T, H, D] fp16.
  * @param [in,out] final_state     Final states [N*H, D, D] fp16.
  * @param [in]     initial_state   Initial states [N, H, D, D] fp16. Ignored
  *                                 when has_initial_state is false; pass any
  *                                 correctly typed tensor in that case.
  * @param [in]     has_initial_state Whether initial_state carries real data.
- * @param [in,out] kkt_workspace   [block_dim*2, C, C] fp16.
- * @param [in,out] wy_workspace_a1 [block_dim, C, C] fp16.
- * @param [in,out] wy_workspace_a2 [block_dim, C, C] fp16.
- * @param [in,out] h_workspace     [block_dim*4, D, D] fp16.
- * @param [in,out] o_workspace_qk  [block_dim, C, C] fp16.
- * @param [in,out] o_workspace_qs  [block_dim, C, D] fp16.
- * @param [in,out] o_workspace_gated [block_dim, C, C] fp16.
+ * @param [in,out] kkt_workspace   Control metadata [block_dim*2, C, C] fp16
+ * storage.
+ * @param [in,out] wy_workspace_a1 Reserved scratch [block_dim, C, C] fp16.
+ * @param [in,out] wy_workspace_a2 Reserved scratch [block_dim, C, C] fp16.
+ * @param [in,out] h_workspace     Two attention/decay slots [block_dim*4, D, D]
+ * fp16.
+ * @param [in,out] o_workspace_qk  Reserved scratch [block_dim, C, C] fp16.
+ * @param [in,out] o_workspace_qs  Reserved scratch [block_dim, C, D] fp16.
+ * @param [in,out] o_workspace_gated Reserved scratch [block_dim, C, C] fp16.
  * @param [in]     block_dim       Launch block dimension (cube core count).
  * @param [in]     batch_size      Number of sequences (cu_seqlens.numel()-1).
  * @param [in]     seq_len         Packed token count.

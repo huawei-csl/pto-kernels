@@ -163,31 +163,31 @@ message("* TORCH_NPU_PATH           : ${TORCH_NPU_PATH}")
 message("* TORCH_LIBRARIES          : ${TORCH_LIBRARIES}")
 message("***********************************************************")
 
-ascendc_library(
-  no_workspace_kernel
-  SHARED
-  csrc/kernel/kernel_tri_inv_col_sweep.cpp
-  csrc/kernel/kernel_abs.cpp
-  csrc/kernel/kernel_gdn_chunk_cumsum.cpp
-  csrc/kernel/kernel_csr_gather.cpp
-  csrc/kernel/kernel_kda_chunk_h.cpp
-  csrc/kernel/kernel_kda_chunk_o.cpp
-  csrc/kernel/kernel_gdn_chunk_h.cpp
-  csrc/kernel/kernel_gdn_scaled_dot_kkt.cpp
-  csrc/kernel/kernel_gdn_chunk_o.cpp
-  csrc/kernel/kernel_gdn_wy_fast.cpp
-  csrc/kernel/gdn_mega/kernel_gdn_mega.cpp
-  csrc/kernel/kernel_scan_ul1.cpp
-  csrc/kernel/kernel_simple_matmul.cpp
-  csrc/kernel/kernel_batch_matrix_square.cpp
-  csrc/kernel/kernel_tri_inv_ns.cpp
-  csrc/kernel/kernel_tri_inv_rec_unroll.cpp
-  csrc/kernel/kernel_tri_inv_trick.cpp
-  csrc/kernel/kernel_swiglu.cpp
-  csrc/kernel/kernel_kda_gate_cumsum.cpp
-  csrc/kernel/kernel_kda_wy.cpp
-  csrc/kernel/kernel_kda_kkt.cpp
-  csrc/kernel/kernel_flash_attention.cpp)
+set(PTO_KERNEL_SOURCES
+    csrc/kernel/kernel_tri_inv_col_sweep.cpp
+    csrc/kernel/kernel_abs.cpp
+    csrc/kernel/kernel_gdn_chunk_cumsum.cpp
+    csrc/kernel/kernel_csr_gather.cpp
+    csrc/kernel/kernel_kda_chunk_h.cpp
+    csrc/kernel/kernel_kda_chunk_o.cpp
+    csrc/kernel/kernel_gdn_chunk_h.cpp
+    csrc/kernel/kernel_gdn_scaled_dot_kkt.cpp
+    csrc/kernel/kernel_gdn_chunk_o.cpp
+    csrc/kernel/kernel_gdn_wy_fast.cpp
+    csrc/kernel/gdn_mega/kernel_gdn_mega.cpp
+    csrc/kernel/kernel_scan_ul1.cpp
+    csrc/kernel/kernel_simple_matmul.cpp
+    csrc/kernel/kernel_batch_matrix_square.cpp
+    csrc/kernel/kernel_tri_inv_ns.cpp
+    csrc/kernel/kernel_tri_inv_rec_unroll.cpp
+    csrc/kernel/kernel_tri_inv_trick.cpp
+    csrc/kernel/kernel_swiglu.cpp
+    csrc/kernel/kernel_kda_gate_cumsum.cpp
+    csrc/kernel/kernel_kda_wy.cpp
+    csrc/kernel/kernel_kda_kkt.cpp
+    csrc/kernel/kernel_flash_attention.cpp)
+
+ascendc_library(no_workspace_kernel SHARED ${PTO_KERNEL_SOURCES})
 
 if(USE_ASC_LANGUAGE)
   # pto_kernels_ops is linked with RUNPATH $ORIGIN/build/lib, so the kernel
@@ -223,7 +223,7 @@ target_link_directories(pto_kernels_ops PRIVATE ${TORCH_INSTALL_PREFIX}/lib
 target_include_directories(
   pto_kernels_ops
   PRIVATE ${TORCH_NPU_PATH}/include ${TORCH_INCLUDE_DIRS}
-          ${TORCH_INSTALL_PREFIX}/include
+          ${ASCEND_CANN_PACKAGE_PATH}/include ${TORCH_INSTALL_PREFIX}/include
           ${TORCH_INSTALL_PREFIX}/include/torch/csrc/api/include)
 
 if(PIP_INSTALL)
@@ -239,7 +239,7 @@ if(PIP_INSTALL)
     pto_kernels_ops
     PROPERTIES BUILD_WITH_INSTALL_RPATH TRUE
                INSTALL_RPATH_USE_LINK_PATH TRUE
-               LINK_FLAGS "-Wl,-rpath,\${ORIGIN}/lib")
+               INSTALL_RPATH "$ORIGIN/lib")
 
   # install dynamic libraries under site-packages/pto_kernels/libs
   install(TARGETS no_workspace_kernel LIBRARY DESTINATION pto_kernels/lib)
@@ -253,7 +253,7 @@ else()
     pto_kernels_ops
     PROPERTIES BUILD_WITH_INSTALL_RPATH TRUE
                INSTALL_RPATH_USE_LINK_PATH TRUE
-               LINK_FLAGS "-Wl,-rpath,\${ORIGIN}/build/lib"
+               INSTALL_RPATH "${CMAKE_BINARY_DIR}/lib"
                LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 endif()
