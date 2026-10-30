@@ -167,9 +167,9 @@ BSD-3-Clause-Clear — see [LICENSE](LICENSE) for details.
 The following publications are related to the theory and the implementations of the implemented kernels.
 
 1. [Parallel Scan on Ascend AI Accelerators](https://ieeexplore.ieee.org/document/11106103)
-    <details> 
-    <summary> 
-    Bibtex  
+    <details>
+    <summary>
+    Bibtex
     </summary>
 
     ```
@@ -191,7 +191,7 @@ The following publications are related to the theory and the implementations of 
     <summary>
     Bibtex
     </summary>
-    
+
     ```
     @inproceedings{zouzias2023parallel,
         author       = {Anastasios Zouzias and William F. McColl},
@@ -237,7 +237,7 @@ The following publications are related to the theory and the implementations of 
     <summary>
     Bibtex
     </summary>
-    
+
     ```
     @article{sobczyk2026fast,
         doi = {10.48550/ARXIV.2605.21325},
