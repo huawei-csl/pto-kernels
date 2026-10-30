@@ -239,7 +239,7 @@ The following publications are related to the theory and the implementations of 
     </summary>
     
     ```
-    @article{sobczyk2026arxiv,
+    @article{sobczyk2026fast,
         doi = {10.48550/ARXIV.2605.21325},
         url = {https://arxiv.org/abs/2605.21325},
         author = {Sobczyk,  Aleksandros and Gottardo,  Gioele and Matzoros,  Christos K. and De Vita,  Mirko and Skogh,  Filip and Zouzias,  Anastasios and Zhuang,  Jiawei},
