@@ -38,6 +38,9 @@ namespace pto_isa_ops {
  * to 24576 tiles, dense and BSND: the value with the lowest geometric-mean
  * runtime for each matrix size. The cube kernel's lead over the vector kernel
  * peaks at matrix_size 64, hence the larger cube share there.
+ *
+ * @param matrix_size The dimension of the square matrices.
+ * @return double The default fraction of tiles assigned to cube units.
  */
 constexpr double DefaultTriInvMixCubeFraction(uint32_t matrix_size) {
   switch (matrix_size) {
@@ -91,12 +94,13 @@ constexpr double DefaultTriInvMixCubeFraction(uint32_t matrix_size) {
  * cube half changes from the recursive doubling to the unrolled algorithm.
  * Defaults to 16. Values higher than 16 can increase performance but can raise
  * numerical instabilities. The vector half ignores it.
- * @param cube_fraction Fraction of the tiles, in [0, 1], inverted on the cube
- * units. The split is balanced when it matches the cube units' share of the
- * combined throughput, which depends on the matrix size; when unset, the
- * measured per-size value of DefaultTriInvMixCubeFraction is used. 0 runs the
- * vector algorithm only, 1 the cube algorithm only. Ignored when there are
- * fewer tiles than cube cores: then all of them run on the cube units.
+ * @param cube_fraction_opt Optional fraction of the tiles, in [0, 1], inverted
+ * on the cube units. The split is balanced when it matches the cube units'
+ * share of the combined throughput, which depends on the matrix size; when
+ * unset, the measured per-size value of DefaultTriInvMixCubeFraction is used.
+ * 0 runs the vector algorithm only, 1 the cube algorithm only. Ignored when
+ * there are fewer tiles than cube cores: then all of them run on the cube
+ * units.
  * @return at::Tensor Tensor containing inverses of input matrices having same
  * dtype as input.
  */
