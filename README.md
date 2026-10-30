@@ -19,6 +19,17 @@ PTO focuses on tile-level operations, enabling efficient, composable kernel deve
 
 ---
 
+## Contents
+- [Installation](#installation)
+- [Quickstart](#quickstart)
+- [Available kernels](#available-kernels)
+- [Testing](#testing)
+- [Repository structure](#repository-structure)
+- [Contributing](#contributing)
+- [Release process](#release-process)
+- [License](#license)
+- [Publications](#publications)
+
 ## Installation
 
 ### From PyPI (recommended)
@@ -151,3 +162,47 @@ See [RELEASE.md](RELEASE.md) for how new versions are cut and published.
 ## License
 
 BSD-3-Clause-Clear — see [LICENSE](LICENSE) for details.
+
+## Publications
+The following publications are related to the theory and the implementations of the implemented kernels.
+
+- [Parallel Scan on Ascend AI Accelerators](https://ieeexplore.ieee.org/document/11106103)
+    <details> 
+    <summary> 
+    Bibtex  
+    </summary>
+    ```
+    @inproceedings{wroblewski2025parallel,
+        title={{Parallel Scan on Ascend AI Accelerators}},
+        author={Wr{\'o}blewski, Bart{\l}omiej and Gottardo, Gioele and Zouzias, Anastasios},
+        booktitle={2025 IEEE International Parallel and Distributed Processing Symposium Workshops (IPDPSW)},
+        pages={1290--1292},
+        year={2025},
+        organization={IEEE},
+        doi={10.1109/IPDPSW66978.2025.00216}
+    }
+    ```
+    </details>
+
+- [A Parallel Scan Algorithm in the Tensor Core Unit Model](https://link.springer.com/chapter/10.1007/978-3-031-39698-4_33)
+    <details>
+    <summary>
+    Bibtex
+    </summary>
+    ```
+    @inproceedings{zouzias2023parallel,
+        author       = {Anastasios Zouzias and William F. McColl},
+        title        = {{A Parallel Scan Algorithm in the Tensor Core Unit Model}},
+        booktitle    = {International European Conference on Parallel and Distributed Computing (Euro-Par)},
+        series       = {Lecture Notes in Computer Science},
+        volume       = {14100},
+        pages        = {489--502},
+        publisher    = {Springer},
+        year         = {2023},
+        doi          = {10.1007/978-3-031-39698-4_33},
+        timestamp    = {Tue, 12 Sep 2023 07:57:22 +0200},
+        biburl       = {https://dblp.org/rec/conf/europar/ZouziasM23.bib},
+        bibsource    = {dblp computer science bibliography, https://dblp.org}
+    }
+    ```
+    </details>
