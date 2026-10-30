@@ -171,6 +171,7 @@ The following publications are related to the theory and the implementations of 
     <summary> 
     Bibtex  
     </summary>
+
     ```
     @inproceedings{wroblewski2025parallel,
         title={{Parallel Scan on Ascend AI Accelerators}},
@@ -182,13 +183,15 @@ The following publications are related to the theory and the implementations of 
         doi={10.1109/IPDPSW66978.2025.00216}
     }
     ```
-    </details>
+
+</details>
 
 - [A Parallel Scan Algorithm in the Tensor Core Unit Model](https://link.springer.com/chapter/10.1007/978-3-031-39698-4_33)
     <details>
     <summary>
     Bibtex
     </summary>
+    
     ```
     @inproceedings{zouzias2023parallel,
         author       = {Anastasios Zouzias and William F. McColl},
@@ -205,4 +208,25 @@ The following publications are related to the theory and the implementations of 
         bibsource    = {dblp computer science bibliography, https://dblp.org}
     }
     ```
+
+    </details>
+
+- [Segmented Operations Using Matrix Multiplications](https://arxiv.org/abs/2506.23906)
+    <details>
+    <summary>
+    Bibtex
+    </summary>
+
+    ```
+    @article{sobczyk2025segmented,
+        title={{Segmented Operations using Matrix Multiplications}},
+        author={Sobczyk, Aleksandros and Sorrentino, Giuseppe and Zouzias, Anastasios},
+        journal={arXiv},
+        publisher={arXiv},
+        url={https://arxiv.org/abs/2506.23906},
+        doi={10.48550/arXiv.2506.23906},
+        year={2025}
+    }
+    ```
+
     </details>
