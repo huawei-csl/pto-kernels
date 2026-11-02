@@ -258,16 +258,16 @@ extern "C" __global__ AICORE void triv_inv_col_sweep_fp16(
 
   if (matrix_size == 16) {
     dispatchColSweep<half, 16>((fp16_t)x, (fp16_t)z, total_tiles,
-                                num_bsnd_heads, _cu_seqlens);
+                               num_bsnd_heads, _cu_seqlens);
   } else if (matrix_size == 32) {
     dispatchColSweep<half, 32>((fp16_t)x, (fp16_t)z, total_tiles,
-                                num_bsnd_heads, _cu_seqlens);
+                               num_bsnd_heads, _cu_seqlens);
   } else if (matrix_size == 64) {
     dispatchColSweep<half, 64>((fp16_t)x, (fp16_t)z, total_tiles,
-                                num_bsnd_heads, _cu_seqlens);
+                               num_bsnd_heads, _cu_seqlens);
   } else if (matrix_size == 128) {
     dispatchColSweep<half, 128>((fp16_t)x, (fp16_t)z, total_tiles,
-                                 num_bsnd_heads, _cu_seqlens);
+                                num_bsnd_heads, _cu_seqlens);
   }
 #endif
 }
