@@ -15,13 +15,13 @@ for the full License text.
 
 extern "C" {
 
-void pto_launch_triv_inv_col_sweep_fp16(uint32_t blockDim, void* stream,
+void pto_launch_tri_inv_rank_one_fp16(uint32_t blockDim, void* stream,
                                         void* x, void* z, uint32_t total_tiles,
                                         uint32_t matrix_size, uint32_t is_lower,
                                         uint32_t num_bsnd_heads,
                                         void* cu_seqlens);
 
-void pto_launch_triv_inv_col_sweep_fp32(uint32_t blockDim, void* stream,
+void pto_launch_tri_inv_rank_one_fp32(uint32_t blockDim, void* stream,
                                         void* x, void* z, uint32_t total_tiles,
                                         uint32_t matrix_size, uint32_t is_lower,
                                         uint32_t num_bsnd_heads,
@@ -32,7 +32,8 @@ void pto_launch_triv_inv_col_sweep_fp32(uint32_t blockDim, void* stream,
 namespace pto_isa_ops {
 
 /**
- * @brief Runs triangular inverse using vector-only column sweep method.
+ * @brief Runs triangular inverse using the vector-only rank-one update
+ * method, which sweeps the columns applying one rank-1 update each.
  *
  * @param [in] x Input tensor whose last two dimensions contain square
  * unit triangular matrices to invert. In BSND format (see is_bsnd_format)
@@ -51,7 +52,7 @@ namespace pto_isa_ops {
  * @return at::Tensor Tensor of same shape as input where matrices are inverted.
  */
 
-at::Tensor run_tri_inv_col_sweep(
+at::Tensor run_tri_inv_rank_one(
     const at::Tensor& x, const bool is_lower = true,
     const bool is_bsnd_format = false,
     const at::Tensor& cu_seqlens = at::zeros({1})) {
@@ -106,10 +107,10 @@ at::Tensor run_tri_inv_col_sweep(
   }
 
   if (dtype == at::kHalf) {
-    EXEC_KERNEL_CMD(triv_inv_col_sweep_fp16, block_dim, x, z, total_tiles,
+    EXEC_KERNEL_CMD(tri_inv_rank_one_fp16, block_dim, x, z, total_tiles,
                     matrix_size, is_lower, num_bsnd_heads, cu_seqlens_ptr);
   } else {
-    EXEC_KERNEL_CMD(triv_inv_col_sweep_fp32, block_dim, x, z, total_tiles,
+    EXEC_KERNEL_CMD(tri_inv_rank_one_fp32, block_dim, x, z, total_tiles,
                     matrix_size, is_lower, num_bsnd_heads, cu_seqlens_ptr);
   }
 

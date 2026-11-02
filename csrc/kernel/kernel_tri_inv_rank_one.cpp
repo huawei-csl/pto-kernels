@@ -182,7 +182,7 @@ AICORE void runTTriInvRankOne(__gm__ T* vec_in, __gm__ T* vec_out,
   constexpr uint32_t OuterRows = (3 * tile_bytes <= UsableUbBytes) ? S : S / 2;
   constexpr uint32_t outer_bytes = OuterRows * S * sizeof(T);
   static_assert(2 * tile_bytes + outer_bytes <= UsableUbBytes,
-                "tri_inv col sweep: UB budget exceeded");
+                "tri_inv rank one: UB budget exceeded");
 
   constexpr uint32_t L_UB_ADDR = 0x0;
   constexpr uint32_t Y_UB_ADDR = L_UB_ADDR + tile_bytes;
@@ -371,7 +371,7 @@ AICORE void dispatchTriInv(__gm__ T* vec_in, __gm__ T* vec_out,
   }
 }
 
-extern "C" __global__ AICORE void triv_inv_col_sweep_fp16(
+extern "C" __global__ AICORE void tri_inv_rank_one_fp16(
     GM_ADDR x, GM_ADDR z, uint32_t total_tiles, uint32_t matrix_size,
     uint32_t is_lower, uint32_t num_bsnd_heads, GM_ADDR cu_seqlens) {
   KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY);
@@ -397,7 +397,7 @@ extern "C" __global__ AICORE void triv_inv_col_sweep_fp16(
 #endif
 }
 
-extern "C" __global__ AICORE void triv_inv_col_sweep_fp32(
+extern "C" __global__ AICORE void tri_inv_rank_one_fp32(
     GM_ADDR x, GM_ADDR z, uint32_t total_tiles, uint32_t matrix_size,
     uint32_t is_lower, uint32_t num_bsnd_heads, GM_ADDR cu_seqlens) {
   KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY);
@@ -423,20 +423,20 @@ extern "C" __global__ AICORE void triv_inv_col_sweep_fp32(
 #endif
 }
 
-extern "C" void pto_launch_triv_inv_col_sweep_fp16(
+extern "C" void pto_launch_tri_inv_rank_one_fp16(
     uint32_t blockDim, void* stream, void* x, void* z, uint32_t total_tiles,
     uint32_t matrix_size, uint32_t is_lower, uint32_t num_bsnd_heads,
     void* cu_seqlens) {
-  triv_inv_col_sweep_fp16<<<blockDim, nullptr, stream>>>(
+  tri_inv_rank_one_fp16<<<blockDim, nullptr, stream>>>(
       (GM_ADDR)x, (GM_ADDR)z, total_tiles, matrix_size, is_lower,
       num_bsnd_heads, (GM_ADDR)cu_seqlens);
 }
 
-extern "C" void pto_launch_triv_inv_col_sweep_fp32(
+extern "C" void pto_launch_tri_inv_rank_one_fp32(
     uint32_t blockDim, void* stream, void* x, void* z, uint32_t total_tiles,
     uint32_t matrix_size, uint32_t is_lower, uint32_t num_bsnd_heads,
     void* cu_seqlens) {
-  triv_inv_col_sweep_fp32<<<blockDim, nullptr, stream>>>(
+  tri_inv_rank_one_fp32<<<blockDim, nullptr, stream>>>(
       (GM_ADDR)x, (GM_ADDR)z, total_tiles, matrix_size, is_lower,
       num_bsnd_heads, (GM_ADDR)cu_seqlens);
 }

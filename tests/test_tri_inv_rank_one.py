@@ -10,7 +10,7 @@ import functools
 from typing import Callable
 
 import torch
-from pto_kernels import pto_tri_inv_col_sweep
+from pto_kernels import pto_tri_inv_rank_one
 import pytest
 import numpy as np
 import random
@@ -35,7 +35,7 @@ def np_triu_inv_cs(input_x, dtype: np.dtype = np.float16):
     """Return the matrix inverse of a 3d tensor where first dimension is batch dimension.
     Each batch dimension returns U_inv_n of input U_n, i.e., U_n U_inv_n = I_n.
 
-    The algorithm is the column sweep's algorithm (vectorized) applied on each column of I, i.e.,
+    The algorithm is the rank-one kernel's algorithm (vectorized) applied on each column of I, i.e.,
     Ax=e_j for j=0,1,...,(n-1).
     """
     output = np.zeros_like(input_x)
@@ -86,7 +86,7 @@ def ones_np_tril(batch_size: int, n: int, dtype: np.dtype):
     "mat_gen",
     (rand_np_tril, ones_np_tril),
 )
-def test_tri_inv_col_sweep(
+def test_tri_inv_rank_one(
     batch_size: int,
     matrix_size: int,
     data_type: np.dtype,
@@ -102,7 +102,7 @@ def test_tri_inv_col_sweep(
     expected = torch.from_numpy(expected_cpu).npu()
 
     torch.npu.synchronize()
-    actual = pto_tri_inv_col_sweep(input_x)
+    actual = pto_tri_inv_rank_one(input_x)
     torch.npu.synchronize()
     # Transpose matrices back to row-major order
     actual = actual.transpose(2, 1)
@@ -121,7 +121,7 @@ def test_tri_inv_col_sweep(
     # at n = 128 (40 seeds); see _assert_close_to_inverse.
     [(rand_np_tril, 4.1e-6, 1e-5), (ones_np_tril, 0, 0)],
 )
-def test_tri_inv_col_sweep_np_linalg_inv(
+def test_tri_inv_rank_one_np_linalg_inv(
     batch_size: int,
     matrix_size: int,
     data_type: np.dtype,
@@ -139,7 +139,7 @@ def test_tri_inv_col_sweep_np_linalg_inv(
     golden_numpy_as_torch = torch.from_numpy(golden_numpy_cpu).npu()
 
     torch.npu.synchronize()
-    actual = pto_tri_inv_col_sweep(input_x)
+    actual = pto_tri_inv_rank_one(input_x)
     torch.npu.synchronize()
 
     # rtol must be scaled w.r.t to the input size, see Higham's paper, Eq. (2.3)
@@ -166,7 +166,7 @@ def test_tri_inv_col_sweep_np_linalg_inv(
     ids=lambda v: getattr(v, "__name__", None),
 )
 # pylint: disable=too-many-positional-arguments
-def test_tri_inv_col_sweep_is_lower(
+def test_tri_inv_rank_one_is_lower(
     batch_size: int,
     matrix_size: int,
     data_type: np.dtype,
@@ -183,7 +183,7 @@ def test_tri_inv_col_sweep_is_lower(
     input_x = torch.from_numpy(input_x_cpu).npu()
     golden = torch.from_numpy(golden_cpu).npu()
 
-    actual = pto_tri_inv_col_sweep(input_x, is_lower=is_lower)
+    actual = pto_tri_inv_rank_one(input_x, is_lower=is_lower)
     torch.npu.synchronize()
 
     assert actual.shape == golden.shape
@@ -192,10 +192,10 @@ def test_tri_inv_col_sweep_is_lower(
 
 
 @pytest.mark.parametrize("matrix_size", [16, 128])
-def test_tri_inv_col_sweep_default_is_lower(matrix_size: int):
+def test_tri_inv_rank_one_default_is_lower(matrix_size: int):
     input_x = torch.from_numpy(rand_np_tril(4, matrix_size, np.float32)).npu()
     assert torch.equal(
-        pto_tri_inv_col_sweep(input_x), pto_tri_inv_col_sweep(input_x, is_lower=True)
+        pto_tri_inv_rank_one(input_x), pto_tri_inv_rank_one(input_x, is_lower=True)
     )
 
 
@@ -294,7 +294,7 @@ def _to_unit_tri(A: torch.Tensor, is_lower: bool, input_dtype: torch.dtype):
     return A, (A + eye).contiguous()
 
 
-def _test_tri_inv_col_sweep(
+def _test_tri_inv_rank_one(
     A: torch.Tensor,
     atol: float,
     rtol: float,
@@ -305,7 +305,7 @@ def _test_tri_inv_col_sweep(
     A, M = _to_unit_tri(A, is_lower, input_dtype)
     golden_cpu = torch.linalg.inv(M.double())
 
-    actual = pto_tri_inv_col_sweep(M.npu(), is_lower=is_lower)
+    actual = pto_tri_inv_rank_one(M.npu(), is_lower=is_lower)
     torch.npu.synchronize()
     actual_cpu = actual.cpu().to(torch.float64)
 
@@ -347,7 +347,7 @@ def _test_tri_inv_col_sweep(
     ],
 )
 # pylint: disable=too-many-positional-arguments
-def test_tri_inv_col_sweep_rec_unroll_cases(
+def test_tri_inv_rank_one_rec_unroll_cases(
     n: int,
     block_dim_x: int,
     block_dim_y: int,
@@ -359,7 +359,7 @@ def test_tri_inv_col_sweep_rec_unroll_cases(
     input_dtype: torch.dtype,
 ):
     U = matrix_gen(n, block_dim_x, block_dim_y)
-    _test_tri_inv_col_sweep(U, atol, rtol, ftol, is_lower, input_dtype)
+    _test_tri_inv_rank_one(U, atol, rtol, ftol, is_lower, input_dtype)
 
 
 @pytest.mark.parametrize("n", [16, 32, 64, 128])
@@ -382,7 +382,7 @@ def test_tri_inv_col_sweep_rec_unroll_cases(
     ],
 )
 # pylint: disable=too-many-positional-arguments
-def test_tri_inv_col_sweep_conditioning(
+def test_tri_inv_rank_one_conditioning(
     n: int,
     block_dim_x: int,
     block_dim_y: int,
@@ -393,7 +393,7 @@ def test_tri_inv_col_sweep_conditioning(
 ):
     """Accuracy as a function of how hard the matrix is to invert."""
     A = conditioned_tri_matrix(n, block_dim_x, block_dim_y, cond_target=cond_target)
-    _test_tri_inv_col_sweep(
+    _test_tri_inv_rank_one(
         A, atol=ftol, rtol=0.1, ftol=ftol, is_lower=is_lower, input_dtype=input_dtype
     )
 
@@ -402,12 +402,12 @@ def test_tri_inv_col_sweep_conditioning(
 @pytest.mark.parametrize("scale", [0.1, 0.5, 1.0])
 @pytest.mark.parametrize("is_lower", [False, True])
 @pytest.mark.parametrize("input_dtype", [torch.float16, torch.float32])
-def test_tri_inv_col_sweep_dynamic_range(
+def test_tri_inv_rank_one_dynamic_range(
     n: int, scale: float, is_lower: bool, input_dtype: torch.dtype
 ):
     """Dense same-sign input up to 1.0 must produce finite output."""
     _, M = _to_unit_tri(scale * ones_tri_matrix(n, 2, 4), is_lower, input_dtype)
-    actual = pto_tri_inv_col_sweep(M.npu(), is_lower=is_lower)
+    actual = pto_tri_inv_rank_one(M.npu(), is_lower=is_lower)
     torch.npu.synchronize()
     finite = torch.isfinite(actual.cpu().to(torch.float64))
     assert finite.all(), (
@@ -421,15 +421,15 @@ def test_tri_inv_col_sweep_dynamic_range(
 @pytest.mark.parametrize(
     "matrix_gen", [deltanet_rand_triu_matrix, deltanet_randn_triu_matrix]
 )
-def test_tri_inv_col_sweep_deltanet(n: int, input_dtype: torch.dtype, matrix_gen):
+def test_tri_inv_rank_one_deltanet(n: int, input_dtype: torch.dtype, matrix_gen):
     A = matrix_gen(n, block_dim_x=7, block_dim_y=13)
     this_eps = torch.finfo(input_dtype).eps
     # Unlike test_tri_inv_rec_unroll.py, which uses ftol = 2 * eps / 10 (scaled
-    # by the doubling block size / 16), the column sweep applies n sequential
+    # by the doubling block size / 16), the rank-one kernel applies n sequential
     # rank-1 updates, so rounding errors accumulate with the matrix size. The
     # observed relative Frobenius error is ~0.14 * eps * sqrt(n) for both
     # float16 and float32; ftol = eps * sqrt(n) / 8 leaves a ~1.7x margin.
-    _test_tri_inv_col_sweep(
+    _test_tri_inv_rank_one(
         A,
         atol=this_eps,
         rtol=0.1,
@@ -452,7 +452,7 @@ def _to_bsnd(tiles: torch.Tensor, B: int, S: int, N: int, C: int) -> torch.Tenso
     return tiles.transpose(1, 2).contiguous().reshape(B, S, N, C)
 
 
-def _test_tri_inv_col_sweep_bsnd(
+def _test_tri_inv_rank_one_bsnd(
     A: torch.Tensor,
     B: int,
     S: int,
@@ -467,7 +467,7 @@ def _test_tri_inv_col_sweep_bsnd(
     _, M = _to_unit_tri(A, is_lower, input_dtype)
     golden_cpu = _to_bsnd(torch.linalg.inv(M.double()), B, S, N, C)
 
-    actual = pto_tri_inv_col_sweep(
+    actual = pto_tri_inv_rank_one(
         _to_bsnd(M, B, S, N, C).npu(), is_lower=is_lower, is_bsnd_format=True
     )
     torch.npu.synchronize()
@@ -502,7 +502,7 @@ def _test_tri_inv_col_sweep_bsnd(
     ],
 )
 # pylint: disable=too-many-positional-arguments
-def test_tri_inv_col_sweep_bsnd(
+def test_tri_inv_rank_one_bsnd(
     B: int,
     S: int,
     N: int,
@@ -516,7 +516,7 @@ def test_tri_inv_col_sweep_bsnd(
 ):
     """Same matrices as the dense tests, laid out as [B, S, N, C]."""
     A = matrix_gen(C, B * S // C, N)
-    _test_tri_inv_col_sweep_bsnd(A, B, S, N, C, atol, rtol, ftol, is_lower, input_dtype)
+    _test_tri_inv_rank_one_bsnd(A, B, S, N, C, atol, rtol, ftol, is_lower, input_dtype)
 
 
 def generate_random_sequence_lengths(
@@ -581,7 +581,7 @@ def _varlen_bsnd_input(
     [(torch.float16, 1e-3, 5e-2, 1e-3), (torch.float32, 1e-6, 1e-3, 1e-6)],
 )
 # pylint: disable=too-many-positional-arguments
-def test_tri_inv_col_sweep_varlen_bsnd(
+def test_tri_inv_rank_one_varlen_bsnd(
     B: int,
     N: int,
     chunk_size: int,
@@ -599,7 +599,7 @@ def test_tri_inv_col_sweep_varlen_bsnd(
         seq_lens, N, chunk_size, is_lower, input_dtype
     )
 
-    actual = pto_tri_inv_col_sweep(
+    actual = pto_tri_inv_rank_one(
         packed.npu(),
         is_lower=is_lower,
         is_bsnd_format=True,

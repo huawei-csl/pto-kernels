@@ -3,7 +3,7 @@ import numpy as np
 import torch
 import csv
 from pathlib import Path
-from pto_kernels import pto_tri_inv_col_sweep
+from pto_kernels import pto_tri_inv_rank_one
 from utils import do_bench
 
 
@@ -41,13 +41,13 @@ def plot_csv(path):
     plt.savefig(str(path).replace(".csv", ".png"))
 
 
-def bench(path: str = "benchmark_data/tri_inv_col_sweep.csv"):
+def bench(path: str = "benchmark_data/tri_inv_rank_one.csv"):
     rows = [["dtype", "matrix_size", "batch_size", "time_ms", "bandwidth_gbps"]]
     for dt in (np.float16, np.float32):
         for S in (16, 32, 64, 128):
             for bs in (256,):
                 x = torch.from_numpy(rand_np_tril(bs, S, dt).transpose(0, 2, 1)).npu()
-                ms = do_bench(lambda inp=x: pto_tri_inv_col_sweep(inp), unit="ms")
+                ms = do_bench(lambda inp=x: pto_tri_inv_rank_one(inp), unit="ms")
                 n_el, size = x.numel(), x.element_size()
                 gbps = 2 * n_el * size / (ms / 1e3) / 1e9
                 print(f"{dt.__name__}, N={S}, bs={bs}, {ms:.3f} ms, {gbps:.3f} GB/s")
