@@ -9,7 +9,7 @@ AICORE inline void mega_copy_block16(D& dst, S& src) {
 #if __CCE_AICORE__ == 220
   set_vector_mask(0, 65535);
   vadds(dst.data(), src.data(), 0.0f, 16, 1, 1, D::Cols / 8, S::Cols / 8);
-  PipeBarrierVec();
+  kernel_utils::PipeBarrierVec();
   set_vector_mask(-1, -1);
 #else
   TADDS(dst, src, 0.0f);
@@ -35,7 +35,7 @@ AICORE inline void mega_diagonal_inverses(Stripe& a, Identity& identity,
 
     TASSIGN(idst, Base + b * B * sizeof(float));
     mega_copy_block16(idst, unit);
-    PipeBarrierVec();
+    kernel_utils::PipeBarrierVec();
   }
   Tile<TileType::Vec, uint32_t, 1, B * R> indices;
   TASSIGN(indices, 176 * 1024);
@@ -48,7 +48,7 @@ AICORE inline void mega_diagonal_inverses(Stripe& a, Identity& identity,
     set_vector_mask(0, B * R);
     vgather(reinterpret_cast<__ubuf__ uint32_t*>(coefficients.data()),
             indices.data(), reinterpret_cast<uintptr_t>(source.data()), 8, 1);
-    PipeBarrierVec();
+    kernel_utils::PipeBarrierVec();
     set_mask_norm();
     set_vector_mask(-1, -1);
     // The solved row is reused by every destination row directly by the
@@ -65,7 +65,7 @@ AICORE inline void mega_diagonal_inverses(Stripe& a, Identity& identity,
     TCOLEXPAND(broadcast, solved);
     TMULADDDST(inverse, coefficients, broadcast);
 #endif
-    PipeBarrierVec();
+    kernel_utils::PipeBarrierVec();
   }
   for (int b = 0; b < R / B; ++b) {
     using Source = Tile<TileType::Vec, float, B, R, BLayout::RowMajor, B, B>;
@@ -76,7 +76,7 @@ AICORE inline void mega_diagonal_inverses(Stripe& a, Identity& identity,
     TASSIGN(dst, (uint64_t)a.data() +
                      (b * B * 128 + stripe + b * B) * sizeof(float));
     mega_copy_block16(dst, src);
-    PipeBarrierVec();
+    kernel_utils::PipeBarrierVec();
   }
 }
 #endif

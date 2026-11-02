@@ -11,10 +11,6 @@
 
 #include "acl/acl.h"
 
-// The legacy ccec compiler does not provide the ASC task-type annotation.
-#ifndef KERNEL_TASK_TYPE_DEFAULT
-#define KERNEL_TASK_TYPE_DEFAULT(kernel_type) ((void)0)
-#endif
 using namespace pto;
 
 #include "common.hpp"
@@ -65,7 +61,7 @@ AICORE inline void mega_kernel_impl(
                              reinterpret_cast<__gm__ half*>(q_ptr),
                              reinterpret_cast<__gm__ float*>(A_inv_f32_ptr));
 
-  mega_sync_all();
+  kernel_utils::SyncAll<false>();
 
   mega_fused_pipeline<H, C, D>(
       reinterpret_cast<__gm__ half*>(q_ptr),

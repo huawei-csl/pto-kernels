@@ -27,7 +27,8 @@ AICORE inline void mega_shared_grams_serial(
   TASSIGN(acc, 0);
   for (uint32_t m = get_block_idx(); m < matrices / H * key_heads;
        m += get_block_num()) {
-    auto info = mega_chunk_info(m, key_heads, C, cu);
+    auto info =
+        kernel_utils::GetBSNDVarlenTileInfoFromCuSeqlens(m, key_heads, C, cu);
     int valid = info.valid_size;
     int head = m % key_heads;
     int64_t pos = (info.bsnd_offset - head * C) / (key_heads * C);
@@ -133,11 +134,13 @@ AICORE inline void mega_shared_grams_pipelined(
   uint32_t first = get_block_idx(), count = matrices / H * key_heads,
            step = get_block_num();
   if (first >= count) return;
-  auto first_info = mega_chunk_info(first, key_heads, C, cu);
+  auto first_info =
+      kernel_utils::GetBSNDVarlenTileInfoFromCuSeqlens(first, key_heads, C, cu);
   mega_load_gram_pair<C, D>(k, q, first_info.bsnd_offset / C * D,
                             first_info.valid_size, key_heads);
   for (uint32_t m = first; m < count; m += step) {
-    auto info = mega_chunk_info(m, key_heads, C, cu);
+    auto info =
+        kernel_utils::GetBSNDVarlenTileInfoFromCuSeqlens(m, key_heads, C, cu);
     int valid = info.valid_size;
     wait_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID0);
     if (valid != C) {
@@ -157,7 +160,8 @@ AICORE inline void mega_shared_grams_pipelined(
     set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID0);
     wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID0);
     if (m + step < count) {
-      auto next = mega_chunk_info(m + step, key_heads, C, cu);
+      auto next = kernel_utils::GetBSNDVarlenTileInfoFromCuSeqlens(
+          m + step, key_heads, C, cu);
       mega_load_gram_pair<C, D>(k, q, next.bsnd_offset / C * D, next.valid_size,
                                 key_heads);
     }

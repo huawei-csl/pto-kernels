@@ -19,7 +19,7 @@ AICORE inline void mega_vector_load(Full& full, __gm__ T* pointer, int rows,
     return;
   }
   TEXPANDS(full, static_cast<T>(0));
-  PipeBarrierVec();
+  kernel_utils::PipeBarrierVec();
   if (rows > 0) {
     using Part = Tile<TileType::Vec, T, R, K, BLayout::RowMajor, DYNAMIC,
                       DYNAMIC, SLayout::NoneBox, 512, PadValue::Zero>;
@@ -34,7 +34,7 @@ AICORE inline void mega_vector_load(Full& full, __gm__ T* pointer, int rows,
         padded;
     TASSIGN(padded, (uint64_t)full.data());
     TFILLPAD_INPLACE(padded, part);
-    PipeBarrierVec();
+    kernel_utils::PipeBarrierVec();
   }
 #endif
 }
@@ -48,11 +48,11 @@ AICORE inline void mega_split_pair(F& value, Half& high, Half& low) {
   TASSIGN(high, Base + Bytes);
   TASSIGN(low, Base + Bytes + Bytes / 2);
   TCVT(high, value, RoundMode::CAST_RINT);
-  PipeBarrierVec();
+  kernel_utils::PipeBarrierVec();
   TCVT(rounded, high, RoundMode::CAST_NONE);
-  PipeBarrierVec();
+  kernel_utils::PipeBarrierVec();
   TSUB(rounded, value, rounded);
-  PipeBarrierVec();
+  kernel_utils::PipeBarrierVec();
   TCVT(low, rounded, RoundMode::CAST_RINT);
   pipe_barrier(PIPE_ALL);
 #endif
@@ -115,7 +115,7 @@ AICORE inline void mega_load_kk(F& value, __gm__ float* first,
   using Part = Tile<TileType::Vec, float, R, C, BLayout::RowMajor, DYNAMIC,
                     DYNAMIC, SLayout::NoneBox, 512, PadValue::Zero>;
   TEXPANDS(value, 0.0f);
-  PipeBarrierVec();
+  kernel_utils::PipeBarrierVec();
   if (rows > 0) {
     Part a(rows, C / 2), b(rows, C / 2);
     TASSIGN(a, (uint64_t)value.data());
@@ -135,7 +135,7 @@ AICORE inline void mega_load_kk(F& value, __gm__ float* first,
         padded;
     TASSIGN(padded, (uint64_t)value.data());
     TFILLPAD_INPLACE(padded, complete);
-    PipeBarrierVec();
+    kernel_utils::PipeBarrierVec();
   }
 #endif
 }
@@ -167,7 +167,7 @@ AICORE inline void mega_prepare_weights(
   mega_vector_load<1, C>(lows, glow + head * tokens + pos, 1, valid, C);
   mega_vector_load<1, C>(beta_h, beta + head * tokens + pos, 1, valid, C);
   TCVT(betas, beta_h, RoundMode::CAST_NONE);
-  PipeBarrierVec();
+  kernel_utils::PipeBarrierVec();
   M a, raw, mask;
   TASSIGN(a, 96 * 1024);
   TASSIGN(raw, 0);
@@ -179,27 +179,27 @@ AICORE inline void mega_prepare_weights(
   // One decay matrix serves both QK and KK. Native FP32 attention stores
   // leave this tile intact, unlike the former paired-operand conversion.
   TCOLEXPAND(raw, gates);
-  PipeBarrierVec();
+  kernel_utils::PipeBarrierVec();
   TMULS(raw, raw, -1.0f);
-  PipeBarrierVec();
+  kernel_utils::PipeBarrierVec();
   TROWEXPANDADD(raw, raw, gcol);
-  PipeBarrierVec();
+  kernel_utils::PipeBarrierVec();
   TCOLEXPAND(a, lows);
-  PipeBarrierVec();
+  kernel_utils::PipeBarrierVec();
   TMULS(a, a, -1.0f);
-  PipeBarrierVec();
+  kernel_utils::PipeBarrierVec();
   TROWEXPANDADD(a, a, lcol);
-  PipeBarrierVec();
+  kernel_utils::PipeBarrierVec();
   TADD(raw, raw, a);
-  PipeBarrierVec();
+  kernel_utils::PipeBarrierVec();
   // Invalid rows must be masked before exp: a padded zero prefix minus
   // a large negative real prefix would otherwise overflow, then 0*inf
   // would poison the solve and even valid output rows.
   mega_vector_load<R, C>(a, full + stripe * C, count, C, C);
   TMUL(raw, raw, a);
-  PipeBarrierVec();
+  kernel_utils::PipeBarrierVec();
   TEXP(raw, raw);
-  PipeBarrierVec();
+  kernel_utils::PipeBarrierVec();
   TMUL(raw, raw, a);
   pipe_barrier(PIPE_ALL);
   mega_vector_load<R, C>(a, qk + ((pos + stripe) * kh + key_head) * C, count, C,
@@ -221,14 +221,14 @@ AICORE inline void mega_prepare_weights(
                      kk_upper + ((pos + stripe) * kh + key_head) * (C / 2),
                      count, kh * C / 2);
   TMUL(a, a, raw);
-  PipeBarrierVec();
+  kernel_utils::PipeBarrierVec();
   mega_vector_load<R, C>(mask, lower + stripe * C, R, C, C);
   TMUL(a, a, mask);
-  PipeBarrierVec();
+  kernel_utils::PipeBarrierVec();
   TROWEXPANDMUL(a, a, bcol);
-  PipeBarrierVec();
+  kernel_utils::PipeBarrierVec();
   TMULS(a, a, -1.0f);
-  PipeBarrierVec();
+  kernel_utils::PipeBarrierVec();
 #endif
 }
 
@@ -258,7 +258,7 @@ AICORE inline void mega_finish_inverse(
   mega_vector_load<R, C>(raw, full + stripe * C, R, C, C);
   mega_vector_load<R, C>(mask, lower + stripe * C, R, C, C);
   TSUB(raw, raw, mask);
-  PipeBarrierVec();
+  kernel_utils::PipeBarrierVec();
   mega_diagonal_inverses(a, raw, stripe);
   pipe_barrier(PIPE_ALL);
   GlobalTensor<float, Shape<1, 1, 1, R, C>, pto::Stride<1, 1, 1, C, 1>> native(
@@ -272,23 +272,23 @@ AICORE inline void mega_finish_inverse(
   TASSIGN(delta, 165 * 1024);
   float last = gates.GetValue(valid - 1), last_low = lows.GetValue(valid - 1);
   TMULS(decay, gates, -1.0f);
-  PipeBarrierVec();
+  kernel_utils::PipeBarrierVec();
   TADDS(decay, decay, last);
-  PipeBarrierVec();
+  kernel_utils::PipeBarrierVec();
   TMULS(delta, lows, -1.0f);
-  PipeBarrierVec();
+  kernel_utils::PipeBarrierVec();
   TADDS(delta, delta, last_low);
-  PipeBarrierVec();
+  kernel_utils::PipeBarrierVec();
   TADD(decay, decay, delta);
-  PipeBarrierVec();
+  kernel_utils::PipeBarrierVec();
   TEXP(decay, decay);
-  PipeBarrierVec();
+  kernel_utils::PipeBarrierVec();
   Tile<TileType::Vec, half, R, C> key;
   TASSIGN(key, 128 * 1024);
   mega_vector_load<R, C>(key, original_k + ((pos + stripe) * kh + key_head) * C,
                          count, C, kh * C);
   TCVT(a, key, RoundMode::CAST_NONE);
-  PipeBarrierVec();
+  kernel_utils::PipeBarrierVec();
   Col weight;
   TASSIGN(weight, 164 * 1024 + stripe * sizeof(float));
   TROWEXPANDMUL(a, a, weight);
@@ -340,7 +340,7 @@ AICORE inline void mega_initialize_state(__gm__ half* initial,
     mega_vector_load<R, D>(source, initial + get_subblockid() * R * D, R, D, D);
   else {
     TEXPANDS(source, static_cast<half>(0));
-    PipeBarrierVec();
+    kernel_utils::PipeBarrierVec();
   }
   if (empty) {
     GlobalTensor<half, Shape<1, 1, 1, R, D>, pto::Stride<1, 1, 1, D, 1>> gm(
@@ -380,9 +380,9 @@ AICORE inline float mega_prepare_rhs(__gm__ half* v, __gm__ float* g,
   mega_vector_load<1, C>(beta_h, beta + head * tokens + pos, 1, valid, C);
   TEXP(exponentials, gates);
   TCVT(betas, beta_h, RoundMode::CAST_NONE);
-  PipeBarrierVec();
+  kernel_utils::PipeBarrierVec();
   TEXP(correction, lows);
-  PipeBarrierVec();
+  kernel_utils::PipeBarrierVec();
   TMUL(exponentials, exponentials, correction);
   pipe_barrier(PIPE_ALL);
   float alpha = exponentials.GetValue(valid - 1);
@@ -406,7 +406,7 @@ AICORE inline float mega_prepare_rhs(__gm__ half* v, __gm__ float* g,
   TROWEXPANDMUL(value, value, expcol);
   pipe_barrier(PIPE_ALL);
   TSUB(value, values, value);
-  PipeBarrierVec();
+  kernel_utils::PipeBarrierVec();
   TROWEXPANDMUL(value, value, bcol);
   pipe_barrier(PIPE_ALL);
   GlobalTensor<float, Shape<1, 1, 1, R, D>, pto::Stride<1, 1, 1, D, 1>> saved(
@@ -435,7 +435,7 @@ AICORE inline void mega_finish_output(__gm__ float* local, __gm__ half* output,
   TASSIGN(result, 96 * 1024);
   mega_vector_load<R, D>(value, local + stripe * D, R, D, D);
   TADD(value, value, base);
-  PipeBarrierVec();
+  kernel_utils::PipeBarrierVec();
   TCVT(result, value, RoundMode::CAST_RINT);
   pipe_barrier(PIPE_ALL);
   if (count > 0) {
@@ -466,7 +466,7 @@ AICORE inline void mega_update_state(__gm__ float* exchange, float alpha,
   TLOAD(update, gm);
   pipe_barrier(PIPE_ALL);
   TMULS(state, state, alpha);
-  PipeBarrierVec();
+  kernel_utils::PipeBarrierVec();
   TADD(state, state, update);
   pipe_barrier(PIPE_ALL);
   // Interleaved high/low rows occupy exactly the FP32 update's footprint.

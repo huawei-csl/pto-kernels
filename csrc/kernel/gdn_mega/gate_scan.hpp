@@ -44,9 +44,9 @@ AICORE inline void mega_gate_scan(__gm__ float* g, __gm__ half* beta,
       set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
       wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
       TFILLPAD_INPLACE(buffers[0], input);
-      PipeBarrierVec();
+      kernel_utils::PipeBarrierVec();
       TEXPANDS(lows[0], 0.0f);
-      PipeBarrierVec();
+      kernel_utils::PipeBarrierVec();
       int current = 0;
       for (int offset = 1; offset < C; offset *= 2) {
         Part prefix(offset, P), dest_prefix(offset, P);
@@ -62,7 +62,7 @@ AICORE inline void mega_gate_scan(__gm__ float* g, __gm__ half* beta,
         TASSIGN(b, current * Bytes);
         TASSIGN(dest, (1 - current) * Bytes + offset * P * sizeof(float));
         TADD(dest, a, b);
-        PipeBarrierVec();
+        kernel_utils::PipeBarrierVec();
         // Error-free TwoSum of the high parts, plus their low parts.
         Part ar(C - offset, P), br(C - offset, P), la(C - offset, P),
             lb(C - offset, P), lo(C - offset, P);
@@ -72,17 +72,17 @@ AICORE inline void mega_gate_scan(__gm__ float* g, __gm__ half* beta,
         TASSIGN(lb, (2 + current) * Bytes);
         TASSIGN(lo, (3 - current) * Bytes + offset * P * sizeof(float));
         TSUB(br, dest, a);
-        PipeBarrierVec();
+        kernel_utils::PipeBarrierVec();
         TSUB(ar, dest, br);
-        PipeBarrierVec();
+        kernel_utils::PipeBarrierVec();
         TSUB(ar, a, ar);
         TSUB(br, b, br);
-        PipeBarrierVec();
+        kernel_utils::PipeBarrierVec();
         TADD(ar, ar, br);
         TADD(lo, la, lb);
-        PipeBarrierVec();
+        kernel_utils::PipeBarrierVec();
         TADD(lo, lo, ar);
-        PipeBarrierVec();
+        kernel_utils::PipeBarrierVec();
         current = 1 - current;
       }
       // Reuse the dead ping-pong slots for transpose output/scratch.
@@ -125,7 +125,7 @@ AICORE inline void mega_gate_scan(__gm__ float* g, __gm__ half* beta,
       set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
       wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
       TFILLPAD_INPLACE(beta_full, beta_in);
-      PipeBarrierVec();
+      kernel_utils::PipeBarrierVec();
       TTRANS(beta_trans, beta_full, beta_tmp);
       set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
       wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);

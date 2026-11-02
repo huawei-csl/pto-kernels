@@ -124,6 +124,11 @@ QUICK_CASES = (
 def build(source, destination, heads):
     destination.mkdir(parents=True, exist_ok=True)
     sources = sorted(p for p in source.iterdir() if p.suffix in (".hpp", ".cpp"))
+    # Keep the shared helper in candidate snapshots and their fingerprints.
+    kernel_utils = source / "kernel_utils.h"
+    if not kernel_utils.exists():
+        kernel_utils = ROOT / "csrc/kernel/kernel_utils.h"
+    sources.append(kernel_utils)
     hashes = {p.name: sha256(p) for p in sources}
     for path in sources:
         shutil.copyfile(path, destination / path.name)
