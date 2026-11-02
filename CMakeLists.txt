@@ -189,7 +189,7 @@ set(PTO_KERNEL_SOURCES
 
 ascendc_library(no_workspace_kernel SHARED ${PTO_KERNEL_SOURCES})
 ascendc_include_directories(no_workspace_kernel PRIVATE
-                           ${CMAKE_CURRENT_SOURCE_DIR}/csrc/kernel)
+                            ${CMAKE_CURRENT_SOURCE_DIR}/csrc/kernel)
 
 if(USE_ASC_LANGUAGE)
   # pto_kernels_ops is linked with RUNPATH $ORIGIN/build/lib, so the kernel
