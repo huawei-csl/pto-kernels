@@ -7,6 +7,7 @@
 # --------------------------------------------------------------------------------
 PTO_LIB_PATH    ?= $(ASCEND_TOOLKIT_HOME)
 CSRC_KERNEL_DIR := csrc/kernel
+KERNEL_SUBDIR   ?= .
 
 .PHONY: clean setup_once build wheel install docs test test_tri_inv
 
@@ -26,7 +27,7 @@ wheel: clean
 # 'make compile_abs' compiles 'kernel_abs.cpp' into 'build/lib/libkernel_abs.so' without building the whole wheel package.
 # This is useful for development and debugging of individual kernels.
 compile_%:
-	mkdir -p build/lib/
+	mkdir -p build/lib/$(KERNEL_SUBDIR)/
 	bisheng -fPIC -shared -xcce -DMEMORY_BASE -O2 -std=c++17 \
 		-I$(CSRC_KERNEL_DIR) \
 		-I$(PTO_LIB_PATH)/include \
@@ -35,11 +36,11 @@ compile_%:
 		-I${ASCEND_TOOLKIT_HOME}/pkg_inc/profiling \
 		--npu-arch=dav-2201 \
 		-Wno-ignored-attributes \
-		$(CSRC_KERNEL_DIR)/kernel_$*.cpp \
-		-o build/lib/libkernel_$*.so
+		$(CSRC_KERNEL_DIR)/$(KERNEL_SUBDIR)/kernel_$*.cpp \
+		-o build/lib/$(KERNEL_SUBDIR)/libkernel_$*.so
 
 compile_a5_%:
-	mkdir -p build/lib/
+	mkdir -p build/lib/$(KERNEL_SUBDIR)/
 	bisheng -fPIC -shared -xcce -DREGISTER_BASE -O2 -std=gnu++17 \
 		-I$(CSRC_KERNEL_DIR) \
 		-I$(PTO_LIB_PATH)/include \
@@ -50,8 +51,8 @@ compile_a5_%:
 		-mllvm -cce-aicore-stack-size=0x8000 \
 		-mllvm -cce-aicore-function-stack-size=0x8000 \
 		-Wno-ignored-attributes \
-		$(CSRC_KERNEL_DIR)/kernel_$*.cpp \
-		-o build/lib/libkernel_$*.so
+		$(CSRC_KERNEL_DIR)/$(KERNEL_SUBDIR)/kernel_$*.cpp \
+		-o build/lib/$(KERNEL_SUBDIR)/libkernel_$*.so
 
 install:
 	python3 -m pip install --force-reinstall pto_kernels-*.whl
