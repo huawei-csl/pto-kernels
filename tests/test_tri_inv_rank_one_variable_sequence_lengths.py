@@ -12,7 +12,7 @@ import torch.nn.functional as torch_functional
 import pytest
 import numpy as np
 import random
-from pto_kernels import pto_tri_inv_col_sweep
+from pto_kernels import pto_tri_inv_rank_one
 
 random.seed(42)
 torch.manual_seed(42)
@@ -189,7 +189,7 @@ def _test_inverse_accuracy(
 ):
 
     ref = _reference_inverse(A, cu_seqlens, chunk_size)
-    tri = pto_tri_inv_col_sweep(
+    tri = pto_tri_inv_rank_one(
         A, is_lower=False, is_bsnd_format=True, cu_seqlens=cu_seqlens
     )
     torch.npu.synchronize()
@@ -210,7 +210,7 @@ def _test_inverse_accuracy(
 @pytest.mark.parametrize(
     "matrix_type,atol,rtol,ftol", [("ones", 0, 0, 0), ("random", 1e-5, 5e-2, 1e-2)]
 )
-def test_tri_inv_col_sweep_variable_length(
+def test_tri_inv_rank_one_variable_length(
     B: int,
     N: int,
     chunk_size: int,

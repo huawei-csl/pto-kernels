@@ -29,6 +29,7 @@ for the full License text.
 #include "torch_swiglu.h"
 #include "torch_tri_inv_col_sweep.h"
 #include "torch_tri_inv_ns.h"
+#include "torch_tri_inv_rank_one.h"
 #include "torch_tri_inv_rec_unroll.h"
 #include "torch_tri_inv_trick.h"
 
@@ -106,6 +107,9 @@ PYBIND11_MODULE(pto_kernels_ops, m) {
   m.def("pto_tri_inv_ns", &pto_isa_ops::run_tri_inv_ns, py::arg("M"),
         py::arg("num_iters") = 0, py::arg("scale_value") = 0.0f);
   m.def("pto_tri_inv_col_sweep", &pto_isa_ops::run_tri_inv_col_sweep,
+        py::arg("x"), py::arg("is_bsnd_format") = false,
+        py::arg("cu_seqlens") = at::zeros({1}));
+  m.def("pto_tri_inv_rank_one", &pto_isa_ops::run_tri_inv_rank_one,
         py::arg("x"), py::arg("is_lower") = true,
         py::arg("is_bsnd_format") = false,
         py::arg("cu_seqlens") = at::zeros({1}));
