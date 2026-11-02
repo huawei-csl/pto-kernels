@@ -39,6 +39,7 @@ jobs:
         simple_matmul
         swiglu
         tri_inv_rank_one
+        tri_inv_col_sweep
         tri_inv_ns
         tri_inv_rec_unroll
         tri_inv_trick
