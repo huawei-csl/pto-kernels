@@ -28,6 +28,7 @@ import argparse
 import csv
 import math
 from collections import defaultdict
+from functools import partial
 from pathlib import Path
 
 import matplotlib
@@ -124,7 +125,17 @@ def sweep(layouts, block_dims, fractions, path: Path):
                 shape = "x".join(str(d) for d in U.shape)
                 key = (layout, n, bdx, bdy)
 
-                def record(algo, fraction, ms, U=U, shape=shape, n=n, bdx=bdx, bdy=bdy):
+                def record(
+                    algo,
+                    fraction,
+                    ms,
+                    U=U,
+                    shape=shape,
+                    n=n,
+                    bdx=bdx,
+                    bdy=bdy,
+                    layout=layout,
+                ):
                     rows.append(
                         [
                             algo,
@@ -151,7 +162,7 @@ def sweep(layouts, block_dims, fractions, path: Path):
                     )
 
                 for fraction in fractions:
-                    ms = measure(lambda inp, f=fraction: mix(inp, f), U)
+                    ms = measure(partial(mix, f=fraction), U)
                     results[key]["mix"][fraction] = ms
                     record("mix", fraction, ms)
                     print(
