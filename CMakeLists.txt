@@ -167,6 +167,7 @@ ascendc_library(
   no_workspace_kernel
   SHARED
   csrc/kernel/kernel_tri_inv_rank_one.cpp
+  csrc/kernel/kernel_tri_inv_col_sweep.cpp
   csrc/kernel/kernel_abs.cpp
   csrc/kernel/kernel_gdn_chunk_cumsum.cpp
   csrc/kernel/kernel_csr_gather.cpp
