@@ -51,9 +51,7 @@ def test_bsnd_matches_dense(n, num_chunks, num_heads, dtype):
     tiles = random_tiles(num_chunks, num_heads, n, dtype)
 
     dense = pto_tri_inv_col_sweep(tiles.npu()).cpu()
-    bsnd = pto_tri_inv_col_sweep(
-        to_bsnd(tiles).npu(), is_bsnd_format=True
-    ).cpu()
+    bsnd = pto_tri_inv_col_sweep(to_bsnd(tiles).npu(), is_bsnd_format=True).cpu()
 
     assert torch.equal(from_bsnd(bsnd, num_chunks, num_heads, n), dense)
 
@@ -98,6 +96,6 @@ def test_varlen_bsnd_matches_padded_dense(n, num_heads, seq_lens):
         expected = pto_tri_inv_col_sweep(tile.npu()).cpu()[0]
 
         got = actual[0, start : start + v, :, :v].permute(1, 0, 2)
-        assert torch.equal(got, expected[:, :v, :v]), (
-            f"chunk at row {start} (valid {v}) differs"
-        )
+        assert torch.equal(
+            got, expected[:, :v, :v]
+        ), f"chunk at row {start} (valid {v}) differs"
