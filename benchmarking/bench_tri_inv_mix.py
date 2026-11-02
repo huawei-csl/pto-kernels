@@ -4,12 +4,12 @@ kernel against the two single-engine kernels it is built from.
 
 ``tri_inv_mix`` gives the leading ``cube_fraction`` of the tiles (a measured
 per-matrix-size default) to the cube units, which run the recursive unroll algorithm, and the
-rest to the vector units, which run the column sweep. The question this
+rest to the vector units, which run the rank-one update. The question this
 benchmark answers is whether that beats running either algorithm alone over all
 the tiles, and from which problem size onwards. Pass ``--cube-fraction`` to
 override the split, e.g. to find the fraction at which both engines finish
 together: it is balanced when it equals t_vec / (t_cube + t_vec), with t_cube
-and t_vec the rec_unroll and col_sweep times over the same tiles.
+and t_vec the rec_unroll and rank_one times over the same tiles.
 
 Run with ``--layout dense`` (default) for contiguous row-major tiles of shape
 (block_dim_x, block_dim_y, n, n), or ``--layout bsnd`` for the same tiles laid
@@ -28,7 +28,7 @@ from pathlib import Path
 import matplotlib
 import matplotlib.pyplot as plt
 import torch
-from pto_kernels import pto_tri_inv_col_sweep, pto_tri_inv_mix, pto_tri_inv_rec_unroll
+from pto_kernels import pto_tri_inv_mix, pto_tri_inv_rank_one, pto_tri_inv_rec_unroll
 from utils import do_bench
 
 matplotlib.use("Agg")
@@ -48,12 +48,13 @@ MIX_KWARGS: dict = {}
 # kernel's input. All three kernels take an implicit unit diagonal, so the same
 # strictly triangular tensor means the same matrices to all of them.
 #
-# Unlike bench_tri_inv_rec_unroll_vs_col_sweep.py, which lets the column sweep
-# take its cheaper default (is_lower=True) on a transposed input, every kernel
-# here is run with is_lower=False on one and the same tensor: the mixed kernel
-# hands that single input to both algorithms, so a comparison it takes part in
-# has to feed all three the same way. The column sweep therefore pays its upper
-# triangular transpose here and is a little slower than in that benchmark.
+# Unlike bench_tri_inv_rec_unroll_vs_rank_one.py, which lets the rank-one
+# kernel take its cheaper default (is_lower=True) on a transposed input, every
+# kernel here is run with is_lower=False on one and the same tensor: the mixed
+# kernel hands that single input to both algorithms, so a comparison it takes
+# part in has to feed all three the same way. The rank-one kernel therefore
+# pays its upper triangular transpose here and is a little slower than in that
+# benchmark.
 ALGOS = {
     "dense": {
         "mix": (
@@ -68,9 +69,9 @@ ALGOS = {
                 inp, is_bsnd_format=False, is_lower=False
             ),
         ),
-        "col_sweep": (
+        "rank_one": (
             lambda U: U,
-            lambda inp: pto_tri_inv_col_sweep(inp, is_lower=False),
+            lambda inp: pto_tri_inv_rank_one(inp, is_lower=False),
         ),
     },
     "bsnd": {
@@ -86,9 +87,9 @@ ALGOS = {
                 inp, is_bsnd_format=True, is_lower=False
             ),
         ),
-        "col_sweep": (
+        "rank_one": (
             to_bsnd,
-            lambda inp: pto_tri_inv_col_sweep(inp, is_lower=False, is_bsnd_format=True),
+            lambda inp: pto_tri_inv_rank_one(inp, is_lower=False, is_bsnd_format=True),
         ),
     },
 }
@@ -145,7 +146,7 @@ def plot_csv(path, layout: str = "dense"):
     plt.xticks(range(len(sizes)), [str(n) for n in sizes])
     plt.xlabel("Matrix size")
     plt.ylabel("Bandwidth (GB/s)")
-    plt.title(f"tri_inv: mix vs rec_unroll vs col_sweep ({layout})")
+    plt.title(f"tri_inv: mix vs rec_unroll vs rank_one ({layout})")
     plt.legend(fontsize="small")
     plt.grid(True, axis="y")
     plt.gca().set_axisbelow(True)

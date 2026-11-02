@@ -6,6 +6,7 @@ See LICENSE in the root of the software repository:
 https://github.com/huawei-csl/pto-kernels/
 for the full License text.
 */
+
 #pragma once
 
 #include "kernel_utils.h"
@@ -187,7 +188,7 @@ AICORE void runTTriInvRankOne(__gm__ T* vec_in, __gm__ T* vec_out,
   constexpr uint32_t OuterRows = (3 * tile_bytes <= UsableUbBytes) ? S : S / 2;
   constexpr uint32_t outer_bytes = OuterRows * S * sizeof(T);
   static_assert(2 * tile_bytes + outer_bytes <= UsableUbBytes,
-                "tri_inv col sweep: UB budget exceeded");
+                "tri_inv rank one: UB budget exceeded");
 
   constexpr uint32_t L_UB_ADDR = 0x0;
   constexpr uint32_t Y_UB_ADDR = L_UB_ADDR + tile_bytes;

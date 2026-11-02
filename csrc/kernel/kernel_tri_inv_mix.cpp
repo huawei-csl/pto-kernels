@@ -7,7 +7,7 @@ https://github.com/huawei-csl/pto-kernels/
 for the full License text.
 */
 
-#include "kernel_tri_inv_col_sweep.h"
+#include "kernel_tri_inv_rank_one.h"
 #include "kernel_tri_inv_rec_unroll.h"
 
 /**

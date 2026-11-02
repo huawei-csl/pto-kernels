@@ -3,7 +3,7 @@ Sweep of the ``cube_fraction`` parameter of ``tri_inv_mix``.
 
 ``tri_inv_mix`` gives the leading ``cube_fraction`` of the tiles to the cube
 units, which run the recursive unroll algorithm, and the rest to the vector
-units, which run the column sweep. The two parts are disjoint and run
+units, which run the rank-one update. The two parts are disjoint and run
 concurrently, so the kernel ends with whichever engine is slower on its part
 and the fraction that minimizes the runtime is the one that makes them finish
 together. This benchmark measures the whole curve rather than that one point:
@@ -35,12 +35,12 @@ import matplotlib
 import matplotlib.pyplot as plt
 import torch
 from bench_tri_inv_mix import random_triu_matrix, to_bsnd
-from pto_kernels import pto_tri_inv_col_sweep, pto_tri_inv_mix, pto_tri_inv_rec_unroll
+from pto_kernels import pto_tri_inv_mix, pto_tri_inv_rank_one, pto_tri_inv_rec_unroll
 from utils import do_bench
 
 matplotlib.use("Agg")
 
-# Each layout maps to (make_input, mix, rec_unroll, col_sweep), where
+# Each layout maps to (make_input, mix, rec_unroll, rank_one), where
 # make_input turns a strictly upper triangular (bdx, bdy, n, n) tensor into the
 # kernel's input and the three callables invert it. As in bench_tri_inv_mix.py,
 # every kernel is run with is_lower=False on one and the same tensor: the mixed
@@ -53,7 +53,7 @@ LAYOUTS = {
             inp, is_bsnd_format=False, is_lower=False, cube_fraction=f
         ),
         lambda inp: pto_tri_inv_rec_unroll(inp, is_bsnd_format=False, is_lower=False),
-        lambda inp: pto_tri_inv_col_sweep(inp, is_lower=False),
+        lambda inp: pto_tri_inv_rank_one(inp, is_lower=False),
     ),
     "bsnd": (
         to_bsnd,
@@ -61,7 +61,7 @@ LAYOUTS = {
             inp, is_bsnd_format=True, is_lower=False, cube_fraction=f
         ),
         lambda inp: pto_tri_inv_rec_unroll(inp, is_bsnd_format=True, is_lower=False),
-        lambda inp: pto_tri_inv_col_sweep(inp, is_lower=False, is_bsnd_format=True),
+        lambda inp: pto_tri_inv_rank_one(inp, is_lower=False, is_bsnd_format=True),
     ),
 }
 
@@ -111,13 +111,13 @@ def sweep(layouts, block_dims, fractions, path: Path):
             "bandwidth_gbps",
         ]
     ]
-    # (layout, n, bdx, bdy) -> {"rec_unroll": ms, "col_sweep": ms,
+    # (layout, n, bdx, bdy) -> {"rec_unroll": ms, "rank_one": ms,
     #                           "mix": {fraction: ms}}
     results: dict = defaultdict(lambda: {"mix": {}})
     dtype_name = "fp16"
 
     for layout in layouts:
-        make_input, mix, rec_unroll, col_sweep = LAYOUTS[layout]
+        make_input, mix, rec_unroll, rank_one = LAYOUTS[layout]
         for n in MATRIX_SIZES:
             for bdx, bdy in block_dims:
                 U = random_triu_matrix(n, bdx, bdy).to(torch.float16)
@@ -152,7 +152,7 @@ def sweep(layouts, block_dims, fractions, path: Path):
                         ]
                     )
 
-                for algo, fn in (("rec_unroll", rec_unroll), ("col_sweep", col_sweep)):
+                for algo, fn in (("rec_unroll", rec_unroll), ("rank_one", rank_one)):
                     ms = measure(fn, U)
                     results[key][algo] = ms
                     record(algo, None, ms)
@@ -191,7 +191,7 @@ def print_per_config(results: dict):
         f"{'f=0.50':>8}"
     )
     for (layout, n, bdx, bdy), res in sorted(results.items()):
-        t_cube, t_vec = res["rec_unroll"], res["col_sweep"]
+        t_cube, t_vec = res["rec_unroll"], res["rank_one"]
         by_fraction = res["mix"]
         best_f = min(by_fraction, key=by_fraction.get)
         best_ms = by_fraction[best_f]
@@ -256,7 +256,7 @@ def plot(results: dict, fractions, path: Path):
         for (layout, size, bdx, bdy), res in sorted(results.items()):
             if size != n:
                 continue
-            single = min(res["rec_unroll"], res["col_sweep"])
+            single = min(res["rec_unroll"], res["rank_one"])
             ax.plot(
                 fractions,
                 [single / res["mix"][f] for f in fractions],
@@ -274,7 +274,7 @@ def plot(results: dict, fractions, path: Path):
         ax.legend(fontsize="small")
     for ax in axes.flat[len(sizes) :]:
         ax.set_visible(False)
-    fig.suptitle("tri_inv_mix: cube_fraction sweep vs rec_unroll and col_sweep")
+    fig.suptitle("tri_inv_mix: cube_fraction sweep vs rec_unroll and rank_one")
     fig.tight_layout()
     fig.savefig(path)
     plt.close(fig)
