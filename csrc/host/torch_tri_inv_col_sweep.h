@@ -16,15 +16,13 @@ for the full License text.
 extern "C" {
 
 void pto_launch_triv_inv_col_sweep_fp16(uint32_t blockDim, void* stream,
-                                        void* x, void* z,
-                                        uint32_t total_tiles,
+                                        void* x, void* z, uint32_t total_tiles,
                                         uint32_t matrix_size,
                                         uint32_t num_bsnd_heads,
                                         void* cu_seqlens);
 
 void pto_launch_triv_inv_col_sweep_fp32(uint32_t blockDim, void* stream,
-                                        void* x, void* z,
-                                        uint32_t total_tiles,
+                                        void* x, void* z, uint32_t total_tiles,
                                         uint32_t matrix_size,
                                         uint32_t num_bsnd_heads,
                                         void* cu_seqlens);

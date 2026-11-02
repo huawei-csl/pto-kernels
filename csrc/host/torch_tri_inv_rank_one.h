@@ -15,17 +15,17 @@ for the full License text.
 
 extern "C" {
 
-void pto_launch_tri_inv_rank_one_fp16(uint32_t blockDim, void* stream,
-                                        void* x, void* z, uint32_t total_tiles,
-                                        uint32_t matrix_size, uint32_t is_lower,
-                                        uint32_t num_bsnd_heads,
-                                        void* cu_seqlens);
+void pto_launch_tri_inv_rank_one_fp16(uint32_t blockDim, void* stream, void* x,
+                                      void* z, uint32_t total_tiles,
+                                      uint32_t matrix_size, uint32_t is_lower,
+                                      uint32_t num_bsnd_heads,
+                                      void* cu_seqlens);
 
-void pto_launch_tri_inv_rank_one_fp32(uint32_t blockDim, void* stream,
-                                        void* x, void* z, uint32_t total_tiles,
-                                        uint32_t matrix_size, uint32_t is_lower,
-                                        uint32_t num_bsnd_heads,
-                                        void* cu_seqlens);
+void pto_launch_tri_inv_rank_one_fp32(uint32_t blockDim, void* stream, void* x,
+                                      void* z, uint32_t total_tiles,
+                                      uint32_t matrix_size, uint32_t is_lower,
+                                      uint32_t num_bsnd_heads,
+                                      void* cu_seqlens);
 
 }  // extern "C"
 
@@ -52,10 +52,9 @@ namespace pto_isa_ops {
  * @return at::Tensor Tensor of same shape as input where matrices are inverted.
  */
 
-at::Tensor run_tri_inv_rank_one(
-    const at::Tensor& x, const bool is_lower = true,
-    const bool is_bsnd_format = false,
-    const at::Tensor& cu_seqlens = at::zeros({1})) {
+at::Tensor run_tri_inv_rank_one(const at::Tensor& x, const bool is_lower = true,
+                                const bool is_bsnd_format = false,
+                                const at::Tensor& cu_seqlens = at::zeros({1})) {
   const at::Device device = x.options().device();
   const auto dtype = x.options().dtype();
   TORCH_CHECK(device.type() == DEVICE_TYPE,
