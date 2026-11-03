@@ -164,6 +164,7 @@ message("* TORCH_LIBRARIES          : ${TORCH_LIBRARIES}")
 message("***********************************************************")
 
 set(PTO_KERNEL_SOURCES
+    csrc/kernel/kernel_tri_inv_rank_one.cpp
     csrc/kernel/kernel_tri_inv_col_sweep.cpp
     csrc/kernel/kernel_abs.cpp
     csrc/kernel/kernel_gdn_chunk_cumsum.cpp
@@ -189,7 +190,7 @@ set(PTO_KERNEL_SOURCES
 
 ascendc_library(no_workspace_kernel SHARED ${PTO_KERNEL_SOURCES})
 ascendc_include_directories(no_workspace_kernel PRIVATE
-                            ${CMAKE_CURRENT_SOURCE_DIR}/csrc/kernel)
+                           ${CMAKE_CURRENT_SOURCE_DIR}/csrc/kernel)
 
 if(USE_ASC_LANGUAGE)
   # pto_kernels_ops is linked with RUNPATH $ORIGIN/build/lib, so the kernel

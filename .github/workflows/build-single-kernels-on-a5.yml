@@ -23,7 +23,7 @@ jobs:
         abs
         batch_matrix_square
         csr_gather
-        # flash_attention # TODO: fix this kernel
+        flash_attention
         gdn_chunk_cumsum
         gdn_chunk_h
         gdn_chunk_o
@@ -38,6 +38,7 @@ jobs:
         scan_ul1
         simple_matmul
         swiglu
+        tri_inv_rank_one
         tri_inv_col_sweep
         tri_inv_ns
         tri_inv_rec_unroll

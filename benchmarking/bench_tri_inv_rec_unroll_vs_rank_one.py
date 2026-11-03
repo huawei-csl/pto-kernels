@@ -1,6 +1,6 @@
 """
 Performance benchmark comparing the triangular inverse recursive unroll kernel
-against the vector-only column sweep kernel.
+against the vector-only rank-one update kernel.
 
 Run with ``--layout dense`` (default) for contiguous row-major tiles of shape
 (block_dim_x, block_dim_y, n, n), or ``--layout bsnd`` for the same tiles laid
@@ -15,7 +15,7 @@ from pathlib import Path
 import matplotlib
 import matplotlib.pyplot as plt
 import torch
-from pto_kernels import pto_tri_inv_col_sweep, pto_tri_inv_rec_unroll
+from pto_kernels import pto_tri_inv_rank_one, pto_tri_inv_rec_unroll
 from utils import do_bench
 
 matplotlib.use("Agg")
@@ -32,7 +32,7 @@ def to_bsnd(U: torch.Tensor) -> torch.Tensor:
 # kernel's input. Both kernels take an implicit unit diagonal.
 #
 # Dense: rec_unroll (is_lower=False) reads the strictly upper triangle, while
-# col_sweep (default is_lower=True) reads the strictly lower one, so col_sweep
+# rank_one (default is_lower=True) reads the strictly lower one, so rank_one
 # gets the transpose -- same shape, same element count, same amount of work.
 #
 # BSND: both kernels are fed the same upper triangular BSND tensor with
@@ -43,9 +43,9 @@ ALGOS = {
             lambda U: U,
             lambda inp: pto_tri_inv_rec_unroll(inp, is_bsnd_format=False),
         ),
-        "col_sweep": (
+        "rank_one": (
             lambda U: U.transpose(-1, -2).contiguous(),
-            pto_tri_inv_col_sweep,
+            pto_tri_inv_rank_one,
         ),
     },
     "bsnd": {
@@ -55,9 +55,9 @@ ALGOS = {
                 inp, is_bsnd_format=True, is_lower=False
             ),
         ),
-        "col_sweep": (
+        "rank_one": (
             to_bsnd,
-            lambda inp: pto_tri_inv_col_sweep(inp, is_lower=False, is_bsnd_format=True),
+            lambda inp: pto_tri_inv_rank_one(inp, is_lower=False, is_bsnd_format=True),
         ),
     },
 }
@@ -100,7 +100,7 @@ def plot_csv(path, layout: str = "dense"):
     plt.xticks(range(len(sizes)), [str(n) for n in sizes])
     plt.xlabel("Matrix size")
     plt.ylabel("Bandwidth (GB/s)")
-    plt.title(f"tri_inv: rec_unroll vs col_sweep ({layout})")
+    plt.title(f"tri_inv: rec_unroll vs rank_one ({layout})")
     plt.legend()
     plt.grid(True, axis="y")
     plt.gca().set_axisbelow(True)
@@ -112,7 +112,7 @@ def plot_csv(path, layout: str = "dense"):
 def bench(path: str | None = None, layout: str = "dense"):
     if path is None:
         suffix = "" if layout == "dense" else f"_{layout}"
-        path = f"benchmark_data/tri_inv_rec_unroll_vs_col_sweep{suffix}.csv"
+        path = f"benchmark_data/tri_inv_rec_unroll_vs_rank_one{suffix}.csv"
     rows = [
         [
             "algo",
