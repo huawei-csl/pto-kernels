@@ -21,15 +21,6 @@ for the full License text.
  * therefore disjoint rows of the output -- so the two halves need no cross-core
  * synchronization and simply run concurrently for the length of the kernel.
  *
- * Splitting the work this way is what the AIC_1_2 mix mode buys: a cube-only
- * kernel leaves the 2 * blockDim vector cores idle and a vector-only kernel
- * leaves the blockDim cube cores idle, while here each engine works on its
- * own half of the tiles with the algorithm that suits it.
- *
- * The engines are not equally fast, so the split point is chosen on the host
- * (see run_tri_inv_mix) to give each engine a share of the tiles proportional
- * to its throughput, so that both finish at about the same time.
- *
  * @tparam T Input and output data type. Only fp16 is supported: the cube
  * half also accepts bf16, but the rank-1 sweep needs TSUB and TROWEXPANDMUL,
  * which have no bf16 form, so bf16 is out for the mix kernel as a whole.
