@@ -13,12 +13,12 @@
 
 using namespace pto;
 
-#include "common.hpp"
-#include "fused_pipeline.hpp"
-#include "gate_scan.hpp"
-#include "inverse.hpp"
-#include "recurrence_pipeline.hpp"
-#include "shared_grams.hpp"
+#include "common.h"
+#include "fused_pipeline.h"
+#include "gate_scan.h"
+#include "inverse.h"
+#include "recurrence_pipeline.h"
+#include "shared_grams.h"
 
 template <int32_t H>
 AICORE inline void mega_kernel_impl(

@@ -123,12 +123,13 @@ QUICK_CASES = (
 
 def build(source, destination, heads):
     destination.mkdir(parents=True, exist_ok=True)
-    sources = sorted(p for p in source.iterdir() if p.suffix in (".hpp", ".cpp"))
+    sources = sorted(p for p in source.iterdir() if p.suffix in (".h", ".hpp", ".cpp"))
     # Keep the shared helper in candidate snapshots and their fingerprints.
     kernel_utils = source / "kernel_utils.h"
     if not kernel_utils.exists():
         kernel_utils = ROOT / "csrc/kernel/kernel_utils.h"
-    sources.append(kernel_utils)
+    if kernel_utils not in sources:
+        sources.append(kernel_utils)
     hashes = {p.name: sha256(p) for p in sources}
     for path in sources:
         shutil.copyfile(path, destination / path.name)
@@ -489,7 +490,7 @@ def run_measurements(args):
         "working_tree_source_sha256": {
             p.name: sha256(p)
             for p in (ROOT / "csrc/kernel/gdn_mega").iterdir()
-            if p.suffix in (".cpp", ".hpp")
+            if p.suffix in (".cpp", ".h", ".hpp")
         },
         "working_tree_commit": subprocess.check_output(
             ["git", "-c", f"safe.directory={ROOT}", "rev-parse", "HEAD"],

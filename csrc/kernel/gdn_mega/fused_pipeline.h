@@ -1,7 +1,7 @@
 #pragma once
 
-#include "inverse.hpp"
-#include "recurrence_pipeline.hpp"
+#include "inverse.h"
+#include "recurrence_pipeline.h"
 
 // Public scratch allocations retain their original sizes. Paired operands use
 // separate existing half buffers; the recurrent FP32 state stays in vector UB.
