@@ -1,11 +1,21 @@
 # Copyright (c) 2026 Huawei Technologies Co., Ltd. See repository LICENSE.
-"""Differentiable CPU FP64 oracle for GDN mega backward validation."""
+"""Differentiable token recurrence, independent of the chunked PTO algorithm."""
 
 import torch
 
 
 def recurrent_gdn_reference(
-    q, k, v, g, beta, initial_state=None, cu_seqlens=None, *, scale=1.0
+    q,
+    k,
+    v,
+    g,
+    beta,
+    initial_state=None,
+    cu_seqlens=None,
+    *,
+    scale=1.0,
+    dtype=torch.float64,
+    reorder_ops=False,
 ):
     """Return output and final states using the literal token recurrence.
 
@@ -15,7 +25,7 @@ def recurrent_gdn_reference(
     or a sigmoid. cu_seqlens [N+1] delimits independent sequences; without
     it the input is one sequence. initial_state is optional [N, Hv, K, V].
 
-    Computation and results are CPU float64. Tensor conversions preserve
+    Computation and results use CPU `dtype` (float64 by default). Tensor conversions preserve
     autograd: gradients reach the original leaves in their original dtype
     and device. For FP64 gradient comparisons, create CPU float64 leaves
     before calling this function. There are no in-place state updates.
@@ -24,6 +34,8 @@ def recurrent_gdn_reference(
     unchanged states for empty sequences. scale=1 matches the raw megakernel;
     use scale=K**-0.5 to match attention-scaled output (states are unscaled).
     This is a small-case correctness oracle: autograd retains token states.
+    `reorder_ops` distributes beta across the state update and scales q before
+    its contraction. In the input dtype this estimates operation-order error.
 
     Example (with inputs already requiring gradients)::
 
@@ -65,11 +77,9 @@ def recurrent_gdn_reference(
     ):
         raise ValueError("initial_state must have shape [N, Hv, K, V]")
 
-    q, k, v, g, beta = (
-        x.to(device="cpu", dtype=torch.float64) for x in (q, k, v, g, beta)
-    )
+    q, k, v, g, beta = (x.to(device="cpu", dtype=dtype) for x in (q, k, v, g, beta))
     if initial_state is not None:
-        initial_state = initial_state.to(device="cpu", dtype=torch.float64)
+        initial_state = initial_state.to(device="cpu", dtype=dtype)
     # Autograd sums contributions back into shared query/key heads.
     q = q.repeat_interleave(heads // key_heads, dim=2)
     k = k.repeat_interleave(heads // key_heads, dim=2)
@@ -85,9 +95,18 @@ def recurrent_gdn_reference(
             qt, kt, vt = q[0, t], k[0, t], v[0, t]
             decayed_state = g[0, t].exp()[:, None, None] * state
             prediction = torch.einsum("hk,hkv->hv", kt, decayed_state)
-            update = beta[0, t, :, None] * (vt - prediction)
-            state = decayed_state + kt[:, :, None] * update[:, None, :]
-            outputs.append(scale * torch.einsum("hk,hkv->hv", qt, state))
+            if reorder_ops:
+                kb = kt * beta[0, t, :, None]
+                state = (
+                    decayed_state
+                    + kb[:, :, None] * vt[:, None, :]
+                    - kb[:, :, None] * prediction[:, None, :]
+                )
+                outputs.append(torch.einsum("hk,hkv->hv", qt * scale, state))
+            else:
+                update = beta[0, t, :, None] * (vt - prediction)
+                state = decayed_state + kt[:, :, None] * update[:, None, :]
+                outputs.append(scale * torch.einsum("hk,hkv->hv", qt, state))
         states.append(state)
 
     final_state = torch.stack(states)

@@ -93,6 +93,14 @@ def backward(
         )
         pointers = (ctypes.c_void_p * 6)(*[x.data_ptr() for x in outputs])
         native.gdn_backward(
-            descriptors, cu, N, H, HK, pointers, workspace.data_ptr(), scale
+            descriptors,
+            cu,
+            N,
+            H,
+            HK,
+            pointers,
+            workspace.data_ptr(),
+            scale,
+            native.stage_launcher,
         )
         return tuple(outputs)

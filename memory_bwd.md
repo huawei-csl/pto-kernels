@@ -1,6 +1,95 @@
 # GDN backward development
 
-## Current rough baseline (v0)
+## Current Cube implementation
+
+All dense matrix products now use Cube. FP16/BF16 q/k/v use one native FP32
+Cube product; any FP32 q/k/v selects four K=32 Cube products, followed by
+compensated addition of their matrix results. The old vector dot-product
+implementation is removed. Vector operations still handle packing, masking,
+gate scans, triangular back substitution, elementwise arithmetic and reductions.
+There remain seven sequence-wide stage launches and no Torch numerical hotpath.
+
+FP32 cancellation required algebraic improvements as well as shorter dot
+accumulations. Subtracting rounded large gate prefixes loses interval accuracy,
+so this path sums gate intervals directly. dQ is reconstructed in 16-token
+subblocks inside each 128-token chunk, reducing cancellation between distant
+updates. Since Z=beta*residual and dV/beta=dUpdate, dBeta can be computed as
+dot(dUpdate,Z)/beta; this avoids cancellation between WY derivative paths.
+The general derivative is retained at beta=0. FP16/BF16 keep the simpler path.
+
+Tests use identical rounded inputs and upstream gradients in a golden recursive
+PyTorch run, a reordered run in the input dtype, and the PTO backward. For each
+of six gradients, max error must be <= 2 * baseline max error + 1e-5 (the
+absolute allowance was explicitly requested). The golden computation is FP32
+for FP16/BF16, FP64 for FP32; golden gradients retain that precision because
+the kernel returns FP32 gradients. Query/value/upstream inputs use unit-variance
+randn; keys remain normalized for a stable delta recurrence. Both references
+use autograd. FP64 tests independently verify equivalence of the reordered
+equations and their gradients. Mixed FP32 gates/state are covered too.
+
+Development notes: unpartitioned Cube products passed all FP16/BF16 cases even
+without the absolute allowance. FP32 exposed cancellation; changing tolerances
+alone was insufficient. K=8 extraction is only supported in compatible L0
+layouts and initially required explicit transposes. Local dQ and direct dBeta
+made that experiment unnecessary; the final K=32 path needs no GM transposes.
+The workspace now reserves 45 MiB of block scratch (four additional partial
+products), totaling 816.5 MiB at 8K tokens / 16 heads. Forward caches are still
+unused, and sequence-wide intermediate matrices still occupy GM.
+
+Validation: **71 passed in 109.04 s** with cached builds (61 hardware, 10 CPU).
+Final FP16 timings at H=16, Hk=2, D=128: **5.534 ms at 2K** and **20.481 ms
+at 8K**, versus 75.378 / 293.984 ms in v1: **13.62x / 14.35x faster**.
+Medians include allocation, recomputation, enqueue and synchronization, with
+one warmup and five samples. At 8K, the seven hardware stage times were
+10.977, 0.949, 0.691, 1.146, 1.882, 3.500 and 0.997 ms. Local/output gradient
+stages together dropped from 275.42 ms to 2.57 ms. Preparation/recomputation
+now dominates; fusion and inverse preparation are the next profiling targets.
+FP32's accuracy path is correctness-tested, but these timing improvements
+must not be attributed to it. Raw samples, profile timings, exact config,
+validation criterion and source hashes are in
+`tests/baselines/gdn_mega_bwd_cube_v2.json`; earlier artifacts remain unchanged.
+
+## Archived sequence-wide v1 implementation
+
+### 16-head performance diagnosis (2026-11-04)
+
+Measured B=1, H=16, Hk=2, D=128, FP16 inputs, zero initial state, no final-state gradient: 2,048 tokens **75.378 ms**, 8,192 tokens **293.984 ms**, five samples after warmup. Enqueue medians were 0.339 and 0.407 ms. Raw samples and the 8K hardware trace timings are preserved in `tests/baselines/gdn_mega_bwd_staged_v1_heads16.json`; the benchmark now accepts `--heads` and `--key-heads`. The user's approximate forward times were 1 and 2.5 ms, but forward was not rerun and its exact key-head count/timing scope was unspecified.
+
+Seven-stage device timings at 8K were 11.031, 1.021, 77.882, 1.253, 197.539, 3.695 and 1.082 ms. Local and output gradients (stages 2 and 4) consume **93.8%** of device time. Their `score_product` helper computes matrix products on vector cores with a seven-level compensated TwoSum reduction, repeated operand loads, transposes and barriers. This preserves strict cancellation-sensitive gradient accuracy but is much slower than the Cube products used by the forward. The two state scans total only 2.274 ms. Neither seven launch overheads nor state recurrence explains the slowdown. Next priority is accurate Cube implementations of these products, preserving the existing gradient tests, followed by reducing GM temporaries and synchronization. Forward recomputation adds work but is a small fraction of this measured runtime.
+
+`kernel.cpp` launches seven mixed cube/vector kernels: prepare, forward replay, local gradients, reverse state propagation, output derivatives, WY derivatives, and final assembly. Independent stages distribute chunk/head tasks across blocks; state stages loop over chunks on device. The host has no token-chunk loop. At most 64 sequence descriptors fit in one inline plan; larger packed batches submit groups of seven stages and reuse the same workspace. A hardware trace for a 1,024-token sequence contains exactly seven stage launches.
+
+Device primitives moved to `primitives.h`. `device_ops.h` coordinates each cube/vector block. Both vector subcores split disjoint rows/stripes; weighted triangular preparation and multiply/reduction chains keep intermediate products in UB. General matrix temporaries still use per-block GM scratch inside the stages. This establishes the FLA-like scheduling structure while preserving the independently tested FP32 equations.
+
+State buffers and other stage outputs have explicit lifetimes in `layout.h`. Twelve matrix slots and seven vector slots are retained per chunk/head. W is reused for dW, U for corrected values, Q for dQ, dOut for dV, and state adjoints for dK. Per-block scratch has 24 temporary matrix slots (WY peaks at 19 matrices plus vectors) and two state-adjoint slots; 24 blocks reserve 39 MiB. Workspace at 8K tokens/H=16 is 810.5 MiB, compared with 162 MiB in the rough baseline. The additional sequence-wide storage trades memory for chunk parallelism.
+
+### Findings during stage conversion
+
+- A launch-only conversion passed all 57 original checks but was slower at short lengths: 13.77 / 27.00 / 80.00 ms for 128 / 512 / 2048 tokens. Compensated dot products lost their previous row-level distribution across blocks.
+- The trace attributed most time to stages 2 and 4. Splitting these products across both vector subcores reduced timings to 7.27 / 14.08 / 41.27 ms. The 128-token case still trails the 5.00 ms rough baseline; long-sequence throughput improves.
+- A two-vector data hazard initially corrupted one row: signalling the cube release before waiting for both vectors let one vector read its peer's unfinished rows. `join()` now waits for both vector producers before releasing either vector to the next operation.
+- Grouped-head reduction reuses one scaled-query temporary, so scratch use is bounded even when many value heads share one key head.
+- Pointer values in the inline plan use `uint64_t`; the Ascend compiler rejects converting generic pointer fields directly into GM pointers inside device functions.
+- The host launcher receives a device entry-function pointer. Device-only edits now rebuild only the bisheng library; they do not recompile Torch headers.
+- Expanded coverage includes non-power-of-two head counts, packed tails, a 65-sequence metadata batch, and a 64-to-1 shared-head case. Final validation: **66 passed in 70.11 s**, including 6.00 s device and 11.60 s native builds. This comprises 58 hardware checks and 8 CPU-reference checks, at unchanged tolerances. Native-only and device-only builds are cached independently.
+
+### Final comparison record
+
+`tests/baselines/gdn_mega_bwd_staged_v1.json` contains final raw samples, source hashes, hardware stage timings and configuration; v0 remains unchanged.
+
+| Tokens | Rough native v0 (ms) | Seven stages v1 (ms) | Speedup |
+| --- | --- | --- | --- |
+| 128 | 5.005 | 7.279 | 0.69x |
+| 512 | 19.561 | 14.033 | 1.39x |
+| 2048 | 77.748 | 41.082 | 1.89x |
+
+At 1,024 tokens, wall time was 20.893 ms and the trace contained exactly seven device launches. Stage durations in order were 0.680, 0.117, 5.446, 0.160, 13.736, 0.258 and 0.163 ms. Enqueue medians were about 0.29–0.31 ms. These timings include no model forward pass.
+
+The benchmark's `--profile DIR` option records a hardware trace and `stages.json`. It is not a simulator run. Stage labels are `gdn_bwd_stage<0>` through `<6>`. Keep the frozen v0 JSON unchanged; newer measurements belong in a separate artifact.
+
+## Archived rough baseline (150fed0)
+
+The descriptions and measurements in this section refer to commit 150fed0, before the seven-stage implementation.
 
 This commit is a rough correctness baseline before sequence-wide stage fusion. Frozen timing samples, source hashes and validation results are in `tests/baselines/gdn_mega_bwd_rough_v0.json`; preserve that file when comparing future implementations.
 

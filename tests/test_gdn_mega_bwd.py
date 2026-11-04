@@ -1,5 +1,11 @@
 # Copyright (c) 2026 Huawei Technologies Co., Ltd. See repository LICENSE.
-"""PTO backward against CPU FP64 autograd; compile only the standalone kernel."""
+"""Per-gradient max error <= 2x reordered PyTorch autograd's max error + 1e-5.
+
+FP16/BF16 inputs use an FP32 golden recurrence; FP32 uses FP64. Golden leaves
+and gradients retain the higher precision, matching the kernel's FP32 gradient
+return contract. The baseline computes in the input dtype. All three use the
+same rounded inputs and upstream gradients, with a 1e-5 absolute allowance.
+"""
 from contextlib import nullcontext
 
 import pytest
@@ -40,13 +46,17 @@ class AllocationsOnly(TorchDispatchMode):
         ([129, 0, 131], 8, 2, "strided"),
         ([257], 8, 2, "replace"),
         ([513], 8, 2, "replace"),
+        ([127, 1, 0, 129], 3, 1, "both"),
+        ([0] * 64 + [1], 2, 1, "both"),
+        ([2], 64, 1, "both"),
+        ([129], 8, 2, "mixed"),
     ],
 )
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
 def test_backward(lengths, heads, key_heads, mode, dtype, npu_device):
     torch.manual_seed(42)
     T, N = sum(lengths), len(lengths)
-    q = torch.randn(1, T, key_heads, 128) * 0.1
+    q = torch.randn(1, T, key_heads, 128)
     k = torch.nn.functional.normalize(torch.randn_like(q), dim=-1)
     v = torch.randn(1, T, heads, 128)
     g = -torch.rand(1, T, heads) * 0.1
@@ -65,17 +75,35 @@ def test_backward(lengths, heads, key_heads, mode, dtype, npu_device):
         g.zero_()
     scale = 1.0 if mode in ("replace", "zero_beta") else 0.125
     # Use the exact rounded inputs supplied to the device kernel.
-    inputs = [x.to(dtype).double().requires_grad_() for x in (q, k, v, g, beta, h0)]
+    golden_dtype = torch.float64 if dtype == torch.float32 else torch.float32
+    input_dtypes = [dtype] * 6
+    if mode == "mixed":
+        input_dtypes[3] = input_dtypes[5] = torch.float32
+    inputs = [
+        x.to(dt).to(golden_dtype).requires_grad_()
+        for x, dt in zip((q, k, v, g, beta, h0), input_dtypes)
+    ]
     cu = torch.tensor([0, *torch.tensor(lengths).cumsum(0).tolist()], dtype=torch.int32)
-    out, ht = recurrent_gdn_reference(*inputs, cu_seqlens=cu, scale=scale)
-    do, dh = torch.randn_like(out), torch.randn_like(ht)
+    out, ht = recurrent_gdn_reference(
+        *inputs, cu_seqlens=cu, scale=scale, dtype=golden_dtype
+    )
+    do, dh = torch.randn_like(out).to(dtype), torch.randn_like(ht).to(dtype)
     if mode == "state":
         do.zero_()
     if mode in ("output", "defaults"):
         dh.zero_()
-    do, dh = do.float(), dh.float()
-    ((out * do).sum() + (ht * dh).sum()).backward()
-    device_inputs = [x.detach().to(device=npu_device, dtype=dtype) for x in inputs]
+    expected = torch.autograd.grad(
+        (out, ht), inputs, (do.to(golden_dtype), dh.to(golden_dtype))
+    )
+    pt_inputs = [x.detach().to(dtype).requires_grad_() for x in inputs]
+    pt_out, pt_ht = recurrent_gdn_reference(
+        *pt_inputs, cu_seqlens=cu, scale=scale, dtype=dtype, reorder_ops=True
+    )
+    baseline = torch.autograd.grad((pt_out, pt_ht), pt_inputs, (do, dh))
+    device_inputs = [
+        x.detach().to(device=npu_device, dtype=dt)
+        for x, dt in zip(inputs, input_dtypes)
+    ]
     context = (
         torch.npu.stream(torch.npu.Stream(device=npu_device))
         if mode in ("defaults", "strided")
@@ -103,19 +131,21 @@ def test_backward(lengths, heads, key_heads, mode, dtype, npu_device):
             )
         assert guard.allocations == 7  # Six outputs and one reusable workspace.
         torch.npu.synchronize(npu_device)
-    for name, x, result in zip(
-        ("dq", "dk", "dv", "dg", "dbeta", "dh0"), inputs, actual
+    for name, ref, pt, result in zip(
+        ("dq", "dk", "dv", "dg", "dbeta", "dh0"), expected, baseline, actual
     ):
-        torch.testing.assert_close(
-            result.cpu().double(),
-            x.grad,
-            atol=2e-5,
-            rtol=2e-4,
-            msg=lambda m: f"{name}: {m}",
-        )
+        if not ref.numel():
+            assert result.shape == ref.shape
+            continue
+        assert all(torch.isfinite(x).all() for x in (ref, pt, result.cpu())), name
+        error = (result.cpu().double() - ref.double()).abs().max().item()
+        budget = 2 * (pt.double() - ref.double()).abs().max().item() + 1e-5
+        assert (
+            error <= budget
+        ), f"{name}: kernel error {error:.9g} > 2x PyTorch error + 1e-5 = {budget:.9g}"
     for actual_input, original in zip(device_inputs, inputs):
         torch.testing.assert_close(
-            actual_input.cpu().double(), original, atol=0, rtol=0
+            actual_input.cpu().double(), original.double(), atol=0, rtol=0
         )
 
 

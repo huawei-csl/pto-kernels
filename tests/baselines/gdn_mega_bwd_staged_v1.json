@@ -1,0 +1,167 @@
+{
+  "name": "gdn_mega_bwd_sequence_wide_stages_v1",
+  "measurement_date": "2026-11-04",
+  "baseline_commit": "150fed0",
+  "baseline_results": "tests/baselines/gdn_mega_bwd_rough_v0.json",
+  "device": "Ascend910B2",
+  "container_image": "quay.io/ascend/cann:9.1.0-910b-ubuntu22.04-py3.11",
+  "torch": "2.10.0+cpu",
+  "torch_npu": "2.10.0",
+  "python": "3.11.15",
+  "config": {
+    "batch": 1,
+    "key_heads": 2,
+    "value_heads": 8,
+    "head_dim": 128,
+    "chunk_size": 128,
+    "q_k_v_beta_dout_dtype": "float16",
+    "g_dtype": "float32",
+    "initial_state": null,
+    "dfinal_state": null,
+    "scale": 1.0,
+    "seed": 42,
+    "warmup_calls": 1,
+    "measured_calls": 5,
+    "OMP_NUM_THREADS": 4
+  },
+  "method": "Median hardware wall time, includes validation, allocation, enqueue and final synchronization; excludes compilation and input creation. Backward includes its own forward-state recomputation. No model forward is timed.",
+  "command": "OMP_NUM_THREADS=4 PYTHONPATH=. python tests/benchmark_gdn_mega_bwd.py --tokens 128 512 2048 1024 --profile build/gdn_mega_bwd/profile/staged_v1_final",
+  "results": [
+    {
+      "tokens": 128,
+      "heads": 8,
+      "median_ms": 7.278915960341692,
+      "enqueue_median_ms": 0.3037187270820141,
+      "samples_ms": [
+        7.330005988478661,
+        7.279595825821161,
+        7.274386938661337,
+        7.273855619132519,
+        7.278915960341692
+      ],
+      "baseline_median_ms": 5.004538223147392,
+      "speedup": 0.6875389481639881
+    },
+    {
+      "tokens": 512,
+      "heads": 8,
+      "median_ms": 14.03327425941825,
+      "enqueue_median_ms": 0.3063986077904701,
+      "samples_ms": [
+        15.384071040898561,
+        14.218012802302837,
+        14.033182989805937,
+        14.03327425941825,
+        14.028504025191069
+      ],
+      "baseline_median_ms": 19.56053962931037,
+      "speedup": 1.3938685489726368
+    },
+    {
+      "tokens": 2048,
+      "heads": 8,
+      "median_ms": 41.08177265152335,
+      "enqueue_median_ms": 0.2990099601447582,
+      "samples_ms": [
+        41.08827328309417,
+        41.09842190518975,
+        41.08177265152335,
+        41.07183311134577,
+        41.07536328956485
+      ],
+      "baseline_median_ms": 77.74782134220004,
+      "speedup": 1.892513791984998
+    },
+    {
+      "tokens": 1024,
+      "heads": 8,
+      "median_ms": 20.892610773444176,
+      "enqueue_median_ms": 0.2918587997555733,
+      "samples_ms": [
+        20.888270810246468,
+        20.909619983285666,
+        20.892610773444176,
+        20.882631186395884,
+        20.895260386168957
+      ]
+    }
+  ],
+  "profile": {
+    "tokens": 1024,
+    "method": "Torch NPU profiler hardware trace; each listed event is a device kernel.",
+    "device_stage_launches": 7,
+    "stages": [
+      {
+        "name": "_Z13gdn_bwd_stageILi0EEv4Plan",
+        "duration_us": 680.0195
+      },
+      {
+        "name": "_Z13gdn_bwd_stageILi1EEv4Plan",
+        "duration_us": 116.733
+      },
+      {
+        "name": "_Z13gdn_bwd_stageILi2EEv4Plan",
+        "duration_us": 5446.2735
+      },
+      {
+        "name": "_Z13gdn_bwd_stageILi3EEv4Plan",
+        "duration_us": 160.15
+      },
+      {
+        "name": "_Z13gdn_bwd_stageILi4EEv4Plan",
+        "duration_us": 13735.8165
+      },
+      {
+        "name": "_Z13gdn_bwd_stageILi5EEv4Plan",
+        "duration_us": 258.345
+      },
+      {
+        "name": "_Z13gdn_bwd_stageILi6EEv4Plan",
+        "duration_us": 163.4905
+      }
+    ]
+  },
+  "stage_names": [
+    "prepare",
+    "forward_state_replay",
+    "local_gradients",
+    "reverse_state_propagation",
+    "output_derivatives",
+    "wy_backward",
+    "final_assembly"
+  ],
+  "launch_count_formula": "7 * ceil(packed_sequence_count / 64), independent of token/chunk count",
+  "validation": {
+    "total_tests": 66,
+    "hardware_tests": 58,
+    "cpu_reference_tests": 8,
+    "elapsed_seconds_including_build": 70.11,
+    "atol": 2e-05,
+    "rtol": 0.0002
+  },
+  "build_seconds": {
+    "device": 6.0,
+    "native_host": 11.6
+  },
+  "workspace": {
+    "record_floats_per_chunk_head": 197504,
+    "scratch_bytes": 40894464,
+    "formula_bytes": "4 * max_group_total_chunks * value_heads * 197504 + 39 * 1024 * 1024",
+    "tokens_8192_heads_16_MiB": 810.5
+  },
+  "limitations": [
+    "Short sequences are slower than the rough baseline.",
+    "Sequence-wide intermediate storage increases memory.",
+    "Some matrix temporaries still round-trip through GM inside stages.",
+    "Compensated vector dot products dominate stages 2 and 4."
+  ],
+  "source_sha256": {
+    "csrc/kernel/gdn_mega_bwd/backward.py": "e3b8a29d58af1b25769b5598e1b52d193fb01634aed69a96150b68b5702cc001",
+    "csrc/kernel/gdn_mega_bwd/binding.py": "f5f658f8f8bb798245423c1c95244823c61c191c7d37fd7f86939fabd707cc0b",
+    "csrc/kernel/gdn_mega_bwd/device_ops.h": "57b3f309b8a88da9eec223c30e2549af6978c1e35ffca92a804ae615ddd78619",
+    "csrc/kernel/gdn_mega_bwd/kernel.cpp": "1f50311cfeb85cd9d4443b28f61b0331e57de5175b2141383e316fe3f8ade28d",
+    "csrc/kernel/gdn_mega_bwd/launch.cpp": "62a09306b07b2e67ec03bc73d50656d2c3d01e5998dd5173526b9aeaa5def53f",
+    "csrc/kernel/gdn_mega_bwd/layout.h": "f7e00199c8ad2e7c26dcd0f15d44c59210168a76529f5050a22d3886ba4f39a1",
+    "csrc/kernel/gdn_mega_bwd/primitives.h": "c5df1ca6370510f315825005bbe55fb2b9b5c900e84dd1c708c16a46cf6ff846"
+  }
+}

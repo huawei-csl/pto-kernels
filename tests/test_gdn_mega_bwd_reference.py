@@ -114,3 +114,21 @@ def test_conversions_preserve_gradients_and_inputs():
         torch.testing.assert_close(x, snapshot, rtol=0, atol=0)
         assert x.grad is not None and x.grad.dtype == x.dtype
         assert torch.isfinite(x.grad).all()
+
+
+@pytest.mark.parametrize("tokens", [0, 5])
+def test_reordered_reference_matches_equations(tokens):
+    inputs = make_inputs(tokens=tokens, sequences=3)
+    cu = torch.tensor([0, 0, tokens // 2, tokens])
+    golden = recurrent_gdn_reference(*inputs, cu_seqlens=cu, scale=0.7)
+    reordered = recurrent_gdn_reference(
+        *inputs, cu_seqlens=cu, scale=0.7, reorder_ops=True
+    )
+    upstream = tuple(torch.randn_like(x) for x in golden)
+    for a, b in zip(golden, reordered):
+        torch.testing.assert_close(a, b, atol=1e-12, rtol=1e-12)
+    for a, b in zip(
+        torch.autograd.grad(golden, inputs, upstream),
+        torch.autograd.grad(reordered, inputs, upstream),
+    ):
+        torch.testing.assert_close(a, b, atol=1e-12, rtol=1e-12)

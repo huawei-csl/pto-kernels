@@ -1,0 +1,143 @@
+{
+  "device": "Ascend910B2",
+  "container_image": "quay.io/ascend/cann:9.1.0-910b-ubuntu22.04-py3.11",
+  "torch": "2.10.0+cpu",
+  "torch_npu": "2.10.0",
+  "python": "3.11.15",
+  "method": "Median hardware wall time, includes validation, allocation, enqueue and final synchronization; excludes compilation and input creation. Backward includes its own forward-state recomputation. No model forward is timed.",
+  "stage_names": [
+    "prepare",
+    "forward_state_replay",
+    "local_gradients",
+    "reverse_state_propagation",
+    "output_derivatives",
+    "wy_backward",
+    "final_assembly"
+  ],
+  "launch_count_formula": "7 * ceil(packed_sequence_count / 64), independent of token/chunk count",
+  "name": "gdn_mega_bwd_cube_v2",
+  "measurement_date": "2026-11-04",
+  "baseline_results": "tests/baselines/gdn_mega_bwd_staged_v1_heads16.json",
+  "config": {
+    "batch": 1,
+    "key_heads": 2,
+    "value_heads": 16,
+    "head_dim": 128,
+    "chunk_size": 128,
+    "q_k_v_beta_dout_dtype": "float16",
+    "g_dtype": "float32",
+    "initial_state": null,
+    "dfinal_state": null,
+    "scale": 1.0,
+    "seed": 42,
+    "warmup_calls": 1,
+    "measured_calls": 5,
+    "OMP_NUM_THREADS": 4
+  },
+  "command": "python -m tests.benchmark_gdn_mega_bwd --tokens 2048 8192 --heads 16 --key-heads 2 --repeats 5 --profile build/gdn_mega_bwd/profile/cube_v2_heads16",
+  "results": [
+    {
+      "tokens": 2048,
+      "heads": 16,
+      "key_heads": 2,
+      "median_ms": 5.534444935619831,
+      "enqueue_median_ms": 0.3395210951566696,
+      "samples_ms": [
+        5.567456129938364,
+        5.4986546747386456,
+        5.534444935619831,
+        5.543976090848446,
+        5.524465348571539
+      ],
+      "baseline_median_ms": 75.37792902439833,
+      "speedup": 13.619781188762765
+    },
+    {
+      "tokens": 8192,
+      "heads": 16,
+      "key_heads": 2,
+      "median_ms": 20.48113662749529,
+      "enqueue_median_ms": 0.30321115627884865,
+      "samples_ms": [
+        20.529276691377163,
+        20.478927064687014,
+        20.475565921515226,
+        20.50473727285862,
+        20.48113662749529
+      ],
+      "baseline_median_ms": 293.98431815207005,
+      "speedup": 14.353906401727981
+    }
+  ],
+  "profile": {
+    "tokens": 8192,
+    "device_stage_launches": 7,
+    "stages": [
+      {
+        "name": "_Z13gdn_bwd_stageILi0EEv4Plan",
+        "duration_us": 10977.102
+      },
+      {
+        "name": "_Z13gdn_bwd_stageILi1EEv4Plan",
+        "duration_us": 948.5235
+      },
+      {
+        "name": "_Z13gdn_bwd_stageILi2EEv4Plan",
+        "duration_us": 690.5785
+      },
+      {
+        "name": "_Z13gdn_bwd_stageILi3EEv4Plan",
+        "duration_us": 1146.351
+      },
+      {
+        "name": "_Z13gdn_bwd_stageILi4EEv4Plan",
+        "duration_us": 1881.907
+      },
+      {
+        "name": "_Z13gdn_bwd_stageILi5EEv4Plan",
+        "duration_us": 3500.49
+      },
+      {
+        "name": "_Z13gdn_bwd_stageILi6EEv4Plan",
+        "duration_us": 997.34
+      }
+    ]
+  },
+  "validation": {
+    "total_tests": 71,
+    "hardware_tests": 61,
+    "cpu_reference_tests": 10,
+    "elapsed_seconds": 109.04,
+    "criterion": "Per-gradient max_abs(kernel-golden) <= 2 * max_abs(reordered_pytorch-golden) + 1e-5",
+    "golden_dtype": "float32 for float16/bfloat16 inputs; float64 for float32 inputs",
+    "reordered_dtype": "input dtype",
+    "query_value_upstream": "unit-variance randn; keys normalized",
+    "torch_hotpath": "Exactly seven allocations, no numerical Torch operations"
+  },
+  "workspace": {
+    "record_floats_per_chunk_head": 197504,
+    "scratch_bytes": 47185920,
+    "formula_bytes": "4 * max_group_total_chunks * value_heads * 197504 + 45 * 1024 * 1024",
+    "tokens_8192_heads_16_MiB": 816.5
+  },
+  "limitations": [
+    "This benchmark measures FP16 q/k/v/beta/dout with FP32 gates.",
+    "FP32 q/k/v uses a separate accuracy path (four Cube partials, interval gates, local dQ, direct dBeta); no FP32 speedup is inferred from these timings.",
+    "Forward preparation/recomputation now dominates runtime.",
+    "Intermediate matrices still round-trip through GM; workspace remains large.",
+    "No autograd model wrapper or saved-forward-cache integration."
+  ],
+  "source_sha256": {
+    "csrc/kernel/gdn_mega_bwd/backward.py": "e3b8a29d58af1b25769b5598e1b52d193fb01634aed69a96150b68b5702cc001",
+    "csrc/kernel/gdn_mega_bwd/binding.py": "f5f658f8f8bb798245423c1c95244823c61c191c7d37fd7f86939fabd707cc0b",
+    "csrc/kernel/gdn_mega_bwd/device_ops.h": "2231f9c95c194b0cf0ccad0936dff7f28b3e39bb36d26042ff37f89d5bfc4902",
+    "csrc/kernel/gdn_mega_bwd/kernel.cpp": "31d81c60a1728cf938ea8af2d20035029403f32d917034a4896dd89fbca8810b",
+    "csrc/kernel/gdn_mega_bwd/launch.cpp": "62a09306b07b2e67ec03bc73d50656d2c3d01e5998dd5173526b9aeaa5def53f",
+    "csrc/kernel/gdn_mega_bwd/layout.h": "c92352cecfe287cd40aa9425354af41778f9442799dc37ef22eca85af3e90620",
+    "csrc/kernel/gdn_mega_bwd/primitives.h": "27c1f323b15b1ef12b164bfaea57d9d58cde2301e06e70498a486b9a046825e8",
+    "tests/gdn_mega_bwd_reference.py": "ca176acb78ce36c1366da70a881d782b6b2219c81ee2706bbc7139f6381500b3",
+    "tests/test_gdn_mega_bwd.py": "daeb2b8ada6cddc5a3c1a8c2982b8ed4ec37678d2ffce5722339fa63d1aa62f7",
+    "tests/test_gdn_mega_bwd_reference.py": "fa305fdf46d06e2118fc17a7033ec8dd4e026703eb0ac5e88709d7fdbfc22087",
+    "tests/benchmark_gdn_mega_bwd.py": "cf1497fec17c60e08b40a12e5971513cb300d93d81ac7a6345b62a1f7a83c1ef"
+  }
+}

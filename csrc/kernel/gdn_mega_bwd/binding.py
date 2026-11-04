@@ -27,6 +27,7 @@ def build():
     ]
     key = hashlib.sha256(
         source.read_bytes()
+        + b"".join(p.read_bytes() for p in sorted(source.parent.glob("*.h")))
         + (root / "csrc/kernel/kernel_utils.h").read_bytes()
         + repr(flags).encode()
     ).hexdigest()[:16]
@@ -46,7 +47,7 @@ def build():
     abi = int(torch._C._GLIBCXX_USE_CXX11_ABI)
     native_key = hashlib.sha256(
         native.read_bytes()
-        + str(target).encode()
+        + source.with_name("layout.h").read_bytes()
         + repr((torch.__version__, torch_npu.__version__, abi)).encode()
     ).hexdigest()[:16]
     library = root / "build/gdn_mega_bwd" / native_key / "launch.so"
@@ -71,7 +72,6 @@ def build():
                 f"-D_GLIBCXX_USE_CXX11_ABI={abi}",
                 *[f"-I{x}" for x in includes],
                 str(native),
-                str(target),
                 *[f"-L{x}" for x in libs],
                 *[f"-Wl,-rpath,{x}" for x in libs],
                 "-ltorch_npu",
@@ -85,6 +85,8 @@ def build():
         temporary.replace(library)
         print(f"GDN native launcher build: {time.perf_counter()-start:.2f}s")
     lib = ctypes.CDLL(str(library))
+    lib.device_library = ctypes.CDLL(str(target))
+    lib.stage_launcher = ctypes.cast(lib.device_library.launch_stages, ctypes.c_void_p)
     lib.workspace_elements.argtypes = [
         ctypes.POINTER(ctypes.c_int64),
         ctypes.c_int,
@@ -100,6 +102,7 @@ def build():
         ctypes.POINTER(ctypes.c_void_p),
         ctypes.c_void_p,
         ctypes.c_float,
+        ctypes.c_void_p,
     ]
     lib.gdn_backward.restype = None
     return lib
