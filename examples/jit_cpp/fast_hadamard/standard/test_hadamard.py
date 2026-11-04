@@ -3,11 +3,16 @@ import math
 import pytest
 import torch
 
+from standard.jit_util_hadamard import (
+    MAX_HADAMARD_N,
+    SPECIALISED_HADAMARD_N,
+    validate_hadamard_args,
+)
+
 TEST_BATCHES = [1, 7, 22, 65]
 TEST_HIDDEN_DIMS = [128, 256, 512, 1024, 2048, 4096, 8192, 16384]
 TEST_SEEDS = [0, 1]
 DTYPE = torch.float16
-MAX_HADAMARD_N = 16 * 1024
 
 
 def hadamard_ref_inplace(x):
@@ -25,48 +30,11 @@ def hadamard_ref_inplace(x):
     return x
 
 
-def validate_hadamard_args(x, batch, n, log2_n):
-    if not isinstance(x, torch.Tensor):
-        raise TypeError("x must be a torch.Tensor")
-    if x.device.type != "npu":
-        raise ValueError(f"x must be on an NPU device, got {x.device}")
-    if x.dtype != torch.float16:
-        raise TypeError(f"x must have dtype torch.float16, got {x.dtype}")
-    if x.dim() != 2:
-        raise ValueError(f"x must be 2D with shape [batch, n], got {tuple(x.shape)}")
-    if not x.is_contiguous():
-        raise ValueError("x must be contiguous")
-
-    batch = int(batch)
-    n = int(n)
-    log2_n = int(log2_n)
-
-    if batch < 0:
-        raise ValueError(f"batch must be >= 0, got {batch}")
-    if n <= 0:
-        raise ValueError(f"n must be > 0, got {n}")
-    if n > MAX_HADAMARD_N:
-        raise ValueError(f"n must be <= {MAX_HADAMARD_N}, got {n}")
-    if x.shape != (batch, n):
-        raise ValueError(f"x shape {tuple(x.shape)} must match batch={batch} and n={n}")
-    if n & (n - 1):
-        raise ValueError(f"n must be a power of two, got {n}")
-
-    expected_log2_n = int(math.log2(n))
-    if log2_n != expected_log2_n:
-        raise ValueError(
-            f"log2_n must equal int(log2(n))={expected_log2_n}, got {log2_n}"
-        )
-
-    return batch, n, log2_n
-
-
 def run_hadamard_inplace(hadamard_kernel, x, log2_n=None):
     n = x.shape[-1]
     if log2_n is None:
         log2_n = int(math.log2(n))
-    batch, n, log2_n = validate_hadamard_args(x, x.shape[0], n, log2_n)
-    hadamard_kernel(x, batch, n, log2_n)
+    hadamard_kernel(x, x.shape[0], n, log2_n)
     torch.npu.synchronize()
 
 
@@ -151,3 +119,45 @@ def test_shape_mismatch_rejected(npu_device):
 
     with pytest.raises(ValueError, match="must match batch=1 and n=1024"):
         validate_hadamard_args(x, 1, 1024, 10)
+
+
+@pytest.mark.parametrize("n", [192, MAX_HADAMARD_N + 1])
+def test_kernel_wrapper_rejects_invalid_n(hadamard_kernel, npu_device, n):
+    """The wrapper must apply the restrictions, not just re-export them.
+
+    Without this the validator could sit in jit_util_hadamard.py and never be
+    called, and every bad argument would still reach the kernel and fail
+    silently -- which is the state this moved out of.
+    """
+    x = torch.randn(2, n, device=npu_device, dtype=DTYPE)
+    with pytest.raises(ValueError, match="power of two|<= 16384"):
+        hadamard_kernel(x)
+
+
+def test_kernel_wrapper_rejects_wrong_log2(hadamard_kernel, npu_device):
+    x = torch.randn(2, 1024, device=npu_device, dtype=DTYPE)
+    with pytest.raises(ValueError, match="log2_n"):
+        hadamard_kernel(x, 2, 1024, 9)
+
+
+def test_kernel_wrapper_derives_batch_n_and_log2(hadamard_kernel, npu_device):
+    """x alone is enough; the three redundant arguments are optional."""
+    torch.manual_seed(0)
+    x = torch.randn(7, 1024, device=npu_device, dtype=DTYPE)
+    expected = hadamard_ref_inplace(x)
+    hadamard_kernel(x)
+    torch.npu.synchronize()
+    assert torch.equal(x, expected)
+
+
+def test_zero_batch_is_a_no_op(hadamard_kernel, npu_device):
+    x = torch.randn(0, 1024, device=npu_device, dtype=DTYPE)
+    hadamard_kernel(x)
+    torch.npu.synchronize()
+    assert x.shape == (0, 1024)
+
+
+@pytest.mark.parametrize("n", SPECIALISED_HADAMARD_N)
+def test_specialised_sizes_are_all_powers_of_two_within_the_limit(n):
+    assert n & (n - 1) == 0
+    assert n <= MAX_HADAMARD_N
