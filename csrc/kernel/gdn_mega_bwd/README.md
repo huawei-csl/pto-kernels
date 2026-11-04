@@ -1,14 +1,93 @@
 # Sequence-wide GDN backward
 
 Packed B=1, D=C=128, FP16/BF16/FP32 inputs and FP32 gradients. The backward
-recomputes from its inputs; no saved forward intermediates are required.
+can recompute from its inputs or consume an optional inverse cache from forward.
 Python validates, allocates six outputs and one workspace, then enqueues once.
+
+## Optional forward inverse cache
+
+Allocate a separate contiguous FP32 tensor `[num_chunks, H, 128, 128]`, where
+`num_chunks = sum(ceil(sequence_length/128))`, and pass it to both calls:
+
+```python
+inverse_cache = torch.empty(num_chunks, H, 128, 128, device=q.device, dtype=torch.float32)
+pto_gdn_mega(**forward_launch_args, inverse_cache=inverse_cache)
+grads = backward(q, k, v, g, beta, dout, h0, dht, cu_seqlens,
+                 scale=scale, inverse_cache=inverse_cache)
+```
+
+The cache belongs to those exact k/g/beta and sequence boundaries. Retain it
+until backward finishes; the backward reads it without modifying it. A model
+autograd wrapper can retain it using `ctx.save_for_backward` alongside inputs.
+Omitting it keeps the recomputation path. Other inverse scratch remains opaque and is not a substitute for this cache. Rebuild the forward host binding
+and device library together for the added optional argument.
+
+The forward does not materialize a complete inverse. For `M=I+L`, it already
+computes `D0=M00^-1`, `D1=M11^-1` and `P=-D1*L10`. The cache stores
+`[D0, 0; P, D1]`. Existing vector/Cube exchanges are redirected into the
+cache instead of copied afterward. No additional forward matrix products,
+data stores or kernel launches are introduced.
+Backward completes `A10=P*D0` with one 64x64 Cube product, transposes the
+result, and skips the triangular inversion. KK, W/U, states and Z are still recomputed. Gate prefixes can also be
+retained as described below. There are still seven backward stages.
+
+The cache uses 16 MiB at 2K tokens/H=16 and 64 MiB at 8K/H=16 (plus padded
+packed tails). It survives from forward to backward; the existing 816.5 MiB
+backward workspace at 8K/H=16 is unchanged. Forward's current dtype contract
+is FP16 q/k/v/beta and FP32 gates.
+
+Measured at H=16/Hk=2 with FP16 inputs and FP32 gates:
+
+| Tokens | Cube baseline backward | Cached backward | Forward device, cache off → on |
+| --- | --- | --- | --- |
+| 2048 | 5.534 ms | 4.529 ms | 345.271 → 348.904 us |
+| 8192 | 20.481 ms | 16.641 ms | 1268.518 → 1280.014 us |
+
+Backward uses synchronized wall time including allocation and recomputation.
+Forward uses 31 graph trials of 20 calls each; allocation is excluded.
+Caching adds approximately 1% forward time here, rather than being literally
+free. The 8K preparation stage drops from 10.977 to 7.107 ms. **349 tests pass**,
+including cached gradients at every supported head count. Measurements and
+source hashes are recorded in
+[`gdn_mega_bwd_inverse_cache_v3.json`](../../../tests/baselines/gdn_mega_bwd_inverse_cache_v3.json).
+
+## Existing gate and beta buffers
+
+Forward already leaves `(g_t, g_sum, beta_t)` in physical `[H,T]` layout.
+`g_t` and `g_sum` are the high and low FP32 parts of each chunk's cumulative
+log gate; `beta_t` is FP16 beta. Keep these exact buffers alive and pass
+`gate_cache=(g_t, g_sum, beta_t)` to backward, optionally alongside
+`inverse_cache`. No forward code or computation is added for this reuse.
+Backward loads them contiguously and skips the prefix scan and beta packing;
+exponentials and pairwise gate decay are still computed in PTO. These buffers
+must belong to the same inputs and packed sequence boundaries, and must not
+be overwritten by another forward before backward finishes.
+
+Retaining all three costs 0.3125 MiB at 2K/H=16 or 1.25 MiB at 8K/H=16.
+`ctx.save_for_backward` can retain them without copying. The original `g`
+and `beta` inputs remain part of the backward API. The original `h0` is
+already reused; chunk-boundary states are still replayed. This forward does
+not compute an `rstd`: Q/K normalization happens upstream and its autograd
+operation owns any normalization statistics.
+
+At H=16/Hk=2, 31-sample measurements with the same inputs give:
+
+| Tokens | Inverse cache only (ms) | Inverse + gate/beta cache (ms) |
+| --- | --- | --- |
+| 2048 | 4.670 | 4.320 |
+| 8192 | 17.194 | 15.799 |
+
+Synchronized wall time includes backward allocations. These are consecutive
+processes, so clock/thermal variation can affect the comparison. The 8K trace
+still shows seven stages, with preparation at 5.733 ms. See the
+[raw samples and source hashes](../../../tests/baselines/gdn_mega_bwd_gate_cache_v4.json).
+Add `--gate-cache` to the inverse-cache benchmark command below to reproduce.
 
 ## Seven device stages
 
 | Stage | Work | Scheduling |
 | --- | --- | --- |
-| 0 | Pack inputs; prefix gates; Gram products; inverse; W/U | Independent chunk/head tasks |
+| 0 | Pack inputs; prefix gates; Gram products; reconstruct cached inverse or invert; W/U | Independent chunk/head tasks |
 | 1 | Replay incoming states and corrected values Z | Forward chunk loop inside each sequence/head task |
 | 2 | Local value-update gradients and local state-gradient contribution | Independent chunk/head tasks |
 | 3 | Complete value-update gradients and propagate state adjoints; write dh0 | Reverse chunk loop inside each sequence/head task |
@@ -91,8 +170,10 @@ For each of dq, dk, dv, dg, dbeta and dh0, the kernel's maximum absolute error
 must be at most twice the baseline's maximum absolute error plus `1e-5`. Golden
 gradients retain their computation precision, since this API returns FP32
 gradients. CPU tests also check that the reordered equations and derivatives
-agree in FP64. Only the reference runs forward here; the device backward
-recomputes its inputs and does not call the forward megakernel.
+agree in FP64. Cache tests also run the forward megakernel to produce saved
+buffers; recomputation tests need only the reference forward. The device
+backward itself never calls the forward megakernel. The latest gate-cache
+validation passes 107 checks (97 hardware, 10 CPU reference).
 
 Sequence-wide stages use more GM storage: 12 FP32 matrices and seven FP32
 vectors per chunk/head, plus 45 MiB of reusable per-block scratch (including
@@ -101,7 +182,7 @@ and 16 value heads the workspace is **816.5 MiB**, versus the rough baseline's
 162 MiB. Slots are reused after their last consumer (W→dW, U→Z, Q→dQ,
 dOut→dV, state adjoint→dK). This workspace exists during backward only.
 
-The model autograd wrapper and forward-cache integration remain separate work.
+The model autograd wrapper remains separate work.
 See [development notes](../../../memory_bwd.md) for validation and profiling.
 
 After sourcing CANN, run from the repository root:
@@ -110,4 +191,5 @@ After sourcing CANN, run from the repository root:
 OMP_NUM_THREADS=4 NPU_DEVICE=npu:0 python -m pytest tests/test_gdn_mega_bwd.py tests/test_gdn_mega_bwd_reference.py -q
 OMP_NUM_THREADS=4 PYTHONPATH=. python tests/benchmark_gdn_mega_bwd.py
 OMP_NUM_THREADS=4 PYTHONPATH=. python tests/benchmark_gdn_mega_bwd.py --tokens 1024 --profile build/gdn_mega_bwd/profile/current
+OMP_NUM_THREADS=4 PYTHONPATH=python:. python tests/benchmark_gdn_mega_bwd.py --tokens 2048 8192 --heads 16 --inverse-cache
 ```

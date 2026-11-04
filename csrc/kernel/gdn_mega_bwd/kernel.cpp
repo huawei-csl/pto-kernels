@@ -12,12 +12,27 @@ AICORE inline void prepare(const Plan& p,int c,int head,Ops& o) {
   o.pack(p.input[1],first,kh,length,x.m(K));
   o.pack(p.input[2],first,head,length,x.m(V));
   o.pack(p.input[5],first,head,length,x.m(DO_DV));
-  auto g=o.pack(p.input[3],first,head,length,o.empty(true));
-  o.pack(p.input[4],first,head,length,x.v(BETA));
-  gates(g.data,x.v(EXP).data,x.v(RATIO).data,x.m(DECAY).data,1,o.accurate); join();
+  if(p.gate_cache[0]) {
+    auto hi=o.empty(true),lo=o.empty(true); int64_t offset=int64_t(head)*p.tokens+first;
+    cached_row((__gm__ float*)p.gate_cache[0]+offset,hi.data,length);
+    cached_row((__gm__ float*)p.gate_cache[1]+offset,lo.data,length);
+    cached_row((__gm__ half*)p.gate_cache[2]+offset,x.v(BETA).data,length); join();
+    gates(hi.data,x.v(EXP).data,x.v(RATIO).data,x.m(DECAY).data,1,o.accurate,lo.data,length); join();
+  } else {
+    auto g=o.pack(p.input[3],first,head,length,o.empty(true));
+    o.pack(p.input[4],first,head,length,x.v(BETA));
+    gates(g.data,x.v(EXP).data,x.v(RATIO).data,x.m(DECAY).data,1,o.accurate); join();
+  }
   o.mm(x.m(K),x.m(K),false,true,x.m(KK));
-  auto l=o.call(9,0,x.m(KK),x.m(DECAY),x.v(BETA));
-  o.call(5,0,l,{},{},{},1,x.m(AT));
+  if(p.inverse_cache) {
+    auto factor=o.empty();
+    o.copy({(__gm__ float*)p.inverse_cache+(int64_t(c)*p.heads+head)*Matrix},factor);
+    complete_cached_inverse(factor.data); join();
+    transpose_inverse(factor.data,x.m(AT).data); join();
+  } else {
+    auto l=o.call(9,0,x.m(KK),x.m(DECAY),x.v(BETA));
+    o.call(5,0,l,{},{},{},1,x.m(AT));
+  }
   auto kb=o.row(x.m(K),o.mul(x.v(BETA),x.v(EXP))),vb=o.row(x.m(V),x.v(BETA));
   o.mm(x.m(AT),kb,true,false,x.m(W_DW));
   o.mm(x.m(AT),vb,true,false,x.m(U_Z));

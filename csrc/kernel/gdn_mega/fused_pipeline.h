@@ -237,7 +237,8 @@ AICORE inline void mega_finish_inverse(
     __gm__ float* g, __gm__ float* glow, __gm__ float* lower,
     __gm__ float* full, __gm__ half* weighted_first, int64_t pos, int valid,
     int head, int kh, int64_t tokens, __gm__ half* first, __gm__ half* second,
-    __gm__ half* original_k, __gm__ half* weighted_second) {
+    __gm__ half* original_k, __gm__ half* weighted_second,
+    __gm__ float* inverse_cache) {
 #if defined(__DAV_VEC__)
   constexpr int R = C / 2, Gate = 160 * 1024;
   int stripe = get_subblockid() * R, count = max(0, min(R, valid - stripe)),
@@ -261,7 +262,9 @@ AICORE inline void mega_finish_inverse(
   kernel_utils::PipeBarrierVec();
   mega_diagonal_inverses(a, raw, stripe);
   pipe_barrier(PIPE_ALL);
+  // With caching, the existing exchange itself becomes persistent storage.
   GlobalTensor<float, Shape<1, 1, 1, R, C>, pto::Stride<1, 1, 1, C, 1>> native(
+      inverse_cache ? inverse_cache + stripe*C :
       reinterpret_cast<__gm__ float*>(stripe == 0 ? first : second));
   TSTORE(native, a);
   pipe_barrier(PIPE_ALL);
@@ -315,13 +318,13 @@ AICORE inline void mega_prepare_inverse(
     __gm__ half* attention_high, __gm__ half* attention_low, int64_t pos,
     int valid, int head, int kh, int64_t tokens, __gm__ half* first,
     __gm__ half* second, __gm__ half* original_k,
-    __gm__ half* weighted_second) {
+    __gm__ half* weighted_second, __gm__ float* inverse_cache) {
   mega_prepare_weights<H, C>(g, glow, beta, kk, kk_upper, qk, lower, full,
                              attention_high, attention_low, pos, valid, head,
                              kh, tokens);
   mega_finish_inverse<H, C>(g, glow, lower, full, weighted_first, pos, valid,
                             head, kh, tokens, first, second, original_k,
-                            weighted_second);
+                            weighted_second, inverse_cache);
 }
 
 // State is resident at [64,96) KiB in each vector subblock for the entire head.
@@ -494,7 +497,7 @@ AICORE inline void mega_fused_pipeline(
     __gm__ half* final_state, __gm__ half* initial, bool has_initial,
     __gm__ int32_t* cu, int64_t sequences, int kh, int64_t tokens,
     __gm__ float* kk, __gm__ float* kk_upper, __gm__ float* qk,
-    __gm__ float* lower, __gm__ float* full) {
+    __gm__ float* lower, __gm__ float* full, __gm__ float* inverse_cache) {
 #if defined(__DAV_VEC__)
   set_mask_norm();
   set_vector_mask(-1, -1);
@@ -545,12 +548,16 @@ AICORE inline void mega_fused_pipeline(
   for (int64_t work = block; work < sequences * H; work += get_block_num()) {
     int seq = work / H, head = work % H;
     int64_t start = cu[seq], end = cu[seq + 1];
+    int64_t chunk_base = 0;
+    if (inverse_cache)
+      for (int i = 0; i < seq; ++i) chunk_base += (cu[i+1]-cu[i]+C-1)/C;
+    auto saved = inverse_cache ? inverse_cache + (chunk_base*H+head)*C*C : nullptr;
 #if defined(__DAV_VEC__)
     if (start < end)
       mega_prepare_inverse<H, C>(
           g, glow, beta, kk, kk_upper, qk, lower, full, weighted_first,
           att_high, att_low, start, min(static_cast<int64_t>(C), end - start),
-          head, kh, tokens, first, second, k, weighted_second);
+          head, kh, tokens, first, second, k, weighted_second, saved);
     mega_initialize_state<D>(has_initial ? initial + work * D * D : initial,
                              final_state + work * D * D, exchange, has_initial,
                              start == end);
@@ -582,7 +589,7 @@ AICORE inline void mega_fused_pipeline(
         mega_finish_inverse<H, C>(g, glow, lower, full, weighted_first, pos + C,
                                   min(static_cast<int64_t>(C), end - pos - C),
                                   head, kh, tokens, first, second, k,
-                                  weighted_second);
+                                  weighted_second, saved ? saved + H*C*C : nullptr);
       mega_wait(9);
       mega_finish_output<H, C, D>(local_output, output + (pos * H + head) * D,
                                   valid);
@@ -622,13 +629,13 @@ AICORE inline void mega_fused_pipeline(
       TASSIGN(first_half, 64 * 1024);
       TASSIGN(second_half, 64 * 1024 + (C / 2) * 8 * sizeof(float));
       GlobalTensor<float, Shape<1, 1, 1, C / 2, C>, pto::Stride<1, 1, 1, C, 1>>
-          fg(reinterpret_cast<__gm__ float*>(first)),
-          sg(reinterpret_cast<__gm__ float*>(second));
+          fg(saved ? saved : reinterpret_cast<__gm__ float*>(first)),
+          sg(saved ? saved + (C/2)*C : reinterpret_cast<__gm__ float*>(second));
       TLOAD(first_half, fg);
       TLOAD(second_half, sg);
       pipe_barrier(PIPE_ALL);
       mega_signal<PIPE_FIX>(5);
-      mega_float_inverse<C>(inverse, solve_scratch);
+      mega_float_inverse<C>(inverse, solve_scratch, saved);
       {
         auto storage =
             reinterpret_cast<__gm__ float*>(head < H / 2 ? att_high : att_low);
@@ -687,6 +694,7 @@ AICORE inline void mega_fused_pipeline(
       mega_load_pair<D, D>(state, sh, sh + D, D, 2 * D);
       mega_signal<PIPE_MTE2>(7);
 #endif
+      if (saved) saved += H*C*C;
     }
 #if defined(__DAV_VEC__)
     mega_wait(7);

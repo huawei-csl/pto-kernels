@@ -53,7 +53,7 @@ class AllocationsOnly(TorchDispatchMode):
     ],
 )
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
-def test_backward(lengths, heads, key_heads, mode, dtype, npu_device):
+def test_backward(lengths, heads, key_heads, mode, dtype, npu_device, cache_mode=None):
     torch.manual_seed(42)
     T, N = sum(lengths), len(lengths)
     q = torch.randn(1, T, key_heads, 128)
@@ -79,6 +79,8 @@ def test_backward(lengths, heads, key_heads, mode, dtype, npu_device):
     input_dtypes = [dtype] * 6
     if mode == "mixed":
         input_dtypes[3] = input_dtypes[5] = torch.float32
+    if cache_mode:
+        input_dtypes[3] = torch.float32  # Forward mega's gate dtype.
     inputs = [
         x.to(dt).to(golden_dtype).requires_grad_()
         for x, dt in zip((q, k, v, g, beta, h0), input_dtypes)
@@ -111,6 +113,37 @@ def test_backward(lengths, heads, key_heads, mode, dtype, npu_device):
     )
     with context:
         device_do, device_dh = do.to(npu_device), dh.to(npu_device)
+        cache, gate_cache = None, None
+        if cache_mode:
+            from test_gdn_mega import _prepare_gdn_mega, pto_gdn_mega
+
+            launch = _prepare_gdn_mega(
+                *device_inputs[:5], cu.to(npu_device), device_inputs[5]
+            )
+            if cache_mode != "gates":
+                cache = torch.empty(
+                    launch["num_matrices"] // heads,
+                    heads,
+                    128,
+                    128,
+                    device=npu_device,
+                    dtype=torch.float32,
+                )
+            pto_gdn_mega(**launch)
+            out_before, state_before = (
+                launch["out"].clone(),
+                launch["final_state"].clone(),
+            )
+            pto_gdn_mega(**launch, inverse_cache=cache)
+            torch.testing.assert_close(launch["out"], out_before, atol=0, rtol=0)
+            torch.testing.assert_close(
+                launch["final_state"], state_before, atol=0, rtol=0
+            )
+            if cache is not None:
+                cache_before = cache.clone()
+            if cache_mode != "inverse":
+                gate_cache = tuple(launch[name] for name in ("g_t", "g_sum", "beta_t"))
+                gates_before = tuple(x.clone() for x in gate_cache)
         if mode in ("defaults", "strided"):
             device_inputs = [
                 x.transpose(-1, -2).contiguous().transpose(-1, -2)
@@ -128,6 +161,8 @@ def test_backward(lengths, heads, key_heads, mode, dtype, npu_device):
                 None if mode in ("output", "defaults") else device_dh,
                 None if mode == "defaults" else cu,
                 scale=scale,
+                inverse_cache=cache,
+                gate_cache=gate_cache,
             )
         assert guard.allocations == 7  # Six outputs and one reusable workspace.
         torch.npu.synchronize(npu_device)
@@ -147,6 +182,31 @@ def test_backward(lengths, heads, key_heads, mode, dtype, npu_device):
         torch.testing.assert_close(
             actual_input.cpu().double(), original.double(), atol=0, rtol=0
         )
+    if cache is not None:
+        torch.testing.assert_close(cache, cache_before, atol=0, rtol=0)
+    if gate_cache is not None:
+        for x, before in zip(gate_cache, gates_before):
+            torch.testing.assert_close(x, before, atol=0, rtol=0)
+
+
+@pytest.mark.parametrize(
+    "lengths,heads,key_heads,mode",
+    [
+        ([129], 8, 2, "both"),
+        ([256], 16, 4, "both"),
+        ([0, 1, 17, 0, 129], 8, 2, "strided"),
+        ([257], 8, 2, "replace"),
+        ([513], 8, 2, "weak"),
+        ([0, 0], 8, 2, "both"),
+        ([1] + [0] * 63 + [1], 8, 2, "both"),
+        *[([65], h, h // 4, "both") for h in (12, 24, 32, 48, 64)],
+    ],
+)
+@pytest.mark.parametrize("cache_mode", ["inverse", "gates", "both"])
+def test_saved_forward(lengths, heads, key_heads, mode, cache_mode, npu_device):
+    test_backward(
+        lengths, heads, key_heads, mode, torch.float16, npu_device, cache_mode
+    )
 
 
 def test_queued_calls(npu_device):

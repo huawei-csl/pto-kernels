@@ -55,6 +55,32 @@ AICORE inline void matmul(__gm__ float* a, __gm__ float* b,
 #endif
 }
 
+// The forward saves [D0,0; P,D1], P=-D1*L10. Complete A10=P*D0 on Cube.
+AICORE inline void complete_cached_inverse(__gm__ float* factor) {
+#if defined(__DAV_CUBE__)
+  Tile<TileType::Mat,float,128,128,BLayout::ColMajor,128,128,SLayout::RowMajor,512> f;
+  TileLeft<float,64,64> left; TileRight<float,64,64> right;
+  TileAcc<float,64,64> acc;
+  TASSIGN(f,0); TASSIGN(left,0); TASSIGN(right,0); TASSIGN(acc,0);
+  load<128,128>(f,factor);
+  TEXTRACT(left,f,64,0); TEXTRACT(right,f,0,0); sync();
+  TMATMUL(acc,left,right); sync();
+  GlobalTensor<float,Shape<1,1,1,64,64>,Stride<1,1,1,128,1>> gm(factor+64*128);
+  TSTORE(gm,acc); sync();
+#endif
+}
+AICORE inline void transpose_inverse(__gm__ float* x,__gm__ float* y) {
+#if defined(__DAV_VEC__)
+  Tile<TileType::Vec,float,128,64> input;
+  Half output,tmp;
+  TASSIGN(input,0); TASSIGN(output,32768); TASSIGN(tmp,65536);
+  int stripe=get_subblockid();
+  GlobalTensor<float,Shape<1,1,1,128,64>,Stride<1,1,1,128,1>> gm(x+stripe*64);
+  TLOAD(input,gm); sync(); TTRANS(output,input,tmp); sync();
+  store<64,128>(output,y+stripe*8192);
+#endif
+}
+
 // Matrix products execute on Cube. Vector cores only add the partial results
 // with compensation, shortening FP32 accumulation chains without vector dots.
 AICORE inline void sum_products(__gm__ float* parts,__gm__ float* out) {
@@ -209,9 +235,26 @@ AICORE inline void vector_op(__gm__ float* x,__gm__ float* y,__gm__ float* z,
 #endif
 }
 
+// Cached head-major vectors load contiguously, including short packed tails.
+template<class T>
+AICORE inline void cached_row(__gm__ T* src,__gm__ float* dst,int valid) {
+#if defined(__DAV_VEC__)
+  if(get_subblockid()!=0) return;
+  Tile<TileType::Vec,T,1,128> input;
+  Tile<TileType::Vec,T,1,128,BLayout::RowMajor,1,DYNAMIC> part(valid);
+  Row output; TASSIGN(input,0); TASSIGN(part,0); TASSIGN(output,512);
+  TEXPANDS(input,static_cast<T>(0)); sync();
+  GlobalTensor<T,Shape<1,1,1,1,DYNAMIC>,Stride<1,1,1,128,1>> gm(src,{1,1,1,1,valid});
+  TLOAD(part,gm); sync();
+  if constexpr(std::is_same_v<T,float>) store<1,128>(input,dst);
+  else { TCVT(output,input,RoundMode::CAST_NONE); sync(); store<1,128>(output,dst); }
+#endif
+}
+
 // Natural-log gate prefix, exp(G), exp(G_end-G), and causal exp(G_i-G_j).
 AICORE inline void gates(__gm__ float* g,__gm__ float* e,
-    __gm__ float* r,__gm__ float* decay,int batch,bool accurate) {
+    __gm__ float* r,__gm__ float* decay,int batch,bool accurate,
+    __gm__ float* low=nullptr,int valid=128) {
 #if defined(__DAV_VEC__)
   if(get_subblockid()!=0) return;
   Row prefix,expv,ratio,raw; Col col; Half a,b;
@@ -220,14 +263,26 @@ AICORE inline void gates(__gm__ float* g,__gm__ float* e,
   TASSIGN(a,2048); TASSIGN(b,34816);
   for(int h=0;h<batch;++h) {
     load<1,128>(prefix,g+h*128);
-    if(accurate) { TADDS(raw,prefix,0.0f); sync(); }
     float sum=0.0f,correction=0.0f;
-    for(int i=0;i<128;++i) {
-      float delta=prefix.GetValue(i)-correction,next=sum+delta;
-      correction=(next-sum)-delta; sum=next; prefix.SetValue(i,sum);
+    if(low) {
+      load<1,128>(raw,low+h*128);
+      sum=prefix.GetValue(valid-1); float last_low=raw.GetValue(valid-1);
+      for(int i=valid;i<128;++i) { prefix.SetValue(i,sum); raw.SetValue(i,last_low); }
+    } else {
+      if(accurate) { TADDS(raw,prefix,0.0f); sync(); }
+      for(int i=0;i<128;++i) {
+        float delta=prefix.GetValue(i)-correction,next=sum+delta;
+        correction=(next-sum)-delta; sum=next; prefix.SetValue(i,sum);
+      }
     }
-    sync(); TEXP(expv,prefix); sync(); store<1,128>(expv,e+h*128);
-    if(accurate) {
+    sync(); TEXP(expv,prefix); sync();
+    if(low) { TEXP(ratio,raw); sync(); TMUL(expv,expv,ratio); sync(); }
+    store<1,128>(expv,e+h*128);
+    if(low) {
+      TMULS(ratio,prefix,-1.0f); sync(); TADDS(ratio,ratio,sum); sync();
+      TMULS(expv,raw,-1.0f); sync(); TADDS(expv,expv,raw.GetValue(127)); sync();
+      TADD(ratio,ratio,expv); sync();
+    } else if(accurate) {
       // Sum intervals directly: subtracting rounded large prefixes loses bits.
       float tail=0.0f,low=0.0f;
       for(int i=127;i>=0;--i) {
@@ -240,7 +295,7 @@ AICORE inline void gates(__gm__ float* g,__gm__ float* e,
     TEXP(ratio,ratio); sync(); store<1,128>(ratio,r+h*128);
     for(int stripe=0;stripe<2;++stripe) {
       TASSIGN(col,stripe*64*4);
-      if(accurate) {
+      if(accurate && !low) {
         TEXPANDS(a,0.0f); sync();
         for(int i=0;i<64;++i) {
           float interval=0.0f,low=0.0f;
@@ -254,6 +309,11 @@ AICORE inline void gates(__gm__ float* g,__gm__ float* e,
       } else {
         TCOLEXPAND(a,prefix); sync(); TMULS(a,a,-1.0f); sync();
         TROWEXPANDADD(a,a,col); sync();
+        if(low) {
+          TCOLEXPAND(b,raw); sync(); TMULS(b,b,-1.0f); sync();
+          TASSIGN(col,1536+stripe*64*4);
+          TROWEXPANDADD(b,b,col); sync(); TADD(a,a,b); sync();
+        }
       }
       // Clamp upper-triangular exponents before exp, preventing 0*inf.
       TEXPANDS(b,1.0f); sync();

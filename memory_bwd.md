@@ -1,6 +1,95 @@
 # GDN backward development
 
-## Current Cube implementation
+## Reusing existing gate and beta outputs
+
+The inverse export below did change forward code; it redirects existing
+exchanges to a retained buffer. Gate/beta reuse needs no further forward
+numerical changes: `gate_scan.h` already writes the high FP32 chunk prefix
+into `g_t`, its low FP32 part into `g_sum`, and FP16 beta into `beta_t`.
+All three have physical `[H,T]` layout, despite g_sum's historical logical
+`[1,T,H]` allocation. Preserve their lifetime and pass
+`gate_cache=(g_t,g_sum,beta_t)` to backward. Never share these buffers with
+a subsequent forward until their backward consumer has completed.
+
+PTO loads these rows contiguously, skipping raw gate/beta packing and the
+prefix scan. It forms exp(G) as exp(high)*exp(low), and intervals from the
+differences of both parts, matching the forward's compensated representation.
+Tail prefixes repeat the last valid value, with padded beta zero. Exponentials,
+pairwise decays, KK, W/U, chunk states and Z remain recomputed. Both caches
+are optional and read-only; the seven-stage schedule and seven allocations
+remain unchanged. Retaining gates/beta adds 0.3125 / 1.25 MiB at 2K / 8K,
+H=16, with no new forward writes. The original h0 is already consumed;
+retaining chunk-boundary states would be a separate 64 MiB cache at 8K/H=16.
+There is no normalization rstd in this forward; normalization is upstream.
+
+Validation: **107 passed in 185.35 s** (97 hardware, 10 CPU reference),
+including 36 saved-forward cases covering inverse-only, gates-only and both.
+These exercise all seven supported head counts, packed tails, empty sequences,
+weak decay, repeated keys, strided inputs and the 64-sequence grouping boundary.
+All six gradients retain the `2 * reordered_PyTorch_max_error + 1e-5` bound;
+read-only cache checks and the seven-allocation/no-Torch-computation guard pass.
+Forward numerical code was unchanged for this addition; the preceding inverse
+export had already passed all 266 forward checks.
+
+Consecutive 31-sample runs at H=16/Hk=2 measured inverse-only backward at
+**4.670 / 17.194 ms** for 2K / 8K, and inverse+gates at **4.320 / 15.799 ms**
+(7.5% / 8.1% lower wall time). The latter 8K trace has seven launches, with
+preparation taking 5.733 ms. Separate processes can have different clock/thermal
+state; raw samples, profile and hashes are retained in
+`tests/baselines/gdn_mega_bwd_gate_cache_v4.json`. Forward timing in this record
+still compares the existing inverse-cache switch; gate retention itself changes
+no forward work. The earlier v2/v3 records remain untouched.
+
+## Optional forward inverse cache
+
+Commit **c03edb2** preserves the validated Cube baseline before this work.
+The optional `inverse_cache` argument is shared by `pto_gdn_mega` and
+`backward`. It is a dedicated contiguous FP32 `[num_chunks,H,128,128]` tensor
+in packed sequence/chunk order; hold it with the original inputs until
+backward completes. The backward does not modify it. Caller allocation and
+the seven-stage backward launch structure are unchanged.
+
+The forward's final 64x64 join deliberately stops short of a full inverse.
+It holds D0=M00^-1, D1=M11^-1 and P=-D1*L10 for M=I+L. Exporting a tensor
+called “inverse” without accounting for this would produce wrong gradients.
+The cache contract is `[D0,0;P,D1]`; backward computes only the missing block
+P*D0 on Cube, then transposes the result for its existing WY equations.
+It skips weighted-triangular construction and back substitution. It still
+recomputes gates, KK, W/U, forward states and Z.
+
+The first implementation mirrored the existing exchange stores into the
+cache and passed all 344 then-existing forward/backward/reference checks.
+It added about 1.5–2% forward device time. The final approach redirects those
+existing exchanges into the cache and reloads the same data from it; this
+adds no matrix products, stores or launches. Next-chunk preparation writes
+a different cache record from the current Cube solve. Existing cross-core
+flags order producers/consumers. The final lower-left join stays factored.
+
+At H=16, Hk=2, D=128, the final 31-trial paired graph measurements (20 forward
+calls per trial) were 345.271 → 348.904 us at 2K and 1268.518 → 1280.014 us at
+8K with caching enabled: **1.05% / 0.91% overhead**, not literally zero.
+Synchronized backward wall time was **4.529 ms / 16.641 ms**, versus the
+frozen Cube baseline's 5.534 / 20.481 ms. The 8K preparation stage fell from
+10.977 to 7.107 ms; inversion was only part of its cost. Forward output and
+final state are bit-identical with/without caching in the cache tests and
+the 2K/8K benchmark. The cache occupies 16 / 64 MiB respectively, surviving
+from forward to backward; backward's original workspace remains 816.5 MiB
+at 8K/H=16. Reusing an unrelated opaque scratch tensor is not supported.
+
+Final validation: **349 passed in 293.74 s** (266 forward, 73 backward,
+10 CPU-reference checks). Twelve cached-backward cases cover all seven
+supported head counts, grouped heads, weak gates, repeated-key cancellation,
+packed tails, empty sequences, strided backward inputs, and cache offsets
+across a 65-sequence batch. Both forward outputs are checked unchanged with
+caching enabled; the cache itself is checked unchanged after backward.
+The backward tolerance remains `2 * reordered_PyTorch_max_error + 1e-5`.
+The all-head device candidate built in 11.02 s. The existing forward benchmark
+builder was reused; the local development binding was rebuilt for only the
+GDN entry, avoiding compilation of unrelated device kernels. The validated
+device library is also installed in the ignored `build/lib/` location used
+by the default local binding.
+
+## Cube baseline (c03edb2)
 
 All dense matrix products now use Cube. FP16/BF16 q/k/v use one native FP32
 Cube product; any FP32 q/k/v selects four K=32 Cube products, followed by

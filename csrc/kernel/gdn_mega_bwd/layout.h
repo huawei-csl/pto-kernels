@@ -11,9 +11,9 @@ constexpr int ScratchMatrices=24, ProductParts=4;
 constexpr int ScratchSize=(ScratchMatrices+2+ProductParts)*Matrix;
 struct Input { uint64_t data; int64_t stride[4]; int64_t dtype; };
 struct Plan {
-  Input input[8]; uint64_t output[6],workspace;
+  Input input[8]; uint64_t output[6],workspace,inverse_cache,gate_cache[3];
   int start[MaxSequences],length[MaxSequences],offset[MaxSequences+1];
-  int sequences,sequence_base,heads,key_heads,chunks;
+  int sequences,sequence_base,heads,key_heads,chunks,tokens;
   float scale;
 };
 // Several slots change meaning only after their previous consumers finish.

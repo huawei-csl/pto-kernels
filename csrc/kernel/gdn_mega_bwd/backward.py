@@ -20,11 +20,19 @@ def backward(
     cu_seqlens=None,
     *,
     scale=1.0,
+    inverse_cache=None,
+    gate_cache=None,
 ):
     """Return FP32 (dq,dk,dv,dg,dbeta,dh0), packed B=1, C=128, D=128.
 
     The native launcher owns replay, chunk traversal, and workspace reuse.
     Inputs may be FP16/BF16/FP32. Enqueued on the current Torch NPU stream.
+    inverse_cache optionally holds mega forward's FP32 [chunks,Hv,128,128]
+    factors for these same k/g/beta and packed sequence boundaries. It is
+    read-only; otherwise the inverse is recomputed.
+    gate_cache optionally retains forward's (g_t, g_sum, beta_t): head-major
+    high/low gate prefixes and beta. Their physical layout is [Hv,T], including
+    g_sum despite its historical logical shape. These buffers are read-only.
     """
     device = q.device
     if device.type not in ("npu", "privateuseone"):
@@ -71,6 +79,28 @@ def backward(
     for x in (initial_state, dfinal_state):
         if x is not None and x.shape != (N, H, 128, 128):
             raise ValueError("state must have shape [N,Hv,128,128]")
+    if inverse_cache is not None:
+        chunks = sum((b - a + 127) // 128 for a, b in zip(bounds, bounds[1:]))
+        if (
+            inverse_cache.device != device
+            or inverse_cache.dtype != torch.float32
+            or not inverse_cache.is_contiguous()
+            or inverse_cache.shape != (chunks, H, 128, 128)
+        ):
+            raise ValueError(
+                "inverse_cache must be contiguous FP32 [chunks,Hv,128,128] on NPU"
+            )
+    if gate_cache is not None:
+        if len(gate_cache) != 3 or any(
+            x.device != device
+            or not x.is_contiguous()
+            or x.numel() != H * T
+            or x.dtype != dt
+            for x, dt in zip(gate_cache, (torch.float32, torch.float32, torch.float16))
+        ):
+            raise ValueError(
+                "gate_cache must be forward's contiguous (g_t, g_sum, beta_t) on NPU"
+            )
 
     with torch.npu.device(device):
         native = build()
@@ -101,6 +131,14 @@ def backward(
             pointers,
             workspace.data_ptr(),
             scale,
+            None if inverse_cache is None else inverse_cache.data_ptr(),
+            (ctypes.c_void_p * 3)(
+                *(
+                    [x.data_ptr() for x in gate_cache]
+                    if gate_cache is not None
+                    else [None] * 3
+                )
+            ),
             native.stage_launcher,
         )
         return tuple(outputs)

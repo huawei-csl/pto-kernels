@@ -13,6 +13,7 @@ for the full License text.
 
 #include <cstdint>
 #include <limits>
+#include <optional>
 
 #include "utils.h"
 
@@ -24,7 +25,7 @@ extern "C" void pto_launch_gdn_mega(
     void* fs, void* h0, int64_t has_initial_state, void* kkt_ws, void* wy_ws_a1,
     void* wy_ws_a2, void* h_ws, void* o_ws_qk, void* o_ws_qs, void* o_ws_gated,
     uint32_t num_heads, uint32_t num_key_heads, int64_t batch_size,
-    int64_t seq_len, int64_t total_tokens, uint32_t num_matrices);
+    int64_t seq_len, int64_t total_tokens, uint32_t num_matrices, void* inverse_cache);
 
 namespace pto_isa_ops {
 
@@ -116,8 +117,9 @@ void gdn_mega_check_shape(const at::Tensor& q, const at::Tensor& k,
  * This entry point is caller-allocates: every output, intermediate and
  * per-core workspace is supplied by the caller and written in place. See the
  * shapes below. Intermediate buffers are opaque scratch: their historical
- * mathematical names do not promise post-call contents. The signature and
- * allocation sizes are preserved for existing callers.
+ * mathematical names do not promise post-call contents. Existing allocation
+ * sizes are preserved. The optional inverse_cache has a separate stable
+ * contract for backward; it must remain alive and unchanged until consumed.
  *
  * @param [in]     q               Queries [1, T, Hg, D] fp16.
  * @param [in]     k               Keys [1, T, Hg, D] fp16.
@@ -129,8 +131,8 @@ void gdn_mega_check_shape(const at::Tensor& q, const at::Tensor& k,
  * @param [in]     minus_identity  Negated identity [C, C] fp16.
  * @param [in]     cu_seqlens      Cumulative sequence lengths [N+1] int32.
  * @param [in,out] out             Output [1, T, H, D] fp16.
- * @param [in,out] g_sum           Cumulative gates [1, T, H] fp32.
- * @param [in,out] g_t             Transposed gates [H, T] fp32.
+ * @param [in,out] g_sum           Low part of chunk gate prefixes; physical [H, T] fp32.
+ * @param [in,out] g_t             High part of chunk gate prefixes [H, T] fp32.
  * @param [in,out] beta_t          Transposed beta [H, T] fp16.
  * @param [in,out] a               Opaque scratch [1, T, H, C] fp16.
  * @param [in,out] a_inv_f32       Opaque scratch [1, T, H, C] fp32 storage.
@@ -158,6 +160,11 @@ void gdn_mega_check_shape(const at::Tensor& q, const at::Tensor& k,
  * @param [in]     seq_len         Packed token count.
  * @param [in]     total_tokens    Packed token count.
  * @param [in]     num_matrices    num_chunks * H.
+ * @param [out]    inverse_cache   Optional contiguous FP32 [num_chunks,H,128,128].
+ *                                 Packed sequence/chunk order, then value head.
+ *                                 Stores [D0,0;P,D1], where D0/D1 are the two
+ *                                 64x64 diagonal inverses and P=-D1*L10.
+ *                                 The full inverse has lower-left block P*D0.
  */
 void run_gdn_mega(const at::Tensor& q, const at::Tensor& k, const at::Tensor& v,
                   const at::Tensor& g, const at::Tensor& beta,
@@ -174,7 +181,8 @@ void run_gdn_mega(const at::Tensor& q, const at::Tensor& k, const at::Tensor& v,
                   at::Tensor& o_workspace_qk, at::Tensor& o_workspace_qs,
                   at::Tensor& o_workspace_gated, int64_t block_dim,
                   int64_t batch_size, int64_t seq_len, int64_t total_tokens,
-                  int64_t num_matrices) {
+                  int64_t num_matrices,
+                  const std::optional<at::Tensor>& inverse_cache) {
   gdn_mega_check_shape(q, k, v, g, beta, cu_seqlens, initial_state,
                        has_initial_state);
 
@@ -195,6 +203,16 @@ void run_gdn_mega(const at::Tensor& q, const at::Tensor& k, const at::Tensor& v,
   const uint32_t num_key_heads_u32 = static_cast<uint32_t>(q.size(2));
   const uint32_t num_matrices_u32 = static_cast<uint32_t>(num_matrices);
   const int64_t has_initial_state_i64 = has_initial_state ? 1 : 0;
+  void* cache_ptr = nullptr;
+  if (inverse_cache) {
+    const auto& cache = *inverse_cache;
+    TORCH_CHECK(cache.device() == q.device() && cache.scalar_type() == at::kFloat &&
+                    cache.is_contiguous() && cache.dim() == 4 &&
+                    cache.size(1) == v.size(2) && cache.size(2) == 128 &&
+                    cache.size(3) == 128 && cache.numel() == num_matrices * 128 * 128,
+                "gdn_mega: inverse_cache must be contiguous FP32 [chunks,H,128,128] on the input device");
+    cache_ptr = cache.data_ptr();
+  }
 
   EXEC_KERNEL_CMD(
       gdn_mega, block_dim_u32, q, k, v, g, beta, mask_lower, mask_full,
@@ -202,7 +220,7 @@ void run_gdn_mega(const at::Tensor& q, const at::Tensor& k, const at::Tensor& v,
       w, u, s, v_new, final_state, initial_state, has_initial_state_i64,
       kkt_workspace, wy_workspace_a1, wy_workspace_a2, h_workspace,
       o_workspace_qk, o_workspace_qs, o_workspace_gated, num_heads_u32,
-      num_key_heads_u32, batch_size, seq_len, total_tokens, num_matrices_u32);
+      num_key_heads_u32, batch_size, seq_len, total_tokens, num_matrices_u32, cache_ptr);
 }
 
 }  // namespace pto_isa_ops

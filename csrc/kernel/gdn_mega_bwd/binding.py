@@ -103,6 +103,8 @@ def build():
         ctypes.c_void_p,
         ctypes.c_float,
         ctypes.c_void_p,
+        ctypes.POINTER(ctypes.c_void_p),
+        ctypes.c_void_p,
     ]
     lib.gdn_backward.restype = None
     return lib

@@ -49,7 +49,8 @@ using MegaFloat = Tile<TileType::Mat, float, R, C, BLayout::ColMajor, R, C,
 // retain separate accumulators. Export/reload phases are synchronized once
 // per level, with independent DMA and matrix operations queued together.
 template <int B, int C, bool FirstOnly = false, typename Mat>
-AICORE inline void mega_float_join_level(Mat& inverse, __gm__ float* scratch) {
+AICORE inline void mega_float_join_level(Mat& inverse, __gm__ float* scratch,
+                                         __gm__ float* cache) {
 #if defined(__DAV_CUBE__)
   constexpr int Groups = C / (2 * B), Rows = Groups * B;
   MegaFloat<Rows, B> temporary;
@@ -73,7 +74,13 @@ AICORE inline void mega_float_join_level(Mat& inverse, __gm__ float* scratch) {
     wait_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
     GlobalTensor<float, Shape<1, 1, 1, B, B>, pto::Stride<1, 1, 1, B, 1>> out(
         scratch + group * B * B);
-    TSTORE(out, acc);
+    if constexpr (FirstOnly) {
+      if (cache) {
+        GlobalTensor<float, Shape<1,1,1,B,B>, pto::Stride<1,1,1,C,1>> saved(
+            cache + (offset+B)*C + offset);
+        TSTORE(saved, acc);
+      } else TSTORE(out, acc);
+    } else TSTORE(out, acc);
   }
   set_flag(PIPE_FIX, PIPE_MTE2, EVENT_ID0);
   wait_flag(PIPE_FIX, PIPE_MTE2, EVENT_ID0);
@@ -95,7 +102,11 @@ AICORE inline void mega_float_join_level(Mat& inverse, __gm__ float* scratch) {
       wait_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
       GlobalTensor<float, Shape<1, 1, 1, B, B>, pto::Stride<1, 1, 1, B, 1>> out(
           scratch + group * B * B);
-      TSTORE(out, acc);
+      if (cache) {
+        GlobalTensor<float, Shape<1,1,1,B,B>, pto::Stride<1,1,1,C,1>> saved(
+            cache + (offset+B)*C + offset);
+        TSTORE(saved, acc);
+      } else TSTORE(out, acc);
     }
     set_flag(PIPE_FIX, PIPE_MTE2, EVENT_ID0);
     wait_flag(PIPE_FIX, PIPE_MTE2, EVENT_ID0);
@@ -109,18 +120,23 @@ AICORE inline void mega_float_join_level(Mat& inverse, __gm__ float* scratch) {
                              (offset * C + (offset + B) * 8) * sizeof(float));
     GlobalTensor<float, Shape<1, 1, 1, B, B>, pto::Stride<1, 1, 1, B, 1>> block(
         scratch + group * B * B);
-    TLOAD(destination, block);
+    if (cache) {
+      GlobalTensor<float, Shape<1,1,1,B,B>, pto::Stride<1,1,1,C,1>> saved(
+          cache + (offset+B)*C + offset);
+      TLOAD(destination, saved);
+    } else TLOAD(destination, block);
   }
   pipe_barrier(PIPE_ALL);
 #endif
 }
 
 template <int C, typename Mat>
-AICORE inline void mega_float_inverse(Mat& inverse, __gm__ float* scratch) {
+AICORE inline void mega_float_inverse(Mat& inverse, __gm__ float* scratch,
+                                      __gm__ float* cache) {
 #if defined(__DAV_CUBE__)
-  mega_float_join_level<16, C>(inverse, scratch);
-  mega_float_join_level<32, C>(inverse, scratch);
-  mega_float_join_level<64, C, true>(inverse, scratch);
+  mega_float_join_level<16, C>(inverse, scratch, cache);
+  mega_float_join_level<32, C>(inverse, scratch, cache);
+  mega_float_join_level<64, C, true>(inverse, scratch, cache);
 #endif
 }
 
