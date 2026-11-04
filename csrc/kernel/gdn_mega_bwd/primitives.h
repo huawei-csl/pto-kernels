@@ -41,6 +41,37 @@ AICORE inline void matmul(__gm__ float* a, __gm__ float* b,
   TileAcc<float,128,128> acc;
   TASSIGN(am,0); TASSIGN(bm,65536);
   TASSIGN(left,0); TASSIGN(right,0); TASSIGN(acc,0);
+  if constexpr(Parts==1) {
+    for(int h=0;h<batch;++h) {
+      GlobalTensor<float,Shape<1,1,1,128,128>,Stride<1,1,1,128,1>> ga(a+h*16384),gb(b+h*16384),gc(c+h*16384);
+      TLOAD(am,ga); TLOAD(bm,gb);
+      set_flag(PIPE_MTE2,PIPE_MTE1,EVENT_ID0); wait_flag(PIPE_MTE2,PIPE_MTE1,EVENT_ID0);
+      if constexpr(TA) { TRESHAPE(at,am); TEXTRACT(left,at,0,0); }
+      else TEXTRACT(left,am,0,0);
+      if constexpr(TB) { TRESHAPE(bt,bm); TEXTRACT(right,bt,0,0); }
+      else TEXTRACT(right,bm,0,0);
+      set_flag(PIPE_MTE1,PIPE_M,EVENT_ID0); wait_flag(PIPE_MTE1,PIPE_M,EVENT_ID0);
+      TMATMUL(acc,left,right);
+      if constexpr(Sum) {
+        // Prefetch the second pair while the first product executes. Its L1
+        // slots are disjoint; L0 operands are reused only after M completes.
+        Mat cm,dm; TASSIGN(cm,131072); TASSIGN(dm,196608);
+        GlobalTensor<float,Shape<1,1,1,128,128>,Stride<1,1,1,128,1>> gd(d+h*16384),ge(e+h*16384);
+        TLOAD(cm,gd); TLOAD(dm,ge);
+        set_flag(PIPE_MTE2,PIPE_MTE1,EVENT_ID0); wait_flag(PIPE_MTE2,PIPE_MTE1,EVENT_ID0);
+        set_flag(PIPE_M,PIPE_MTE1,EVENT_ID0); wait_flag(PIPE_M,PIPE_MTE1,EVENT_ID0);
+        if constexpr(TC) { TRESHAPE(at,cm); TEXTRACT(left,at,0,0); }
+        else TEXTRACT(left,cm,0,0);
+        if constexpr(TD) { TRESHAPE(bt,dm); TEXTRACT(right,bt,0,0); }
+        else TEXTRACT(right,dm,0,0);
+        set_flag(PIPE_MTE1,PIPE_M,EVENT_ID0); wait_flag(PIPE_MTE1,PIPE_M,EVENT_ID0);
+        TMATMUL_ACC(acc,acc,left,right);
+      }
+      set_flag(PIPE_M,PIPE_FIX,EVENT_ID0); wait_flag(PIPE_M,PIPE_FIX,EVENT_ID0);
+      TSTORE(gc,acc); sync();
+    }
+    return;
+  }
   for (int h=0; h<batch; ++h) {
     load<128,128>(am,a+h*16384); load<128,128>(bm,b+h*16384);
     for(int part=0;part<Parts;++part) {
@@ -145,8 +176,15 @@ AICORE inline void causal_mask(TileT& mask,int stripe,bool strict,int scratch) {
 #if defined(__DAV_VEC__)
   Row columns; Short rows; Col col;
   TASSIGN(columns,scratch); TASSIGN(rows,scratch+512); TASSIGN(col,scratch+512);
-  TCI<Row,float,1>(columns,0.0f);
-  TCI<Short,float,0>(rows,float(stripe*64+(strict ? 0 : 1))); sync();
+  Tile<TileType::Vec,int32_t,1,128> ids;
+  Tile<TileType::Vec,int32_t,1,64> row_ids;
+  Tile<TileType::Vec,float,1,256> tmp;
+  TASSIGN(ids,scratch+768); TASSIGN(row_ids,scratch+768); TASSIGN(tmp,scratch+1280);
+  TCI<decltype(ids),decltype(tmp),int32_t,1>(ids,0,tmp); sync();
+  TCVT(columns,ids,RoundMode::CAST_NONE); sync();
+  TCI<decltype(row_ids),decltype(tmp),int32_t,0>(row_ids,stripe*64+(strict ? 0 : 1),tmp); sync();
+  TCVT(rows,row_ids,RoundMode::CAST_NONE); sync();
+  set_mask_norm(); set_vector_mask(-1,-1);
   TCOLEXPAND(mask,columns); sync(); TROWEXPANDADD(mask,mask,col); sync();
   TMAXS(mask,mask,0.0f); sync(); TMINS(mask,mask,1.0f); sync();
 #endif
@@ -223,7 +261,7 @@ AICORE inline void weighted_lower(__gm__ float* kk,__gm__ float* decay,
 // Neither dL nor its elementwise products are written to GM.
 AICORE inline void wy_epilogue(__gm__ float* raw,__gm__ float* decay,
     __gm__ float* kk,__gm__ float* beta,__gm__ float* base_db,
-    __gm__ float* dkk,__gm__ float* db) {
+    __gm__ float* dkk,__gm__ float* db,__gm__ float* base_db2=nullptr) {
 #if defined(__DAV_VEC__)
   Half a,b,c,tmp; Row weights; Col col,sum; Short result,base;
   TASSIGN(a,0); TASSIGN(b,32768); TASSIGN(c,65536); TASSIGN(tmp,98304);
@@ -237,6 +275,10 @@ AICORE inline void wy_epilogue(__gm__ float* raw,__gm__ float* decay,
   TROWEXPANDMUL(c,c,col); sync(); store<64,128>(c,dkk+offset);
   load<64,128>(tmp,kk+offset); TMUL(a,a,tmp); sync(); TMUL(a,a,b); sync();
   TROWSUM(sum,a,tmp); sync(); load<1,64>(base,base_db+stripe*64);
+  if(base_db2) {
+    Short second; TASSIGN(second,131072);
+    load<1,64>(second,base_db2+stripe*64); TADD(base,base,second); sync();
+  }
   TADD(result,base,result); sync(); store<1,64>(result,db+stripe*64);
 #endif
 }
@@ -266,7 +308,8 @@ AICORE inline void vector_op(__gm__ float* x,__gm__ float* y,__gm__ float* z,
       TMULS(b,b,last); sync(); TADD(b,b,c); sync();
       TROWSUM(scalar,b,tmp); sync();
       float total=scalar.GetValue(0), correction=0.0f;
-      for(int i=127;i>=0;--i) {
+      if(op==4) a.SetValue(127,total+a.GetValue(127));
+      else for(int i=127;i>=0;--i) {
         float delta=a.GetValue(i)-correction, next=total+delta;
         correction=(next-total)-delta; total=next; a.SetValue(i,total);
       }
@@ -401,7 +444,7 @@ template<class T>
 AICORE inline void pack_input(__gm__ T* x,__gm__ float* y,int heads,
     int rows,int length,int group,int64_t st,int64_t sh,int64_t sd) {
 #if defined(__DAV_VEC__)
-  if(rows==128 && sd==1) {
+  if(rows==128 && (sd==1 || !x)) {
     using InputTile=Tile<TileType::Vec,T,64,128,BLayout::RowMajor,64,128,SLayout::NoneBox,512,PadValue::Zero>;
     using Part=Tile<TileType::Vec,T,64,128,BLayout::RowMajor,DYNAMIC,128,SLayout::NoneBox,512,PadValue::Zero>;
     InputTile input; Half output;

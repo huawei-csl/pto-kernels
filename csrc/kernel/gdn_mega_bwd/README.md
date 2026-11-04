@@ -4,6 +4,35 @@ Packed B=1, D=C=128, FP16/BF16/FP32 inputs and FP32 gradients. The backward
 can recompute from its inputs or consume an optional inverse cache from forward.
 Python validates, allocates six outputs and one workspace, then enqueues once.
 
+## Current native pipeline
+
+With FP16/BF16 inputs, independent Cube and vector work overlaps inside the
+four stages. Cached preparation batches six phases, state scans move decay
+weighting around Cube products, and output derivatives use the corrected-value
+identity `dL=-(A.T @ dZ) @ Z.T`. Together with a symmetric key-gradient product,
+this reduces output-stage products from **14 to 9 per chunk/head**. Native gate
+scans and causal-index generation use vector instructions. The FP32 input path
+retains its compensated schedule and tighter accuracy handling.
+
+Paired synchronized wall times with H=16/Hk=2, FP16 inputs and both forward
+caches, alternating implementations on identical inputs in one process:
+
+| Tokens | Fused baseline, 300100c | Current | Time reduction |
+| --- | --- | --- | --- |
+| 2048 | 2.783 ms | 1.783 ms | 35.9% |
+| 8192 | 9.877 ms | 6.038 ms | 38.9% |
+
+These are medians of 31 pairs, including allocation/enqueue. **107 tests pass**
+with unchanged error bounds. Forward code, four-launch structure and workspace
+size are unchanged. The **5 ms at 8K target remains unmet**. Hardware profiling
+shows output/WY time falling from 4.010 to 1.949 ms and mean Cube cross-core
+waiting from 1.598 to 0.528 ms. Cube activity rises from 17.3% to 22.9% there;
+this measures active cycles, not peak FLOP/s.
+
+See [measurements and hashes](../../../tests/baselines/gdn_mega_bwd_pipeline_v6.json)
+and [derivation, synchronization rules and remaining limits](../../../memory_bwd.md).
+The measurements below preserve earlier development baselines.
+
 ## Optional forward inverse cache
 
 Allocate a separate contiguous FP32 tensor `[num_chunks, H, 128, 128]`, where
@@ -145,6 +174,14 @@ Final validation: **107 tests passed in 191.11 s**, with the same per-gradient
 error bounds, allocation-only guard and cache integrity checks.
 The 2x-forward target has not yet been reached.
 
+Hardware counter profiling of commit `300100c` shows only 14.1% / 13.3% /
+17.3% Cube activity on active blocks in the first three stages. Cross-core
+waits account for roughly 41–53% of each active Cube block's elapsed time.
+The state stage has only 16 active blocks; assembly is scalar-heavy but only
+0.780 ms. Those findings motivated the native pipeline above; retaining
+more matrix intermediates on chip remains a target. See [profiling findings](../../../memory_bwd.md) and
+[raw counter summaries](../../../tests/baselines/gdn_mega_bwd_profile_v5.json).
+
 ## Files
 
 - `backward.py`: validation, allocation and one native enqueue.
@@ -152,6 +189,7 @@ The 2x-forward target has not yet been reached.
 - `launch.cpp`: packed-sequence metadata and Torch queue integration.
 - `kernel.cpp`: fused stage bodies and their device task loops.
 - `device_ops.h`: cube/vector cooperation and scratch helpers.
+- `pipeline.h`: native Cube/vector phases, direct derivatives and vector gate scan.
 - `primitives.h`: FP32 Cube matrix products and vector elementwise/reduction operations.
 - `layout.h`: stage buffer lifetimes and metadata ABI.
 
@@ -223,3 +261,36 @@ OMP_NUM_THREADS=4 PYTHONPATH=. python tests/benchmark_gdn_mega_bwd.py
 OMP_NUM_THREADS=4 PYTHONPATH=. python tests/benchmark_gdn_mega_bwd.py --tokens 1024 --profile build/gdn_mega_bwd/profile/current
 OMP_NUM_THREADS=4 PYTHONPATH=python:. python tests/benchmark_gdn_mega_bwd.py --tokens 2048 8192 --heads 16 --inverse-cache
 ```
+
+## Extensive TP benchmark
+
+```bash
+OMP_NUM_THREADS=4 PYTHONPATH=python:. python tests/benchmark_gdn_mega_bwd.py --extensive --repeats 5
+```
+
+Runs 80 configurations: global value heads `{64,48,32,16}`, global Q/K heads
+16, TP `{1,2,4,8}`, and sequence lengths `{256,1024,4096,16384,32768}`.
+Both head counts are divided by TP; this measures one device's local work,
+without distributed communication. Inputs are FP16, gates FP32, D=C=128.
+Backward excludes compilation and one warmup, and includes allocation and
+enqueue in its synchronized wall time. Forward excludes two warmups and uses
+preallocated buffers. Each head/TP pair and direction runs in a fresh process
+to release its device memory before the next measurement.
+
+The complete sweep uses **full recomputation**, since the current forward
+cache producer cannot handle local value heads 2, 4 or 6. Cache flags,
+forward-only mode and profiling are rejected with `--extensive`; use the
+ordinary benchmark for cached configurations. The extensive matrix replaces
+`--tokens`, `--heads` and `--key-heads`.
+
+Outputs default to `benchmark_data/gdn_mega_bwd/extensive/`; override with
+`--output DIRECTORY`. `results.jsonl` retains every timing sample and local/global
+head counts. Per-pair logs preserve subprocess output. `heatmap.png` and
+`heatmap.svg` contain four panels, one per global value-head count. Rows are
+TP, columns are sequence length; every cell shows backward / forward ms and
+their ratio. A shared colour scale encodes the ratio. Forward is measured
+without saved caches, with preallocated buffers; backward timings include
+allocation. Both use synchronized wall time, not the separately recorded
+forward graph/device timing. The 20 configurations with local value heads
+2, 4 or 6 display forward `N/A` and grey cells; all 80 retain backward timings.
+Matplotlib is required.

@@ -1,5 +1,193 @@
 # GDN backward development
 
+## Extensive sweep snapshot before further optimization
+
+`tests/baselines/gdn_mega_bwd_extensive_v6.json` preserves all 80 backward
+configurations and the 60 supported forward measurements used by the TP
+heatmaps. These ratios measure **full-recomputation backward**, unlike the
+cached v6 paired benchmark. Both use synchronized wall time; backward includes
+allocation, forward uses preallocated buffers. TP communication is excluded.
+The plotting code can regenerate the heatmap from the snapshot's `results`
+list. No kernel changes were made after the 107-test validation below.
+
+## Pipelined backward and direct corrected-value derivatives (v6)
+
+The native FP16/BF16 path now overlaps independent Cube/vector phases within
+four launches. Forward and cache contracts are unchanged. The FP32 input path
+retains its compensated mathematical schedule. All numerical work remains PTO.
+Final validation: **107 tests passed in 188.16 s**, with unchanged per-tensor
+`max_error <= 2 * reordered_torch_error + 1e-5` bounds, allocation guard,
+cache integrity, packed tails, cancellation, beta=0 and stream coverage.
+
+Paired comparison against commit **300100c**, H=16/Hk=2, FP16 inputs, both
+forward caches: identical inputs in one process, alternating old/new order,
+three warmup pairs and 31 measured pairs. Times include allocation/enqueue
+and device synchronization:
+
+| Tokens | Committed fused baseline | Current pipeline | Time reduction |
+| --- | --- | --- | --- |
+| 2048 | 2.783 ms | 1.783 ms | 35.9% |
+| 8192 | 9.877 ms | 6.038 ms | 38.9% |
+
+The **5 ms target is not reached**. Raw samples, source hashes, profile paths,
+validation and the paired-driver hash are in
+`tests/baselines/gdn_mega_bwd_pipeline_v6.json`. The driver is retained at
+`build/gdn_mega_bwd/pipeline_ab.py`; it loads the original content-addressed
+kernel library alongside the current one. Standalone 8K timing was 5.930 ms;
+prefer the paired comparison when reporting the speedup.
+
+### Remove products before scheduling the remaining work
+
+For one chunk, let `A=(I+L)^-1`, `B=diag(beta)`, `E=diag(exp(G))`, and `H`
+be its incoming state. Corrected values satisfy `Z=A(BV-BEKH)`. Given the
+complete corrected-value gradient `D=dZ`, compute:
+
+```text
+dVB = A.T @ D
+dKB = -dVB @ H.T
+dL  = -dVB @ Z.T       # retain the strictly lower triangle
+```
+
+This avoids materializing `dA` and applying the two-sided inverse derivative.
+It removes four output-stage products. Forming `dKK+dKK.T` before multiplying
+by K removes one more: **14 -> 9 Cube products per chunk/head** in stage 2.
+The beta derivative retains its general formula without dividing by beta.
+Independent vector epilogues run alongside these products.
+
+### Scheduling and scalar work
+
+- `pipeline.h` explicitly groups independent Cube and vector operations.
+  Full joins remain where a vector consumes the other vector's stripe.
+  Elsewhere Cube releases vectors early while waiting for both producers;
+  alternating event epochs prevent a fast subcore from reusing a pending flag.
+- Cached preparation uses six phases. KK overlaps gate preparation, inverse
+  completion overlaps RHS weighting, and QK overlaps inverse transpose.
+- State replay weights Z instead of K before `K.T @ Z`; reverse propagation
+  weights the product `K @ dH`. Residuals, decay and copies overlap Cube work.
+- Native Cube operand loads are queued together, with dependency-specific
+  MTE2/MTE1/M/FIX events. FP32 compensated products keep the original path.
+- Three-argument integer TCI generates causal indices on vectors. Missing
+  initial/final states use tiled zero packing. Native gate gradients use a
+  seven-step FP32 vector reverse scan across transposed groups of eight heads;
+  FP32 inputs retain their compensated scan.
+
+An intermediate build hit one UB bounds exception late in a full suite;
+its isolated case passed. Explicit vector mask initialization at kernel entry
+and restoration after causal-index conversion were added. This is consistent
+with stale mask state, but the original fault's cause was not conclusively
+established. Two subsequent complete suites passed, including the final build.
+Do not assume mask state survives arbitrary low-level vector primitives.
+
+### New hardware counters and remaining limits
+
+Hardware Roofline replay at 8K, both caches, 1800 MHz:
+
+| Stage | Time (ms) | Cube active ratio on active blocks | Mean Cube cross-core wait (ms) |
+| --- | --- | --- | --- |
+| Preparation + local gradients | 1.458 | 20.9% | 0.607 |
+| Forward + reverse state scans | 1.530 | 19.4% | 0.574 |
+| Output + WY gradients | 1.949 | 22.9% | 0.528 |
+| Assembly | 0.621 | 0% (vector work) | 0.506 |
+
+Output/WY drops from 4.010 to 1.949 ms and mean Cube waiting from 1.598 to
+0.528 ms. Its GM/on-chip traffic falls from 5.70 to 5.07 GiB. This includes
+L2-served transfers, not just HBM. Sum **all** wait-ID columns: new phases
+use alternating IDs 2/3 and 4/5 in addition to legacy 0/1. Active-cycle ratios
+are not peak FLOP/s, and overlapping counters are not additive fractions.
+
+The state scan still uses only 16 of 24 blocks for a single sequence/H=16.
+Many intermediates still travel through GM; workspace stays **816.5 MiB** at
+8K/H=16, with **65.25 MiB** retained forward caches. Remaining candidates are
+retaining shared matrix operands on chip, splitting state work across value
+columns to improve occupancy, and avoiding replay by saving chunk states.
+The latter changes forward storage/performance and has not been implemented.
+
+## Hardware profiling after 300100c
+
+Commit **300100c** preserves the validated four-stage fused kernel and v5
+measurements. `msprof op --aic-metrics=Roofline` collected all four kernels
+at 8K/H=16/Hk=2, FP16 inputs, both forward caches, 1800 MHz on Ascend910B2.
+This is counter collection with profiler replay, not a new wall-time benchmark.
+The profiled stage times sum to 9.177 ms; the saved synchronized wall baseline
+is 9.922 ms. Source hashes match the committed runtime.
+
+| Stage | Time (ms) | Mean reported Cube active ratio, active blocks | Active blocks / 24 | Mean Cube cross-core wait / block time |
+| --- | --- | --- | --- | --- |
+| Preparation + local gradients | 2.161 | 14.1% | 24 | 51.8% |
+| Forward + reverse state scans | 2.226 | 13.3% | 16 | 53.1% |
+| Output + WY gradients | 4.010 | 17.3% | 24 | 40.8% |
+| Assembly | 0.780 | 0% (vector work) | 24 | 93.7% |
+
+Cube ratios count active pipeline cycles, not achieved peak FLOP/s. Waiting
+and other pipe counters can overlap and must not be added as disjoint fractions.
+For the state stage, averaging over all 24 blocks gives only 8.9% Cube activity;
+13.3% above excludes the eight idle blocks.
+
+The primary issue is serialized execution, not saturation of Cube arithmetic.
+`Ops::call` ends every primitive with a two-vector/Cube `join()`. `load`,
+`store` and `matmul` additionally place `PIPE_ALL` barriers around DMA, operand
+extraction, multiply and stores. Cube waits for vectors for 1.10 / 1.16 / 1.60 ms
+on average in stages 0 / 1 / 2. Vector subcores spend much of those stages
+waiting for Cube in return. These observations identify the opportunity; they
+do not imply all reported wait time can simply be removed.
+
+Output/WY performs approximately **5.70 GiB of GM/on-chip transfers**:
+1792 MiB GM→L1, 768 MiB L0C→GM, 2188.5 MiB GM→UB and 1092.5 MiB UB→GM.
+This includes L2-served traffic, so it is not HBM traffic or proof of HBM
+bandwidth saturation. It does demonstrate repeated materialization of matrix
+intermediates. Retaining operands/intermediates and overlapping DMA with math
+is more promising than removing another host launch.
+
+Scalar findings: stage 3's vector0 has a 41.1% reported scalar ratio versus
+5.9% on vector1. The compensated 128-element reverse gate scan runs serially
+on vector0; the two-argument PTO `TCI` used by `causal_mask` also expands to
+scalar stores in CANN 9.1's `pto/npu/a2a3/TCI.hpp`. The three-argument TCI
+provides a vector implementation. Missing h0/dhT use the rowwise packing
+fallback because their descriptors have zero strides. Conversely, FP32-only
+interval loops/local dQ reconstruction and inverse recomputation are **not**
+executed in this cached FP16 profile; optimize the actual path first.
+
+Priority for the 5 ms target:
+
+1. Pipeline stage 2's independent chunk/head work with alternating UB/L1
+   buffers; retain common operands and use producer/consumer events at real
+   dependencies. Batch consecutive operations on the same engine. Do not
+   blindly delete cross-core waits: vector broadcasts/reductions cross stripes.
+2. Apply the same scheduling to preparation. Replace scalar TCI and use a
+   compensated vector tree for gate scans, retaining the current error bounds.
+3. Address state-stage occupancy with independent value-column tiles when
+   sequence/head count is too small, or save incoming chunk states to skip
+   replay (extra forward stores and 64 MiB at 8K/H=16). Measure these tradeoffs.
+
+Even eliminating the entire 0.780 ms assembly stage would leave over 8 ms
+in this profile. Scalar cleanup alone cannot reach 5 ms. The counters show
+headroom, but do not establish that a particular pipeline will meet the goal.
+Raw CSV locations/hashes and per-stage summaries are retained in
+`tests/baselines/gdn_mega_bwd_profile_v5.json`.
+
+The benchmark now accepts `--profile-once` to launch one forward for caches
+and one backward, skipping timing graphs and cache comparison runs. For
+hardware counters, use `msprof op --kernel-name="*gdn_bwd_stage*" --launch-count=4
+--aic-metrics=Roofline --output=build/gdn_mega_bwd/profile/roofline_once python
+tests/benchmark_gdn_mega_bwd.py --tokens 8192 --heads 16 --key-heads 2
+--inverse-cache --gate-cache --profile-once` after sourcing CANN and setting
+`PYTHONPATH=python:.`. Numerical tests remain separate from profiler replay.
+
+Simulator note: a C=128/H=16/core0 output/WY capture reached its 10-minute
+application limit during stage 2. It saved a **partial** instruction trace under
+`build/gdn_mega_bwd/profile/simulator_stage2_v5/`; it is not a complete kernel
+measurement and is not used for the hardware percentages above. Early products
+show `WAIT_FLAG_DEVI` stalls. The release binary lacks source-line debug info.
+The initial runner had still executed four forward/cache-check calls; the final
+`--profile-once` path performs only one cache-producing forward and one backward.
+For a future simulator run, prepend CANN's
+`tools/simulator/Ascend910B2/lib` to `LD_LIBRARY_PATH` and use
+`msprof op simulator --kernel-name="_Z13gdn_bwd_stageILi2EEv4Plan"
+--launch-count=1 --aic-metrics=PipeUtilization --core-id=0 --timeout=10`
+with that lean runner. The complete 8K hardware profile is the primary evidence. The lean runner
+completed hardware smoke checks at 128 and 8192 tokens with both caches; runtime
+source hashes remain identical to the committed 107-test-passing kernel.
+
 ## Four-stage fusion after f686c16
 
 Commit **f686c16** preserves the validated seven-stage inverse/gate-cache

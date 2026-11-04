@@ -24,11 +24,45 @@ def main():
     parser.add_argument("--gate-cache", action="store_true")
     parser.add_argument("--forward-only", action="store_true")
     parser.add_argument(
+        "--profile-once",
+        action="store_true",
+        help="One backward call for msprof; omit timings",
+    )
+    parser.add_argument(
         "--profile", type=Path, help="Trace one call at the final token length"
     )
+    parser.add_argument(
+        "--extensive",
+        action="store_true",
+        help="Sweep global Hv=64/48/32/16, Hqk=16, TP=1/2/4/8 and five lengths; heatmap BWD/FWD times",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=Path("benchmark_data/gdn_mega_bwd/extensive"),
+        help="Directory for --extensive raw timings, logs and PNG/SVG heatmaps",
+    )
     args = parser.parse_args()
+    if args.repeats < 1:
+        parser.error("--repeats must be positive")
+    if args.extensive:
+        if args.inverse_cache or args.gate_cache or args.forward_only:
+            parser.error(
+                "--extensive uses full recomputation: forward cache production "
+                "does not support local value heads 2, 4 or 6"
+            )
+        if args.profile or args.profile_once:
+            parser.error("--extensive cannot be combined with profiling")
+        from benchmark_gdn_mega_bwd_sweep import run
+
+        run(args)
+        return
     if args.forward_only and args.profile:
         parser.error("--profile records backward; omit it with --forward-only")
+    if args.profile_once and (args.profile or args.forward_only):
+        parser.error(
+            "--profile-once is for external msprof; omit --profile/--forward-only"
+        )
     torch.npu.set_device(0)
     torch.npu.config.allow_internal_format = False
     torch.manual_seed(42)
@@ -60,19 +94,24 @@ def main():
                     device="npu",
                     dtype=torch.float32,
                 )
-                pto_gdn_mega(**launch)
-                before = launch["out"].clone(), launch["final_state"].clone()
-                pto_gdn_mega(**launch, inverse_cache=cache)
-                for name, ref in zip(("out", "final_state"), before):
-                    torch.testing.assert_close(launch[name], ref, atol=0, rtol=0)
+                if not args.profile_once:
+                    pto_gdn_mega(**launch)
+                    before = launch["out"].clone(), launch["final_state"].clone()
+                    pto_gdn_mega(**launch, inverse_cache=cache)
+                    for name, ref in zip(("out", "final_state"), before):
+                        torch.testing.assert_close(launch[name], ref, atol=0, rtol=0)
             forward_times = {"forward_no_cache_ms": []}
             if cache is not None:
                 forward_times["forward_cache_ms"] = []
-            for trial in range(args.repeats + 2):
+            for trial in range(1 if args.profile_once else args.repeats + 2):
                 modes = (
-                    (False,)
-                    if cache is None
-                    else ((False, True) if trial % 2 else (True, False))
+                    (cache is not None,)
+                    if args.profile_once
+                    else (
+                        (False,)
+                        if cache is None
+                        else ((False, True) if trial % 2 else (True, False))
+                    )
                 )
                 for enabled in modes:
                     torch.npu.synchronize()
@@ -87,11 +126,12 @@ def main():
                 gate_cache = tuple(launch[name] for name in ("g_t", "g_sum", "beta_t"))
             from benchmarking.gdn_mega import time_launch
 
-            forward_device["no_cache"] = time_launch(launch, trials=args.repeats)
-            if cache is not None:
-                forward_device["cache"] = time_launch(
-                    dict(launch, inverse_cache=cache), trials=args.repeats
-                )
+            if not args.profile_once:
+                forward_device["no_cache"] = time_launch(launch, trials=args.repeats)
+                if cache is not None:
+                    forward_device["cache"] = time_launch(
+                        dict(launch, inverse_cache=cache), trials=args.repeats
+                    )
         if args.forward_only:
             print(
                 json.dumps(
@@ -111,6 +151,8 @@ def main():
             continue
         backward(q, k, v, g, beta, do, inverse_cache=cache, gate_cache=gate_cache)
         torch.npu.synchronize()
+        if args.profile_once:
+            continue
         times, enqueue = [], []
         for _ in range(args.repeats):
             start = time.perf_counter()

@@ -20,7 +20,22 @@ AICORE inline void join() {
 }
 struct Buffer { __gm__ float* data=nullptr; bool vector=false; };
 struct Ops {
-  __gm__ float* arena; bool accurate; int used=0;
+  __gm__ float* arena; bool accurate; int used=0; bool parallel=false; int epoch=0;
+  AICORE void begin() { parallel=true; }
+  // Early Cube release is safe only when the next vector phase consumes
+  // its own stripes; Cube still waits for both vector producers.
+  AICORE void end(bool independent_stripes=false) {
+    if(independent_stripes) {
+      sync();
+#if defined(__DAV_CUBE__)
+      kernel_utils::SetCrossFlag<PIPE_FIX>(2+epoch); wait_flag_dev(4+epoch);
+#elif defined(__DAV_VEC__)
+      kernel_utils::SetCrossFlag<PIPE_MTE3>(4+epoch); wait_flag_dev(2+epoch);
+#endif
+      sync(); epoch^=1; // A fast subcore cannot signal twice into one epoch.
+    } else join();
+    parallel=false;
+  }
   template<bool TA,bool TB>
   AICORE void product(Buffer a,Buffer b,Buffer out) {
     if(accurate) {
@@ -47,7 +62,7 @@ struct Ops {
     if(kind==5) inverse(a.data,out.data,1);
     if(kind==9) weighted_lower(a.data,b.data,c.data,out.data);
     if(kind==10) dot_rows(a.data,b.data,c.data,out.data);
-    join(); return out;
+    if(!parallel) join(); return out;
   }
   AICORE Buffer mm(Buffer a,Buffer b,bool ta=false,bool tb=false,Buffer out={}) {
     return call(0,ta+2*tb,a,b,{},{},1,out);
@@ -55,18 +70,18 @@ struct Ops {
   // Accumulate two products in L0C, avoiding two GM intermediates and a
   // vector addition. FP32 inputs retain compensated, separately rounded dots.
   template<bool TA,bool TB,bool TC,bool TD>
-  AICORE Buffer mmadd(Buffer a,Buffer b,Buffer c,Buffer d) {
-    if(accurate) return add(mm(a,b,TA,TB),mm(c,d,TC,TD));
-    auto out=empty();
+  AICORE Buffer mmadd(Buffer a,Buffer b,Buffer c,Buffer d,Buffer out={}) {
+    if(accurate) return add(mm(a,b,TA,TB),mm(c,d,TC,TD),1,out);
+    if(!out.data) out=empty();
     matmul<TA,TB,1,true,TC,TD>(a.data,b.data,out.data,1,c.data,d.data);
-    join(); return out;
+    if(!parallel) join(); return out;
   }
   AICORE Buffer add(Buffer a,Buffer b,float scale=1,Buffer out={}) {
     return call(a.vector ? 2 : 1,0,a,b,{},{},scale,out);
   }
-  AICORE Buffer mul(Buffer a,Buffer b) { return call(a.vector ? 2 : 1,1,a,b); }
-  AICORE Buffer row(Buffer a,Buffer b) { return call(1,2,a,b); }
-  AICORE Buffer last(Buffer a,Buffer b) { return call(1,3,a,b); }
+  AICORE Buffer mul(Buffer a,Buffer b,Buffer out={}) { return call(a.vector ? 2 : 1,1,a,b,{},{},1,out); }
+  AICORE Buffer row(Buffer a,Buffer b,Buffer out={}) { return call(1,2,a,b,{},{},1,out); }
+  AICORE Buffer last(Buffer a,Buffer b,Buffer out={}) { return call(1,3,a,b,{},{},1,out); }
   AICORE Buffer scale(Buffer a,float s,Buffer out={}) { return call(1,4,a,{},{},{},s,out); }
   AICORE Buffer lower(Buffer a) { return call(1,5,a); }
   AICORE Buffer rows(Buffer a,Buffer out={}) { return call(3,0,a,{},{},{},1,out); }
@@ -83,7 +98,7 @@ struct Ops {
     if(x.dtype==0) pack_input((__gm__ half*)src,out.data,1,rows,length,1,st,0,x.stride[3]);
     else if(x.dtype==1) pack_input((__gm__ bfloat16_t*)src,out.data,1,rows,length,1,st,0,x.stride[3]);
     else pack_input((__gm__ float*)src,out.data,1,rows,length,1,st,0,x.stride[3]);
-    join(); return out;
+    if(!parallel) join(); return out;
   }
 };
 struct Chunk {

@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Huawei Technologies Co., Ltd. See repository LICENSE.
 // Four sequence-wide stages. Chunk traversal and arithmetic execute on NPU.
 #include "device_ops.h"
+#include "pipeline.h"
 
 #ifdef __CCE_AICORE__
 AICORE inline void prepare(const Plan& p,int c,int head,Ops& o) {
@@ -141,7 +142,7 @@ AICORE inline void finish(const Plan& p,int c,int first_head,int heads,Ops& o) {
   for(int h=first_head;h<first_head+heads;++h) {
     o.used=0; auto x=chunk(p,c,h);
     auto dg=o.add(x.v(Q_ENERGY),o.dotrows(x.m(DO_DV),x.m(V)),-1);
-    o.call(2,2,dg,x.v(END_STATE),x.v(END_KEYS),x.v(EXP),1,x.v(Q_ENERGY));
+    o.call(2,o.accurate ? 2 : 4,dg,x.v(END_STATE),x.v(END_KEYS),x.v(EXP),1,x.v(Q_ENERGY));
     scatter_matrix(x.m(DO_DV),(__gm__ float*)p.output[2]+(int64_t(first)*p.heads+h)*128,length,p.heads*128);
     join();
   }
@@ -186,6 +187,7 @@ AICORE inline void finish(const Plan& p,int c,int first_head,int heads,Ops& o) {
         load<1,128>(row,chunk(p,c,h+j).v(which==0 ? Q_ENERGY : DB).data);
       }
       TTRANS(output,input,tmp); sync();
+      if(which==0 && !o.accurate) reverse_gate_scan();
       Tile<TileType::Vec,float,128,8,BLayout::RowMajor,DYNAMIC,DYNAMIC> part(length,n);
       TASSIGN(part,4096);
       GlobalTensor<float,Shape<1,1,1,DYNAMIC,DYNAMIC>,Stride<1,1,1,DYNAMIC,1>> gm(
@@ -202,6 +204,9 @@ AICORE inline void finish(const Plan& p,int c,int first_head,int heads,Ops& o) {
 template<int Stage>
 __global__ AICORE void gdn_bwd_stage(Plan p) {
   KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2);
+#if defined(__DAV_VEC__)
+  set_mask_norm(); set_vector_mask(-1,-1);
+#endif
 #ifdef __CCE_AICORE__
   // Keep each shared-key group together for dQ/dK reduction. Split value
   // heads only at cache-line boundaries for the interleaved scalar outputs.
@@ -213,16 +218,18 @@ __global__ AICORE void gdn_bwd_stage(Plan p) {
     Ops o{scratch(p)+2*Matrix,p.input[0].dtype==2 || p.input[1].dtype==2 || p.input[2].dtype==2};
     int head=task%p.heads,index=task/p.heads;
     if constexpr(Stage==0) {
-      prepare(p,index,head,o); o.used=0;
-      local_gradient(p,index,head,o);
+      if(!o.accurate && p.inverse_cache && p.gate_cache[0]) pipelined_prepare(p,index,head,o);
+      else { prepare(p,index,head,o); o.used=0; local_gradient(p,index,head,o); }
     }
     if constexpr(Stage==1) {
-      replay(p,index,head,o); o.used=0;
-      state_gradient(p,index,head,o);
+      if(o.accurate) { replay(p,index,head,o); o.used=0; state_gradient(p,index,head,o); }
+      else pipelined_states(p,index,head,o);
     }
     if constexpr(Stage==2) {
-      output_gradient(p,index,head,o); o.used=0;
-      wy_gradient(p,index,head,o);
+      if(o.accurate) {
+        output_gradient(p,index,head,o); o.used=0;
+        wy_gradient(p,index,head,o);
+      } else pipelined_gradients(p,index,head,o);
     }
     if constexpr(Stage==3) finish(p,task/groups,(task%groups)*fold,fold,o);
   }
