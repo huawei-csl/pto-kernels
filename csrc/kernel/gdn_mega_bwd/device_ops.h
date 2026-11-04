@@ -52,6 +52,15 @@ struct Ops {
   AICORE Buffer mm(Buffer a,Buffer b,bool ta=false,bool tb=false,Buffer out={}) {
     return call(0,ta+2*tb,a,b,{},{},1,out);
   }
+  // Accumulate two products in L0C, avoiding two GM intermediates and a
+  // vector addition. FP32 inputs retain compensated, separately rounded dots.
+  template<bool TA,bool TB,bool TC,bool TD>
+  AICORE Buffer mmadd(Buffer a,Buffer b,Buffer c,Buffer d) {
+    if(accurate) return add(mm(a,b,TA,TB),mm(c,d,TC,TD));
+    auto out=empty();
+    matmul<TA,TB,1,true,TC,TD>(a.data,b.data,out.data,1,c.data,d.data);
+    join(); return out;
+  }
   AICORE Buffer add(Buffer a,Buffer b,float scale=1,Buffer out={}) {
     return call(a.vector ? 2 : 1,0,a,b,{},{},scale,out);
   }

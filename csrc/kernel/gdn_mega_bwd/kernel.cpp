@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Huawei Technologies Co., Ltd. See repository LICENSE.
-// Seven sequence-wide stages. Chunk traversal and arithmetic execute on NPU.
+// Four sequence-wide stages. Chunk traversal and arithmetic execute on NPU.
 #include "device_ops.h"
 
 #ifdef __CCE_AICORE__
@@ -104,15 +104,17 @@ AICORE inline void output_gradient(const Plan& p,int c,int head,Ops& o) {
 AICORE inline void wy_gradient(const Plan& p,int c,int head,Ops& o) {
   auto x=chunk(p,c,head);
   auto kb=o.row(x.m(K),o.mul(x.v(BETA),x.v(EXP))),vb=o.row(x.m(V),x.v(BETA));
-  auto da=o.add(o.mm(x.m(W_DW),kb,false,true),o.mm(x.m(DU),vb,false,true));
+  auto da=o.mmadd<false,true,false,true>(x.m(W_DW),kb,x.m(DU),vb);
   auto dkb=o.mm(x.m(AT),x.m(W_DW)),dvb=o.mm(x.m(AT),x.m(DU));
   o.call(1,2,dvb,x.v(BETA),{},{},1,x.m(DO_DV));
   auto db=o.add(o.dotrows(dkb,o.row(x.m(K),x.v(EXP))),o.dotrows(dvb,x.m(V)));
   auto dk=o.add(x.m(DH_DK),o.row(dkb,o.mul(x.v(BETA),x.v(EXP))));
-  auto dl=o.lower(o.scale(o.mm(o.mm(x.m(AT),da),x.m(AT)),-1));
-  auto dkk=o.row(o.mul(dl,x.m(DECAY)),x.v(BETA));
-  o.add(o.add(dk,o.mm(dkk,x.m(K))),o.mm(dkk,x.m(K),true),1,x.m(DH_DK));
-  o.add(db,o.dotrows(dl,x.m(KK),{},x.m(DECAY)),1,x.v(DB));
+  auto raw=o.mm(o.mm(x.m(AT),da),x.m(AT)),dkk=o.empty();
+  wy_epilogue(raw.data,x.m(DECAY).data,x.m(KK).data,x.v(BETA).data,
+              db.data,dkk.data,x.v(DB).data); join();
+  if(o.accurate)
+    o.add(o.add(dk,o.mm(dkk,x.m(K))),o.mm(dkk,x.m(K),true),1,x.m(DH_DK));
+  else o.add(dk,o.mmadd<false,false,true,false>(dkk,x.m(K),dkk,x.m(K)),1,x.m(DH_DK));
   // Z=beta*residual and dvb is the gradient of the token update. Avoid
   // cancellation between WY paths; retain the general formula at beta=0.
   if(o.accurate)
@@ -133,45 +135,62 @@ AICORE inline void scatter_matrix(Buffer x,__gm__ float* out,int length,int stri
 #endif
 }
 
-AICORE inline void finish(const Plan& p,int c,Ops& o) {
+AICORE inline void finish(const Plan& p,int c,int first_head,int heads,Ops& o) {
   int seq=sequence(p,c),first=p.start[seq]+(c-p.offset[seq])*128;
   int length=min(128,p.start[seq]+p.length[seq]-first),group=p.heads/p.key_heads;
-  for(int h=0;h<p.heads;++h) {
+  for(int h=first_head;h<first_head+heads;++h) {
     o.used=0; auto x=chunk(p,c,h);
     auto dg=o.add(x.v(Q_ENERGY),o.dotrows(x.m(DO_DV),x.m(V)),-1);
     o.call(2,2,dg,x.v(END_STATE),x.v(END_KEYS),x.v(EXP),1,x.v(Q_ENERGY));
     scatter_matrix(x.m(DO_DV),(__gm__ float*)p.output[2]+(int64_t(first)*p.heads+h)*128,length,p.heads*128);
     join();
   }
-  for(int kh=0;kh<p.key_heads;++kh) {
-    o.used=0; auto dq=o.empty(),dk=o.empty(),scaled=o.empty();
-    // Preserve the baseline's scale-before-group-reduction rounding order.
-    o.scale(chunk(p,c,kh*group).m(Q_DQ),p.scale,dq);
-    o.copy(chunk(p,c,kh*group).m(DH_DK),dk);
-    for(int j=1;j<group;++j) {
+#if defined(__DAV_VEC__)
+  // Shared-head sums stay in UB through the final strided output store.
+  Half dq,dk,a,b;
+  TASSIGN(dq,0); TASSIGN(dk,32768); TASSIGN(a,65536); TASSIGN(b,98304);
+  int stripe=get_subblockid()*64,n=max(0,min(64,length-stripe));
+  if(n) for(int kh=first_head/group;kh<(first_head+heads)/group;++kh) {
+    for(int j=0;j<group;++j) {
       auto x=chunk(p,c,kh*group+j);
-      o.scale(x.m(Q_DQ),p.scale,scaled);
-      o.add(dq,scaled,1,dq);
-      o.add(dk,x.m(DH_DK),1,dk);
+      load<64,128>(a,x.m(Q_DQ).data+stripe*128);
+      load<64,128>(b,x.m(DH_DK).data+stripe*128);
+      TMULS(a,a,p.scale); sync(); // Preserve scale-before-reduction rounding.
+      if(j==0) { TMOV(dq,a); TMOV(dk,b); }
+      else { TADD(dq,dq,a); TADD(dk,dk,b); }
+      sync();
     }
-    scatter_matrix(dq,(__gm__ float*)p.output[0]+(int64_t(first)*p.key_heads+kh)*128,length,p.key_heads*128);
-    scatter_matrix(dk,(__gm__ float*)p.output[1]+(int64_t(first)*p.key_heads+kh)*128,length,p.key_heads*128);
-    join();
+    for(int which=0;which<2;++which) {
+      Tile<TileType::Vec,float,64,128,BLayout::RowMajor,DYNAMIC,128> part(n);
+      TASSIGN(part,which*32768);
+      GlobalTensor<float,Shape<1,1,1,DYNAMIC,128>,Stride<1,1,1,DYNAMIC,1>> gm(
+        (__gm__ float*)p.output[which]+(int64_t(first+stripe)*p.key_heads+kh)*128,
+        {1,1,1,n,128},{1,1,1,p.key_heads*128,1});
+      TSTORE(gm,part); sync();
+    }
   }
+#endif
+  join();
 #if defined(__DAV_VEC__)
   if(get_subblockid()==0) {
-    Row value; TASSIGN(value,0);
-    // Contiguous output blocks avoid scalar-store races between heads.
-    for(int which=0;which<2;++which) for(int i=0;i<length*p.heads;i+=128) {
-      int n=min(128,length*p.heads-i);
+    // Transpose eight complete head rows; no scalar GM gathers. Head groups
+    // own whole 32-byte output spans, preventing writes to shared cache lines.
+    Tile<TileType::Vec,float,8,128> input,tmp;
+    Tile<TileType::Vec,float,128,8> output;
+    TASSIGN(input,0); TASSIGN(output,4096); TASSIGN(tmp,8192);
+    for(int which=0;which<2;++which) for(int h=first_head;h<first_head+heads;h+=8) {
+      int n=min(8,first_head+heads-h);
+      TEXPANDS(input,0.0f); sync();
       for(int j=0;j<n;++j) {
-        int flat=i+j;
-        value.SetValue(j,chunk(p,c,flat%p.heads).v(which==0 ? Q_ENERGY : DB).data[flat/p.heads]);
+        Row row; TASSIGN(row,j*512);
+        load<1,128>(row,chunk(p,c,h+j).v(which==0 ? Q_ENERGY : DB).data);
       }
-      sync();
-      Tile<TileType::Vec,float,1,128,BLayout::RowMajor,1,DYNAMIC> part(n); TASSIGN(part,0);
-      GlobalTensor<float,Shape<1,1,1,1,DYNAMIC>,Stride<1,1,1,128,1>> gm(
-        (__gm__ float*)p.output[3+which]+int64_t(first)*p.heads+i,{1,1,1,1,n});
+      TTRANS(output,input,tmp); sync();
+      Tile<TileType::Vec,float,128,8,BLayout::RowMajor,DYNAMIC,DYNAMIC> part(length,n);
+      TASSIGN(part,4096);
+      GlobalTensor<float,Shape<1,1,1,DYNAMIC,DYNAMIC>,Stride<1,1,1,DYNAMIC,1>> gm(
+        (__gm__ float*)p.output[3+which]+int64_t(first)*p.heads+h,
+        {1,1,1,length,n},{1,1,1,p.heads,1});
       TSTORE(gm,part); sync();
     }
   }
@@ -184,18 +203,28 @@ template<int Stage>
 __global__ AICORE void gdn_bwd_stage(Plan p) {
   KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2);
 #ifdef __CCE_AICORE__
-  int tasks=(Stage==1 || Stage==3) ? p.sequences*p.heads :
-            Stage==6 ? p.chunks : p.chunks*p.heads;
+  // Keep each shared-key group together for dQ/dK reduction. Split value
+  // heads only at cache-line boundaries for the interleaved scalar outputs.
+  int group=p.heads/p.key_heads,fold=max(8,group);
+  if(p.heads%8 || p.heads%fold || fold%group) fold=p.heads;
+  int groups=p.heads/fold;
+  int tasks=Stage==1 ? p.sequences*p.heads : Stage==3 ? p.chunks*groups : p.chunks*p.heads;
   for(int task=get_block_idx();task<tasks;task+=get_block_num()) {
     Ops o{scratch(p)+2*Matrix,p.input[0].dtype==2 || p.input[1].dtype==2 || p.input[2].dtype==2};
     int head=task%p.heads,index=task/p.heads;
-    if constexpr(Stage==0) prepare(p,index,head,o);
-    if constexpr(Stage==1) replay(p,index,head,o);
-    if constexpr(Stage==2) local_gradient(p,index,head,o);
-    if constexpr(Stage==3) state_gradient(p,index,head,o);
-    if constexpr(Stage==4) output_gradient(p,index,head,o);
-    if constexpr(Stage==5) wy_gradient(p,index,head,o);
-    if constexpr(Stage==6) finish(p,task,o);
+    if constexpr(Stage==0) {
+      prepare(p,index,head,o); o.used=0;
+      local_gradient(p,index,head,o);
+    }
+    if constexpr(Stage==1) {
+      replay(p,index,head,o); o.used=0;
+      state_gradient(p,index,head,o);
+    }
+    if constexpr(Stage==2) {
+      output_gradient(p,index,head,o); o.used=0;
+      wy_gradient(p,index,head,o);
+    }
+    if constexpr(Stage==3) finish(p,task/groups,(task%groups)*fold,fold,o);
   }
 #endif
 }
@@ -205,7 +234,4 @@ extern "C" void launch_stages(Plan p,void* stream) {
   gdn_bwd_stage<1><<<BlockCount,nullptr,stream>>>(p);
   gdn_bwd_stage<2><<<BlockCount,nullptr,stream>>>(p);
   gdn_bwd_stage<3><<<BlockCount,nullptr,stream>>>(p);
-  gdn_bwd_stage<4><<<BlockCount,nullptr,stream>>>(p);
-  gdn_bwd_stage<5><<<BlockCount,nullptr,stream>>>(p);
-  gdn_bwd_stage<6><<<BlockCount,nullptr,stream>>>(p);
 }

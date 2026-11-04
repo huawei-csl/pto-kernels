@@ -1,5 +1,54 @@
 # GDN backward development
 
+## Four-stage fusion after f686c16
+
+Commit **f686c16** preserves the validated seven-stage inverse/gate-cache
+implementation and its v3/v4 raw results. Fusion leaves forward code and cache
+contracts unchanged. The backward now submits four stages per group of up to
+64 packed sequences, independent of token/chunk count:
+
+1. Preparation and local gradients, parallel across chunk/head tasks. Local
+   gradients depend on Q/K/dOut and gates, not the replayed state.
+2. Forward state/Z replay, then reverse state propagation in the same task,
+   which owns one sequence/head. No cross-task state dependence is introduced.
+3. Output/WY gradients, parallel across individual chunk/head tasks.
+4. Gate scans and final assembly. Tasks own whole shared-key groups; value-head
+   groups split only at 32-byte output boundaries. H=16/Hk=2 has two final tasks
+   per chunk. Irregular head counts use one task per chunk.
+
+Simply calling the old helpers in fewer launches is insufficient. The fused
+implementation also loads dense inputs in 64-row DMA tiles, builds causal masks
+with broadcasts/clamps, keeps inverse-adjoint weighting and beta reduction in
+UB, accumulates pairs of native matrix products in L0C, transposes gate/beta
+outputs in eight-head tiles, and retains shared-head dQ/dK sums in UB until the
+output store. No dense product uses vector dot loops. FP32 inputs retain the
+compensated product path and its rounding order.
+
+The first four-stage candidate measured 2.805 / 9.890 ms at 2K / 8K, H=16/Hk=2,
+with both caches (nine samples). Fusing final assembly with one task per whole
+chunk hurt head parallelism, motivating grouped final tasks. Even with grouped
+heads and on-chip reductions, the three-stage candidate measured 3.207 / 10.176 ms
+(31 samples), so it was rejected in favor of separate assembly. Fewer launches
+alone are not a useful optimization when the expensive stages lose parallelism.
+These were exploratory runs, not the final benchmark. Workspace remains 816.5 MiB at 8K/H=16; many
+intermediates still use GM. There is no whole-kernel on-chip residency claim.
+
+Final 31-sample synchronized wall medians with both caches: **2.807 ms at 2K**
+and **9.922 ms at 8K**, H=16/Hk=2. The committed v4 baseline measured
+4.320 / 15.799 ms: **35.0% / 37.2% less time**. The final 8K trace confirms
+four launches at 2.291 / 2.246 / 4.233 / 0.810 ms. State scans and output/WY
+products remain bottlenecks; the 2x-forward target is not reached. The raw
+samples, rejected three-stage experiment and source hashes are retained in
+`tests/baselines/gdn_mega_bwd_fused_v5.json`. Comparisons are across separate
+development runs, so clock/thermal variation can affect the numbers.
+
+Final validation: **107 passed in 191.11 s** (97 hardware, 10 CPU reference).
+All six gradients keep the same `2 * reordered_PyTorch_max_error + 1e-5` bound.
+The seven-allocation guard, nondefault-stream tests, cache immutability,
+packed/empty sequences, irregular heads and FP32 cancellation cases pass.
+Only the device library needed rebuilding (7.96 s); host ABI and Python hotpath
+are unchanged. Forward numerical code was not changed after f686c16.
+
 ## Reusing existing gate and beta outputs
 
 The inverse export below did change forward code; it redirects existing

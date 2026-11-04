@@ -28,9 +28,9 @@ AICORE inline void store(TileT& tile, __gm__ float* ptr) {
 
 // Generic square products keep the first port short; every tensor is padded
 // to C=D=128. Transposition is a view of the L1 fractal, not a GM copy.
-template<bool TA, bool TB, int Parts=1>
+template<bool TA, bool TB, int Parts=1, bool Sum=false, bool TC=false, bool TD=false>
 AICORE inline void matmul(__gm__ float* a, __gm__ float* b,
-                             __gm__ float* c, int batch) {
+                             __gm__ float* c, int batch, __gm__ float* d=nullptr,__gm__ float* e=nullptr) {
 #if defined(__DAV_CUBE__)
   using Mat = Tile<TileType::Mat,float,128,128,BLayout::ColMajor,128,128,SLayout::RowMajor,512>;
   using Trans = Tile<TileType::Mat,float,128,128,BLayout::RowMajor,128,128,SLayout::ColMajor,512>;
@@ -49,6 +49,14 @@ AICORE inline void matmul(__gm__ float* a, __gm__ float* b,
       if constexpr(TB) { TRESHAPE(bt,bm); TEXTRACT(right,bt,part*K,0); }
       else TEXTRACT(right,bm,part*K,0);
       sync(); TMATMUL(acc,left,right); sync();
+      if constexpr(Sum) {
+        load<128,128>(am,d+h*16384); load<128,128>(bm,e+h*16384);
+        if constexpr(TC) { TRESHAPE(at,am); TEXTRACT(left,at,0,0); }
+        else TEXTRACT(left,am,0,0);
+        if constexpr(TD) { TRESHAPE(bt,bm); TEXTRACT(right,bt,0,0); }
+        else TEXTRACT(right,bm,0,0);
+        sync(); TMATMUL_ACC(acc,acc,left,right); sync();
+      }
       store<128,128>(acc,c+(h*Parts+part)*16384);
     }
   }
@@ -131,6 +139,19 @@ AICORE inline void block_weights(__gm__ float* e,__gm__ float* decay,int start,
 #endif
 }
 
+// Build a causal mask with broadcasts/clamps instead of 8K scalar stores.
+template<class TileT>
+AICORE inline void causal_mask(TileT& mask,int stripe,bool strict,int scratch) {
+#if defined(__DAV_VEC__)
+  Row columns; Short rows; Col col;
+  TASSIGN(columns,scratch); TASSIGN(rows,scratch+512); TASSIGN(col,scratch+512);
+  TCI<Row,float,1>(columns,0.0f);
+  TCI<Short,float,0>(rows,float(stripe*64+(strict ? 0 : 1))); sync();
+  TCOLEXPAND(mask,columns); sync(); TROWEXPANDADD(mask,mask,col); sync();
+  TMAXS(mask,mask,0.0f); sync(); TMINS(mask,mask,1.0f); sync();
+#endif
+}
+
 // op: 0 add(alpha*y), 1 multiply, 2 row scale, 3 last-vector-element scale,
 // 4 scalar scale, 5 strict lower triangle.
 AICORE inline void matrix_op(__gm__ float* x, __gm__ float* y,
@@ -150,8 +171,7 @@ AICORE inline void matrix_op(__gm__ float* x, __gm__ float* y,
       if(op==2) { TASSIGN(col,65536+stripe*64*4); TROWEXPANDMUL(a,a,col); }
       else { float last=row.GetValue(127); TMULS(a,a,last); }
     } else if(op==5) {
-      for(int i=0;i<64;++i)
-        for(int j=stripe*64+i;j<128;++j) a.SetValue(i*128+j,0.0f);
+      causal_mask(b,stripe,true,66048); TMUL(a,a,b);
     } else TMULS(a,a,alpha);
     sync(); store<64,128>(a,out+p);
   }
@@ -194,9 +214,30 @@ AICORE inline void weighted_lower(__gm__ float* kk,__gm__ float* decay,
   load<64,128>(a,kk+stripe*8192); load<64,128>(b,decay+stripe*8192);
   load<1,128>(weights,beta);
   TMUL(a,a,b); sync(); TROWEXPANDMUL(a,a,col); sync();
-  for(int i=0;i<64;++i)
-    for(int j=stripe*64+i;j<128;++j) a.SetValue(i*128+j,0.0f);
+  causal_mask(b,stripe,true,66048); TMUL(a,a,b); sync();
   store<64,128>(a,out+stripe*8192);
+#endif
+}
+
+// Fuse inverse-adjoint masking, decay/beta weights and the beta reduction.
+// Neither dL nor its elementwise products are written to GM.
+AICORE inline void wy_epilogue(__gm__ float* raw,__gm__ float* decay,
+    __gm__ float* kk,__gm__ float* beta,__gm__ float* base_db,
+    __gm__ float* dkk,__gm__ float* db) {
+#if defined(__DAV_VEC__)
+  Half a,b,c,tmp; Row weights; Col col,sum; Short result,base;
+  TASSIGN(a,0); TASSIGN(b,32768); TASSIGN(c,65536); TASSIGN(tmp,98304);
+  TASSIGN(weights,131072); TASSIGN(sum,131584); TASSIGN(result,131584);
+  TASSIGN(base,131840);
+  int stripe=get_subblockid(),offset=stripe*8192;
+  load<64,128>(a,raw+offset); TMULS(a,a,-1.0f); sync();
+  causal_mask(c,stripe,true,132096); TMUL(a,a,c); sync();
+  load<64,128>(b,decay+offset); TMUL(c,a,b); sync();
+  load<1,128>(weights,beta); TASSIGN(col,131072+stripe*256);
+  TROWEXPANDMUL(c,c,col); sync(); store<64,128>(c,dkk+offset);
+  load<64,128>(tmp,kk+offset); TMUL(a,a,tmp); sync(); TMUL(a,a,b); sync();
+  TROWSUM(sum,a,tmp); sync(); load<1,64>(base,base_db+stripe*64);
+  TADD(result,base,result); sync(); store<1,64>(result,db+stripe*64);
 #endif
 }
 
@@ -316,10 +357,8 @@ AICORE inline void gates(__gm__ float* g,__gm__ float* e,
         }
       }
       // Clamp upper-triangular exponents before exp, preventing 0*inf.
-      TEXPANDS(b,1.0f); sync();
-      for(int i=0;i<64;++i)
-        for(int j=stripe*64+i+1;j<128;++j) b.SetValue(i*128+j,0.0f);
-      sync(); TMUL(a,a,b); sync();
+      causal_mask(b,stripe,false,67584);
+      TMUL(a,a,b); sync();
       TEXP(a,a); sync(); TMUL(a,a,b); sync();
       store<64,128>(a,decay+h*16384+stripe*8192);
     }
@@ -362,6 +401,24 @@ template<class T>
 AICORE inline void pack_input(__gm__ T* x,__gm__ float* y,int heads,
     int rows,int length,int group,int64_t st,int64_t sh,int64_t sd) {
 #if defined(__DAV_VEC__)
+  if(rows==128 && sd==1) {
+    using InputTile=Tile<TileType::Vec,T,64,128,BLayout::RowMajor,64,128,SLayout::NoneBox,512,PadValue::Zero>;
+    using Part=Tile<TileType::Vec,T,64,128,BLayout::RowMajor,DYNAMIC,128,SLayout::NoneBox,512,PadValue::Zero>;
+    InputTile input; Half output;
+    TASSIGN(input,0); TASSIGN(output,32768);
+    for(int task=get_subblockid();task<heads*2;task+=2) {
+      int h=task/2,first=(task%2)*64,n=max(0,min(64,length-first));
+      if(x && n) {
+        Part part(n); TASSIGN(part,0);
+        GlobalTensor<T,Shape<1,1,1,DYNAMIC,128>,Stride<1,1,1,DYNAMIC,1>> gm(
+          x+(h/group)*sh+first*st,{1,1,1,n,128},{1,1,1,st,1});
+        TLOAD(part,gm); sync(); TFILLPAD_INPLACE(input,part); sync();
+      } else { TEXPANDS(input,static_cast<T>(0)); sync(); }
+      if constexpr(std::is_same_v<T,float>) store<64,128>(input,y+task*8192);
+      else { TCVT(output,input,RoundMode::CAST_NONE); sync(); store<64,128>(output,y+task*8192); }
+    }
+    return;
+  }
   Tile<TileType::Vec,T,1,128> input;
   Row output; TASSIGN(input,0); TASSIGN(output,512);
   for(int task=get_subblockid();task<heads*rows;task+=2) {
