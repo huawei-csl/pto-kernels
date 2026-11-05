@@ -20,3 +20,21 @@ struct Plan {
 enum MatrixSlot { Q_DQ,K,V,DO_DV,AT,KK,DECAY,W_DW,U_Z,H,DU,DH_DK,MatrixSlots };
 enum VectorSlot { BETA,EXP,RATIO,Q_ENERGY,END_STATE,END_KEYS,DB,VectorSlots };
 constexpr int RecordSize=MatrixSlots*Matrix+VectorSlots*128;
+
+// Host and device share the dispatch decision; small grids retain more tasks.
+#ifdef __CCE_AICORE__
+__host__ __aicore__
+#endif
+inline int output_head_group(const Plan& p) {
+  int group=p.heads/p.key_heads,fold=8;
+  if(p.heads%8) return p.heads;
+  while(fold%group) fold+=8;
+  return fold;
+}
+#ifdef __CCE_AICORE__
+__host__ __aicore__
+#endif
+inline bool fused_output(const Plan& p) {
+  return p.input[0].dtype!=2 && p.input[1].dtype!=2 && p.input[2].dtype!=2 &&
+    p.chunks*(p.heads/output_head_group(p))>=4*BlockCount;
+}

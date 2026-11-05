@@ -19,6 +19,15 @@ def plot(rows, destination):
     from matplotlib.colors import Normalize
     import numpy as np
 
+    modes = {(r.get("inverse_cache", False), r.get("gate_cache", False)) for r in rows}
+    if len(modes) != 1:
+        raise ValueError("A heatmap must not mix cache modes")
+    cached = modes == {(True, True)}
+    caption = (
+        "backward uses saved inverse + gates/beta; forward saves these buffers"
+        if cached
+        else "backward recomputes; forward saves no caches"
+    )
     ratios = [r["bwd_fwd_ratio"] for r in rows if r.get("bwd_fwd_ratio") is not None]
     norm = Normalize(vmin=0, vmax=max(ratios, default=1))
     cmap = plt.get_cmap("YlOrRd").copy()
@@ -47,8 +56,8 @@ def plot(rows, destination):
                     bwd, fwd = row["median_ms"], row.get("forward_median_ms")
                     label = (
                         f"{bwd:.2f} / {fwd:.2f}\n{bwd / fwd:.1f}×"
-                        if fwd is not None
-                        else f"{bwd:.2f} / N/A"
+                        if bwd is not None and fwd is not None
+                        else (f"{bwd:.2f} / N/A" if bwd is not None else "N/A")
                     )
                     color = (
                         "white"
@@ -87,14 +96,18 @@ def plot(rows, destination):
         fig.text(
             0.47,
             0.91,
-            "Each cell: backward / forward milliseconds, then ratio",
+            (
+                "Cached backward / cache-saving forward (ms), then ratio"
+                if cached
+                else "Each cell: backward / forward milliseconds, then ratio"
+            ),
             ha="center",
             fontsize=12,
         )
         fig.text(
             0.5,
             0.045,
-            "Ascend910B2 · FP16 · D=C=128 · backward recomputes; forward saves no caches\n"
+            f"Ascend910B2 · FP16 · D=C=128 · {caption}\n"
             "Median synchronized wall time: backward includes allocation; forward uses preallocated buffers.\n"
             "Heads per device = global heads / TP; no communication. N/A: forward does not support local Hv=2, 4, 6.",
             ha="center",
@@ -106,7 +119,7 @@ def plot(rows, destination):
         plt.close(fig)
 
 
-def measure(heads, tp, repeats, destination, forward=False):
+def measure(heads, tp, repeats, destination, forward=False, cached=False):
     # Separate processes release allocations between head/TP pairs and directions.
     command = [
         sys.executable,
@@ -120,6 +133,8 @@ def measure(heads, tp, repeats, destination, forward=False):
         "--repeats",
         str(repeats),
     ]
+    if cached:
+        command.extend(("--inverse-cache", "--gate-cache"))
     if forward:
         command.append("--forward-only")
     log = destination / f"h{heads}_tp{tp}{'_fwd' if forward else ''}.log"
@@ -143,58 +158,62 @@ def save(rows, destination):
     temporary.replace(destination / "results.jsonl")
 
 
-def add_forward(rows, destination, repeats):
-    for heads in HEADS:
-        for tp in TPS:
-            selected = [
-                r for r in rows if r["global_value_heads"] == heads and r["tp"] == tp
-            ]
-            supported = heads // tp in FORWARD_HEADS
-            print(
-                f"Forward Hv={heads}, TP={tp}: {'measuring' if supported else 'unsupported'}",
-                flush=True,
-            )
-            measurements = (
-                measure(heads, tp, repeats, destination, forward=True)
-                if supported
-                else []
-            )
-            forward = {r["tokens"]: r for r in measurements}
-            for row in selected:
-                result = forward.get(row["tokens"])
-                row["forward_status"] = (
-                    "ok" if result else "unsupported local value heads"
-                )
-                row["forward_median_ms"] = (
-                    result["forward_medians"]["forward_no_cache_ms"] if result else None
-                )
-                row["forward_samples"] = result["forward_samples"] if result else {}
-                row["forward_device"] = result["forward_device"] if result else {}
-                row["bwd_fwd_ratio"] = (
-                    row["median_ms"] / row["forward_median_ms"] if result else None
-                )
-                row["forward_timing"] = (
-                    "synchronized wall, preallocated buffers, no saved caches"
-                )
-            save(rows, destination)
-
-
 def run(args):
+    """Measure forward producing caches and backward consuming those exact buffers."""
     destination = args.output.resolve()
     destination.mkdir(parents=True, exist_ok=True)
     rows = []
     for heads in HEADS:
         for tp in TPS:
+            supported = heads // tp in FORWARD_HEADS
             print(
-                f"Backward Hv={heads}, Q/K=16, TP={tp} (local {heads // tp}/{16 // tp})",
+                f"Cached backward Hv={heads}, TP={tp}: "
+                f"{'measuring' if supported else 'unsupported forward'}",
                 flush=True,
             )
-            for row in measure(heads, tp, args.repeats, destination):
+            measurements = (
+                measure(heads, tp, args.repeats, destination, cached=True)
+                if supported
+                else [
+                    {
+                        "tokens": length,
+                        "median_ms": None,
+                        "samples_ms": [],
+                        "forward_medians": {},
+                        "forward_samples": {},
+                        "forward_device": {},
+                    }
+                    for length in LENGTHS
+                ]
+            )
+            for row in measurements:
+                if supported:
+                    assert row["inverse_cache"] and row["gate_cache"]
+                fwd = row["forward_medians"].get("forward_cache_ms")
                 row.update(
                     global_value_heads=heads,
                     global_qk_heads=16,
                     tp=tp,
-                    timing="synchronized wall including allocation; no TP communication",
+                    heads=heads // tp,
+                    key_heads=16 // tp,
+                    inverse_cache=True,
+                    gate_cache=True,
+                    saved_values=[
+                        "inverse_factors",
+                        "gate_prefix_hi",
+                        "gate_prefix_lo",
+                        "beta",
+                    ],
+                    backward_status=(
+                        "ok" if supported else "unsupported forward cache producer"
+                    ),
+                    forward_status=(
+                        "ok" if supported else "unsupported local value heads"
+                    ),
+                    forward_median_ms=fwd,
+                    bwd_fwd_ratio=row["median_ms"] / fwd if fwd is not None else None,
+                    timing="synchronized wall including backward allocation; forward excluded; no TP communication",
+                    forward_timing="synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
                     dtype="float16",
                     head_dim=128,
                     chunk_size=128,
@@ -202,6 +221,8 @@ def run(args):
                 )
                 rows.append(row)
             save(rows, destination)
-    add_forward(rows, destination, args.repeats)
     plot(rows, destination)
-    print(f"Saved {len(rows)} configurations and heatmap.png/.svg to {destination}")
+    print(
+        f"Saved {sum(r['backward_status'] == 'ok' for r in rows)} cached configurations "
+        f"and heatmap.png/.svg to {destination}"
+    )

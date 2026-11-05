@@ -1,5 +1,213 @@
 # GDN backward development
 
+## FLA comparison chart
+
+Added `tests/benchmark_gdn_mega_bwd_fla.py` and
+`benchmark_data/gdn_mega_bwd/fla_comparison/speedup_heatmap.png/.svg`.
+FLA commit 9e82a80 uses equal Q/K and value heads (16/24/32/48/64), so only
+five shapes matched our prior TP sweep. A separate 25-shape PTO sweep now
+matches batch, length, both head counts and both head dimensions exactly,
+with 30 measured samples per direction and both forward caches enabled.
+The existing TP heatmap is unchanged. `--plot-only` redraws without NPU work.
+
+Cells show FLA/PTO median wall-time ratios and both latencies. The comparison
+is explicitly labeled PTO FP16/C128 versus FLA BF16/C64. Input distributions,
+allocation/autograd overhead and final-state/dh0 outputs also differ; this
+is not a controlled same-dtype performance claim. No joint forward+backward
+ratio is inferred from separate measurements. Source metadata, all 50 ratios
+and raw PTO samples are retained in
+`tests/baselines/gdn_mega_bwd_fla_v8.json`. Both kernels remain unchanged.
+
+
+## Cached backward: local reuse and output fusion (v8)
+
+All numerical changes use PTO-ISA, with native FP32 Cube products. Forward,
+retained-cache format and workspace size are unchanged. Python/native launch
+code still only validates, allocates and submits; no Torch computation was added.
+
+The inverse cache removes the solve, but not KK/QK, W/U, local adjoints, state
+replay or output derivatives. The cached v7 8K/Hv=64/Hqk=16 hardware trace was
+5.626 / 4.632 / 7.764 / 2.278 ms for preparation, state scans, gradients and
+assembly. Thus gradients plus assembly accounted for about half the call;
+even eliminating all preparation would leave most of the backward work.
+The saved inverse is a factorization, completed with one 64x64 Cube product,
+not the full triangular solve. Caching was working; subsequent data movement
+and synchronization limited the end-to-end gain.
+
+A separate alternating comparison on the final code confirms that caches
+still help: at 8K/Hv=64/Hqk=16, full recomputation is **19.506 ms** versus
+**16.878 ms** cached (13.5% lower); at 8K/Hv=16/Hqk=2, **5.939 versus 5.104 ms**
+(14.1% lower). Same inputs, three warmup pairs and eleven measured pairs.
+The blocked recomputation solve is already much cheaper than the original
+serial inverse, so skipping it cannot produce the early expected large gain.
+
+Implemented:
+
+- Native cached preparation transposes the read-only factors into A.T, then
+  completes its upper-right block as D0.T @ P.T. No temporary factor copy.
+- Both vector subcores construct their own decay stripes. Gate/beta prefix
+  buffers remain read-only; both caches are still passed to every timed call.
+- State scans retain the scaled incoming state in UB across their two products.
+  Cube prefetches the next operand while the preceding product runs.
+- `resident_cube.h` retains operands in seven L1 slots. Shared Q/K remain
+  resident across the value heads sharing that key head. Matrix products keep
+  native FP32 operands and accumulation; no lower-precision shortcut is enabled.
+- `epilogues.h` fuses weighting, additions and reductions in UB. Independent DMA
+  loads queue together before their consumer fence. dV energy is computed from
+  the actual rounded dV and reused for dg, preserving the rounding contract.
+- Large native-input grids fuse final output assembly into the gradient stage.
+  Shared dQ/dK sums live at UB 120..184 KiB across value heads; helpers use the
+  lower 120 KiB, leaving PTO's reserved 184..192 KiB untouched. dV writes directly
+  to its final strided output. This removes the final dQ/dK/dV matrix round trips
+  through GM.
+- Fused tasks own lcm(8,Hv/Hqk) value heads (all heads if Hv is not divisible by
+  eight), preserving aligned scalar writes and whole shared-key reductions.
+  Three launches are used when at least 96 such chunk/group tasks exist.
+  Smaller native grids retain four launches and omit unnecessary assembly
+  cross-core joins; FP32 inputs retain the compensated four-stage path.
+
+Hardware `msprof op --aic-metrics=Roofline` counters at 8K/Hv=64/Hqk=16,
+comparing v7 gradients+assembly against the final fused output stage:
+
+| Traffic | v7 (MiB) | v8 (MiB) | Reduction |
+| --- | --- | --- | --- |
+| GM to Cube L1 | 4608 | 2432 | 47.2% |
+| GM to vector UB | 10548 | 5934 | 43.7% |
+| Vector UB to GM | 5028 | 1956 | 61.1% |
+
+These are transfers at the named interfaces, including L2 hits, not measured
+HBM-only bandwidth. Mean per-Cube cross-core waiting for gradients+assembly
+falls from 4.080 to 2.804 ms; state-scan waiting falls from 1.614 to 1.185 ms.
+Output-stage Cube activity is still only 24.8% of the profiler denominator;
+these improvements do not imply peak Cube FLOP utilization or a 2x-forward
+result. Vector work and state dependencies remain substantial costs.
+
+Development checks caught a matrix-only copy used on a vector and a compact
+reduction scratch tile incorrectly reused for a full KK load; both were fixed.
+An HF32 experiment failed the existing repeated-key FP16 dQ bound
+(0.118866 error versus 0.0788064 budget) and was removed. No tolerances changed.
+Packed `[129]+[1]*10` at H=64/Hk=16 and `[1]*48` at H=48/Hk=16 now exercise the
+fused dispatch, state transitions, partial chunks and group sizes four/three.
+
+Paired synchronized wall times on identical inputs, alternating old/new order,
+three warmup pairs and eleven measured pairs; both paths consume the same
+forward inverse and gate/beta caches. Allocation/enqueue is included, forward
+execution excluded. The before library is `b54cbc2527d02828` (cached v7), not
+v6 or uncached recomputation; the after library is `ade915863a5ac992`.
+
+| Tokens | Local Hv / Hqk | Cached v7 (ms) | Cached v8 (ms) | Reduction |
+| --- | --- | --- | --- | --- |
+| 8192 | 64 / 16 | 20.732 | 16.960 | 18.2% |
+| 16384 | 32 / 8 | 21.526 | 17.577 | 18.3% |
+| 16384 | 48 / 16 | 30.830 | 24.675 | 20.0% |
+| 8192 | 16 / 2 | 6.048 | 5.116 | 15.4% |
+| 2048 | 16 / 2 | 1.889 | 1.660 | 12.1% |
+
+All 18 paired cases improve, with reductions of 11.3–20.0%. At 8K/Hv=16/Hqk=2,
+the end-to-end 5 ms target is still narrowly missed (5.116 ms). A separate
+warmed hardware trace sums to **4.780 ms** across three kernels
+(1.405 / 1.343 / 2.032 ms), excluding host allocation/enqueue and launch gaps.
+This is a device trace, not an end-to-end median. The general 2x-forward
+objective also remains unmet; do not describe this as a 2x end-to-end speedup.
+Final validation: **122 passed in 276.73 s**, including 112 hardware and ten
+CPU reference checks, with unchanged per-gradient bounds, cache/input integrity,
+allocation-only guard, streams, empty sequences, packed tails and cancellation.
+All 60 supported cached sweep medians improve over the recorded v7 sweep
+(new/old latency 0.735–0.938, median 0.859). These separate-process comparisons
+supplement the paired measurements above. All 80 cells were checked for both
+cache flags, cache-saving forward denominators and explicit N/A handling.
+The final heatmap and raw samples use both caches; old cached v7 data remain in
+`tests/baselines/gdn_mega_bwd_cached_v7.json` and the `cached_v7/` plot directory.
+
+## Cached training heatmap baseline (v7)
+
+The previous `extensive/` and `tp_v7/` charts measured full recomputation.
+The default `--extensive` sweep now explicitly passes both inverse and
+gate caches produced by the forward call. Its forward denominator is
+`forward_cache_ms`, so inverse-saving cost is included. Cache creation
+happens before backward timing. Those results are preserved under
+`benchmark_data/gdn_mega_bwd/cached_v7/`; unsupported cache producers (local
+Hv=2,4,6) produce N/A cells in both directions, never uncached substitutes.
+The plot rejects mixed cache modes and labels the saved buffers explicitly.
+All 60 supported configurations completed with five samples per direction;
+validated every ratio against `forward_cache_ms` and both cache flags.
+Raw samples and source hashes are preserved in
+`tests/baselines/gdn_mega_bwd_cached_v7.json`.
+
+## TP=1/2 preparation optimization (v7)
+
+The full-recomputation TP heatmap exposed a different bottleneck from cached
+v6: at 4K/H=64/Hk=16, preparation consumed **12.898 ms** of a roughly 20.7 ms
+backward. The uncached path still used 127 serial rank-one inverse updates on
+one vector subcore and scalar GM gathers for each gate/beta token.
+
+Implemented in PTO, without changes to forward, cache contracts or allocations:
+
+- `blocked_inverse.h` reuses forward's eight 16x16 diagonal substitutions on
+  both vector subcores, followed by 32/64/128 block joins on Cube. This computes
+  the complete inverse for recomputation; cached inverse completion is retained.
+- Native preparation now pipelines every cache mode, not just both-caches mode.
+- Gate/beta packing loads aligned head panels and transposes them, replacing
+  128 scalar GM reads per head/vector. Arbitrary strides retain the fallback.
+- Native gate prefixes use a seven-step FP32 vector tree. FP32 q/k/v inputs
+  retain the original compensated prefix, inverse and gradient schedule.
+- When there are at least 24 chunk/key-head tasks, preparation owns an entire
+  shared-key group. QK and KK are computed once for that group. K and KK remain
+  read-only aliases of the leader's storage throughout backward, avoiding copies.
+  Raw QK temporarily occupies the leader's incoming-state slot, which stage 1
+  overwrites only after all preparation finishes. Workspace size is unchanged.
+
+The shared-gram experiment with copied K/KK gave little improvement. Retaining
+read-only aliases reduces traffic; it yields only modest cached-path gains.
+This is mainly a **recomputation improvement**, not a solution to every cached
+backward bottleneck. Native accumulation still uses FP32 Cube operations.
+
+Paired measurements against rebased snapshot **f33546c** (original **2b6bd11**),
+identical inputs in one process, alternating old/new order, three warmup pairs
+and eleven measured pairs; synchronized wall time includes allocations:
+
+| Global Hv / Hqk | TP | Tokens | Snapshot (ms) | Current (ms) |
+| --- | --- | --- | --- | --- |
+| 64 / 16 | 1 | 16384 | 80.359 | 45.188 |
+| 64 / 16 | 2 | 16384 | 42.512 | 24.652 |
+| 48 / 16 | 1 | 16384 | 61.123 | 34.012 |
+| 48 / 16 | 2 | 16384 | 31.098 | 17.453 |
+
+At 8K/H=64/Hk=16 with both caches, the corresponding comparison is only
+20.674 -> 20.244 ms. Do not present the 40–44% uncached improvement as a cached
+speedup. The two-times-forward objective remains unmet. The unchanged gradient
+and state stages account for much of the remaining time.
+
+The original 107 checks passed after the new solve/panel/prefix work; nine
+focused checks passed after shared storage was added. New packed
+`[17,0,19]`, H=64/Hk=16 cases exercise the group scheduling and aliases across
+all three dtypes and cache modes, retaining the same numerical bounds.
+Final validation: **113 tests passed in 205.35 s** with the existing
+`max_error <= 2 * reordered_torch_error + 1e-5` assertions, allocation guard,
+cache integrity, arbitrary strides, packed sequences and stream checks.
+
+Matched 4K/H=64/Hk=16 uncached hardware traces (stage durations, not counters):
+
+| Stage | Snapshot (ms) | Current (ms) |
+| --- | --- | --- |
+| Preparation | 12.898 | 4.203 |
+| State replay + adjoints | 2.349 | 2.269 |
+| Output/WY gradients | 3.989 | 3.953 |
+| Assembly | 1.198 | 1.191 |
+
+Preparation is 67% faster; the other stages are essentially unchanged. These
+traces do not measure Cube utilization percentages. Raw profiles are under
+`build/gdn_mega_bwd/profile/tp1_before` and `tp1_final`. The paired driver,
+measurements and final validation log are retained under
+`build/gdn_mega_bwd/tp_v7/`. The refreshed 80-case backward sweep reuses the
+unchanged forward measurements from v6 and labels their source explicitly.
+All 80 refreshed backward medians improve versus the recorded v6 sweep
+(current/old latency range 0.553–0.943). These separate-process sweep results
+are supplementary to the paired comparisons above. Its heatmaps are under
+`benchmark_data/gdn_mega_bwd/tp_v7/`.
+The compact comparison and full samples are in
+`tests/baselines/gdn_mega_bwd_tp_v7.json`.
+
 ## Extensive sweep snapshot before further optimization
 
 `tests/baselines/gdn_mega_bwd_extensive_v6.json` preserves all 80 backward

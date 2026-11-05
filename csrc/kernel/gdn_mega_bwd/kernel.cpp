@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Huawei Technologies Co., Ltd. See repository LICENSE.
-// Four sequence-wide stages. Chunk traversal and arithmetic execute on NPU.
+// Three sequence-wide stages; small grids and FP32 inputs retain output assembly.
+// Chunk traversal and all numerical work execute in PTO-ISA on NPU.
 #include "device_ops.h"
 #include "pipeline.h"
 
@@ -136,15 +137,47 @@ AICORE inline void scatter_matrix(Buffer x,__gm__ float* out,int length,int stri
 #endif
 }
 
+AICORE inline void scatter_gates(const Plan& p,int c,int first_head,int heads,bool accurate) {
+  int seq=sequence(p,c),first=p.start[seq]+(c-p.offset[seq])*128;
+  int length=min(128,p.start[seq]+p.length[seq]-first);
+#if defined(__DAV_VEC__)
+  if(get_subblockid()==0) {
+    // Transpose eight complete head rows; no scalar GM gathers. Head groups
+    // own whole 32-byte output spans, preventing writes to shared cache lines.
+    Tile<TileType::Vec,float,8,128> input,tmp;
+    Tile<TileType::Vec,float,128,8> output;
+    TASSIGN(input,0); TASSIGN(output,4096); TASSIGN(tmp,8192);
+    for(int which=0;which<2;++which) for(int h=first_head;h<first_head+heads;h+=8) {
+      int n=min(8,first_head+heads-h);
+      TEXPANDS(input,0.0f); sync();
+      for(int j=0;j<n;++j) {
+        Row row; TASSIGN(row,j*512);
+        load<1,128>(row,chunk(p,c,h+j).v(which==0 ? Q_ENERGY : DB).data);
+      }
+      TTRANS(output,input,tmp); sync();
+      if(which==0 && !accurate) reverse_gate_scan();
+      Tile<TileType::Vec,float,128,8,BLayout::RowMajor,DYNAMIC,DYNAMIC> part(length,n);
+      TASSIGN(part,4096);
+      GlobalTensor<float,Shape<1,1,1,DYNAMIC,DYNAMIC>,Stride<1,1,1,DYNAMIC,1>> gm(
+        (__gm__ float*)p.output[3+which]+int64_t(first)*p.heads+h,
+        {1,1,1,length,n},{1,1,1,p.heads,1});
+      TSTORE(gm,part); sync();
+    }
+  }
+#endif
+}
+
 AICORE inline void finish(const Plan& p,int c,int first_head,int heads,Ops& o) {
   int seq=sequence(p,c),first=p.start[seq]+(c-p.offset[seq])*128;
   int length=min(128,p.start[seq]+p.length[seq]-first),group=p.heads/p.key_heads;
+  if(!o.accurate) o.begin();
   for(int h=first_head;h<first_head+heads;++h) {
     o.used=0; auto x=chunk(p,c,h);
-    auto dg=o.add(x.v(Q_ENERGY),o.dotrows(x.m(DO_DV),x.m(V)),-1);
+    auto energy=o.accurate ? o.dotrows(x.m(DO_DV),x.m(V)) : x.v(RATIO);
+    auto dg=o.add(x.v(Q_ENERGY),energy,-1);
     o.call(2,o.accurate ? 2 : 4,dg,x.v(END_STATE),x.v(END_KEYS),x.v(EXP),1,x.v(Q_ENERGY));
     scatter_matrix(x.m(DO_DV),(__gm__ float*)p.output[2]+(int64_t(first)*p.heads+h)*128,length,p.heads*128);
-    join();
+    if(o.accurate) join();
   }
 #if defined(__DAV_VEC__)
   // Shared-head sums stay in UB through the final strided output store.
@@ -171,33 +204,9 @@ AICORE inline void finish(const Plan& p,int c,int first_head,int heads,Ops& o) {
     }
   }
 #endif
-  join();
-#if defined(__DAV_VEC__)
-  if(get_subblockid()==0) {
-    // Transpose eight complete head rows; no scalar GM gathers. Head groups
-    // own whole 32-byte output spans, preventing writes to shared cache lines.
-    Tile<TileType::Vec,float,8,128> input,tmp;
-    Tile<TileType::Vec,float,128,8> output;
-    TASSIGN(input,0); TASSIGN(output,4096); TASSIGN(tmp,8192);
-    for(int which=0;which<2;++which) for(int h=first_head;h<first_head+heads;h+=8) {
-      int n=min(8,first_head+heads-h);
-      TEXPANDS(input,0.0f); sync();
-      for(int j=0;j<n;++j) {
-        Row row; TASSIGN(row,j*512);
-        load<1,128>(row,chunk(p,c,h+j).v(which==0 ? Q_ENERGY : DB).data);
-      }
-      TTRANS(output,input,tmp); sync();
-      if(which==0 && !o.accurate) reverse_gate_scan();
-      Tile<TileType::Vec,float,128,8,BLayout::RowMajor,DYNAMIC,DYNAMIC> part(length,n);
-      TASSIGN(part,4096);
-      GlobalTensor<float,Shape<1,1,1,DYNAMIC,DYNAMIC>,Stride<1,1,1,DYNAMIC,1>> gm(
-        (__gm__ float*)p.output[3+which]+int64_t(first)*p.heads+h,
-        {1,1,1,length,n},{1,1,1,p.heads,1});
-      TSTORE(gm,part); sync();
-    }
-  }
-#endif
-  join();
+  if(o.accurate) join();
+  scatter_gates(p,c,first_head,heads,o.accurate);
+  if(o.accurate) join(); else sync();
 }
 #endif
 
@@ -208,17 +217,26 @@ __global__ AICORE void gdn_bwd_stage(Plan p) {
   set_mask_norm(); set_vector_mask(-1,-1);
 #endif
 #ifdef __CCE_AICORE__
+  if constexpr(Stage==0)
+    if(!p.inverse_cache && p.input[0].dtype!=2 && p.input[1].dtype!=2 && p.input[2].dtype!=2)
+      inverse_indices();
   // Keep each shared-key group together for dQ/dK reduction. Split value
   // heads only at cache-line boundaries for the interleaved scalar outputs.
-  int group=p.heads/p.key_heads,fold=max(8,group);
-  if(p.heads%8 || p.heads%fold || fold%group) fold=p.heads;
+  int group=p.heads/p.key_heads,fold=output_head_group(p);
   int groups=p.heads/fold;
-  int tasks=Stage==1 ? p.sequences*p.heads : Stage==3 ? p.chunks*groups : p.chunks*p.heads;
+  bool emit=fused_output(p);
+  bool share=Stage==0 && shared_grams(p);
+  int tasks=share ? p.chunks*p.key_heads : Stage==1 ? p.sequences*p.heads : (Stage==3 || (Stage==2 && emit)) ? p.chunks*groups : p.chunks*p.heads;
   for(int task=get_block_idx();task<tasks;task+=get_block_num()) {
     Ops o{scratch(p)+2*Matrix,p.input[0].dtype==2 || p.input[1].dtype==2 || p.input[2].dtype==2};
     int head=task%p.heads,index=task/p.heads;
     if constexpr(Stage==0) {
-      if(!o.accurate && p.inverse_cache && p.gate_cache[0]) pipelined_prepare(p,index,head,o);
+      if(!o.accurate) {
+        int count=share ? group : 1;
+        head=share ? (task%p.key_heads)*group : head;
+        index=share ? task/p.key_heads : index;
+        for(int j=0;j<count;++j) { o.used=0; pipelined_prepare(p,index,head+j,head,o); }
+      }
       else { prepare(p,index,head,o); o.used=0; local_gradient(p,index,head,o); }
     }
     if constexpr(Stage==1) {
@@ -229,6 +247,12 @@ __global__ AICORE void gdn_bwd_stage(Plan p) {
       if(o.accurate) {
         output_gradient(p,index,head,o); o.used=0;
         wy_gradient(p,index,head,o);
+      } else if(emit) {
+        int c=task/groups,first_head=(task%groups)*fold;
+        for(int h=first_head;h<first_head+fold;++h) {
+          o.used=0; pipelined_gradients<true>(p,c,h,o);
+        }
+        scatter_gates(p,c,first_head,fold,false); join();
       } else pipelined_gradients(p,index,head,o);
     }
     if constexpr(Stage==3) finish(p,task/groups,(task%groups)*fold,fold,o);
@@ -240,5 +264,5 @@ extern "C" void launch_stages(Plan p,void* stream) {
   gdn_bwd_stage<0><<<BlockCount,nullptr,stream>>>(p);
   gdn_bwd_stage<1><<<BlockCount,nullptr,stream>>>(p);
   gdn_bwd_stage<2><<<BlockCount,nullptr,stream>>>(p);
-  gdn_bwd_stage<3><<<BlockCount,nullptr,stream>>>(p);
+  if(!fused_output(p)) gdn_bwd_stage<3><<<BlockCount,nullptr,stream>>>(p);
 }

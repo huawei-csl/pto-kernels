@@ -101,13 +101,19 @@ struct Ops {
     if(!parallel) join(); return out;
   }
 };
+AICORE inline bool shared_grams(const Plan& p) {
+  return p.chunks*p.key_heads>=BlockCount && p.input[0].dtype!=2 &&
+    p.input[1].dtype!=2 && p.input[2].dtype!=2;
+}
 struct Chunk {
-  __gm__ float* base;
-  AICORE Buffer m(int slot) const { return {base+slot*Matrix}; }
+  __gm__ float* base; __gm__ float* keys;
+  AICORE Buffer m(int slot) const { return {(slot==K || slot==KK ? keys : base)+slot*Matrix}; }
   AICORE Buffer v(int slot) const { return {base+MatrixSlots*Matrix+slot*128,true}; }
 };
 AICORE inline Chunk chunk(const Plan& p,int c,int h) {
-  return {(__gm__ float*)p.workspace+(int64_t(c)*p.heads+h)*RecordSize};
+  int kh=shared_grams(p) ? h/(p.heads/p.key_heads)*(p.heads/p.key_heads) : h;
+  auto start=(__gm__ float*)p.workspace+int64_t(c)*p.heads*RecordSize;
+  return {start+h*RecordSize,start+kh*RecordSize};
 }
 AICORE inline int sequence(const Plan& p,int c) {
   int s=0; while(c>=p.offset[s+1]) ++s; return s;

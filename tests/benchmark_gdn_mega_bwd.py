@@ -34,23 +34,20 @@ def main():
     parser.add_argument(
         "--extensive",
         action="store_true",
-        help="Sweep global Hv=64/48/32/16, Hqk=16, TP=1/2/4/8 and five lengths; heatmap BWD/FWD times",
+        help="Sweep global Hv=64/48/32/16, Hqk=16, TP=1/2/4/8 and five lengths; heatmap cached BWD / cache-saving FWD times",
     )
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("benchmark_data/gdn_mega_bwd/extensive"),
+        default=Path("benchmark_data/gdn_mega_bwd/cached"),
         help="Directory for --extensive raw timings, logs and PNG/SVG heatmaps",
     )
     args = parser.parse_args()
     if args.repeats < 1:
         parser.error("--repeats must be positive")
     if args.extensive:
-        if args.inverse_cache or args.gate_cache or args.forward_only:
-            parser.error(
-                "--extensive uses full recomputation: forward cache production "
-                "does not support local value heads 2, 4 or 6"
-            )
+        if args.forward_only:
+            parser.error("--extensive measures both cached backward and forward")
         if args.profile or args.profile_once:
             parser.error("--extensive cannot be combined with profiling")
         from benchmark_gdn_mega_bwd_sweep import run

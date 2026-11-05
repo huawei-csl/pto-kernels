@@ -12,11 +12,15 @@ using Col = Tile<TileType::Vec, float, 64, 1, BLayout::ColMajor>;
 using Short = Tile<TileType::Vec, float, 1, 64>;
 using Scalar = Tile<TileType::Vec, float, 8, 1, BLayout::ColMajor, 1, 1>;
 AICORE inline void sync() { pipe_barrier(PIPE_ALL); }
+// Batch disjoint DMA loads, then fence once before vector consumers.
+template<int R, int C, class TileT>
+AICORE inline void load_async(TileT& tile, __gm__ float* ptr) {
+  GlobalTensor<float, Shape<1,1,1,R,C>, Stride<1,1,1,C,1>> gm(ptr);
+  TLOAD(tile, gm);
+}
 template<int R, int C, class TileT>
 AICORE inline void load(TileT& tile, __gm__ float* ptr) {
-  sync();
-  GlobalTensor<float, Shape<1,1,1,R,C>, Stride<1,1,1,C,1>> gm(ptr);
-  TLOAD(tile, gm); sync();
+  sync(); load_async<R,C>(tile,ptr); sync();
 }
 template<int R, int C, class TileT>
 AICORE inline void store(TileT& tile, __gm__ float* ptr) {
@@ -95,16 +99,21 @@ AICORE inline void matmul(__gm__ float* a, __gm__ float* b,
 }
 
 // The forward saves [D0,0; P,D1], P=-D1*L10. Complete A10=P*D0 on Cube.
-AICORE inline void complete_cached_inverse(__gm__ float* factor) {
+template<bool Transposed=false>
+AICORE inline void complete_cached_inverse(__gm__ float* factor,__gm__ float* output=nullptr) {
 #if defined(__DAV_CUBE__)
   Tile<TileType::Mat,float,128,128,BLayout::ColMajor,128,128,SLayout::RowMajor,512> f;
   TileLeft<float,64,64> left; TileRight<float,64,64> right;
   TileAcc<float,64,64> acc;
   TASSIGN(f,0); TASSIGN(left,0); TASSIGN(right,0); TASSIGN(acc,0);
   load<128,128>(f,factor);
-  TEXTRACT(left,f,64,0); TEXTRACT(right,f,0,0); sync();
+  if constexpr(Transposed) {
+    Tile<TileType::Mat,float,128,128,BLayout::RowMajor,128,128,SLayout::ColMajor,512> trans;
+    TRESHAPE(trans,f); TEXTRACT(left,trans,0,0); TEXTRACT(right,trans,0,64);
+  } else { TEXTRACT(left,f,64,0); TEXTRACT(right,f,0,0); }
+  sync();
   TMATMUL(acc,left,right); sync();
-  GlobalTensor<float,Shape<1,1,1,64,64>,Stride<1,1,1,128,1>> gm(factor+64*128);
+  GlobalTensor<float,Shape<1,1,1,64,64>,Stride<1,1,1,128,1>> gm(Transposed ? output+64 : factor+64*128);
   TSTORE(gm,acc); sync();
 #endif
 }
@@ -236,7 +245,7 @@ AICORE inline void dot_rows(__gm__ float* x,__gm__ float* y,
   TASSIGN(a,0); TASSIGN(b,32768); TASSIGN(tmp,65536);
   TASSIGN(col,98304); TASSIGN(result,98304);
   int stripe=get_subblockid(),offset=stripe*8192;
-  load<64,128>(a,x+offset); load<64,128>(b,y+offset);
+  sync(); load_async<64,128>(a,x+offset); load_async<64,128>(b,y+offset); sync();
   TMUL(a,a,b); sync();
   if(z) { load<64,128>(b,z+offset); TMUL(a,a,b); sync(); }
   TROWSUM(col,a,tmp); sync(); store<1,64>(result,out+stripe*64);
@@ -263,20 +272,20 @@ AICORE inline void wy_epilogue(__gm__ float* raw,__gm__ float* decay,
     __gm__ float* kk,__gm__ float* beta,__gm__ float* base_db,
     __gm__ float* dkk,__gm__ float* db,__gm__ float* base_db2=nullptr) {
 #if defined(__DAV_VEC__)
-  Half a,b,c,tmp; Row weights; Col col,sum; Short result,base;
+  Half a,b,c; Tile<TileType::Vec,float,64,64> tmp; Row weights; Col col,sum; Short result,base;
   TASSIGN(a,0); TASSIGN(b,32768); TASSIGN(c,65536); TASSIGN(tmp,98304);
-  TASSIGN(weights,131072); TASSIGN(sum,131584); TASSIGN(result,131584);
-  TASSIGN(base,131840);
+  TASSIGN(weights,114688); TASSIGN(sum,115200); TASSIGN(result,115200);
+  TASSIGN(base,115456);
   int stripe=get_subblockid(),offset=stripe*8192;
   load<64,128>(a,raw+offset); TMULS(a,a,-1.0f); sync();
-  causal_mask(c,stripe,true,132096); TMUL(a,a,c); sync();
+  causal_mask(c,stripe,true,115712); TMUL(a,a,c); sync();
   load<64,128>(b,decay+offset); TMUL(c,a,b); sync();
-  load<1,128>(weights,beta); TASSIGN(col,131072+stripe*256);
+  load<1,128>(weights,beta); TASSIGN(col,114688+stripe*256);
   TROWEXPANDMUL(c,c,col); sync(); store<64,128>(c,dkk+offset);
-  load<64,128>(tmp,kk+offset); TMUL(a,a,tmp); sync(); TMUL(a,a,b); sync();
+  load<64,128>(c,kk+offset); TMUL(a,a,c); sync(); TMUL(a,a,b); sync();
   TROWSUM(sum,a,tmp); sync(); load<1,64>(base,base_db+stripe*64);
   if(base_db2) {
-    Short second; TASSIGN(second,131072);
+    Short second; TASSIGN(second,114688);
     load<1,64>(second,base_db2+stripe*64); TADD(base,base,second); sync();
   }
   TADD(result,base,result); sync(); store<1,64>(result,db+stripe*64);
@@ -335,12 +344,36 @@ AICORE inline void cached_row(__gm__ T* src,__gm__ float* dst,int valid) {
 #endif
 }
 
+// Aligned vector tree for native-input gate prefixes; FP32 inputs retain Kahan.
+template<class TileT>
+AICORE inline void native_prefix(TileT& prefix) {
+#if defined(__DAV_VEC__)
+  Tile<TileType::Vec,float,128,8> a,b;
+  Tile<TileType::Vec,float,128,1,BLayout::ColMajor> col;
+  Tile<TileType::Vec,float,8,128> transposed,tmp;
+  using Part=Tile<TileType::Vec,float,128,8,BLayout::RowMajor,DYNAMIC,8>;
+  TASSIGN(a,98304); TASSIGN(b,102400); TASSIGN(col,0);
+  TASSIGN(transposed,106496); TASSIGN(tmp,110592);
+  TROWEXPAND(a,col); sync();
+  int current=0;
+  for(int offset=1;offset<128;offset*=2) {
+    int src=current ? 102400 : 98304,dst=current ? 98304 : 102400,n=128-offset;
+    Part left(n),right(n),sum(n),head(offset),dest(offset);
+    TASSIGN(left,src); TASSIGN(right,src+offset*32); TASSIGN(sum,dst+offset*32);
+    TASSIGN(head,src); TASSIGN(dest,dst);
+    TADD(sum,left,right); TMOV(dest,head); sync(); current=1-current;
+  }
+  TTRANS(transposed,b,tmp); sync();
+  Row first; TASSIGN(first,106496); TMOV(prefix,first); sync();
+#endif
+}
+
 // Natural-log gate prefix, exp(G), exp(G_end-G), and causal exp(G_i-G_j).
 AICORE inline void gates(__gm__ float* g,__gm__ float* e,
     __gm__ float* r,__gm__ float* decay,int batch,bool accurate,
     __gm__ float* low=nullptr,int valid=128) {
 #if defined(__DAV_VEC__)
-  if(get_subblockid()!=0) return;
+  if(accurate && get_subblockid()!=0) return;
   Row prefix,expv,ratio,raw; Col col; Half a,b;
   TASSIGN(prefix,0); TASSIGN(expv,512); TASSIGN(ratio,1024);
   TASSIGN(raw,1536);
@@ -352,8 +385,9 @@ AICORE inline void gates(__gm__ float* g,__gm__ float* e,
       load<1,128>(raw,low+h*128);
       sum=prefix.GetValue(valid-1); float last_low=raw.GetValue(valid-1);
       for(int i=valid;i<128;++i) { prefix.SetValue(i,sum); raw.SetValue(i,last_low); }
-    } else {
-      if(accurate) { TADDS(raw,prefix,0.0f); sync(); }
+    } else if(!accurate) { native_prefix(prefix); sum=prefix.GetValue(127); }
+    else {
+      TADDS(raw,prefix,0.0f); sync();
       for(int i=0;i<128;++i) {
         float delta=prefix.GetValue(i)-correction,next=sum+delta;
         correction=(next-sum)-delta; sum=next; prefix.SetValue(i,sum);
@@ -361,7 +395,7 @@ AICORE inline void gates(__gm__ float* g,__gm__ float* e,
     }
     sync(); TEXP(expv,prefix); sync();
     if(low) { TEXP(ratio,raw); sync(); TMUL(expv,expv,ratio); sync(); }
-    store<1,128>(expv,e+h*128);
+    if(get_subblockid()==0) store<1,128>(expv,e+h*128);
     if(low) {
       TMULS(ratio,prefix,-1.0f); sync(); TADDS(ratio,ratio,sum); sync();
       TMULS(expv,raw,-1.0f); sync(); TADDS(expv,expv,raw.GetValue(127)); sync();
@@ -376,8 +410,9 @@ AICORE inline void gates(__gm__ float* g,__gm__ float* e,
       }
       sync();
     } else { TMULS(ratio,prefix,-1.0f); sync(); TADDS(ratio,ratio,sum); sync(); }
-    TEXP(ratio,ratio); sync(); store<1,128>(ratio,r+h*128);
-    for(int stripe=0;stripe<2;++stripe) {
+    TEXP(ratio,ratio); sync();
+    if(get_subblockid()==0) store<1,128>(ratio,r+h*128);
+    for(int stripe=accurate ? 0 : get_subblockid();stripe<2;stripe+=accurate ? 1 : 2) {
       TASSIGN(col,stripe*64*4);
       if(accurate && !low) {
         TEXPANDS(a,0.0f); sync();

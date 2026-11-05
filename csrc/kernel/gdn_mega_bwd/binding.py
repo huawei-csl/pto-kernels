@@ -28,6 +28,10 @@ def build():
     key = hashlib.sha256(
         source.read_bytes()
         + b"".join(p.read_bytes() for p in sorted(source.parent.glob("*.h")))
+        + b"".join(
+            (source.parent.parent / "gdn_mega" / name).read_bytes()
+            for name in ("inverse.h", "recurrence_pipeline.h")
+        )
         + (root / "csrc/kernel/kernel_utils.h").read_bytes()
         + repr(flags).encode()
     ).hexdigest()[:16]
