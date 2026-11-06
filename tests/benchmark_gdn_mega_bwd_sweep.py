@@ -31,13 +31,19 @@ def plot(rows, destination):
         if cached
         else "backward recomputes; forward saves no caches"
     )
+    heads_grid = sorted({r["global_value_heads"] for r in rows}, reverse=True)
+    lengths = sorted({r["tokens"] for r in rows})
+    tps = sorted({r["tp"] for r in rows})
     ratios = [r["bwd_fwd_ratio"] for r in rows if r.get("bwd_fwd_ratio") is not None]
     norm = Normalize(vmin=0, vmax=max(ratios, default=1))
     cmap = plt.get_cmap("YlOrRd").copy()
     cmap.set_bad("#eeeeee")
     with plt.rc_context({"font.size": 11, "savefig.dpi": 180}):
-        fig, axes = plt.subplots(2, 2, figsize=(15, 10))
-        for heads, ax in zip(HEADS, axes.flat):
+        nrows = (len(heads_grid) + 1) // 2
+        fig, axes = plt.subplots(nrows, 2, figsize=(15, 4 + 3 * nrows), squeeze=False)
+        for ax in list(axes.flat)[len(heads_grid) :]:
+            ax.set_visible(False)
+        for heads, ax in zip(heads_grid, axes.flat):
             cells = {
                 (r["tp"], r["tokens"]): r
                 for r in rows
@@ -45,16 +51,16 @@ def plot(rows, destination):
             }
             values = np.array(
                 [
-                    [cells[tp, length].get("bwd_fwd_ratio") for length in LENGTHS]
-                    for tp in TPS
+                    [cells[tp, length].get("bwd_fwd_ratio") for length in lengths]
+                    for tp in tps
                 ],
                 dtype=float,
             )
             im = ax.imshow(
                 np.ma.masked_invalid(values), cmap=cmap, norm=norm, aspect="auto"
             )
-            for i, tp in enumerate(TPS):
-                for j, length in enumerate(LENGTHS):
+            for i, tp in enumerate(tps):
+                for j, length in enumerate(lengths):
                     row = cells[tp, length]
                     bwd, fwd = row["median_ms"], row.get("forward_median_ms")
                     label = (
@@ -73,17 +79,20 @@ def plot(rows, destination):
             ax.set_title(
                 f"{heads} value heads · 16 Q/K heads", loc="left", weight="bold", pad=12
             )
-            ax.set_xticks(range(5), ("256", "1K", "4K", "16K", "32K"))
-            ax.set_yticks(range(4), [f"TP={tp}" for tp in TPS])
+            ax.set_xticks(
+                range(len(lengths)),
+                [f"{n // 1024}K" if n % 1024 == 0 else str(n) for n in lengths],
+            )
+            ax.set_yticks(range(len(tps)), [f"TP={tp}" for tp in tps])
             ax.set_xlabel("Sequence length (tokens)")
-            ax.set_xticks(np.arange(-0.5, 5, 1), minor=True)
-            ax.set_yticks(np.arange(-0.5, 4, 1), minor=True)
+            ax.set_xticks(np.arange(-0.5, len(lengths), 1), minor=True)
+            ax.set_yticks(np.arange(-0.5, len(tps), 1), minor=True)
             ax.grid(which="minor", color="white", linewidth=2)
             ax.tick_params(which="both", length=0)
             for spine in ax.spines.values():
                 spine.set_visible(False)
         fig.subplots_adjust(
-            left=0.06, right=0.88, top=0.86, bottom=0.16, hspace=0.38, wspace=0.18
+            left=0.06, right=0.88, top=0.82, bottom=0.22, hspace=0.38, wspace=0.18
         )
         fig.colorbar(
             im,
@@ -117,13 +126,20 @@ def plot(rows, destination):
             fontsize=10,
             color="#555555",
         )
-        for extension in ("png", "svg"):
-            fig.savefig(destination / f"heatmap.{extension}", facecolor="white")
+        fig.savefig(destination / "heatmap.png", facecolor="white", bbox_inches="tight")
         plt.close(fig)
 
 
 def measure(
-    heads, tp, repeats, destination, forward=False, cached=False, cache_dtype="float32"
+    heads,
+    tp,
+    repeats,
+    destination,
+    forward=False,
+    cached=False,
+    cache_dtype="float32",
+    lengths=LENGTHS,
+    wall_only=False,
 ):
     # Separate processes release allocations between head/TP pairs and directions.
     command = [
@@ -134,7 +150,7 @@ def measure(
         "--key-heads",
         str(16 // tp),
         "--tokens",
-        *map(str, LENGTHS),
+        *map(str, lengths),
         "--repeats",
         str(repeats),
     ]
@@ -142,6 +158,8 @@ def measure(
         command.extend(
             ("--inverse-cache", "--gate-cache", "--cache-dtype", cache_dtype)
         )
+    if wall_only:
+        command.append("--wall-only")
     if forward:
         command.append("--forward-only")
     log = destination / f"h{heads}_tp{tp}{'_fwd' if forward else ''}.log"
@@ -154,7 +172,7 @@ def measure(
         for line in result.stdout.splitlines()
         if line.startswith('{"tokens":')
     ]
-    if [r["tokens"] for r in rows] != list(LENGTHS):
+    if [r["tokens"] for r in rows] != list(lengths):
         raise RuntimeError(f"Incomplete benchmark output; see {log}")
     return rows
 
@@ -170,8 +188,9 @@ def run(args):
     destination = args.output.resolve()
     destination.mkdir(parents=True, exist_ok=True)
     rows = []
-    for heads in HEADS:
-        for tp in TPS:
+    lengths = getattr(args, "lengths", LENGTHS)
+    for heads in getattr(args, "global_heads", HEADS):
+        for tp in getattr(args, "tps", TPS):
             supported = heads // tp in FORWARD_HEADS
             print(
                 f"Cached backward Hv={heads}, TP={tp}: "
@@ -186,6 +205,8 @@ def run(args):
                     destination,
                     cached=True,
                     cache_dtype=args.cache_dtype,
+                    lengths=lengths,
+                    wall_only=getattr(args, "wall_only", False),
                 )
                 if supported
                 else [
@@ -197,7 +218,7 @@ def run(args):
                         "forward_samples": {},
                         "forward_device": {},
                     }
-                    for length in LENGTHS
+                    for length in lengths
                 ]
             )
             for row in measurements:
@@ -239,5 +260,5 @@ def run(args):
     plot(rows, destination)
     print(
         f"Saved {sum(r['backward_status'] == 'ok' for r in rows)} cached configurations "
-        f"and heatmap.png/.svg to {destination}"
+        f"and heatmap.png to {destination}"
     )

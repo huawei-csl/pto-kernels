@@ -25,6 +25,11 @@ def main():
         "--cache-dtype", choices=("float32", "float16", "bfloat16"), default="float32"
     )
     parser.add_argument("--gate-cache", action="store_true")
+    parser.add_argument(
+        "--wall-only",
+        action="store_true",
+        help="Skip extra device-only forward timings",
+    )
     parser.add_argument("--forward-only", action="store_true")
     parser.add_argument(
         "--profile-once",
@@ -43,7 +48,7 @@ def main():
         "--output",
         type=Path,
         default=Path("benchmark_data/gdn_mega_bwd/cached"),
-        help="Directory for --extensive raw timings, logs and PNG/SVG heatmaps",
+        help="Directory for --extensive raw timings, logs and PNG heatmaps",
     )
     args = parser.parse_args()
     if args.repeats < 1:
@@ -126,7 +131,7 @@ def main():
                 gate_cache = tuple(launch[name] for name in ("g_t", "g_sum", "beta_t"))
             from benchmarking.gdn_mega import time_launch
 
-            if not args.profile_once:
+            if not args.profile_once and not args.wall_only:
                 forward_device["no_cache"] = time_launch(launch, trials=args.repeats)
                 if cache is not None:
                     forward_device["cache"] = time_launch(

@@ -173,12 +173,13 @@ def plot(rows, destination):
             fontsize=10,
             color="#555555",
         )
-        for ext in ("png", "svg"):
-            fig.savefig(destination / f"speedup_heatmap.{ext}", facecolor="white")
+        fig.savefig(
+            destination / "speedup_heatmap.png", facecolor="white", bbox_inches="tight"
+        )
         plt.close(fig)
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fla", type=Path, required=True)
     parser.add_argument(
@@ -186,14 +187,32 @@ def main():
         type=Path,
         default=Path("benchmark_data/gdn_mega_bwd/fla_comparison"),
     )
-    parser.add_argument("--repeats", type=int, default=30)
+    parser.add_argument("--repeats", type=int, default=5)
     parser.add_argument(
         "--plot-only", action="store_true", help="Reuse pto_results.jsonl; no NPU work"
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--cache-dtype", choices=("float32", "float16", "bfloat16"), default="bfloat16"
+    )
+    parser.add_argument(
+        "--quick",
+        action="store_true",
+        help="Only Hv=Hqk=16 at the two shortest lengths",
+    )
+    args = parser.parse_args(argv)
     if args.repeats < 1:
         parser.error("--repeats must be positive")
     fla = json.loads(args.fla.read_text())
+    if args.quick:
+        shortest = sorted(
+            {r["shape"]["sequence_length_tokens"] for r in fla["results"]}
+        )[:2]
+        fla["results"] = [
+            r
+            for r in fla["results"]
+            if r["shape"]["value_heads"] == r["shape"]["query_key_heads"] == 16
+            and r["shape"]["sequence_length_tokens"] in shortest
+        ]
     groups = {}
     for item in fla["results"]:
         b, length, hk, hv, k, v = shape_key(item["shape"])
@@ -217,6 +236,9 @@ def main():
                 *map(str, sorted(lengths)),
                 "--inverse-cache",
                 "--gate-cache",
+                "--cache-dtype",
+                args.cache_dtype,
+                "--wall-only",
                 "--repeats",
                 str(args.repeats),
             ]
@@ -253,6 +275,7 @@ def main():
             "device": "Ascend910B2, NPU 0",
             "dtype": "float16",
             "gate_dtype": "float32",
+            "inverse_cache_dtypes": sorted({r["cache_dtype"] for r in pto}),
             "chunk_size": 128,
             "samples_per_direction": sorted({len(r["samples_ms"]) for r in pto}),
             "forward": "Cache-saving forward; preallocated buffers; two warmup calls per mode; synchronized wall time including dispatch.",
@@ -279,7 +302,7 @@ def main():
     report.write_text(json.dumps(output, indent=2) + "\n")
     plot(rows, args.output)
     print(
-        f"Saved {sum(r['status'] == 'matched' for r in rows)} shape comparisons and speedup_heatmap.png/.svg to {args.output}"
+        f"Saved {sum(r['status'] == 'matched' for r in rows)} shape comparisons and speedup_heatmap.png to {args.output}"
     )
 
 

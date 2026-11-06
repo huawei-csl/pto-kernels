@@ -1,5 +1,111 @@
 # GDN backward development
 
+## PNG-only output and controlled weak-decay audit (2026-11-06)
+
+User preference: save PNG only, never generate SVG. All three backward plotting
+scripts now save only PNG; updated report docs/help and removed 14 generated
+SVG duplicates with existing PNG counterparts. Replotted the full v10 report
+and FlashQLA-bound report without importing Torch or running NPU work.
+
+A matched 513-token experiment used seed=42, Hv/Hqk=8/2, FP16 q/k/v/beta/h0,
+FP32 gates, the same inputs and adjoints, and both forward caches. Only gates
+(normal [-0.1,0] versus weak [-1e-5,0]) and inverse storage changed. Each run
+checked all six gradients against both original bounds and the FP64 L2 bound;
+all 24 gradient comparisons passed. Raw metrics/provenance:
+`benchmark_data/gdn_mega_bwd/weak_decay_control.json`.
+
+| Gates / inverse | dg max abs error vs FP64 | dg relative L2 (%) | Reference RMS |
+| --- | --- | --- | --- |
+| normal / BF16 | 0.0135636 | 0.0362790 | 8.3493 |
+| weak / BF16 | 0.3078346 | 0.0770027 | 121.9003 |
+| normal / FP32 | 0.0000190680 | 0.0000581985 | 8.3493 |
+| weak / FP32 | 0.0001231373 | 0.0000232301 | 121.9003 |
+
+The previous heatmap mixes lengths, so it alone cannot isolate decay. This
+matched experiment confirms larger absolute error with weak decay for the BF16
+cache, but the reference gradient scale also rises ~14.6x. Changing inverse
+storage to FP32 sharply reduces the error: cache quantization is the dominant
+removable source here. No kernel, default cache format or tolerance was changed.
+For normalized keys, the state Jacobian is exp(g)*(I-beta*k*k.T); g near zero
+removes gate-driven contraction in directions the key update does not remove,
+letting state/adjoint errors persist. This explains a mechanism, not a universal
+claim that weak decay always has larger relative error or an ill-conditioned
+inverse. Rechecked FlashQLA's pinned helper: L2(error) <= 0.02*L2(reference),
+equivalently RMSE(error) <= 0.02*RMS(reference). It is an aggregate bound with
+no per-element cap. Retain the separate max-error check.
+
+## FlashQLA numerical bound audit (2026-11-06)
+
+Inspected QwenLM/FlashQLA at `a14dbf3474514e1674526431e960325f72081e9f`,
+`tests/gdr_common.py`: `RTOL=0.02`, reference FP64, tensorwise L2 norm check
+`||actual-reference|| <= 0.02*||reference||`, no absolute allowance.
+
+Added optional `--flashqla-bound` to the error report. It computes an additional
+FP64 recursive/autograd oracle from the same rounded inputs and adjoints, and
+retains the existing FP32-golden/2x-Torch max-error assertion. No production
+kernel changes. Seven cases / 42 gradient checks pass both bounds with BF16
+inverse + gates. Worst relative L2 error: 0.08268% (weak-decay dk), versus 2%.
+The weak-decay dg with max absolute error 0.307835 against FP64 has relative L2
+error 0.07700%, reference L2 7809.234 and reference RMS 121.9003. All original
+FP32 errors and budgets reproduced exactly, confirming identical test inputs.
+
+Saved raw metrics, source provenance and both heatmaps under
+`benchmark_data/gdn_mega_bwd/report_flashqla_bound/errors/`. This applies their
+bound to our seven-case audit, not their entire CUDA/BF16 suite; an aggregate
+L2 bound does not constrain individual outliers. Reproduce via the command in
+`benchmarking/gdn_mega_report.md`.
+
+## Cache contract and unified reports (2026-11-06)
+
+Committed the previous v10 work as `5436e7a` before editing reports/tests. No
+production kernel, cache format, workspace or numerical tolerance changed here.
+
+There is one API per direction. The optional inverse output is FP32/FP16/BF16
+according to the allocated buffer; only that format is retained. Compact export
+uses temporary existing FP32 per-core slots, not two retained inverse tensors.
+Backward accepts inverse and gate caches independently and recomputes missing
+quantities. Even with both caches it replays states and recomputes KK/QK, W/U,
+Z and decay exponentials. Native versus compensated FP32 schedules are distinct
+from the optional-cache decision.
+
+Added `benchmarking/gdn_mega_report.py` and its command/coverage guide. Default
+reports use BF16 inverse + saved gates/beta consistently for TP timings, exact
+shape comparisons against the user's saved FLA JSON, and a seven-case gradient
+error heatmap. Full TP coverage is 60 supported + 20 unsupported cells, and FLA
+has 25 shapes with equal QK/value heads. FLA uses BF16/C64 versus PTO FP16/C128;
+allocation contracts, input distributions and state-output differences remain
+explicit. Raw data, budgets, cache settings and source/build provenance live
+beside PNG/SVG files. No new arithmetic was introduced in the hot path.
+
+Fast options: `--quick --repeats 3`, `--only timings|fla|errors`, and
+`--plot-only`. Reporting skips redundant device-only forward measurements and
+uses cached builds. Verified replotting imports no Torch and preserves raw data
+and metadata byte-for-byte. The smoke run exercised all three sections.
+
+Added nearly dependent normalized keys (1e-3 perturbations), beta=1 and log-gates
+in [-1e-5,0] over 257 tokens. Added stronger decay with g in [-0.75,-0.25],
+retention about 0.47–0.78, over 256 tokens. These supplement exact repeated keys,
+zero beta, near-zero log-gates, packed sequences, tails and strided inputs.
+All **16 new hardware cases passed in 22.74s**, covering recomputed FP16/BF16/
+FP32 and five saved-forward cache modes. Tolerances are unchanged. These bounds
+do not establish correctness for arbitrary negative gates or adversarial 32K
+sequences; timing sweeps check finite gradients rather than a full oracle.
+
+Fresh full reports are in `benchmark_data/gdn_mega_bwd/report_v10/`, generated
+with five samples per direction. All 60 supported TP cells and 25 FLA shapes
+completed. Cached backward / cache-saving forward ranges from **1.70x to 5.10x**.
+Against the saved FLA measurements, reported forward speedups are 2.99–21.97x
+and backward speedups 1.96–9.29x, subject to the documented dtype/timing
+mismatches. These are fresh v10 timings, not relabeled older heatmaps.
+
+All seven numerical audit cases / 42 gradient checks pass the unchanged bounds.
+The largest errors across the audit are dq=0.00750, dk=0.15443, dv=0.00588,
+dg=0.30784, dbeta=0.07840, dh0=0.00467. Weak decay and nearly dependent keys
+have larger absolute errors; passing a baseline-relative budget does not imply
+uniformly tiny absolute errors. The largest error/budget fraction is 0.4453.
+Raw per-case budgets and errors are saved in `errors/errors.json`. Inspected all
+three full PNGs and verified the smoke report can be replotted without NPU work.
+
 ## Remove the remaining operation scheduler (2026-11-06, v10)
 
 Committed the validated v9 work first as `2c181b2`. Its device library is

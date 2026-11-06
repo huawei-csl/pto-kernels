@@ -54,6 +54,22 @@ seven vectors per chunk/head, plus 45 MiB of reusable block scratch. Workspace
 exists only during backward. The current forward cache producer accepts FP16
 q/k/v/beta and FP32 gates.
 
+## Cache modes and reproducible reports
+
+There is one forward API and one backward API, each with optional cache buffers;
+there is no public `cache=True/False` switch. Forward without `inverse_cache`
+retains no inverse output. With it, the allocation dtype selects FP32/FP16/BF16.
+Backward accepts `inverse_cache` and `gate_cache` independently and recomputes
+what is absent. Native FP16/BF16 versus compensated FP32 device schedules are a
+separate precision choice, not separate cached/recomputed APIs. Only one inverse
+cache is retained; the temporary FP32 forward scratch is reused, not also saved.
+
+[Report commands, exact timing contracts and numerical test coverage](../../../benchmarking/gdn_mega_report.md).
+The unified command creates cached backward/forward timing heatmaps, exact-shape
+comparisons against saved FLA times, and a small per-gradient max-error heatmap.
+It defaults to BF16 inverse factors and has `--quick`, `--only` and `--plot-only`
+modes. No production kernel or tolerance changes are needed for these reports.
+
 ## Device stages
 
 | Stage | Work | Scheduling |
@@ -222,7 +238,7 @@ TP={1,2,4,8}, L={256,1024,4096,16384,32768}; both head counts divide by TP.
 Sixty configurations are measured. Twenty are N/A because the forward cache
 producer does not support local Hv=2,4,6; no uncached timings are substituted.
 
-Outputs: `benchmark_data/gdn_mega_bwd/cached/{results.jsonl,heatmap.png,heatmap.svg}`;
+Outputs: `benchmark_data/gdn_mega_bwd/cached/{results.jsonl,heatmap.png}`;
 override with `--output DIRECTORY`. Matplotlib is required. Historical
 `extensive/` and `tp_v7/` plots measure recomputation; `cached_v7/` retains the
 previous cached plot. The ordinary benchmark without cache flags recomputes.
@@ -272,7 +288,7 @@ OMP_NUM_THREADS=4 PYTHONPATH=python:. python tests/benchmark_gdn_mega_bwd_fla.py
 The supplied FLA sweep has Q/K heads equal to value heads (16/24/32/48/64),
 so it needs its own matched-shape PTO sweep; the existing TP chart remains
 unchanged. Outputs go to `benchmark_data/gdn_mega_bwd/fla_comparison/`:
-`speedup_heatmap.png/.svg`, `comparison.json`, raw PTO timings and logs.
+`speedup_heatmap.png`, `comparison.json`, raw PTO timings and logs.
 
 The chart explicitly labels **PTO FP16/C=128 versus FLA BF16/C=64**. These
 are reported latency ratios, not an identical-dtype controlled comparison.

@@ -48,6 +48,8 @@ class AllocationsOnly(TorchDispatchMode):
         ([17, 0, 19], 64, 16, "both"),
         ([129] + [1] * 10, 64, 16, "both"),
         ([513], 8, 2, "weak"),
+        ([257], 8, 2, "correlated_weak"),
+        ([256], 8, 2, "strong_decay"),
         ([7], 8, 2, "defaults"),
         ([128], 8, 2, "both"),
         ([256], 8, 2, "both"),
@@ -72,6 +74,7 @@ def test_backward(
     cache_dtype=None,
     error_report=None,
     roundtrip=False,
+    flashqla_bound=False,
 ):
     torch.manual_seed(42)
     T, N = sum(lengths), len(lengths)
@@ -87,6 +90,12 @@ def test_backward(
         beta.zero_()
     if mode == "weak":
         g.mul_(1e-4)
+    if mode == "correlated_weak":
+        k = torch.nn.functional.normalize(k[:, :1] + 1e-3 * k, dim=-1)
+        beta.fill_(1)
+        g.mul_(1e-4)
+    if mode == "strong_decay":
+        g.mul_(5).sub_(0.25)  # log retention [-0.75, -0.25], exp(g) ~0.47–0.78.
     if mode == "replace":
         k.zero_()
         k[..., 0] = 1
@@ -128,6 +137,17 @@ def test_backward(
             _saved_references[key] = do, dh, expected, baseline
     else:
         do, dh, expected, baseline = cached
+    expected64 = None
+    if flashqla_bound:
+        # Keep the original rounded inputs AND upstream gradients. Only raise
+        # oracle precision; generating new FP64 random adjoints changes the case.
+        leaves64 = [x.detach().double().requires_grad_() for x in inputs]
+        out64, ht64 = recurrent_gdn_reference(
+            *leaves64, cu_seqlens=cu, scale=scale, dtype=torch.float64
+        )
+        expected64 = torch.autograd.grad(
+            (out64, ht64), leaves64, (do.double(), dh.double())
+        )
     device_inputs = [
         x.detach().to(device=npu_device, dtype=dt)
         for x, dt in zip(inputs, input_dtypes)
@@ -204,8 +224,8 @@ def test_backward(
         assert guard.allocations == 7  # Six outputs and one reusable workspace.
         torch.npu.synchronize(npu_device)
     failures = []
-    for name, ref, pt, result in zip(
-        ("dq", "dk", "dv", "dg", "dbeta", "dh0"), expected, baseline, actual
+    for index, (name, ref, pt, result) in enumerate(
+        zip(("dq", "dk", "dv", "dg", "dbeta", "dh0"), expected, baseline, actual)
     ):
         if not ref.numel():
             assert result.shape == ref.shape
@@ -213,8 +233,33 @@ def test_backward(
         assert all(torch.isfinite(x).all() for x in (ref, pt, result.cpu())), name
         error = (result.cpu().double() - ref.double()).abs().max().item()
         budget = 2 * (pt.double() - ref.double()).abs().max().item() + 1e-5
+        record = dict(gradient=name, error=error, budget=budget)
+        if expected64 is not None:
+            ref64 = expected64[index]
+            diff = result.cpu().double() - ref64
+            error_l2 = torch.linalg.vector_norm(diff).item()
+            reference_l2 = torch.linalg.vector_norm(ref64).item()
+            passed = error_l2 <= 0.02 * reference_l2
+            record["flashqla"] = dict(
+                error_l2=error_l2,
+                reference_l2=reference_l2,
+                relative_l2=(
+                    error_l2 / reference_l2
+                    if reference_l2
+                    else (0.0 if error_l2 == 0 else None)
+                ),
+                max_abs_error=diff.abs().max().item(),
+                reference_max_abs=ref64.abs().max().item(),
+                reference_rms=reference_l2 / ref64.numel() ** 0.5,
+                threshold=0.02,
+                passed=passed,
+            )
+            if not passed:
+                failures.append(
+                    f"{name}: FlashQLA L2 error {error_l2:.9g} > 0.02 * reference L2 {reference_l2:.9g}"
+                )
         if error_report is not None:
-            error_report.append(dict(gradient=name, error=error, budget=budget))
+            error_report.append(record)
         if error > budget:
             failures.append(
                 f"{name}: kernel error {error:.9g} > 2x PyTorch error + 1e-5 = {budget:.9g}"
@@ -241,6 +286,8 @@ def test_backward(
         ([17, 0, 19], 64, 16, "both"),
         ([129] + [1] * 10, 64, 16, "both"),
         ([513], 8, 2, "weak"),
+        ([257], 8, 2, "correlated_weak"),
+        ([256], 8, 2, "strong_decay"),
         ([0, 0], 8, 2, "both"),
         ([1] + [0] * 63 + [1], 8, 2, "both"),
         ([1] * 48, 48, 16, "both"),
