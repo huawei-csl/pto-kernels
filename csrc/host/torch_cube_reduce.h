@@ -27,7 +27,13 @@ void pto_launch_cube_reduce_int8(uint32_t blockDim, void* stream, void* input,
 
 namespace pto_isa_ops {
 
-/** Sum all elements of any-shaped fp16/int8 input into one fp32/int32 value. */
+/**
+ * @brief Sums all elements of an input tensor into one value.
+ *
+ * @param [in] x Input tensor on the NPU with dtype fp16 or int8.
+ * @return at::Tensor Single-element tensor containing the sum as fp32 for fp16
+ * input or int32 for int8 input.
+ */
 at::Tensor run_cube_reduce(const at::Tensor& x) {
   TORCH_CHECK(x.device().type() == DEVICE_TYPE,
               "cube_reduce: tensor must be on NPU, got ", x.device());
