@@ -18,6 +18,10 @@ AICORE inline void join() {
 #endif
   sync();
 }
+AICORE inline __gm__ uint8_t* inverse_data(const Plan& p,int c,int h) {
+  return (__gm__ uint8_t*)p.inverse_cache+
+    (int64_t(c)*p.heads+h)*Matrix*(p.inverse_dtype==2 ? 4 : 2);
+}
 struct Buffer { __gm__ float* data=nullptr; bool vector=false; };
 struct Ops {
   __gm__ float* arena; bool accurate; int used=0; bool parallel=false; int epoch=0;

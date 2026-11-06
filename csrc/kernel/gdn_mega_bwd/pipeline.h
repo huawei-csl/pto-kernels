@@ -175,13 +175,21 @@ AICORE inline void pipelined_prepare(const Plan& p,int c,int h,int first_head,Op
   }
   gates(hi.data,x.v(EXP).data,x.v(RATIO).data,x.m(DECAY).data,1,false,
         p.gate_cache[0] ? lo.data : nullptr,n);
-  if(p.inverse_cache)
-    transpose_inverse((__gm__ float*)p.inverse_cache+(int64_t(c)*p.heads+h)*Matrix,x.m(AT).data);
+  if(p.inverse_cache) {
+    auto saved=inverse_data(p,c,h);
+    if(p.inverse_dtype==2) transpose_inverse((__gm__ float*)saved,x.m(AT).data);
+    else if(p.inverse_dtype==0) transpose_inverse((__gm__ half*)saved,x.m(AT).data);
+    else transpose_inverse((__gm__ bfloat16_t*)saved,x.m(AT).data);
+  }
   o.end(); // EXP is produced on vector0 and consumed by both subcores.
 
   o.begin();
-  if(p.inverse_cache)
-    complete_cached_inverse<true>((__gm__ float*)p.inverse_cache+(int64_t(c)*p.heads+h)*Matrix,x.m(AT).data);
+  if(p.inverse_cache) {
+    if(p.inverse_dtype==2)
+      complete_cached_inverse<true>((__gm__ float*)inverse_data(p,c,h),x.m(AT).data);
+    else // Reuse the expanded transpose; no separate FP32 factor copy.
+      complete_cached_inverse<true,true>(x.m(AT).data,x.m(AT).data);
+  }
   o.mul(x.v(BETA),x.v(EXP),be);
   o.row(x.m(V),x.v(BETA),vb);
   o.row(x.m(Q_DQ),x.v(EXP),qe);

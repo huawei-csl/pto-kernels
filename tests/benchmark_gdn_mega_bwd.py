@@ -21,6 +21,9 @@ def main():
     parser.add_argument("--heads", type=int, default=8)
     parser.add_argument("--key-heads", type=int, default=2)
     parser.add_argument("--inverse-cache", action="store_true")
+    parser.add_argument(
+        "--cache-dtype", choices=("float32", "float16", "bfloat16"), default="float32"
+    )
     parser.add_argument("--gate-cache", action="store_true")
     parser.add_argument("--forward-only", action="store_true")
     parser.add_argument(
@@ -89,7 +92,7 @@ def main():
                     128,
                     128,
                     device="npu",
-                    dtype=torch.float32,
+                    dtype=getattr(torch, args.cache_dtype),
                 )
                 if not args.profile_once:
                     pto_gdn_mega(**launch)
@@ -167,6 +170,7 @@ def main():
                     "enqueue_median_ms": statistics.median(enqueue),
                     "samples_ms": times,
                     "inverse_cache": args.inverse_cache,
+                    "cache_dtype": args.cache_dtype if args.inverse_cache else None,
                     "gate_cache": args.gate_cache,
                     "forward_samples": forward_times,
                     "forward_device": forward_device,

@@ -27,7 +27,7 @@ def backward(
 
     The native launcher owns replay, chunk traversal, and workspace reuse.
     Inputs may be FP16/BF16/FP32. Enqueued on the current Torch NPU stream.
-    inverse_cache optionally holds mega forward's FP32 [chunks,Hv,128,128]
+    inverse_cache optionally holds mega forward's FP32/FP16/BF16 [chunks,Hv,128,128]
     factors for these same k/g/beta and packed sequence boundaries. It is
     read-only; otherwise the inverse is recomputed.
     gate_cache optionally retains forward's (g_t, g_sum, beta_t): head-major
@@ -83,12 +83,12 @@ def backward(
         chunks = sum((b - a + 127) // 128 for a, b in zip(bounds, bounds[1:]))
         if (
             inverse_cache.device != device
-            or inverse_cache.dtype != torch.float32
+            or inverse_cache.dtype not in (torch.float32, torch.float16, torch.bfloat16)
             or not inverse_cache.is_contiguous()
             or inverse_cache.shape != (chunks, H, 128, 128)
         ):
             raise ValueError(
-                "inverse_cache must be contiguous FP32 [chunks,Hv,128,128] on NPU"
+                "inverse_cache must be contiguous FP32/FP16/BF16 [chunks,Hv,128,128] on NPU"
             )
     if gate_cache is not None:
         if len(gate_cache) != 3 or any(
@@ -132,6 +132,7 @@ def backward(
             workspace.data_ptr(),
             scale,
             None if inverse_cache is None else inverse_cache.data_ptr(),
+            Input.from_tensor(inverse_cache).dtype,
             (ctypes.c_void_p * 3)(
                 *(
                     [x.data_ptr() for x in gate_cache]

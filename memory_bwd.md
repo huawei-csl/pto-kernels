@@ -1,5 +1,117 @@
 # GDN backward development
 
+## Export completed inverse factors once (2026-11-05)
+
+Replaced the initial low-precision export's duplicate writes. Forward now builds
+FP32 factors in two reusable per-core scratch slots and exports each completed
+FP16/BF16 factor stripe once. Only the 16-bit tensor survives for backward.
+The slots reuse `o_workspace_qs/gated` and the previously idle
+`wy_workspace_a1/a2`; each pair supplies two FP32 64x128 halves. This is
+128 KiB/core (3 MiB for 24 cores), independent of sequence length. No allocations
+or kernel launches were added; the matrix arithmetic remains FP32.
+
+Cube writes/reads its joins through the current scratch slot. Vec prepares the
+next chunk in the other slot. After completing all joins, Cube signals flag 8;
+Vec then converts/exports the completed current slot while Cube runs the
+factored RHS solve and output/state products. Existing flag 9/6/7 handshakes
+finish output/state and protect slot reuse. The export uses UB at 96 KiB and
+0 KiB, preserving the live FP32 recurrent state at 64–96 KiB.
+
+The old export wrote 32 KiB of incomplete 16-bit factors and then overwrote
+14 KiB through seven small Cube stores. The new export writes 32 KiB once,
+removing those Cube exports and putting conversion in the vector idle window.
+A temporary FP32 factor is working scratch, not a second saved activation.
+
+With identical build flags, before/after checks load and assert library hashes.
+Within each process, rotate cache dtype order; 3 warmups + 15 timed samples:
+
+| Tokens / Hv / Hk | Old BF16 FWD ms | New BF16 FWD ms | New FP32-cache FWD ms |
+| --- | --- | --- | --- |
+| 2K / 16 / 2 | 0.423 | 0.400 | 0.398 |
+| 8K / 16 / 2 | 1.438 | 1.347 | 1.342 |
+| 8K / 64 / 16 | 4.322 | 4.107 | 4.109 |
+| 32K / 64 / 16 | 17.233 | 16.643 | 16.664 |
+
+FP16 behaves similarly. The measured smaller-cache overhead versus FP32 cache
+saving is now at most about 0.7%, replacing the old 5–8% in this controlled
+build comparison (6–8.5% in the original run). Absolute comparisons across
+processes include clock/thermal variation; the dtype ratios within one process
+are the better overhead measure. Retained inverse bytes remain halved.
+
+The full run passes 418 unique tests (30 low-precision cases, then the other
+388), including exact cache rounding and bitwise forward output/state.
+A follow-up compile-time export strategy is selected in the host launch shim,
+keeping slot selection and export handshakes out of the FP32/no-cache loop.
+There is still exactly one forward launch. Selecting both expanded pipelines
+inside one device kernel was slower and was rejected.
+
+Final same-process comparison, with all three libraries deep-bound and the
+same input/workspace pointers; rotate/reverse launch order, 4 warmups + 20
+samples. These are synchronized raw-launch wall times, excluding Torch enqueue:
+
+| Tokens / Hv / Hk | Old FP32-cache ms | Old BF16-cache ms | Final FP32-cache ms | Final BF16-cache ms |
+| --- | --- | --- | --- | --- |
+| 2K / 16 / 2 | 0.3940 | 0.4235 | 0.3970 | 0.3961 |
+| 8K / 16 / 2 | 1.3611 | 1.4804 | 1.3650 | 1.3657 |
+| 8K / 64 / 16 | 4.2030 | 4.4511 | 4.2060 | 4.1924 |
+| 32K / 64 / 16 | 16.2060 | 16.9874 | 16.2132 | 16.1718 |
+
+BF16 is now within 0.6% of the original FP32-cache latency at these shapes;
+the final FP32 path stays within 0.8% of the original. There is no measured
+material default-path regression. All 341 affected forward/cache tests pass
+in 374.53s after the host-dispatch change; the other 77 tests exercise the
+unchanged backward/reference implementation. Full records and library/source
+hashes are in `tests/baselines/gdn_mega_inverse_export.json`.
+
+## Initial lower-precision export (2026-11-05, superseded above)
+
+Committed the complete v8/FLA-comparison snapshot first: **c2a9836** (clean
+working tree before this experiment). Added optional **FP16 and BF16** cache
+storage, selected by the dtype of `inverse_cache`; FP32 remains supported and
+is still the benchmark default. Forward q/k/v/beta remain FP16.
+
+- Both smaller formats pass the unchanged `2 * Torch error + 1e-5` gradient
+  bounds. In the 15-case rounding screen, the worst error/budget ratio was
+  **0.02801 FP16**, **0.20618 BF16**, versus **0.001319 FP32**. The first native
+  45-case screen exactly reproduced these max errors. The final implementation
+  passes **152 backward/reference tests**, including 30 actual 16-bit cache
+  cases. The forward suite also passes **266 tests in 164.65s**. No tolerance
+  changes.
+- Retained inverse storage is halved: **64 -> 32 MiB at 8K/H16**, or
+  **256 -> 128 MiB at 8K/H64**. Gates and backward workspace are unchanged.
+- Forward's cache is also its working exchange in the FP32 path. Rounding that
+  exchange would change forward numerics. The 16-bit path instead uses the
+  original FP32 scratch and additional PTO exports: Vec `TCVT` for initial
+  stripes, Cube `TSTORE`/FIX for completed inverse blocks. It adds no GEMMs or
+  launches. Tests verify bitwise-identical output/final state and exact equality
+  of the saved cache with rounding the FP32 factors.
+- Backward converts directly into the existing FP32 transposed-factor buffer,
+  then completes `D0.T @ P.T` on Cube using that buffer. A first version also
+  wrote a separate expanded factor copy; removed that redundant GM write before
+  final regression/timing. Python and C++ launchers only validate/allocate/pass
+  dtype metadata; all production conversions run in PTO.
+
+Same-process, rotating dtype order; 3 warmups + 15 measured synchronized-wall
+samples. Backward includes allocations; forward buffers are preallocated:
+
+| Tokens / Hv / Hk | FP32 FWD / BWD ms | FP16 FWD / BWD ms | BF16 FWD / BWD ms |
+| --- | --- | --- | --- |
+| 2K / 16 / 2 | 0.394 / 1.643 | 0.426 / 1.641 | 0.425 / 1.644 |
+| 8K / 16 / 2 | 1.334 / 4.957 | 1.446 / 4.982 | 1.445 / 4.979 |
+| 8K / 64 / 16 | 4.099 / 16.411 | 4.367 / 16.463 | 4.365 / 16.476 |
+| 32K / 64 / 16 | 16.197 / 64.046 | 17.225 / 64.244 | 17.224 / 64.209 |
+
+This is a **memory option**, not a speedup: forward is about **6.3–8.4% slower**
+than FP32 cache export; backward differs by less than 0.5% in this sample.
+Keep FP32 for the fastest forward; select BF16/FP16 when retained activations
+matter more. `--cache-dtype bfloat16` / `float16` works in the existing benchmark
+and extensive sweep; heatmaps identify and reject mixed cache dtypes.
+
+Reproduce accuracy with `tests/check_gdn_inverse_precision.py --output <json>`;
+`--roundtrip` isolates numerical storage error with test-only Torch casts.
+Raw errors, timings, benchmark script and final source hashes are saved in
+`tests/baselines/gdn_mega_inverse_precision.json`.
+
 ## FLA comparison chart
 
 Added `tests/benchmark_gdn_mega_bwd_fla.py` and

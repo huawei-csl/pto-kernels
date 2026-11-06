@@ -55,7 +55,18 @@ class AllocationsOnly(TorchDispatchMode):
     ],
 )
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
-def test_backward(lengths, heads, key_heads, mode, dtype, npu_device, cache_mode=None):
+def test_backward(
+    lengths,
+    heads,
+    key_heads,
+    mode,
+    dtype,
+    npu_device,
+    cache_mode=None,
+    cache_dtype=None,
+    error_report=None,
+    roundtrip=False,
+):
     torch.manual_seed(42)
     T, N = sum(lengths), len(lengths)
     q = torch.randn(1, T, key_heads, 128)
@@ -129,7 +140,9 @@ def test_backward(lengths, heads, key_heads, mode, dtype, npu_device, cache_mode
                     128,
                     128,
                     device=npu_device,
-                    dtype=torch.float32,
+                    dtype=(
+                        torch.float32 if roundtrip else (cache_dtype or torch.float32)
+                    ),
                 )
             pto_gdn_mega(**launch)
             out_before, state_before = (
@@ -142,6 +155,15 @@ def test_backward(lengths, heads, key_heads, mode, dtype, npu_device, cache_mode
                 launch["final_state"], state_before, atol=0, rtol=0
             )
             if cache is not None:
+                if cache.dtype != torch.float32:
+                    full = torch.empty_like(cache, dtype=torch.float32)
+                    pto_gdn_mega(**launch, inverse_cache=full)
+                    torch.testing.assert_close(
+                        cache, full.to(cache.dtype), atol=0, rtol=0
+                    )
+                # Numerical storage experiment only; production does no Torch math.
+                if roundtrip:
+                    cache = cache.to(cache_dtype).float()
                 cache_before = cache.clone()
             if cache_mode != "inverse":
                 gate_cache = tuple(launch[name] for name in ("g_t", "g_sum", "beta_t"))
@@ -168,6 +190,7 @@ def test_backward(lengths, heads, key_heads, mode, dtype, npu_device, cache_mode
             )
         assert guard.allocations == 7  # Six outputs and one reusable workspace.
         torch.npu.synchronize(npu_device)
+    failures = []
     for name, ref, pt, result in zip(
         ("dq", "dk", "dv", "dg", "dbeta", "dh0"), expected, baseline, actual
     ):
@@ -177,9 +200,12 @@ def test_backward(lengths, heads, key_heads, mode, dtype, npu_device, cache_mode
         assert all(torch.isfinite(x).all() for x in (ref, pt, result.cpu())), name
         error = (result.cpu().double() - ref.double()).abs().max().item()
         budget = 2 * (pt.double() - ref.double()).abs().max().item() + 1e-5
-        assert (
-            error <= budget
-        ), f"{name}: kernel error {error:.9g} > 2x PyTorch error + 1e-5 = {budget:.9g}"
+        if error_report is not None:
+            error_report.append(dict(gradient=name, error=error, budget=budget))
+        if error > budget:
+            failures.append(
+                f"{name}: kernel error {error:.9g} > 2x PyTorch error + 1e-5 = {budget:.9g}"
+            )
     for actual_input, original in zip(device_inputs, inputs):
         torch.testing.assert_close(
             actual_input.cpu().double(), original.double(), atol=0, rtol=0
@@ -189,6 +215,7 @@ def test_backward(lengths, heads, key_heads, mode, dtype, npu_device, cache_mode
     if gate_cache is not None:
         for x, before in zip(gate_cache, gates_before):
             torch.testing.assert_close(x, before, atol=0, rtol=0)
+    assert not failures, "\n".join(failures)
 
 
 @pytest.mark.parametrize(
@@ -207,10 +234,28 @@ def test_backward(lengths, heads, key_heads, mode, dtype, npu_device, cache_mode
         *[([65], h, h // 4, "both") for h in (12, 24, 32, 48, 64)],
     ],
 )
-@pytest.mark.parametrize("cache_mode", ["inverse", "gates", "both"])
-def test_saved_forward(lengths, heads, key_heads, mode, cache_mode, npu_device):
+@pytest.mark.parametrize(
+    "cache_mode,cache_dtype",
+    [
+        ("inverse", torch.float32),
+        ("gates", torch.float32),
+        ("both", torch.float32),
+        ("both", torch.float16),
+        ("both", torch.bfloat16),
+    ],
+)
+def test_saved_forward(
+    lengths, heads, key_heads, mode, cache_mode, cache_dtype, npu_device
+):
     test_backward(
-        lengths, heads, key_heads, mode, torch.float16, npu_device, cache_mode
+        lengths,
+        heads,
+        key_heads,
+        mode,
+        torch.float16,
+        npu_device,
+        cache_mode,
+        cache_dtype,
     )
 
 

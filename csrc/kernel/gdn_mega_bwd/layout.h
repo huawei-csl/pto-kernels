@@ -14,7 +14,7 @@ struct Plan {
   Input input[8]; uint64_t output[6],workspace,inverse_cache,gate_cache[3];
   int start[MaxSequences],length[MaxSequences],offset[MaxSequences+1];
   int sequences,sequence_base,heads,key_heads,chunks,tokens;
-  float scale;
+  float scale; int inverse_dtype;
 };
 // Several slots change meaning only after their previous consumers finish.
 enum MatrixSlot { Q_DQ,K,V,DO_DV,AT,KK,DECAY,W_DW,U_Z,H,DU,DH_DK,MatrixSlots };

@@ -30,7 +30,7 @@ def build():
         + b"".join(p.read_bytes() for p in sorted(source.parent.glob("*.h")))
         + b"".join(
             (source.parent.parent / "gdn_mega" / name).read_bytes()
-            for name in ("inverse.h", "recurrence_pipeline.h")
+            for name in ("inverse.h", "recurrence_pipeline.h", "inverse_cache.h")
         )
         + (root / "csrc/kernel/kernel_utils.h").read_bytes()
         + repr(flags).encode()
@@ -107,6 +107,7 @@ def build():
         ctypes.c_void_p,
         ctypes.c_float,
         ctypes.c_void_p,
+        ctypes.c_int,
         ctypes.POINTER(ctypes.c_void_p),
         ctypes.c_void_p,
     ]

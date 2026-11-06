@@ -99,7 +99,7 @@ AICORE inline void matmul(__gm__ float* a, __gm__ float* b,
 }
 
 // The forward saves [D0,0; P,D1], P=-D1*L10. Complete A10=P*D0 on Cube.
-template<bool Transposed=false>
+template<bool Transposed=false,bool InputTransposed=false>
 AICORE inline void complete_cached_inverse(__gm__ float* factor,__gm__ float* output=nullptr) {
 #if defined(__DAV_CUBE__)
   Tile<TileType::Mat,float,128,128,BLayout::ColMajor,128,128,SLayout::RowMajor,512> f;
@@ -107,7 +107,9 @@ AICORE inline void complete_cached_inverse(__gm__ float* factor,__gm__ float* ou
   TileAcc<float,64,64> acc;
   TASSIGN(f,0); TASSIGN(left,0); TASSIGN(right,0); TASSIGN(acc,0);
   load<128,128>(f,factor);
-  if constexpr(Transposed) {
+  if constexpr(InputTransposed) {
+    TEXTRACT(left,f,0,0); TEXTRACT(right,f,0,64);
+  } else if constexpr(Transposed) {
     Tile<TileType::Mat,float,128,128,BLayout::RowMajor,128,128,SLayout::ColMajor,512> trans;
     TRESHAPE(trans,f); TEXTRACT(left,trans,0,0); TEXTRACT(right,trans,0,64);
   } else { TEXTRACT(left,f,64,0); TEXTRACT(right,f,0,0); }
@@ -117,14 +119,20 @@ AICORE inline void complete_cached_inverse(__gm__ float* factor,__gm__ float* ou
   TSTORE(gm,acc); sync();
 #endif
 }
-AICORE inline void transpose_inverse(__gm__ float* x,__gm__ float* y) {
+template<typename T>
+AICORE inline void transpose_inverse(__gm__ T* x,__gm__ float* y) {
 #if defined(__DAV_VEC__)
   Tile<TileType::Vec,float,128,64> input;
   Half output,tmp;
   TASSIGN(input,0); TASSIGN(output,32768); TASSIGN(tmp,65536);
   int stripe=get_subblockid();
-  GlobalTensor<float,Shape<1,1,1,128,64>,Stride<1,1,1,128,1>> gm(x+stripe*64);
-  TLOAD(input,gm); sync(); TTRANS(output,input,tmp); sync();
+  GlobalTensor<T,Shape<1,1,1,128,64>,Stride<1,1,1,128,1>> gm(x+stripe*64);
+  if constexpr(std::is_same_v<T,float>) TLOAD(input,gm);
+  else {
+    Tile<TileType::Vec,T,128,64> packed; TASSIGN(packed,98304);
+    TLOAD(packed,gm); sync(); TCVT(input,packed,RoundMode::CAST_NONE); sync();
+  }
+  sync(); TTRANS(output,input,tmp); sync();
   store<64,128>(output,y+stripe*8192);
 #endif
 }

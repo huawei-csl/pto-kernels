@@ -28,7 +28,8 @@ AICORE inline void prepare(const Plan& p,int c,int head,Ops& o) {
   o.mm(x.m(K),x.m(K),false,true,x.m(KK));
   if(p.inverse_cache) {
     auto factor=o.empty();
-    o.copy({(__gm__ float*)p.inverse_cache+(int64_t(c)*p.heads+head)*Matrix},factor);
+    Input saved{(uint64_t)inverse_data(p,c,head),{Matrix,128,0,1},p.inverse_dtype};
+    o.pack(saved,0,0,128,factor);
     complete_cached_inverse(factor.data); join();
     transpose_inverse(factor.data,x.m(AT).data); join();
   } else {

@@ -23,8 +23,11 @@ def plot(rows, destination):
     if len(modes) != 1:
         raise ValueError("A heatmap must not mix cache modes")
     cached = modes == {(True, True)}
+    dtypes = {r.get("cache_dtype", "float32") for r in rows}
+    if cached and len(dtypes) != 1:
+        raise ValueError("A heatmap must not mix inverse cache dtypes")
     caption = (
-        "backward uses saved inverse + gates/beta; forward saves these buffers"
+        f"backward uses saved {next(iter(dtypes))} inverse + gates/beta; forward saves these buffers"
         if cached
         else "backward recomputes; forward saves no caches"
     )
@@ -119,7 +122,9 @@ def plot(rows, destination):
         plt.close(fig)
 
 
-def measure(heads, tp, repeats, destination, forward=False, cached=False):
+def measure(
+    heads, tp, repeats, destination, forward=False, cached=False, cache_dtype="float32"
+):
     # Separate processes release allocations between head/TP pairs and directions.
     command = [
         sys.executable,
@@ -134,7 +139,9 @@ def measure(heads, tp, repeats, destination, forward=False, cached=False):
         str(repeats),
     ]
     if cached:
-        command.extend(("--inverse-cache", "--gate-cache"))
+        command.extend(
+            ("--inverse-cache", "--gate-cache", "--cache-dtype", cache_dtype)
+        )
     if forward:
         command.append("--forward-only")
     log = destination / f"h{heads}_tp{tp}{'_fwd' if forward else ''}.log"
@@ -172,7 +179,14 @@ def run(args):
                 flush=True,
             )
             measurements = (
-                measure(heads, tp, args.repeats, destination, cached=True)
+                measure(
+                    heads,
+                    tp,
+                    args.repeats,
+                    destination,
+                    cached=True,
+                    cache_dtype=args.cache_dtype,
+                )
                 if supported
                 else [
                     {
@@ -197,6 +211,7 @@ def run(args):
                     heads=heads // tp,
                     key_heads=16 // tp,
                     inverse_cache=True,
+                    cache_dtype=args.cache_dtype,
                     gate_cache=True,
                     saved_values=[
                         "inverse_factors",

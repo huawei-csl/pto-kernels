@@ -32,9 +32,9 @@ AICORE inline void blocked_inverse(__gm__ float* factor,__gm__ float* scratch,
   join();
 #if defined(__DAV_CUBE__)
   MegaFloat<128,128> a; TASSIGN(a,0); load<128,128>(a,factor);
-  mega_float_join_level<16,128>(a,scratch,factor);
-  mega_float_join_level<32,128>(a,scratch,factor);
-  mega_float_join_level<64,128>(a,scratch,factor);
+  mega_float_join_level<16,128>(a,scratch,{(__gm__ uint8_t*)factor,2});
+  mega_float_join_level<32,128>(a,scratch,{(__gm__ uint8_t*)factor,2});
+  mega_float_join_level<64,128>(a,scratch,{(__gm__ uint8_t*)factor,2});
 #endif
   join(); transpose_inverse(factor,at); join();
 }

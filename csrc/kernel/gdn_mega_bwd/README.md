@@ -9,7 +9,7 @@ launcher handles metadata and stream integration. Neither performs tensor math.
 
 ```python
 # Model forward: create the cache once and retain these buffers for backward.
-inverse_cache = torch.empty(num_chunks, H, 128, 128, device=q.device, dtype=torch.float32)
+inverse_cache = torch.empty(num_chunks, H, 128, 128, device=q.device, dtype=torch.bfloat16)
 pto_gdn_mega(**forward_launch_args, inverse_cache=inverse_cache)
 gate_cache = tuple(forward_launch_args[name] for name in ("g_t", "g_sum", "beta_t"))
 
@@ -27,13 +27,19 @@ caches without copying. Buffers must belong to the same inputs and sequence
 boundaries and stay unmodified until backward finishes. Backward treats them
 as read-only. Missing initial state/final-state adjoint means zero.
 
-Forward saves inverse factors `[D0,0;P,D1]`. Existing vector/Cube exchanges
-are redirected into that cache, without adding matrix products, stores or
-launches. Measured forward overhead was about 1% in the original cache port.
-The native backward transposes those factors directly into A.T, then fills
-its upper-right block with one 64x64 Cube product, `D0.T @ P.T`. It skips the
-triangular solve and the temporary factor copy. The FP32 accuracy path retains
-its original completion/transposition schedule.
+Forward saves inverse factors `[D0,0;P,D1]` in FP32, FP16 or BF16, selected by
+the caller's cache allocation. With FP32, existing vector/Cube exchanges are
+redirected into the cache. With FP16/BF16, forward alternates between two
+existing per-core FP32 scratch slots. After Cube finishes the factors, Vec
+exports each completed stripe once while Cube computes the residual/output.
+Only the 16-bit cache is retained for backward. No extra allocations, matrix
+products or kernel launches are added; forward arithmetic stays unchanged.
+
+Backward expands smaller caches to FP32 while transposing into A.T, then fills
+its upper-right block with one FP32 64x64 Cube product, `D0.T @ P.T`. This
+reuses the expanded transpose without allocating a separate factor buffer.
+It skips the triangular solve. The FP32 input accuracy path retains its
+original completion/transposition schedule.
 
 Existing `(g_t,g_sum,beta_t)` buffers have physical `[H,T]` layout: high/low
 FP32 cumulative log gates and FP16 beta. Reusing them adds no forward work.
@@ -41,7 +47,8 @@ Exponentials and pairwise decay still execute in backward. KK/QK, W/U,
 chunk-boundary states and corrected values Z are also recomputed. The original
 h0 is reused. Q/K normalization and its rstd belong to the upstream operation.
 
-At 8K/H=16, retained inverse factors cost **64 MiB**, gates/beta **1.25 MiB**.
+At 8K/H=16, retained inverse factors cost **32 MiB** in FP16/BF16 or **64 MiB**
+in FP32; gates/beta cost **1.25 MiB**.
 The unchanged backward workspace is **816.5 MiB**: twelve FP32 matrices and
 seven vectors per chunk/head, plus 45 MiB of reusable block scratch. Workspace
 exists only during backward. The current forward cache producer accepts FP16
@@ -100,7 +107,7 @@ workspace size and numerical bounds are unchanged.
 
 ## Validation and benchmarks
 
-**122 tests passed**: 112 hardware and ten CPU reference checks. Each gradient
+**152 tests passed**: 142 hardware and ten CPU reference checks. Each gradient
 is compared with an independent recursive Torch/autograd golden run (FP32 for
 FP16/BF16 inputs, FP64 for FP32). A reordered recurrence in the input dtype
 sets a separate scalar error budget for each tensor:
@@ -108,6 +115,17 @@ sets a separate scalar error budget for each tensor:
 Tests also cover finite differences, cache/input integrity, packed tails,
 empty sequences, shared heads, streams, cancellation and an allocation-only
 Torch dispatch guard. Cache tests run the actual forward to produce caches.
+FP16/BF16 caches must exactly equal rounding the FP32 cache, and cached versus
+uncached forward outputs/final states must be bitwise identical. The numerical
+storage experiment can be reproduced with `tests/check_gdn_inverse_precision.py
+--output build/gdn_mega_bwd/inverse_precision.json`; add `--roundtrip` to isolate
+rounding using test-only Torch casts instead of native 16-bit storage.
+[Initial storage experiment](../../../tests/baselines/gdn_mega_inverse_precision.json)
+and [completed-factor export timings](../../../tests/baselines/gdn_mega_inverse_export.json):
+FP16/BF16 halve the retained inverse bytes. Exporting completed factors once
+removes the earlier 6–8.5% forward penalty; in the measured shapes, 16-bit
+cache-saving forward is within about 1% of FP32 caching in the tested shapes.
+The host chooses a compiled cache strategy; each call still launches once.
 
 After sourcing CANN, from the repository root:
 
@@ -116,6 +134,11 @@ OMP_NUM_THREADS=4 NPU_DEVICE=npu:0 PYTHONPATH=python:. python -m pytest tests/te
 OMP_NUM_THREADS=4 PYTHONPATH=python:. python tests/benchmark_gdn_mega_bwd.py --tokens 2048 8192 --heads 16 --key-heads 2 --inverse-cache --gate-cache
 OMP_NUM_THREADS=4 PYTHONPATH=python:. python tests/benchmark_gdn_mega_bwd.py --extensive --repeats 5
 ```
+
+Add `--cache-dtype bfloat16` or `--cache-dtype float16` to benchmark smaller
+caches (also supported by `--extensive`). The default stays FP32 so historical
+benchmark commands remain comparable. This changes cache storage only; the
+forward still requires FP16 q/k/v/beta, and all inverse arithmetic stays FP32.
 
 `--extensive` always consumes both forward caches. Every heatmap cell shows
 cached backward / cache-saving forward wall time and their ratio. Backward
