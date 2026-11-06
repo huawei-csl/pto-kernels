@@ -8,15 +8,15 @@
 
 """Tests for pto_tri_inv_mix, which inverts the leading cube_fraction of the
 tiles on the cube units (the tri_inv_rec_unroll algorithm) and the rest on the
-vector units (the tri_inv_col_sweep algorithm).
+vector units (the tri_inv_rank_one algorithm).
 
 The input convention is the one of pto_tri_inv_rec_unroll: the tensor holds the
 strictly triangular A and the kernel returns the inverse of I + A.
 
 Tolerances are the looser of the two kernels' own tolerances for a given
-generator, which in practice means the column sweep's: it applies n sequential
-rank-1 updates, so its rounding error grows with the matrix size, while the
-recursion keeps its accumulator in fp32 across the log2(n) levels.
+generator, which in practice means the rank-one kernel's: it applies n
+sequential rank-1 updates, so its rounding error grows with the matrix size,
+while the recursion keeps its accumulator in fp32 across the log2(n) levels.
 """
 
 import random
@@ -26,7 +26,7 @@ import numpy as np
 import pytest
 import torch
 
-from pto_kernels import pto_tri_inv_col_sweep, pto_tri_inv_mix, pto_tri_inv_rec_unroll
+from pto_kernels import pto_tri_inv_mix, pto_tri_inv_rank_one, pto_tri_inv_rec_unroll
 
 # Mirrors DefaultTriInvMixCubeFraction in csrc/host/torch_tri_inv_mix.h.
 DEFAULT_CUBE_FRACTION = {16: 0.50, 32: 0.60, 64: 0.65, 128: 0.55}
@@ -192,9 +192,9 @@ def test_tri_inv_mix_matches_both_halves(
     bit for bit. None checks the per-size default fraction. With fewer tiles
     than cube cores the fraction is ignored and every tile runs on the cube.
 
-    The column sweep never reads the diagonal of its input -- it assumes a unit
-    one -- so the strictly triangular tensor the recursion expects means the
-    same matrix to both kernels.
+    The rank-one kernel never reads the diagonal of its input -- it assumes a
+    unit one -- so the strictly triangular tensor the recursion expects means
+    the same matrix to both kernels.
     """
     A = _to_strict_tri(random_tri_matrix(n, num_tiles, 1), is_lower, torch.float16)
     A_npu = A.npu()
@@ -202,7 +202,7 @@ def test_tri_inv_mix_matches_both_halves(
     kwargs = {} if cube_fraction is None else {"cube_fraction": cube_fraction}
     mixed = pto_tri_inv_mix(A_npu, is_lower=is_lower, **kwargs).cpu()
     cube_only = pto_tri_inv_rec_unroll(A_npu, is_lower=is_lower).cpu()
-    vector_only = pto_tri_inv_col_sweep(A_npu, is_lower=is_lower).cpu()
+    vector_only = pto_tri_inv_rank_one(A_npu, is_lower=is_lower).cpu()
     torch.npu.synchronize()
 
     num_cube_tiles = num_tiles

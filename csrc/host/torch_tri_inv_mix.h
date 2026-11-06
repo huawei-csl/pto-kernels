@@ -63,7 +63,7 @@ constexpr double DefaultTriInvMixCubeFraction(uint32_t matrix_size) {
  * The matrices are split in two parts along the tile index. The first
  * round(cube_fraction * num_tiles) tiles are inverted on the cube units with
  * the "recursive unroll" method of run_tri_inv_rec_unroll, the rest on the
- * vector units with the rank-1 column sweep of run_tri_inv_col_sweep. The
+ * vector units with the rank-1 update of run_tri_inv_rank_one. The
  * parts are disjoint, so the two engines run concurrently without
  * synchronizing.
  *

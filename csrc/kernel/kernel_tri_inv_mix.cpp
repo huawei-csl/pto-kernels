@@ -16,8 +16,8 @@ for the full License text.
  * The tensor is cut in two parts along the tile index. The first
  * num_cube_tiles tiles go to the cube units, which invert it with the
  * recursive-doubling / unrolled recursion of tri_inv_rec_unroll; the remaining
- * tiles go to the vector units, which invert it with the rank-1 column sweep of
- * tri_inv_col_sweep. Both algorithms already own a disjoint set of tiles -- and
+ * tiles go to the vector units, which invert it with the rank-1 update of
+ * tri_inv_rank_one. Both algorithms already own a disjoint set of tiles -- and
  * therefore disjoint rows of the output -- so the two halves need no cross-core
  * synchronization and simply run concurrently for the length of the kernel.
  *
