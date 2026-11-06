@@ -16,6 +16,12 @@ from csrc.kernel.gdn_mega_bwd.backward import backward
 from gdn_mega_bwd_reference import recurrent_gdn_reference
 
 
+# The five saved-buffer variants have identical fixed-seed model inputs.
+# Reuse only their CPU oracle results within this process; every NPU run and
+# assertion still executes. Nothing is cached on disk or in production code.
+_saved_references = {}
+
+
 class AllocationsOnly(TorchDispatchMode):
     """Reject accidental Torch computation inside the backward implementation."""
 
@@ -99,22 +105,29 @@ def test_backward(
         for x, dt in zip((q, k, v, g, beta, h0), input_dtypes)
     ]
     cu = torch.tensor([0, *torch.tensor(lengths).cumsum(0).tolist()], dtype=torch.int32)
-    out, ht = recurrent_gdn_reference(
-        *inputs, cu_seqlens=cu, scale=scale, dtype=golden_dtype
-    )
-    do, dh = torch.randn_like(out).to(dtype), torch.randn_like(ht).to(dtype)
-    if mode == "state":
-        do.zero_()
-    if mode in ("output", "defaults"):
-        dh.zero_()
-    expected = torch.autograd.grad(
-        (out, ht), inputs, (do.to(golden_dtype), dh.to(golden_dtype))
-    )
-    pt_inputs = [x.detach().to(dtype).requires_grad_() for x in inputs]
-    pt_out, pt_ht = recurrent_gdn_reference(
-        *pt_inputs, cu_seqlens=cu, scale=scale, dtype=dtype, reorder_ops=True
-    )
-    baseline = torch.autograd.grad((pt_out, pt_ht), pt_inputs, (do, dh))
+    key = (tuple(lengths), heads, key_heads, mode, dtype, tuple(input_dtypes))
+    cached = _saved_references.get(key) if cache_mode else None
+    if cached is None:
+        out, ht = recurrent_gdn_reference(
+            *inputs, cu_seqlens=cu, scale=scale, dtype=golden_dtype
+        )
+        do, dh = torch.randn_like(out).to(dtype), torch.randn_like(ht).to(dtype)
+        if mode == "state":
+            do.zero_()
+        if mode in ("output", "defaults"):
+            dh.zero_()
+        expected = torch.autograd.grad(
+            (out, ht), inputs, (do.to(golden_dtype), dh.to(golden_dtype))
+        )
+        pt_inputs = [x.detach().to(dtype).requires_grad_() for x in inputs]
+        pt_out, pt_ht = recurrent_gdn_reference(
+            *pt_inputs, cu_seqlens=cu, scale=scale, dtype=dtype, reorder_ops=True
+        )
+        baseline = torch.autograd.grad((pt_out, pt_ht), pt_inputs, (do, dh))
+        if cache_mode:
+            _saved_references[key] = do, dh, expected, baseline
+    else:
+        do, dh, expected, baseline = cached
     device_inputs = [
         x.detach().to(device=npu_device, dtype=dt)
         for x, dt in zip(inputs, input_dtypes)

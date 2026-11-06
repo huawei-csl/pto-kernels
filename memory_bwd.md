@@ -1,5 +1,72 @@
 # GDN backward development
 
+## Remove the remaining operation scheduler (2026-11-06, v10)
+
+Committed the validated v9 work first as `2c181b2`. Its device library is
+`45d6c0fa80997f25/kernel.so`. The native launcher, Plan/workspace layout,
+forward/cache format and per-gradient error bounds remain unchanged.
+
+Deleted `Ops`, its allocator, generic `call(kind,op)` dispatcher, nested tensor
+expressions and implicit joins. This is not a relocation of the old class.
+`kernel.cpp` now has explicit compensated stages with fixed scratch addresses;
+`pipeline.h` retains the already optimized FP16/BF16 schedules. Small inline
+PTO tile helpers are instructions inside a stage, never additional launches.
+
+Concrete changes to the formerly generic FP32 path:
+
+- Pack/scale Q together and batch independent vector preparation. Fuse the
+  compensated product's rounded result directly into its consumer in UB,
+  preserving the order of additions while eliminating intermediate GM matrices.
+- Evaluate 64 gate-interval Kahan sums in SIMD lanes, preserving each row's
+  descending summation order, and use both vector subcores for the two stripes.
+  Keep the compensated prefix/reverse scans required by the FP32 error budget.
+- Replace local-score scalar masking with four 16x16 tiled loads per subcore.
+  Load block weights through aligned DMA, transpose and tile insertion.
+- Replace the remaining serial rank-one inverse with the existing blocked
+  diagonal solver and Cube joins. The full FP32 suite passed unchanged bounds.
+- Give all four K=32 products disjoint L0A/B operands and alternating 64-KiB
+  L0C slots. MTE1, M and FIX overlap; FIX->M events protect accumulator reuse.
+  Four partial results still receive the original compensated reduction.
+- Replace scalar beta-gradient division with masked PTO comparison/selection
+  and vector division; beta=0 retains the general derivative without dividing
+  by zero. Remove the unused generic GEMM modes, scalar inverse and reducer.
+
+Validation: **152 tests passed in 359.94s**, before changing reference reuse.
+The subsequently optimized saved-buffer test group passed **75 tests in
+55.74s**. Instrumentation verified **30 oracle calls for 15 unique input cases**,
+versus 150 calls before. Only fixed-seed CPU oracle results are shared within
+one process. Every kernel call, tolerance assertion, allocation-only guard,
+input/cache integrity check and stream check still runs; nothing is saved to
+disk or added to the production path.
+
+The benchmark now supports `--quick`, repeated `--shape T HV HK`, `--dtype`,
+`--warmup` and `--repeats`. Quick runs use two shapes, one warmup and three pairs.
+Development used small smoke tests and quick comparisons; the full numerical
+suite ran once after kernel changes stabilized, followed by the affected test
+cache group. No repeated full sweeps, forward rebuilds or profiler runs.
+Device/native builds remain separately content-addressed. A tile-typed helper
+must be guarded by `__CCE_AICORE__`, including its signature, because the
+bisheng host pass does not define device tile aliases.
+
+Final paired measurements, alternating libraries on identical data, two warmup
+pairs and seven measured pairs. FP32 recomputes; FP16 uses actual saved inverse
+and gate/beta buffers. Wall times include allocation/enqueue and synchronization,
+excluding build and forward:
+
+| Input / cache | Tokens | Hv / Hqk | v9 ms | v10 ms | Speedup |
+| --- | --- | --- | --- | --- | --- |
+| float32 / none | 256 | 8 / 2 | 1.546 | 1.048 | 1.48x |
+| float32 / none | 513 | 8 / 2 | 2.707 | 1.716 | 1.58x |
+| float32 / none | 2048 | 16 / 2 | 12.552 | 6.869 | 1.83x |
+| float16 / BF16 + gates | 2048 | 16 / 2 | 1.447 | 1.454 | 1.00x |
+| float16 / BF16 + gates | 8192 | 64 / 16 | 13.610 | 13.592 | 1.00x |
+
+FP32 improves **1.48–1.83x**. The optimized FP16 path stays within **0.5%** of
+v9; these are not additional training-dtype speedups. The previous 2x native
+backward target remains unmet. Raw samples, source/library hashes, commands
+and development comparisons are in
+`tests/baselines/gdn_mega_bwd_no_ops_v10.json`.
+
 ## Explicit native schedules (2026-11-06)
 
 Snapshot requested before optimization: `e82451a` (clean tree after commit).

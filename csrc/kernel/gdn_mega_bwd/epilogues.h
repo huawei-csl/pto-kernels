@@ -59,7 +59,7 @@ template<int Address>
 AICORE inline void load_value(const Input& input,int first,int head,int length,
                                __gm__ float* packed,Half& out) {
 #if defined(__DAV_VEC__)
-  if(input.stride[3]!=1) load<64,128>(out,packed+get_subblockid()*8192);
+  if(input.dtype==2 || input.stride[3]!=1) load<64,128>(out,packed+get_subblockid()*8192);
   else if(input.dtype==0) load_value<half,Address>(input,first,head,length,out);
   else load_value<bfloat16_t,Address>(input,first,head,length,out);
 #endif

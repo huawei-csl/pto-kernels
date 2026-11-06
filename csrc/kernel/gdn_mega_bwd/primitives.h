@@ -30,71 +30,43 @@ AICORE inline void store(TileT& tile, __gm__ float* ptr) {
 }
 #endif
 
-// Generic square products keep the first port short; every tensor is padded
-// to C=D=128. Transposition is a view of the L1 fractal, not a GM copy.
-template<bool TA, bool TB, int Parts=1, bool Sum=false, bool TC=false, bool TD=false>
-AICORE inline void matmul(__gm__ float* a, __gm__ float* b,
-                             __gm__ float* c, int batch, __gm__ float* d=nullptr,__gm__ float* e=nullptr) {
+// Four K=32 products use disjoint L0A/B slots and alternating L0C slots.
+// The previous export can overlap the next product; only accumulator reuse waits.
+template<int Part,bool TA,bool TB>
+AICORE inline void partial_product(__gm__ float* out) {
 #if defined(__DAV_CUBE__)
-  using Mat = Tile<TileType::Mat,float,128,128,BLayout::ColMajor,128,128,SLayout::RowMajor,512>;
-  using Trans = Tile<TileType::Mat,float,128,128,BLayout::RowMajor,128,128,SLayout::ColMajor,512>;
-  Mat am,bm; Trans at,bt;
-  constexpr int K=128/Parts;
-  TileLeft<float,128,K> left;
-  TileRight<float,K,128> right;
-  TileAcc<float,128,128> acc;
+  using Mat=Tile<TileType::Mat,float,128,128,BLayout::ColMajor,128,128,SLayout::RowMajor,512>;
+  using Trans=Tile<TileType::Mat,float,128,128,BLayout::RowMajor,128,128,SLayout::ColMajor,512>;
+  Mat a,b; Trans at,bt; TileLeft<float,128,32> left;
+  TileRight<float,32,128> right; TileAcc<float,128,128> acc;
+  TASSIGN(a,0); TASSIGN(b,65536); TASSIGN(left,Part*16384); TASSIGN(right,Part*16384);
+  TASSIGN(acc,(Part%2)*65536);
+  if constexpr(TA) { TRESHAPE(at,a); TEXTRACT(left,at,0,Part*32); }
+  else TEXTRACT(left,a,0,Part*32);
+  if constexpr(TB) { TRESHAPE(bt,b); TEXTRACT(right,bt,Part*32,0); }
+  else TEXTRACT(right,b,Part*32,0);
+  set_flag(PIPE_MTE1,PIPE_M,EVENT_ID0); wait_flag(PIPE_MTE1,PIPE_M,EVENT_ID0);
+  if constexpr(Part==2) wait_flag(PIPE_FIX,PIPE_M,EVENT_ID2);
+  if constexpr(Part==3) wait_flag(PIPE_FIX,PIPE_M,EVENT_ID3);
+  TMATMUL(acc,left,right);
+  set_flag(PIPE_M,PIPE_FIX,EVENT_ID0); wait_flag(PIPE_M,PIPE_FIX,EVENT_ID0);
+  GlobalTensor<float,Shape<1,1,1,128,128>,Stride<1,1,1,128,1>> gm(out+Part*Matrix);
+  TSTORE(gm,acc);
+  if constexpr(Part==0) set_flag(PIPE_FIX,PIPE_M,EVENT_ID2);
+  if constexpr(Part==1) set_flag(PIPE_FIX,PIPE_M,EVENT_ID3);
+#endif
+}
+template<bool TA,bool TB>
+AICORE inline void partial_products(__gm__ float* a,__gm__ float* b,__gm__ float* out) {
+#if defined(__DAV_CUBE__)
+  static_assert(ProductParts==4);
+  Tile<TileType::Mat,float,128,128,BLayout::ColMajor,128,128,SLayout::RowMajor,512> am,bm;
   TASSIGN(am,0); TASSIGN(bm,65536);
-  TASSIGN(left,0); TASSIGN(right,0); TASSIGN(acc,0);
-  if constexpr(Parts==1) {
-    for(int h=0;h<batch;++h) {
-      GlobalTensor<float,Shape<1,1,1,128,128>,Stride<1,1,1,128,1>> ga(a+h*16384),gb(b+h*16384),gc(c+h*16384);
-      TLOAD(am,ga); TLOAD(bm,gb);
-      set_flag(PIPE_MTE2,PIPE_MTE1,EVENT_ID0); wait_flag(PIPE_MTE2,PIPE_MTE1,EVENT_ID0);
-      if constexpr(TA) { TRESHAPE(at,am); TEXTRACT(left,at,0,0); }
-      else TEXTRACT(left,am,0,0);
-      if constexpr(TB) { TRESHAPE(bt,bm); TEXTRACT(right,bt,0,0); }
-      else TEXTRACT(right,bm,0,0);
-      set_flag(PIPE_MTE1,PIPE_M,EVENT_ID0); wait_flag(PIPE_MTE1,PIPE_M,EVENT_ID0);
-      TMATMUL(acc,left,right);
-      if constexpr(Sum) {
-        // Prefetch the second pair while the first product executes. Its L1
-        // slots are disjoint; L0 operands are reused only after M completes.
-        Mat cm,dm; TASSIGN(cm,131072); TASSIGN(dm,196608);
-        GlobalTensor<float,Shape<1,1,1,128,128>,Stride<1,1,1,128,1>> gd(d+h*16384),ge(e+h*16384);
-        TLOAD(cm,gd); TLOAD(dm,ge);
-        set_flag(PIPE_MTE2,PIPE_MTE1,EVENT_ID0); wait_flag(PIPE_MTE2,PIPE_MTE1,EVENT_ID0);
-        set_flag(PIPE_M,PIPE_MTE1,EVENT_ID0); wait_flag(PIPE_M,PIPE_MTE1,EVENT_ID0);
-        if constexpr(TC) { TRESHAPE(at,cm); TEXTRACT(left,at,0,0); }
-        else TEXTRACT(left,cm,0,0);
-        if constexpr(TD) { TRESHAPE(bt,dm); TEXTRACT(right,bt,0,0); }
-        else TEXTRACT(right,dm,0,0);
-        set_flag(PIPE_MTE1,PIPE_M,EVENT_ID0); wait_flag(PIPE_MTE1,PIPE_M,EVENT_ID0);
-        TMATMUL_ACC(acc,acc,left,right);
-      }
-      set_flag(PIPE_M,PIPE_FIX,EVENT_ID0); wait_flag(PIPE_M,PIPE_FIX,EVENT_ID0);
-      TSTORE(gc,acc); sync();
-    }
-    return;
-  }
-  for (int h=0; h<batch; ++h) {
-    load<128,128>(am,a+h*16384); load<128,128>(bm,b+h*16384);
-    for(int part=0;part<Parts;++part) {
-      if constexpr(TA) { TRESHAPE(at,am); TEXTRACT(left,at,0,part*K); }
-      else TEXTRACT(left,am,0,part*K);
-      if constexpr(TB) { TRESHAPE(bt,bm); TEXTRACT(right,bt,part*K,0); }
-      else TEXTRACT(right,bm,part*K,0);
-      sync(); TMATMUL(acc,left,right); sync();
-      if constexpr(Sum) {
-        load<128,128>(am,d+h*16384); load<128,128>(bm,e+h*16384);
-        if constexpr(TC) { TRESHAPE(at,am); TEXTRACT(left,at,0,0); }
-        else TEXTRACT(left,am,0,0);
-        if constexpr(TD) { TRESHAPE(bt,bm); TEXTRACT(right,bt,0,0); }
-        else TEXTRACT(right,bm,0,0);
-        sync(); TMATMUL_ACC(acc,acc,left,right); sync();
-      }
-      store<128,128>(acc,c+(h*Parts+part)*16384);
-    }
-  }
+  GlobalTensor<float,Shape<1,1,1,128,128>,Stride<1,1,1,128,1>> ga(a),gb(b);
+  TLOAD(am,ga); TLOAD(bm,gb);
+  set_flag(PIPE_MTE2,PIPE_MTE1,EVENT_ID0); wait_flag(PIPE_MTE2,PIPE_MTE1,EVENT_ID0);
+  partial_product<0,TA,TB>(out); partial_product<1,TA,TB>(out);
+  partial_product<2,TA,TB>(out); partial_product<3,TA,TB>(out);
 #endif
 }
 
@@ -139,7 +111,9 @@ AICORE inline void transpose_inverse(__gm__ T* x,__gm__ float* y) {
 
 // Matrix products execute on Cube. Vector cores only add the partial results
 // with compensation, shortening FP32 accumulation chains without vector dots.
-AICORE inline void sum_products(__gm__ float* parts,__gm__ float* out) {
+template<bool Add=false>
+AICORE inline void sum_products(__gm__ float* parts,__gm__ float* out,
+                                 __gm__ float* base=nullptr,float sign=1) {
 #if defined(__DAV_VEC__)
   using Part=Tile<TileType::Vec,float,32,128>;
   Part a,b,low,sum,bb,err;
@@ -155,7 +129,10 @@ AICORE inline void sum_products(__gm__ float* parts,__gm__ float* out) {
       TSUB(bb,b,bb); sync(); TADD(err,err,bb); sync();
       TADD(low,low,err); sync(); TADDS(a,sum,0.0f); sync();
     }
-    TADD(a,a,low); sync(); store<32,128>(a,out+offset);
+    TADD(a,a,low); sync();
+    if(sign!=1) { TMULS(a,a,sign); sync(); }
+    if constexpr(Add) { load<32,128>(b,base+offset); TADD(a,b,a); sync(); }
+    store<32,128>(a,out+offset);
   }
 #endif
 }
@@ -164,25 +141,37 @@ AICORE inline void sum_products(__gm__ float* parts,__gm__ float* out) {
 // execute on Cube; these helpers only mask scores and construct decay weights.
 AICORE inline void local_scores(__gm__ float* x,__gm__ float* out) {
 #if defined(__DAV_VEC__)
-  Half a; TASSIGN(a,0); int first=get_subblockid()*64;
-  load<64,128>(a,x+first*128);
-  for(int i=0;i<64;++i) for(int j=0;j<128;++j)
-    if((first+i)/16!=j/16) a.SetValue(i*128+j,0.0f);
-  sync(); store<64,128>(a,out+first*128);
+  Half a; Tile<TileType::Vec,float,16,16> block;
+  TASSIGN(a,0); TASSIGN(block,32768); int first=get_subblockid()*64;
+  TEXPANDS(a,0.0f); sync();
+  for(int i=0;i<64;i+=16) {
+    GlobalTensor<float,Shape<1,1,1,16,16>,Stride<1,1,1,128,1>> gm(x+(first+i)*128+first+i);
+    TLOAD(block,gm); sync(); TINSERT(a,block,i,first+i); sync();
+  }
+  store<64,128>(a,out+first*128);
 #endif
 }
 AICORE inline void block_weights(__gm__ float* e,__gm__ float* decay,int start,
                                  __gm__ float* d,__gm__ float* k,__gm__ float* factor) {
 #if defined(__DAV_VEC__)
   if(get_subblockid()!=0) return;
-  Row a,b,c; TASSIGN(a,0); TASSIGN(b,512); TASSIGN(c,1024);
-  for(int i=0;i<128;++i) {
-    bool inside=i>=start && i<start+16;
-    a.SetValue(i,inside ? (start ? decay[i*128+start-1] : e[i]) : 0.0f);
-    b.SetValue(i,inside ? decay[(start+15)*128+i] : 0.0f);
+  Row a,b,c; Tile<TileType::Vec,float,1,16> selected;
+  Tile<TileType::Vec,float,16,8> column;
+  Tile<TileType::Vec,float,8,16> transposed,tmp;
+  TASSIGN(a,0); TASSIGN(b,512); TASSIGN(c,1024);
+  TASSIGN(column,1536); TASSIGN(transposed,2048); TASSIGN(tmp,2560);
+  TEXPANDS(a,0.0f); TEXPANDS(b,0.0f); TEXPANDS(c,0.0f); sync();
+  if(start) {
+    GlobalTensor<float,Shape<1,1,1,16,8>,Stride<1,1,1,128,1>> gm(decay+start*128+start-8);
+    TLOAD(column,gm); sync(); TTRANS(transposed,column,tmp); sync();
+    TASSIGN(selected,2048+7*64);
+  } else {
+    TASSIGN(selected,2048); load<1,16>(selected,e);
   }
-  TEXPANDS(c,0.0f); sync();
-  c.SetValue(127,start ? decay[(start+15)*128+start-1] : e[start+15]); sync();
+  TINSERT(a,selected,0,start); sync();
+  TASSIGN(selected,2048); load<1,16>(selected,decay+(start+15)*128+start);
+  TINSERT(b,selected,0,start); sync();
+  c.SetValue(127,a.GetValue(start+15)); sync();
   store<1,128>(a,d); store<1,128>(b,k); store<1,128>(c,factor);
 #endif
 }
@@ -230,17 +219,6 @@ AICORE inline void matrix_op(__gm__ float* x, __gm__ float* y,
     } else TMULS(a,a,alpha);
     sync(); store<64,128>(a,out+p);
   }
-#endif
-}
-
-// Row reduction, with disjoint stripes on the two vector subblocks.
-AICORE inline void reduce(__gm__ float* x,__gm__ float* out) {
-#if defined(__DAV_VEC__)
-  Half a,tmp; Col col; Short result;
-  TASSIGN(a,0); TASSIGN(tmp,32768); TASSIGN(col,65536); TASSIGN(result,65536);
-  int stripe=get_subblockid();
-  load<64,128>(a,x+stripe*8192);
-  TROWSUM(col,a,tmp); sync(); store<1,64>(result,out+stripe*64);
 #endif
 }
 
@@ -318,10 +296,12 @@ AICORE inline void vector_op(__gm__ float* x,__gm__ float* y,__gm__ float* z,
     else if(op==1) TMUL(a,a,b);
     else if(op==3) {
       load<1,128>(c,z+h*128);
-      for(int i=0;i<128;++i) {
-        float beta=c.GetValue(i);
-        if(beta!=0.0f) a.SetValue(i,b.GetValue(i)/beta);
-      }
+      Tile<TileType::Vec,uint8_t,1,32> mask;
+      Tile<TileType::Vec,uint32_t,1,8> select_tmp;
+      TASSIGN(mask,3072); TASSIGN(select_tmp,3104);
+      TEXPANDS(d,0.0f); sync(); TCMP(mask,c,d,CmpMode::NE); sync();
+      TEXPANDS(d,1.0f); sync(); TSEL(c,mask,c,d,select_tmp); sync();
+      TDIV(b,b,c); sync(); TSEL(a,mask,b,a,select_tmp); sync();
     }
     else {
       load<1,128>(c,z+h*128); load<1,128>(d,e+h*128);
@@ -380,12 +360,45 @@ AICORE inline void native_prefix(TileT& prefix) {
 #endif
 }
 
+#ifdef __CCE_AICORE__
+// All 64 destination rows run the same compensated recurrence in SIMD lanes.
+// Keep each row's original descending summation order; transpose once at the end.
+AICORE inline void compensated_intervals(Row& raw,Half& out,int stripe) {
+#if defined(__DAV_VEC__)
+  Short interval,error,delta,next,ids,active;
+  Tile<TileType::Vec,int32_t,1,64> integer_ids;
+  Tile<TileType::Vec,float,1,256> index_tmp;
+  Tile<TileType::Vec,float,128,64> columns; Half transpose_tmp;
+  TASSIGN(interval,71680); TASSIGN(error,71936); TASSIGN(delta,72192);
+  TASSIGN(next,72448); TASSIGN(ids,72704); TASSIGN(active,72960);
+  TASSIGN(integer_ids,73216); TASSIGN(index_tmp,73728);
+  TASSIGN(columns,34816); TASSIGN(transpose_tmp,98304);
+  int first=stripe*64;
+  TCI<decltype(integer_ids),decltype(index_tmp),int32_t,0>(integer_ids,first,index_tmp); sync();
+  TCVT(ids,integer_ids,RoundMode::CAST_NONE); sync();
+  TEXPANDS(interval,0.0f); TEXPANDS(error,0.0f); TEXPANDS(columns,0.0f); sync();
+  for(int j=first+63;j>=0;--j) {
+    Short column; TASSIGN(column,34816+j*256); TMOV(column,interval); sync();
+    if(j<first) TEXPANDS(active,raw.GetValue(j));
+    else {
+      TADDS(active,ids,float(1-j)); sync(); TMAXS(active,active,0.0f); sync();
+      TMINS(active,active,1.0f); sync(); TMULS(active,active,raw.GetValue(j));
+    }
+    sync(); TSUB(delta,active,error); sync(); TADD(next,interval,delta); sync();
+    TSUB(error,next,interval); sync(); TSUB(error,error,delta); sync();
+    TMOV(interval,next); sync();
+  }
+  TTRANS(out,columns,transpose_tmp); sync();
+#endif
+}
+
+#endif
+
 // Natural-log gate prefix, exp(G), exp(G_end-G), and causal exp(G_i-G_j).
 AICORE inline void gates(__gm__ float* g,__gm__ float* e,
     __gm__ float* r,__gm__ float* decay,int batch,bool accurate,
     __gm__ float* low=nullptr,int valid=128) {
 #if defined(__DAV_VEC__)
-  if(accurate && get_subblockid()!=0) return;
   Row prefix,expv,ratio,raw; Col col; Half a,b;
   TASSIGN(prefix,0); TASSIGN(expv,512); TASSIGN(ratio,1024);
   TASSIGN(raw,1536);
@@ -424,19 +437,10 @@ AICORE inline void gates(__gm__ float* g,__gm__ float* e,
     } else { TMULS(ratio,prefix,-1.0f); sync(); TADDS(ratio,ratio,sum); sync(); }
     TEXP(ratio,ratio); sync();
     if(get_subblockid()==0) store<1,128>(ratio,r+h*128);
-    for(int stripe=accurate ? 0 : get_subblockid();stripe<2;stripe+=accurate ? 1 : 2) {
+    for(int stripe=get_subblockid();stripe<2;stripe+=2) {
       TASSIGN(col,stripe*64*4);
       if(accurate && !low) {
-        TEXPANDS(a,0.0f); sync();
-        for(int i=0;i<64;++i) {
-          float interval=0.0f,low=0.0f;
-          for(int j=stripe*64+i;j>=0;--j) {
-            a.SetValue(i*128+j,interval);
-            float delta=raw.GetValue(j)-low,next=interval+delta;
-            low=(next-interval)-delta; interval=next;
-          }
-        }
-        sync();
+        compensated_intervals(raw,a,stripe);
       } else {
         TCOLEXPAND(a,prefix); sync(); TMULS(a,a,-1.0f); sync();
         TROWEXPANDADD(a,a,col); sync();
@@ -452,35 +456,6 @@ AICORE inline void gates(__gm__ float* g,__gm__ float* e,
       TEXP(a,a); sync(); TMUL(a,a,b); sync();
       store<64,128>(a,decay+h*16384+stripe*8192);
     }
-  }
-#endif
-}
-
-// (I+L)^-T by rank-one back substitution, adapted from the repository's
-// triangular-inverse kernel. Saves transposed A to avoid a UB transpose.
-AICORE inline void inverse(__gm__ float* l,__gm__ float* at,int batch) {
-#if defined(__DAV_VEC__)
-  if(get_subblockid()!=0) return;
-  Full input,y;
-  TASSIGN(input,0); TASSIGN(y,65536);
-  for(int h=0;h<batch;++h) {
-    load<128,128>(input,l+h*16384);
-    TEXPANDS(y,0.0f); sync();
-    for(int i=0;i<128;++i) y.SetValue(i*128+i,1.0f);
-    sync();
-    for(int m=127;m>=1;--m) {
-      Row pivot; TASSIGN(pivot,65536+m*512);
-      for(int start=0;start<m;start+=64) {
-        int rows=min(64,m-start);
-        Tile<TileType::Vec,float,64,128,BLayout::RowMajor,DYNAMIC,128> tmp(rows),dst(rows);
-        Tile<TileType::Vec,float,128,1,BLayout::ColMajor,DYNAMIC,1> coeff(rows);
-        TASSIGN(tmp,131072); TASSIGN(dst,65536+start*512);
-        TASSIGN(coeff,(m*128+start)*4);
-        TCOLEXPAND(tmp,pivot); sync(); TROWEXPANDMUL(tmp,tmp,coeff); sync();
-        TSUB(dst,dst,tmp); sync();
-      }
-    }
-    store<128,128>(y,at+h*16384);
   }
 #endif
 }

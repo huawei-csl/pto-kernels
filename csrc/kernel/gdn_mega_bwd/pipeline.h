@@ -6,8 +6,7 @@
 #include "resident_cube.h"
 
 #ifdef __CCE_AICORE__
-// Native stages own fixed scratch addresses and phase boundaries. Only the
-// compensated FP32 fallback uses the generic Ops expression interface.
+// Stages own fixed scratch addresses and explicit Cube/Vec phase boundaries.
 AICORE inline void native_pack(const Input& x,int first,int head,int length,Buffer out,
                                bool state=false,float scale=1) {
   int64_t st=x.stride[state ? 2 : 1],sh=x.stride[state ? 1 : 2];
@@ -172,11 +171,13 @@ AICORE inline void prepare_rhs(const Input& input,int first,int head,int length,
   TASSIGN(bec,99328+stripe*256);
   sync(); load_async<64,128>(k,x.m(K).data+offset); sync();
   load_value<65536>(input,first,head,length,x.m(V).data,v);
-  load_async<64,128>(q,x.m(Q_DQ).data+offset); load_async<1,128>(b,x.v(BETA).data);
+  if(qe) load_async<64,128>(q,x.m(Q_DQ).data+offset);
+  load_async<1,128>(b,x.v(BETA).data);
   load_async<1,128>(e,x.v(EXP).data); sync();
   TMUL(be,b,e); sync(); TROWEXPANDMUL(k,k,bec); TROWEXPANDMUL(v,v,bc);
-  TROWEXPANDMUL(q,q,ec); sync();
-  store<64,128>(k,kb+offset); store<64,128>(v,vb+offset); store<64,128>(q,qe+offset);
+  if(qe) TROWEXPANDMUL(q,q,ec); sync();
+  store<64,128>(k,kb+offset); store<64,128>(v,vb+offset);
+  if(qe) store<64,128>(q,qe+offset);
 #endif
 }
 
@@ -284,11 +285,11 @@ AICORE inline void pipelined_gradients(const Plan& p,int c,int h) {
   int seq=sequence(p,c),first=p.start[seq]+(c-p.offset[seq])*128;
   int length=min(128,p.start[seq]+p.length[seq]-first);
   if constexpr(Emit) {
-    int seq=sequence(p,c),first=p.start[seq]+(c-p.offset[seq])*128,group=p.heads/p.key_heads;
+    int group=p.heads/p.key_heads;
     output={(__gm__ float*)p.output[0]+(int64_t(first)*p.key_heads+h/group)*128,
             (__gm__ float*)p.output[1]+(int64_t(first)*p.key_heads+h/group)*128,
             (__gm__ float*)p.output[2]+(int64_t(first)*p.heads+h)*128,
-            min(128,p.start[seq]+p.length[seq]-first),p.key_heads*128,p.heads*128,
+            length,p.key_heads*128,p.heads*128,
             p.scale,h%group==0,h%group==group-1};
   }
   int epoch=0; auto arena=scratch(p)+2*Matrix;
