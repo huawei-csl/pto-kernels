@@ -1,0 +1,103 @@
+{
+  "device": "Ascend910B2",
+  "container_image": "quay.io/ascend/cann:9.1.0-910b-ubuntu22.04-py3.11",
+  "torch": "2.10.0+cpu",
+  "torch_npu": "2.10.0",
+  "python": "3.11.15",
+  "source_sha256": {
+    "csrc/kernel/gdn_mega_bwd/backward.py": "e3b8a29d58af1b25769b5598e1b52d193fb01634aed69a96150b68b5702cc001",
+    "csrc/kernel/gdn_mega_bwd/binding.py": "f5f658f8f8bb798245423c1c95244823c61c191c7d37fd7f86939fabd707cc0b",
+    "csrc/kernel/gdn_mega_bwd/device_ops.h": "57b3f309b8a88da9eec223c30e2549af6978c1e35ffca92a804ae615ddd78619",
+    "csrc/kernel/gdn_mega_bwd/kernel.cpp": "1f50311cfeb85cd9d4443b28f61b0331e57de5175b2141383e316fe3f8ade28d",
+    "csrc/kernel/gdn_mega_bwd/launch.cpp": "62a09306b07b2e67ec03bc73d50656d2c3d01e5998dd5173526b9aeaa5def53f",
+    "csrc/kernel/gdn_mega_bwd/layout.h": "f7e00199c8ad2e7c26dcd0f15d44c59210168a76529f5050a22d3886ba4f39a1",
+    "csrc/kernel/gdn_mega_bwd/primitives.h": "c5df1ca6370510f315825005bbe55fb2b9b5c900e84dd1c708c16a46cf6ff846"
+  },
+  "stage_names": [
+    "prepare",
+    "forward_state_replay",
+    "local_gradients",
+    "reverse_state_propagation",
+    "output_derivatives",
+    "wy_backward",
+    "final_assembly"
+  ],
+  "name": "staged_v1_heads16_diagnosis",
+  "measurement_date": "2026-11-04",
+  "config": {
+    "batch": 1,
+    "heads": 16,
+    "key_heads": 2,
+    "dimension": 128,
+    "input_dtype": "float16",
+    "initial_state": null,
+    "dfinal_state": null,
+    "scale": 1
+  },
+  "method": "One warmup, five synchronized wall-time samples; excludes build/input creation/model forward. Separate hardware profile at 8192 tokens.",
+  "command": "python -m tests.benchmark_gdn_mega_bwd --tokens 2048 8192 --heads 16 --key-heads 2 --repeats 5 --profile build/gdn_mega_bwd/profile/heads16_8192",
+  "results": [
+    {
+      "tokens": 2048,
+      "median_ms": 75.37792902439833,
+      "enqueue_median_ms": 0.3391597419977188,
+      "samples_ms": [
+        75.4201989620924,
+        75.37792902439833,
+        75.39400830864906,
+        75.36973897367716,
+        75.32583922147751
+      ]
+    },
+    {
+      "tokens": 8192,
+      "median_ms": 293.98431815207005,
+      "enqueue_median_ms": 0.40710996836423874,
+      "samples_ms": [
+        293.98138681426644,
+        294.19854702427983,
+        293.98431815207005,
+        293.9515570178628,
+        294.3052276968956
+      ]
+    }
+  ],
+  "profile": {
+    "tokens": 8192,
+    "stages": [
+      {
+        "name": "_Z13gdn_bwd_stageILi0EEv4Plan",
+        "duration_us": 11031.3185
+      },
+      {
+        "name": "_Z13gdn_bwd_stageILi1EEv4Plan",
+        "duration_us": 1021.439
+      },
+      {
+        "name": "_Z13gdn_bwd_stageILi2EEv4Plan",
+        "duration_us": 77881.8905
+      },
+      {
+        "name": "_Z13gdn_bwd_stageILi3EEv4Plan",
+        "duration_us": 1252.545
+      },
+      {
+        "name": "_Z13gdn_bwd_stageILi4EEv4Plan",
+        "duration_us": 197538.5155
+      },
+      {
+        "name": "_Z13gdn_bwd_stageILi5EEv4Plan",
+        "duration_us": 3695.358
+      },
+      {
+        "name": "_Z13gdn_bwd_stageILi6EEv4Plan",
+        "duration_us": 1081.515
+      }
+    ]
+  },
+  "user_reported_forward_ms": {
+    "2048": 1,
+    "8192": 2.5
+  },
+  "comparison_caveat": "Forward was not rerun; its exact key-head count and timing scope were not specified."
+}

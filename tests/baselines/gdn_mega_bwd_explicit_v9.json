@@ -1,0 +1,787 @@
+{
+  "name": "gdn_mega_bwd_explicit_v9",
+  "date": "2026-11-06",
+  "device": "Ascend910B2",
+  "baseline_commit": "e82451a2553499fa154fea2fc9d1a15ec5a4d3a7",
+  "description": "Explicit native PTO schedules; interleaved state scans, UB key/gate fusion, retained Cube operands and direct original-input loads.",
+  "target": "2x snapshot backward throughput; NOT achieved. Measured 1.14-1.24x over seven cases.",
+  "validation": "152 passed in 379.56s: 142 NPU and 10 CPU reference tests. Bounds unchanged: per-gradient max|kernel-golden| <= 2*max|reordered_torch-golden| + 1e-5.",
+  "method": "Same process, identical inputs and actual BF16 inverse + gate/beta caches from gdn_mega forward. Alternating snapshot/current order; 3 warmup pairs and 11 measured pairs. Synchronized wall time includes backward allocation/enqueue, excludes forward and compilation.",
+  "input": "B=1, D=C=128, FP16 q/k/v/beta/dout; FP32 g. Seed 42, q=.1*randn, k=normalize(randn), v/dout=randn, g=-.1*rand, beta=rand. No initial state or final-state adjoint.",
+  "reproduce": "OMP_NUM_THREADS=4 NPU_DEVICE=npu:0 PYTHONPATH=python:.:tests python benchmarking/gdn_mega_bwd_compare.py build/gdn_mega_bwd/4ef9e56e099811b5/kernel.so",
+  "builds": {
+    "libraries": {
+      "snapshot": "/mounted_home/autokernel_gdn/pto-kernels/build/gdn_mega_bwd/4ef9e56e099811b5/kernel.so",
+      "current": "/mounted_home/autokernel_gdn/pto-kernels/build/gdn_mega_bwd/45d6c0fa80997f25/kernel.so"
+    },
+    "sha256": {
+      "snapshot": "1ff60e7f75fe0238c989297cb84fe808470436bd6570671f21f9b5dfbe48fd39",
+      "current": "20a021feca423798f15e2e8a2ecbba4582c34e2bb3ef1583b2cb93ea5f4f20d8"
+    },
+    "layout_sha256": "82396b3600ec5485ea4aa58cd16a9151eab1619a9cb3263f058eeafaf9d55be8"
+  },
+  "source_sha256": {
+    "csrc/kernel/gdn_mega_bwd/blocked_inverse.h": "1445991e38a1f9ffe24affb2599e227ac83dc005fcf30c069d62a1b976e86cde",
+    "csrc/kernel/gdn_mega_bwd/device_ops.h": "62e29977f3b1ba232626d1d116d5ca0d84e92687baead20f2c707a43511adf9d",
+    "csrc/kernel/gdn_mega_bwd/epilogues.h": "d2988f055eaa5311239411869056ecd0d1bf140646cfdf8ce37239e95f419b3f",
+    "csrc/kernel/gdn_mega_bwd/layout.h": "82396b3600ec5485ea4aa58cd16a9151eab1619a9cb3263f058eeafaf9d55be8",
+    "csrc/kernel/gdn_mega_bwd/pipeline.h": "d1c632435700f114ed7b9ecccc0af0070567f3242e57f88a949618502f25c562",
+    "csrc/kernel/gdn_mega_bwd/primitives.h": "13d83eed571e752d44a4063a04d444b1dc461faa2ba7cbe366c30c8eed5c6d95",
+    "csrc/kernel/gdn_mega_bwd/resident_cube.h": "428027adc622b51c95ed61ef8c64782203b94eaa5b32deae72f1a536d93f8229",
+    "csrc/kernel/gdn_mega_bwd/kernel.cpp": "d21fd47aa0b1badacda95048ff6dac0d929d4ee03216d6d7ee696139f10bc3c4",
+    "csrc/kernel/gdn_mega_bwd/launch.cpp": "98c80f77c566d14ef35570b7655ce0f9932f208b1e295a026b8cbdc3c15d4152",
+    "benchmarking/gdn_mega_bwd_compare.py": "c0ce961c530e73395594281764af111eeefa7c571281399a858fa0fd821c122d"
+  },
+  "forward_library_sha256": "c9c4f1589fd8ddaacc13b56bb2dea4821bb7bba0742a8dbb4b274877f0d905d5",
+  "paired": [
+    {
+      "tokens": 2048,
+      "heads": 16,
+      "key_heads": 2,
+      "cache_dtype": "bfloat16",
+      "samples_ms": {
+        "snapshot": [
+          1.6986289992928505,
+          1.6811788082122803,
+          1.6691279597580433,
+          1.6810288652777672,
+          1.6889688558876514,
+          1.6729091294109821,
+          1.6613081097602844,
+          1.683718990534544,
+          1.6720090061426163,
+          1.6724290326237679,
+          1.666598953306675
+        ],
+        "current": [
+          1.4798189513385296,
+          1.4625792391598225,
+          1.4782389625906944,
+          1.459469087421894,
+          1.4720093458890915,
+          1.452519092708826,
+          1.4653690159320831,
+          1.4655590057373047,
+          1.4787791296839714,
+          1.460287719964981,
+          1.4664791524410248
+        ]
+      },
+      "medians_ms": {
+        "snapshot": 1.6729091294109821,
+        "current": 1.4655590057373047
+      },
+      "speedup": 1.1414819347852612
+    },
+    {
+      "tokens": 8192,
+      "heads": 16,
+      "key_heads": 2,
+      "cache_dtype": "bfloat16",
+      "samples_ms": {
+        "snapshot": [
+          5.169357173144817,
+          5.162525922060013,
+          5.179376341402531,
+          5.167925730347633,
+          5.176335573196411,
+          5.164466332644224,
+          5.181926768273115,
+          5.174796096980572,
+          5.170706193894148,
+          5.160076078027487,
+          5.322806071490049
+        ],
+        "current": [
+          4.27346583455801,
+          4.272917285561562,
+          4.256837069988251,
+          4.25820704549551,
+          4.276166670024395,
+          4.259246867150068,
+          4.283247049897909,
+          4.267367068678141,
+          4.277816973626614,
+          4.2578671127557755,
+          6.527584977447987
+        ]
+      },
+      "medians_ms": {
+        "snapshot": 5.170706193894148,
+        "current": 4.272917285561562
+      },
+      "speedup": 1.2101114644475492
+    },
+    {
+      "tokens": 8192,
+      "heads": 64,
+      "key_heads": 16,
+      "cache_dtype": "bfloat16",
+      "samples_ms": {
+        "snapshot": [
+          16.89830794930458,
+          17.0263578183949,
+          16.96418784558773,
+          16.91609714180231,
+          16.944877803325653,
+          17.028457950800657,
+          16.920736990869045,
+          16.925247851759195,
+          16.96735806763172,
+          16.938128042966127,
+          17.010847106575966
+        ],
+        "current": [
+          13.81924981251359,
+          13.834219891577959,
+          13.792310375720263,
+          13.773929793387651,
+          13.791410252451897,
+          13.81100993603468,
+          13.797469902783632,
+          13.843790162354708,
+          13.83762015029788,
+          13.827019836753607,
+          13.811499811708927
+        ]
+      },
+      "medians_ms": {
+        "snapshot": 16.944877803325653,
+        "current": 13.811499811708927
+      },
+      "speedup": 1.2268673231968878
+    },
+    {
+      "tokens": 8192,
+      "heads": 48,
+      "key_heads": 16,
+      "cache_dtype": "bfloat16",
+      "samples_ms": {
+        "snapshot": [
+          13.066390063613653,
+          13.09173135086894,
+          13.030760921537876,
+          13.049389701336622,
+          13.06894002482295,
+          13.046090956777334,
+          13.045230880379677,
+          13.00814002752304,
+          13.082909863442183,
+          13.067201245576143,
+          13.036501128226519
+        ],
+        "current": [
+          10.750502813607454,
+          10.751862078905106,
+          10.737941600382328,
+          10.772991925477982,
+          10.752242989838123,
+          10.740941856056452,
+          10.76420210301876,
+          10.766653344035149,
+          10.747371707111597,
+          10.747652035206556,
+          10.783981997519732
+        ]
+      },
+      "medians_ms": {
+        "snapshot": 13.049389701336622,
+        "current": 10.751862078905106
+      },
+      "speedup": 1.213686485705505
+    },
+    {
+      "tokens": 8192,
+      "heads": 32,
+      "key_heads": 16,
+      "cache_dtype": "bfloat16",
+      "samples_ms": {
+        "snapshot": [
+          9.502893313765526,
+          9.528622962534428,
+          9.521653410047293,
+          9.49155306443572,
+          9.533382952213287,
+          9.52785275876522,
+          9.471822995692492,
+          9.504112880676985,
+          9.528962895274162,
+          9.494622703641653,
+          9.498402941972017
+        ],
+        "current": [
+          7.709134835749865,
+          7.695793639868498,
+          7.725035306066275,
+          7.727384101599455,
+          7.6781949028372765,
+          7.724074646830559,
+          7.72905396297574,
+          7.727494928985834,
+          7.725024130195379,
+          7.684315089136362,
+          7.713994011282921
+        ]
+      },
+      "medians_ms": {
+        "snapshot": 9.504112880676985,
+        "current": 7.724074646830559
+      },
+      "speedup": 1.230453266602859
+    },
+    {
+      "tokens": 8192,
+      "heads": 32,
+      "key_heads": 8,
+      "cache_dtype": "bfloat16",
+      "samples_ms": {
+        "snapshot": [
+          9.44411288946867,
+          9.420373011380434,
+          9.42845270037651,
+          9.433072991669178,
+          9.39751323312521,
+          9.406514000147581,
+          9.408412966877222,
+          9.434852749109268,
+          9.39728319644928,
+          9.408162906765938,
+          9.421193972229958
+        ],
+        "current": [
+          7.6070851646363735,
+          7.635514251887798,
+          7.610914763063192,
+          7.631184998899698,
+          7.601554039865732,
+          7.59028410539031,
+          7.624354679137468,
+          7.609934080392122,
+          7.624984718859196,
+          7.593775168061256,
+          7.574073970317841
+        ]
+      },
+      "medians_ms": {
+        "snapshot": 9.420373011380434,
+        "current": 7.609934080392122
+      },
+      "speedup": 1.2379046798385702
+    },
+    {
+      "tokens": 32768,
+      "heads": 64,
+      "key_heads": 16,
+      "cache_dtype": "bfloat16",
+      "samples_ms": {
+        "snapshot": [
+          64.45891410112381,
+          64.51242417097092,
+          64.55029407516122,
+          64.44681389257312,
+          64.51468309387565,
+          64.39081439748406,
+          64.42180322483182,
+          64.37393417581916,
+          64.45582397282124,
+          64.50851308181882,
+          64.37618378549814
+        ],
+        "current": [
+          52.945942152291536,
+          53.009680937975645,
+          52.9261720366776,
+          52.899602334946394,
+          52.94912215322256,
+          52.91925184428692,
+          53.05365240201354,
+          52.921072114259005,
+          52.894702181220055,
+          52.964752074331045,
+          53.0421519652009
+        ]
+      },
+      "medians_ms": {
+        "snapshot": 64.45582397282124,
+        "current": 52.945942152291536
+      },
+      "speedup": 1.2173893097873894
+    }
+  ],
+  "profile": {
+    "method": "One warmed torch_npu hardware trace per implementation, same process/input/caches, 8192 tokens Hv64/Hqk16. Kernel durations exclude allocation/enqueue. No utilization or bandwidth counters collected.",
+    "stages": {
+      "snapshot": [
+        {
+          "name": "_Z13gdn_bwd_stageILi0EEv4Plan",
+          "duration_us": 5136.572
+        },
+        {
+          "name": "_Z13gdn_bwd_stageILi1EEv4Plan",
+          "duration_us": 3909.5255
+        },
+        {
+          "name": "_Z13gdn_bwd_stageILi2EEv4Plan",
+          "duration_us": 7128.733
+        }
+      ],
+      "current": [
+        {
+          "name": "_Z13gdn_bwd_stageILi0EEv4Plan",
+          "duration_us": 4276.7035
+        },
+        {
+          "name": "_Z13gdn_bwd_stageILi1EEv4Plan",
+          "duration_us": 3071.836
+        },
+        {
+          "name": "_Z13gdn_bwd_stageILi2EEv4Plan",
+          "duration_us": 5951.0235
+        }
+      ]
+    }
+  },
+  "experiments": {
+    "pairs": [
+      {
+        "tokens": 2048,
+        "heads": 16,
+        "key_heads": 2,
+        "medians_ms": {
+          "snapshot": 1.691573765128851,
+          "current": 1.9027851521968842
+        },
+        "speedup": 0.888998825314473
+      },
+      {
+        "tokens": 8192,
+        "heads": 16,
+        "key_heads": 2,
+        "medians_ms": {
+          "snapshot": 5.128171760588884,
+          "current": 5.835558287799358
+        },
+        "speedup": 0.8787799740276031
+      },
+      {
+        "tokens": 8192,
+        "heads": 64,
+        "key_heads": 16,
+        "medians_ms": {
+          "snapshot": 16.904250252991915,
+          "current": 19.620773382484913
+        },
+        "speedup": 0.8615486211202059
+      },
+      {
+        "tokens": 8192,
+        "heads": 48,
+        "key_heads": 16,
+        "medians_ms": {
+          "snapshot": 13.060248922556639,
+          "current": 15.280526131391525
+        },
+        "speedup": 0.8546989030519268
+      },
+      {
+        "tokens": 8192,
+        "heads": 32,
+        "key_heads": 16,
+        "medians_ms": {
+          "snapshot": 9.505308233201504,
+          "current": 10.866721160709858
+        },
+        "speedup": 0.874717230029723
+      },
+      {
+        "tokens": 32768,
+        "heads": 64,
+        "key_heads": 16,
+        "medians_ms": {
+          "snapshot": 64.20613126829267,
+          "current": 74.02708102017641
+        },
+        "speedup": 0.8673330135871897
+      }
+    ],
+    "explicit": [
+      {
+        "tokens": 2048,
+        "heads": 16,
+        "key_heads": 2,
+        "medians_ms": {
+          "snapshot": 1.6447040252387524,
+          "current": 1.5892037190496922
+        },
+        "speedup": 1.0349233427557343
+      },
+      {
+        "tokens": 8192,
+        "heads": 16,
+        "key_heads": 2,
+        "medians_ms": {
+          "snapshot": 4.99401381239295,
+          "current": 4.774873144924641
+        },
+        "speedup": 1.0458945527592163
+      },
+      {
+        "tokens": 8192,
+        "heads": 64,
+        "key_heads": 16,
+        "medians_ms": {
+          "snapshot": 16.472974326461554,
+          "current": 15.649822074919939
+        },
+        "speedup": 1.0525981859474798
+      },
+      {
+        "tokens": 8192,
+        "heads": 48,
+        "key_heads": 16,
+        "medians_ms": {
+          "snapshot": 12.684584129601717,
+          "current": 12.046741787344217
+        },
+        "speedup": 1.052947290937006
+      },
+      {
+        "tokens": 8192,
+        "heads": 32,
+        "key_heads": 16,
+        "medians_ms": {
+          "snapshot": 9.243044070899487,
+          "current": 8.790963795036077
+        },
+        "speedup": 1.0514255645232757
+      },
+      {
+        "tokens": 32768,
+        "heads": 64,
+        "key_heads": 16,
+        "medians_ms": {
+          "snapshot": 65.95524586737156,
+          "current": 62.43290612474084
+        },
+        "speedup": 1.0564180007189332
+      }
+    ],
+    "interleaved": [
+      {
+        "tokens": 2048,
+        "heads": 16,
+        "key_heads": 2,
+        "medians_ms": {
+          "snapshot": 1.6894959844648838,
+          "current": 1.552686095237732
+        },
+        "speedup": 1.088111750112765
+      },
+      {
+        "tokens": 8192,
+        "heads": 16,
+        "key_heads": 2,
+        "medians_ms": {
+          "snapshot": 5.1335361786186695,
+          "current": 4.539261106401682
+        },
+        "speedup": 1.1309189002983078
+      },
+      {
+        "tokens": 8192,
+        "heads": 64,
+        "key_heads": 16,
+        "medians_ms": {
+          "snapshot": 16.880807001143694,
+          "current": 15.076962299644947
+        },
+        "speedup": 1.1196424495630148
+      },
+      {
+        "tokens": 8192,
+        "heads": 48,
+        "key_heads": 16,
+        "medians_ms": {
+          "snapshot": 13.029768597334623,
+          "current": 11.79737038910389
+        },
+        "speedup": 1.1044638057112273
+      },
+      {
+        "tokens": 8192,
+        "heads": 32,
+        "key_heads": 16,
+        "medians_ms": {
+          "snapshot": 9.50171984732151,
+          "current": 8.369089104235172
+        },
+        "speedup": 1.135335008264301
+      },
+      {
+        "tokens": 32768,
+        "heads": 64,
+        "key_heads": 16,
+        "medians_ms": {
+          "snapshot": 64.49200585484505,
+          "current": 57.48683540150523
+        },
+        "speedup": 1.121856950455067
+      }
+    ],
+    "rescheduled": [
+      {
+        "tokens": 2048,
+        "heads": 16,
+        "key_heads": 2,
+        "medians_ms": {
+          "snapshot": 1.6656499356031418,
+          "current": 1.5010111965239048
+        },
+        "speedup": 1.1096852171792677
+      },
+      {
+        "tokens": 8192,
+        "heads": 16,
+        "key_heads": 2,
+        "medians_ms": {
+          "snapshot": 5.032788030803204,
+          "current": 4.257903899997473
+        },
+        "speedup": 1.1819872286939568
+      },
+      {
+        "tokens": 8192,
+        "heads": 64,
+        "key_heads": 16,
+        "medians_ms": {
+          "snapshot": 16.57198602333665,
+          "current": 14.089981094002724
+        },
+        "speedup": 1.1761538864229115
+      },
+      {
+        "tokens": 8192,
+        "heads": 48,
+        "key_heads": 16,
+        "medians_ms": {
+          "snapshot": 12.70749093964696,
+          "current": 10.951312258839607
+        },
+        "speedup": 1.160362396697237
+      },
+      {
+        "tokens": 8192,
+        "heads": 32,
+        "key_heads": 16,
+        "medians_ms": {
+          "snapshot": 9.20669175684452,
+          "current": 7.769112009555101
+        },
+        "speedup": 1.1850378454476347
+      },
+      {
+        "tokens": 32768,
+        "heads": 64,
+        "key_heads": 16,
+        "medians_ms": {
+          "snapshot": 66.21726788580418,
+          "current": 55.53349480032921
+        },
+        "speedup": 1.1923843101156968
+      }
+    ],
+    "outer": [
+      {
+        "tokens": 2048,
+        "heads": 16,
+        "key_heads": 2,
+        "medians_ms": {
+          "snapshot": 1.6826428472995758,
+          "current": 1.5072328969836235
+        },
+        "speedup": 1.1163787963140896
+      },
+      {
+        "tokens": 8192,
+        "heads": 16,
+        "key_heads": 2,
+        "medians_ms": {
+          "snapshot": 5.1180170848965645,
+          "current": 4.282641224563122
+        },
+        "speedup": 1.1950609020298357
+      },
+      {
+        "tokens": 8192,
+        "heads": 64,
+        "key_heads": 16,
+        "medians_ms": {
+          "snapshot": 16.920615918934345,
+          "current": 14.222098048776388
+        },
+        "speedup": 1.1897411943654914
+      },
+      {
+        "tokens": 8192,
+        "heads": 48,
+        "key_heads": 16,
+        "medians_ms": {
+          "snapshot": 13.03372299298644,
+          "current": 11.072841007262468
+        },
+        "speedup": 1.1770893291466813
+      },
+      {
+        "tokens": 8192,
+        "heads": 32,
+        "key_heads": 16,
+        "medians_ms": {
+          "snapshot": 9.51739912852645,
+          "current": 8.001415058970451
+        },
+        "speedup": 1.1894644957652105
+      },
+      {
+        "tokens": 32768,
+        "heads": 64,
+        "key_heads": 16,
+        "medians_ms": {
+          "snapshot": 64.37873234972358,
+          "current": 54.15041605010629
+        },
+        "speedup": 1.1888871230491167
+      }
+    ],
+    "direct_v": [
+      {
+        "tokens": 2048,
+        "heads": 16,
+        "key_heads": 2,
+        "medians_ms": {
+          "snapshot": 1.6411845572292805,
+          "current": 1.4696549624204636
+        },
+        "speedup": 1.1167141942802101
+      },
+      {
+        "tokens": 8192,
+        "heads": 16,
+        "key_heads": 2,
+        "medians_ms": {
+          "snapshot": 4.999605007469654,
+          "current": 4.1828579269349575
+        },
+        "speedup": 1.1952605359305566
+      },
+      {
+        "tokens": 8192,
+        "heads": 64,
+        "key_heads": 16,
+        "medians_ms": {
+          "snapshot": 16.506091225892305,
+          "current": 13.903738930821419
+        },
+        "speedup": 1.1871692433250502
+      },
+      {
+        "tokens": 8192,
+        "heads": 48,
+        "key_heads": 16,
+        "medians_ms": {
+          "snapshot": 12.705241795629263,
+          "current": 10.827086865901947
+        },
+        "speedup": 1.173468168583947
+      },
+      {
+        "tokens": 8192,
+        "heads": 32,
+        "key_heads": 16,
+        "medians_ms": {
+          "snapshot": 9.220492094755173,
+          "current": 7.702746894210577
+        },
+        "speedup": 1.1970394745393154
+      },
+      {
+        "tokens": 32768,
+        "heads": 64,
+        "key_heads": 16,
+        "medians_ms": {
+          "snapshot": 65.85930520668626,
+          "current": 54.55909809097648
+        },
+        "speedup": 1.2071186568529204
+      }
+    ],
+    "symmetric": [
+      {
+        "tokens": 2048,
+        "heads": 16,
+        "key_heads": 2,
+        "medians_ms": {
+          "snapshot": 1.6917157918214798,
+          "current": 1.4745760709047318
+        },
+        "speedup": 1.1472556928063542
+      },
+      {
+        "tokens": 8192,
+        "heads": 16,
+        "key_heads": 2,
+        "medians_ms": {
+          "snapshot": 5.155386868864298,
+          "current": 4.211310297250748
+        },
+        "speedup": 1.2241764450911794
+      },
+      {
+        "tokens": 8192,
+        "heads": 64,
+        "key_heads": 16,
+        "medians_ms": {
+          "snapshot": 16.969749238342047,
+          "current": 13.942656107246876
+        },
+        "speedup": 1.2171102197322217
+      },
+      {
+        "tokens": 8192,
+        "heads": 48,
+        "key_heads": 16,
+        "medians_ms": {
+          "snapshot": 13.060607947409153,
+          "current": 10.862013325095177
+        },
+        "speedup": 1.202411335404499
+      },
+      {
+        "tokens": 8192,
+        "heads": 32,
+        "key_heads": 16,
+        "medians_ms": {
+          "snapshot": 9.501026943325996,
+          "current": 7.736710831522942
+        },
+        "speedup": 1.2280447273038064
+      },
+      {
+        "tokens": 32768,
+        "heads": 64,
+        "key_heads": 16,
+        "medians_ms": {
+          "snapshot": 64.55348478630185,
+          "current": 53.38118225336075
+        },
+        "speedup": 1.2092929017554257
+      }
+    ]
+  },
+  "limits": [
+    "Forward code/cache format and workspace sizing are unchanged. No new Torch computation in the hot path.",
+    "Generic Ops remains for the compensated FP32-input path. Native FP16/BF16 schedules no longer use it.",
+    "Dense gradient/state products keep FP32 operands and accumulation; shared full contiguous Q/K Grams use original 16-bit inputs with FP32 accumulation.",
+    "Full numerical tests reach 513 tokens; long timing cases check finite gradients, not a full long-sequence autograd oracle.",
+    "The 2x snapshot speedup target remains unmet. Heatmaps were not regenerated."
+  ]
+}

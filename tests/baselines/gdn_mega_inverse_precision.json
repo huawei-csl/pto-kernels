@@ -1,0 +1,5008 @@
+{
+  "snapshot_commit": "c2a9836",
+  "hardware": "Ascend910B2 / NPU0",
+  "description": "Optional FP16/BF16 saved inverse factors; all inverse arithmetic and working scratch stay FP32.",
+  "tolerance": "Per gradient: max(abs(kernel - FP32 golden)) <= 2*max(abs(reordered FP16 Torch - FP32 golden)) + 1e-5.",
+  "cache_format": "[D0,0;P,D1], P=-D1*L10; 128-token chunks",
+  "input_dtype": "FP16 q/k/v/beta/h0/dout/dht, FP32 g",
+  "rounding_screen": [
+    {
+      "cache_dtype": "torch.float32",
+      "lengths": [
+        129
+      ],
+      "heads": 8,
+      "key_heads": 2,
+      "mode": "both",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 8.344650268554688e-07,
+          "budget": 0.005356179008483886
+        },
+        {
+          "gradient": "dk",
+          "error": 1.5974044799804688e-05,
+          "budget": 0.09593056274414062
+        },
+        {
+          "gradient": "dv",
+          "error": 7.748603820800781e-07,
+          "budget": 0.00556276870727539
+        },
+        {
+          "gradient": "dg",
+          "error": 1.811981201171875e-05,
+          "budget": 0.10836742950439453
+        },
+        {
+          "gradient": "dbeta",
+          "error": 5.7220458984375e-06,
+          "budget": 0.05524920059204102
+        },
+        {
+          "gradient": "dh0",
+          "error": 9.5367431640625e-07,
+          "budget": 0.012228475341796875
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.float32",
+      "lengths": [
+        256
+      ],
+      "heads": 16,
+      "key_heads": 4,
+      "mode": "both",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 9.5367431640625e-07,
+          "budget": 0.006576286087036132
+        },
+        {
+          "gradient": "dk",
+          "error": 1.52587890625e-05,
+          "budget": 0.13316582275390626
+        },
+        {
+          "gradient": "dv",
+          "error": 7.152557373046875e-07,
+          "budget": 0.007133589515686035
+        },
+        {
+          "gradient": "dg",
+          "error": 1.9073486328125e-05,
+          "budget": 0.13638161254882814
+        },
+        {
+          "gradient": "dbeta",
+          "error": 9.5367431640625e-06,
+          "budget": 0.06863449645996093
+        },
+        {
+          "gradient": "dh0",
+          "error": 1.0728836059570312e-06,
+          "budget": 0.008993850479125976
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.float32",
+      "lengths": [
+        0,
+        1,
+        17,
+        0,
+        129
+      ],
+      "heads": 8,
+      "key_heads": 2,
+      "mode": "strided",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 7.37607479095459e-07,
+          "budget": 0.006229744682312011
+        },
+        {
+          "gradient": "dk",
+          "error": 1.52587890625e-05,
+          "budget": 0.13178490234375
+        },
+        {
+          "gradient": "dv",
+          "error": 9.5367431640625e-07,
+          "budget": 0.007075773010253906
+        },
+        {
+          "gradient": "dg",
+          "error": 1.823902130126953e-05,
+          "budget": 0.16997383666992189
+        },
+        {
+          "gradient": "dbeta",
+          "error": 7.152557373046875e-06,
+          "budget": 0.0678815705871582
+        },
+        {
+          "gradient": "dh0",
+          "error": 1.0728836059570312e-06,
+          "budget": 0.01475928855895996
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.float32",
+      "lengths": [
+        257
+      ],
+      "heads": 8,
+      "key_heads": 2,
+      "mode": "replace",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 0.00010204315185546875,
+          "budget": 0.077372060546875
+        },
+        {
+          "gradient": "dk",
+          "error": 0.00067138671875,
+          "budget": 11.896250234375
+        },
+        {
+          "gradient": "dv",
+          "error": 7.62939453125e-06,
+          "budget": 0.0077004296875
+        },
+        {
+          "gradient": "dg",
+          "error": 0.00048065185546875,
+          "budget": 2.06623314453125
+        },
+        {
+          "gradient": "dbeta",
+          "error": 8.96453857421875e-05,
+          "budget": 0.1021828515625
+        },
+        {
+          "gradient": "dh0",
+          "error": 4.57763671875e-05,
+          "budget": 0.733499990234375
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.float32",
+      "lengths": [
+        17,
+        0,
+        19
+      ],
+      "heads": 64,
+      "key_heads": 16,
+      "mode": "both",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 7.152557373046875e-07,
+          "budget": 0.005087600479125976
+        },
+        {
+          "gradient": "dk",
+          "error": 1.52587890625e-05,
+          "budget": 0.12046669555664062
+        },
+        {
+          "gradient": "dv",
+          "error": 9.5367431640625e-07,
+          "budget": 0.007431493530273437
+        },
+        {
+          "gradient": "dg",
+          "error": 2.288818359375e-05,
+          "budget": 0.1563649041748047
+        },
+        {
+          "gradient": "dbeta",
+          "error": 7.62939453125e-06,
+          "budget": 0.07287834716796875
+        },
+        {
+          "gradient": "dh0",
+          "error": 1.430511474609375e-06,
+          "budget": 0.025362001190185546
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.float32",
+      "lengths": [
+        129,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "heads": 64,
+      "key_heads": 16,
+      "mode": "both",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 8.940696716308594e-07,
+          "budget": 0.006472335586547851
+        },
+        {
+          "gradient": "dk",
+          "error": 1.33514404296875e-05,
+          "budget": 0.1271309716796875
+        },
+        {
+          "gradient": "dv",
+          "error": 9.5367431640625e-07,
+          "budget": 0.008479104766845703
+        },
+        {
+          "gradient": "dg",
+          "error": 2.47955322265625e-05,
+          "budget": 0.17392204833984376
+        },
+        {
+          "gradient": "dbeta",
+          "error": 1.1444091796875e-05,
+          "budget": 0.06894539428710937
+        },
+        {
+          "gradient": "dh0",
+          "error": 1.1920928955078125e-06,
+          "budget": 0.012218461761474609
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.float32",
+      "lengths": [
+        513
+      ],
+      "heads": 8,
+      "key_heads": 2,
+      "mode": "weak",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 5.245208740234375e-06,
+          "budget": 0.06010030342102051
+        },
+        {
+          "gradient": "dk",
+          "error": 0.0001068115234375,
+          "budget": 1.13727806640625
+        },
+        {
+          "gradient": "dv",
+          "error": 5.0067901611328125e-06,
+          "budget": 0.049370990524291995
+        },
+        {
+          "gradient": "dg",
+          "error": 0.000274658203125,
+          "budget": 2.6690316064453126
+        },
+        {
+          "gradient": "dbeta",
+          "error": 5.91278076171875e-05,
+          "budget": 0.706461416015625
+        },
+        {
+          "gradient": "dh0",
+          "error": 9.5367431640625e-06,
+          "budget": 0.11806057525634765
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.float32",
+      "lengths": [
+        0,
+        0
+      ],
+      "heads": 8,
+      "key_heads": 2,
+      "mode": "both",
+      "gradients": [
+        {
+          "gradient": "dh0",
+          "error": 0.0,
+          "budget": 1e-05
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.float32",
+      "lengths": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1
+      ],
+      "heads": 8,
+      "key_heads": 2,
+      "mode": "both",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 4.76837158203125e-07,
+          "budget": 0.0015916688537597657
+        },
+        {
+          "gradient": "dk",
+          "error": 7.62939453125e-06,
+          "budget": 0.05340431762695313
+        },
+        {
+          "gradient": "dv",
+          "error": 4.76837158203125e-07,
+          "budget": 0.0022778375244140625
+        },
+        {
+          "gradient": "dg",
+          "error": 3.814697265625e-06,
+          "budget": 0.019647107849121093
+        },
+        {
+          "gradient": "dbeta",
+          "error": 4.76837158203125e-06,
+          "budget": 0.03909538818359375
+        },
+        {
+          "gradient": "dh0",
+          "error": 4.76837158203125e-07,
+          "budget": 0.009502874145507812
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.float32",
+      "lengths": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "heads": 48,
+      "key_heads": 16,
+      "mode": "both",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 5.364418029785156e-07,
+          "budget": 0.0019602639770507813
+        },
+        {
+          "gradient": "dk",
+          "error": 1.52587890625e-05,
+          "budget": 0.1121926171875
+        },
+        {
+          "gradient": "dv",
+          "error": 9.5367431640625e-07,
+          "budget": 0.004361615905761718
+        },
+        {
+          "gradient": "dg",
+          "error": 9.5367431640625e-06,
+          "budget": 0.05809258056640625
+        },
+        {
+          "gradient": "dbeta",
+          "error": 8.106231689453125e-06,
+          "budget": 0.04097221923828125
+        },
+        {
+          "gradient": "dh0",
+          "error": 9.5367431640625e-07,
+          "budget": 0.01087139678955078
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.float32",
+      "lengths": [
+        65
+      ],
+      "heads": 12,
+      "key_heads": 3,
+      "mode": "both",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 7.152557373046875e-07,
+          "budget": 0.004769073257446289
+        },
+        {
+          "gradient": "dk",
+          "error": 9.5367431640625e-06,
+          "budget": 0.12712715698242189
+        },
+        {
+          "gradient": "dv",
+          "error": 7.152557373046875e-07,
+          "budget": 0.005824075469970703
+        },
+        {
+          "gradient": "dg",
+          "error": 1.9073486328125e-05,
+          "budget": 0.12179611755371093
+        },
+        {
+          "gradient": "dbeta",
+          "error": 6.67572021484375e-06,
+          "budget": 0.05377052856445313
+        },
+        {
+          "gradient": "dh0",
+          "error": 5.960464477539062e-07,
+          "budget": 0.009629474411010742
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.float32",
+      "lengths": [
+        65
+      ],
+      "heads": 24,
+      "key_heads": 6,
+      "mode": "both",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 9.5367431640625e-07,
+          "budget": 0.006481812725067138
+        },
+        {
+          "gradient": "dk",
+          "error": 1.33514404296875e-05,
+          "budget": 0.13196037841796876
+        },
+        {
+          "gradient": "dv",
+          "error": 9.5367431640625e-07,
+          "budget": 0.005835996398925781
+        },
+        {
+          "gradient": "dg",
+          "error": 2.0503997802734375e-05,
+          "budget": 0.14100693298339845
+        },
+        {
+          "gradient": "dbeta",
+          "error": 1.1444091796875e-05,
+          "budget": 0.06977318359375
+        },
+        {
+          "gradient": "dh0",
+          "error": 7.152557373046875e-07,
+          "budget": 0.009308086166381836
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.float32",
+      "lengths": [
+        65
+      ],
+      "heads": 32,
+      "key_heads": 8,
+      "mode": "both",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 8.940696716308594e-07,
+          "budget": 0.005708442459106445
+        },
+        {
+          "gradient": "dk",
+          "error": 1.1444091796875e-05,
+          "budget": 0.14214180541992189
+        },
+        {
+          "gradient": "dv",
+          "error": 8.344650268554688e-07,
+          "budget": 0.007480607757568359
+        },
+        {
+          "gradient": "dg",
+          "error": 2.002716064453125e-05,
+          "budget": 0.13230560852050782
+        },
+        {
+          "gradient": "dbeta",
+          "error": 6.67572021484375e-06,
+          "budget": 0.07156132293701171
+        },
+        {
+          "gradient": "dh0",
+          "error": 7.152557373046875e-07,
+          "budget": 0.011507020721435546
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.float32",
+      "lengths": [
+        65
+      ],
+      "heads": 48,
+      "key_heads": 12,
+      "mode": "both",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 9.5367431640625e-07,
+          "budget": 0.006743894348144531
+        },
+        {
+          "gradient": "dk",
+          "error": 1.52587890625e-05,
+          "budget": 0.1202034814453125
+        },
+        {
+          "gradient": "dv",
+          "error": 9.5367431640625e-07,
+          "budget": 0.007618652114868164
+        },
+        {
+          "gradient": "dg",
+          "error": 2.6702880859375e-05,
+          "budget": 0.16177223754882814
+        },
+        {
+          "gradient": "dbeta",
+          "error": 6.67572021484375e-06,
+          "budget": 0.08875320983886718
+        },
+        {
+          "gradient": "dh0",
+          "error": 9.5367431640625e-07,
+          "budget": 0.010063157806396484
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.float32",
+      "lengths": [
+        65
+      ],
+      "heads": 64,
+      "key_heads": 16,
+      "mode": "both",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 7.152557373046875e-07,
+          "budget": 0.006211982498168945
+        },
+        {
+          "gradient": "dk",
+          "error": 1.52587890625e-05,
+          "budget": 0.13654945922851564
+        },
+        {
+          "gradient": "dv",
+          "error": 8.344650268554688e-07,
+          "budget": 0.0073375566101074215
+        },
+        {
+          "gradient": "dg",
+          "error": 2.0265579223632812e-05,
+          "budget": 0.21856926513671876
+        },
+        {
+          "gradient": "dbeta",
+          "error": 9.5367431640625e-06,
+          "budget": 0.07356690002441406
+        },
+        {
+          "gradient": "dh0",
+          "error": 9.5367431640625e-07,
+          "budget": 0.010230766067504882
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.float16",
+      "lengths": [
+        129
+      ],
+      "heads": 8,
+      "key_heads": 2,
+      "mode": "both",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 9.143352508544922e-05,
+          "budget": 0.005356179008483886
+        },
+        {
+          "gradient": "dk",
+          "error": 0.0017542839050292969,
+          "budget": 0.09593056274414062
+        },
+        {
+          "gradient": "dv",
+          "error": 0.00014030933380126953,
+          "budget": 0.00556276870727539
+        },
+        {
+          "gradient": "dg",
+          "error": 0.0016632080078125,
+          "budget": 0.10836742950439453
+        },
+        {
+          "gradient": "dbeta",
+          "error": 0.0013804435729980469,
+          "budget": 0.05524920059204102
+        },
+        {
+          "gradient": "dh0",
+          "error": 2.034008502960205e-05,
+          "budget": 0.012228475341796875
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.float16",
+      "lengths": [
+        256
+      ],
+      "heads": 16,
+      "key_heads": 4,
+      "mode": "both",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 9.274482727050781e-05,
+          "budget": 0.006576286087036132
+        },
+        {
+          "gradient": "dk",
+          "error": 0.0016984939575195312,
+          "budget": 0.13316582275390626
+        },
+        {
+          "gradient": "dv",
+          "error": 0.00013256072998046875,
+          "budget": 0.007133589515686035
+        },
+        {
+          "gradient": "dg",
+          "error": 0.0015032291412353516,
+          "budget": 0.13638161254882814
+        },
+        {
+          "gradient": "dbeta",
+          "error": 0.0008943080902099609,
+          "budget": 0.06863449645996093
+        },
+        {
+          "gradient": "dh0",
+          "error": 1.5564262866973877e-05,
+          "budget": 0.008993850479125976
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.float16",
+      "lengths": [
+        0,
+        1,
+        17,
+        0,
+        129
+      ],
+      "heads": 8,
+      "key_heads": 2,
+      "mode": "strided",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 9.447336196899414e-05,
+          "budget": 0.006229744682312011
+        },
+        {
+          "gradient": "dk",
+          "error": 0.00188446044921875,
+          "budget": 0.13178490234375
+        },
+        {
+          "gradient": "dv",
+          "error": 0.00015535950660705566,
+          "budget": 0.007075773010253906
+        },
+        {
+          "gradient": "dg",
+          "error": 0.0021581649780273438,
+          "budget": 0.16997383666992189
+        },
+        {
+          "gradient": "dbeta",
+          "error": 0.0012259483337402344,
+          "budget": 0.0678815705871582
+        },
+        {
+          "gradient": "dh0",
+          "error": 2.8192996978759766e-05,
+          "budget": 0.01475928855895996
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.float16",
+      "lengths": [
+        257
+      ],
+      "heads": 8,
+      "key_heads": 2,
+      "mode": "replace",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 0.00010204315185546875,
+          "budget": 0.077372060546875
+        },
+        {
+          "gradient": "dk",
+          "error": 0.00067138671875,
+          "budget": 11.896250234375
+        },
+        {
+          "gradient": "dv",
+          "error": 7.62939453125e-06,
+          "budget": 0.0077004296875
+        },
+        {
+          "gradient": "dg",
+          "error": 0.00048065185546875,
+          "budget": 2.06623314453125
+        },
+        {
+          "gradient": "dbeta",
+          "error": 8.96453857421875e-05,
+          "budget": 0.1021828515625
+        },
+        {
+          "gradient": "dh0",
+          "error": 4.57763671875e-05,
+          "budget": 0.733499990234375
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.float16",
+      "lengths": [
+        17,
+        0,
+        19
+      ],
+      "heads": 64,
+      "key_heads": 16,
+      "mode": "both",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 7.140636444091797e-05,
+          "budget": 0.005087600479125976
+        },
+        {
+          "gradient": "dk",
+          "error": 0.0033740997314453125,
+          "budget": 0.12046669555664062
+        },
+        {
+          "gradient": "dv",
+          "error": 0.00015991926193237305,
+          "budget": 0.007431493530273437
+        },
+        {
+          "gradient": "dg",
+          "error": 0.0020694732666015625,
+          "budget": 0.1563649041748047
+        },
+        {
+          "gradient": "dbeta",
+          "error": 0.0013170242309570312,
+          "budget": 0.07287834716796875
+        },
+        {
+          "gradient": "dh0",
+          "error": 3.910064697265625e-05,
+          "budget": 0.025362001190185546
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.float16",
+      "lengths": [
+        129,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "heads": 64,
+      "key_heads": 16,
+      "mode": "both",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 0.00011134147644042969,
+          "budget": 0.006472335586547851
+        },
+        {
+          "gradient": "dk",
+          "error": 0.0020923614501953125,
+          "budget": 0.1271309716796875
+        },
+        {
+          "gradient": "dv",
+          "error": 0.00015556812286376953,
+          "budget": 0.008479104766845703
+        },
+        {
+          "gradient": "dg",
+          "error": 0.0016574859619140625,
+          "budget": 0.17392204833984376
+        },
+        {
+          "gradient": "dbeta",
+          "error": 0.001216888427734375,
+          "budget": 0.06894539428710937
+        },
+        {
+          "gradient": "dh0",
+          "error": 2.2277235984802246e-05,
+          "budget": 0.012218461761474609
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.float16",
+      "lengths": [
+        513
+      ],
+      "heads": 8,
+      "key_heads": 2,
+      "mode": "weak",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 0.0008853673934936523,
+          "budget": 0.06010030342102051
+        },
+        {
+          "gradient": "dk",
+          "error": 0.014592170715332031,
+          "budget": 1.13727806640625
+        },
+        {
+          "gradient": "dv",
+          "error": 0.0008298158645629883,
+          "budget": 0.049370990524291995
+        },
+        {
+          "gradient": "dg",
+          "error": 0.0382080078125,
+          "budget": 2.6690316064453126
+        },
+        {
+          "gradient": "dbeta",
+          "error": 0.009469032287597656,
+          "budget": 0.706461416015625
+        },
+        {
+          "gradient": "dh0",
+          "error": 0.0005037486553192139,
+          "budget": 0.11806057525634765
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.float16",
+      "lengths": [
+        0,
+        0
+      ],
+      "heads": 8,
+      "key_heads": 2,
+      "mode": "both",
+      "gradients": [
+        {
+          "gradient": "dh0",
+          "error": 0.0,
+          "budget": 1e-05
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.float16",
+      "lengths": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1
+      ],
+      "heads": 8,
+      "key_heads": 2,
+      "mode": "both",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 4.76837158203125e-07,
+          "budget": 0.0015916688537597657
+        },
+        {
+          "gradient": "dk",
+          "error": 7.62939453125e-06,
+          "budget": 0.05340431762695313
+        },
+        {
+          "gradient": "dv",
+          "error": 4.76837158203125e-07,
+          "budget": 0.0022778375244140625
+        },
+        {
+          "gradient": "dg",
+          "error": 3.814697265625e-06,
+          "budget": 0.019647107849121093
+        },
+        {
+          "gradient": "dbeta",
+          "error": 4.76837158203125e-06,
+          "budget": 0.03909538818359375
+        },
+        {
+          "gradient": "dh0",
+          "error": 4.76837158203125e-07,
+          "budget": 0.009502874145507812
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.float16",
+      "lengths": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "heads": 48,
+      "key_heads": 16,
+      "mode": "both",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 5.364418029785156e-07,
+          "budget": 0.0019602639770507813
+        },
+        {
+          "gradient": "dk",
+          "error": 1.52587890625e-05,
+          "budget": 0.1121926171875
+        },
+        {
+          "gradient": "dv",
+          "error": 9.5367431640625e-07,
+          "budget": 0.004361615905761718
+        },
+        {
+          "gradient": "dg",
+          "error": 9.5367431640625e-06,
+          "budget": 0.05809258056640625
+        },
+        {
+          "gradient": "dbeta",
+          "error": 8.106231689453125e-06,
+          "budget": 0.04097221923828125
+        },
+        {
+          "gradient": "dh0",
+          "error": 9.5367431640625e-07,
+          "budget": 0.01087139678955078
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.float16",
+      "lengths": [
+        65
+      ],
+      "heads": 12,
+      "key_heads": 3,
+      "mode": "both",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 7.593631744384766e-05,
+          "budget": 0.004769073257446289
+        },
+        {
+          "gradient": "dk",
+          "error": 0.0017199516296386719,
+          "budget": 0.12712715698242189
+        },
+        {
+          "gradient": "dv",
+          "error": 8.669495582580566e-05,
+          "budget": 0.005824075469970703
+        },
+        {
+          "gradient": "dg",
+          "error": 0.001361846923828125,
+          "budget": 0.12179611755371093
+        },
+        {
+          "gradient": "dbeta",
+          "error": 0.0008093118667602539,
+          "budget": 0.05377052856445313
+        },
+        {
+          "gradient": "dh0",
+          "error": 1.4185905456542969e-05,
+          "budget": 0.009629474411010742
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.float16",
+      "lengths": [
+        65
+      ],
+      "heads": 24,
+      "key_heads": 6,
+      "mode": "both",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 8.693337440490723e-05,
+          "budget": 0.006481812725067138
+        },
+        {
+          "gradient": "dk",
+          "error": 0.0019063949584960938,
+          "budget": 0.13196037841796876
+        },
+        {
+          "gradient": "dv",
+          "error": 0.00014215707778930664,
+          "budget": 0.005835996398925781
+        },
+        {
+          "gradient": "dg",
+          "error": 0.0012999773025512695,
+          "budget": 0.14100693298339845
+        },
+        {
+          "gradient": "dbeta",
+          "error": 0.0011107921600341797,
+          "budget": 0.06977318359375
+        },
+        {
+          "gradient": "dh0",
+          "error": 1.7959624528884888e-05,
+          "budget": 0.009308086166381836
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.float16",
+      "lengths": [
+        65
+      ],
+      "heads": 32,
+      "key_heads": 8,
+      "mode": "both",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 7.424503564834595e-05,
+          "budget": 0.005708442459106445
+        },
+        {
+          "gradient": "dk",
+          "error": 0.001990199089050293,
+          "budget": 0.14214180541992189
+        },
+        {
+          "gradient": "dv",
+          "error": 0.0001226663589477539,
+          "budget": 0.007480607757568359
+        },
+        {
+          "gradient": "dg",
+          "error": 0.0019030570983886719,
+          "budget": 0.13230560852050782
+        },
+        {
+          "gradient": "dbeta",
+          "error": 0.0019106864929199219,
+          "budget": 0.07156132293701171
+        },
+        {
+          "gradient": "dh0",
+          "error": 2.2351741790771484e-05,
+          "budget": 0.011507020721435546
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.float16",
+      "lengths": [
+        65
+      ],
+      "heads": 48,
+      "key_heads": 12,
+      "mode": "both",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 7.897615432739258e-05,
+          "budget": 0.006743894348144531
+        },
+        {
+          "gradient": "dk",
+          "error": 0.0026569366455078125,
+          "budget": 0.1202034814453125
+        },
+        {
+          "gradient": "dv",
+          "error": 0.00014591217041015625,
+          "budget": 0.007618652114868164
+        },
+        {
+          "gradient": "dg",
+          "error": 0.0019445419311523438,
+          "budget": 0.16177223754882814
+        },
+        {
+          "gradient": "dbeta",
+          "error": 0.0013780593872070312,
+          "budget": 0.08875320983886718
+        },
+        {
+          "gradient": "dh0",
+          "error": 2.1085143089294434e-05,
+          "budget": 0.010063157806396484
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.float16",
+      "lengths": [
+        65
+      ],
+      "heads": 64,
+      "key_heads": 16,
+      "mode": "both",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 9.810924530029297e-05,
+          "budget": 0.006211982498168945
+        },
+        {
+          "gradient": "dk",
+          "error": 0.00240325927734375,
+          "budget": 0.13654945922851564
+        },
+        {
+          "gradient": "dv",
+          "error": 0.0001575946807861328,
+          "budget": 0.0073375566101074215
+        },
+        {
+          "gradient": "dg",
+          "error": 0.002385169267654419,
+          "budget": 0.21856926513671876
+        },
+        {
+          "gradient": "dbeta",
+          "error": 0.0016775131225585938,
+          "budget": 0.07356690002441406
+        },
+        {
+          "gradient": "dh0",
+          "error": 2.2113323211669922e-05,
+          "budget": 0.010230766067504882
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.bfloat16",
+      "lengths": [
+        129
+      ],
+      "heads": 8,
+      "key_heads": 2,
+      "mode": "both",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 0.0006893277168273926,
+          "budget": 0.005356179008483886
+        },
+        {
+          "gradient": "dk",
+          "error": 0.014340877532958984,
+          "budget": 0.09593056274414062
+        },
+        {
+          "gradient": "dv",
+          "error": 0.000841975212097168,
+          "budget": 0.00556276870727539
+        },
+        {
+          "gradient": "dg",
+          "error": 0.010591506958007812,
+          "budget": 0.10836742950439453
+        },
+        {
+          "gradient": "dbeta",
+          "error": 0.006721019744873047,
+          "budget": 0.05524920059204102
+        },
+        {
+          "gradient": "dh0",
+          "error": 0.00016376376152038574,
+          "budget": 0.012228475341796875
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.bfloat16",
+      "lengths": [
+        256
+      ],
+      "heads": 16,
+      "key_heads": 4,
+      "mode": "both",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 0.0007877945899963379,
+          "budget": 0.006576286087036132
+        },
+        {
+          "gradient": "dk",
+          "error": 0.014510154724121094,
+          "budget": 0.13316582275390626
+        },
+        {
+          "gradient": "dv",
+          "error": 0.000905156135559082,
+          "budget": 0.007133589515686035
+        },
+        {
+          "gradient": "dg",
+          "error": 0.012434005737304688,
+          "budget": 0.13638161254882814
+        },
+        {
+          "gradient": "dbeta",
+          "error": 0.007172524929046631,
+          "budget": 0.06863449645996093
+        },
+        {
+          "gradient": "dh0",
+          "error": 0.00011271238327026367,
+          "budget": 0.008993850479125976
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.bfloat16",
+      "lengths": [
+        0,
+        1,
+        17,
+        0,
+        129
+      ],
+      "heads": 8,
+      "key_heads": 2,
+      "mode": "strided",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 0.0005921125411987305,
+          "budget": 0.006229744682312011
+        },
+        {
+          "gradient": "dk",
+          "error": 0.012894630432128906,
+          "budget": 0.13178490234375
+        },
+        {
+          "gradient": "dv",
+          "error": 0.0008689016103744507,
+          "budget": 0.007075773010253906
+        },
+        {
+          "gradient": "dg",
+          "error": 0.014774322509765625,
+          "budget": 0.16997383666992189
+        },
+        {
+          "gradient": "dbeta",
+          "error": 0.011105775833129883,
+          "budget": 0.0678815705871582
+        },
+        {
+          "gradient": "dh0",
+          "error": 0.000263899564743042,
+          "budget": 0.01475928855895996
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.bfloat16",
+      "lengths": [
+        257
+      ],
+      "heads": 8,
+      "key_heads": 2,
+      "mode": "replace",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 0.00010204315185546875,
+          "budget": 0.077372060546875
+        },
+        {
+          "gradient": "dk",
+          "error": 0.00067138671875,
+          "budget": 11.896250234375
+        },
+        {
+          "gradient": "dv",
+          "error": 7.62939453125e-06,
+          "budget": 0.0077004296875
+        },
+        {
+          "gradient": "dg",
+          "error": 0.00048065185546875,
+          "budget": 2.06623314453125
+        },
+        {
+          "gradient": "dbeta",
+          "error": 8.96453857421875e-05,
+          "budget": 0.1021828515625
+        },
+        {
+          "gradient": "dh0",
+          "error": 4.57763671875e-05,
+          "budget": 0.733499990234375
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.bfloat16",
+      "lengths": [
+        17,
+        0,
+        19
+      ],
+      "heads": 64,
+      "key_heads": 16,
+      "mode": "both",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 0.0005050897598266602,
+          "budget": 0.005087600479125976
+        },
+        {
+          "gradient": "dk",
+          "error": 0.017932415008544922,
+          "budget": 0.12046669555664062
+        },
+        {
+          "gradient": "dv",
+          "error": 0.0012539029121398926,
+          "budget": 0.007431493530273437
+        },
+        {
+          "gradient": "dg",
+          "error": 0.012050628662109375,
+          "budget": 0.1563649041748047
+        },
+        {
+          "gradient": "dbeta",
+          "error": 0.008603870868682861,
+          "budget": 0.07287834716796875
+        },
+        {
+          "gradient": "dh0",
+          "error": 0.00027060508728027344,
+          "budget": 0.025362001190185546
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.bfloat16",
+      "lengths": [
+        129,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "heads": 64,
+      "key_heads": 16,
+      "mode": "both",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 0.0007721781730651855,
+          "budget": 0.006472335586547851
+        },
+        {
+          "gradient": "dk",
+          "error": 0.017705440521240234,
+          "budget": 0.1271309716796875
+        },
+        {
+          "gradient": "dv",
+          "error": 0.001008152961730957,
+          "budget": 0.008479104766845703
+        },
+        {
+          "gradient": "dg",
+          "error": 0.018065452575683594,
+          "budget": 0.17392204833984376
+        },
+        {
+          "gradient": "dbeta",
+          "error": 0.010340690612792969,
+          "budget": 0.06894539428710937
+        },
+        {
+          "gradient": "dh0",
+          "error": 0.00014838576316833496,
+          "budget": 0.012218461761474609
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.bfloat16",
+      "lengths": [
+        513
+      ],
+      "heads": 8,
+      "key_heads": 2,
+      "mode": "weak",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 0.007498979568481445,
+          "budget": 0.06010030342102051
+        },
+        {
+          "gradient": "dk",
+          "error": 0.11722564697265625,
+          "budget": 1.13727806640625
+        },
+        {
+          "gradient": "dv",
+          "error": 0.005879044532775879,
+          "budget": 0.049370990524291995
+        },
+        {
+          "gradient": "dg",
+          "error": 0.3078799247741699,
+          "budget": 2.6690316064453126
+        },
+        {
+          "gradient": "dbeta",
+          "error": 0.07839679718017578,
+          "budget": 0.706461416015625
+        },
+        {
+          "gradient": "dh0",
+          "error": 0.0046749114990234375,
+          "budget": 0.11806057525634765
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.bfloat16",
+      "lengths": [
+        0,
+        0
+      ],
+      "heads": 8,
+      "key_heads": 2,
+      "mode": "both",
+      "gradients": [
+        {
+          "gradient": "dh0",
+          "error": 0.0,
+          "budget": 1e-05
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.bfloat16",
+      "lengths": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1
+      ],
+      "heads": 8,
+      "key_heads": 2,
+      "mode": "both",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 4.76837158203125e-07,
+          "budget": 0.0015916688537597657
+        },
+        {
+          "gradient": "dk",
+          "error": 7.62939453125e-06,
+          "budget": 0.05340431762695313
+        },
+        {
+          "gradient": "dv",
+          "error": 4.76837158203125e-07,
+          "budget": 0.0022778375244140625
+        },
+        {
+          "gradient": "dg",
+          "error": 3.814697265625e-06,
+          "budget": 0.019647107849121093
+        },
+        {
+          "gradient": "dbeta",
+          "error": 4.76837158203125e-06,
+          "budget": 0.03909538818359375
+        },
+        {
+          "gradient": "dh0",
+          "error": 4.76837158203125e-07,
+          "budget": 0.009502874145507812
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.bfloat16",
+      "lengths": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "heads": 48,
+      "key_heads": 16,
+      "mode": "both",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 5.364418029785156e-07,
+          "budget": 0.0019602639770507813
+        },
+        {
+          "gradient": "dk",
+          "error": 1.52587890625e-05,
+          "budget": 0.1121926171875
+        },
+        {
+          "gradient": "dv",
+          "error": 9.5367431640625e-07,
+          "budget": 0.004361615905761718
+        },
+        {
+          "gradient": "dg",
+          "error": 9.5367431640625e-06,
+          "budget": 0.05809258056640625
+        },
+        {
+          "gradient": "dbeta",
+          "error": 8.106231689453125e-06,
+          "budget": 0.04097221923828125
+        },
+        {
+          "gradient": "dh0",
+          "error": 9.5367431640625e-07,
+          "budget": 0.01087139678955078
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.bfloat16",
+      "lengths": [
+        65
+      ],
+      "heads": 12,
+      "key_heads": 3,
+      "mode": "both",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 0.000697016716003418,
+          "budget": 0.004769073257446289
+        },
+        {
+          "gradient": "dk",
+          "error": 0.01432180404663086,
+          "budget": 0.12712715698242189
+        },
+        {
+          "gradient": "dv",
+          "error": 0.0009393692016601562,
+          "budget": 0.005824075469970703
+        },
+        {
+          "gradient": "dg",
+          "error": 0.010231971740722656,
+          "budget": 0.12179611755371093
+        },
+        {
+          "gradient": "dbeta",
+          "error": 0.007760047912597656,
+          "budget": 0.05377052856445313
+        },
+        {
+          "gradient": "dh0",
+          "error": 0.00011208653450012207,
+          "budget": 0.009629474411010742
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.bfloat16",
+      "lengths": [
+        65
+      ],
+      "heads": 24,
+      "key_heads": 6,
+      "mode": "both",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 0.0006511807441711426,
+          "budget": 0.006481812725067138
+        },
+        {
+          "gradient": "dk",
+          "error": 0.0179901123046875,
+          "budget": 0.13196037841796876
+        },
+        {
+          "gradient": "dv",
+          "error": 0.0007731765508651733,
+          "budget": 0.005835996398925781
+        },
+        {
+          "gradient": "dg",
+          "error": 0.014309167861938477,
+          "budget": 0.14100693298339845
+        },
+        {
+          "gradient": "dbeta",
+          "error": 0.007878303527832031,
+          "budget": 0.06977318359375
+        },
+        {
+          "gradient": "dh0",
+          "error": 0.00021094828844070435,
+          "budget": 0.009308086166381836
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.bfloat16",
+      "lengths": [
+        65
+      ],
+      "heads": 32,
+      "key_heads": 8,
+      "mode": "both",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 0.0007637739181518555,
+          "budget": 0.005708442459106445
+        },
+        {
+          "gradient": "dk",
+          "error": 0.0161895751953125,
+          "budget": 0.14214180541992189
+        },
+        {
+          "gradient": "dv",
+          "error": 0.0011304020881652832,
+          "budget": 0.007480607757568359
+        },
+        {
+          "gradient": "dg",
+          "error": 0.016040802001953125,
+          "budget": 0.13230560852050782
+        },
+        {
+          "gradient": "dbeta",
+          "error": 0.010268211364746094,
+          "budget": 0.07156132293701171
+        },
+        {
+          "gradient": "dh0",
+          "error": 0.00015652040019631386,
+          "budget": 0.011507020721435546
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.bfloat16",
+      "lengths": [
+        65
+      ],
+      "heads": 48,
+      "key_heads": 12,
+      "mode": "both",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 0.0006258785724639893,
+          "budget": 0.006743894348144531
+        },
+        {
+          "gradient": "dk",
+          "error": 0.024784088134765625,
+          "budget": 0.1202034814453125
+        },
+        {
+          "gradient": "dv",
+          "error": 0.001265108585357666,
+          "budget": 0.007618652114868164
+        },
+        {
+          "gradient": "dg",
+          "error": 0.015467464923858643,
+          "budget": 0.16177223754882814
+        },
+        {
+          "gradient": "dbeta",
+          "error": 0.013166666030883789,
+          "budget": 0.08875320983886718
+        },
+        {
+          "gradient": "dh0",
+          "error": 0.0001800060272216797,
+          "budget": 0.010063157806396484
+        }
+      ],
+      "passed": true
+    },
+    {
+      "cache_dtype": "torch.bfloat16",
+      "lengths": [
+        65
+      ],
+      "heads": 64,
+      "key_heads": 16,
+      "mode": "both",
+      "gradients": [
+        {
+          "gradient": "dq",
+          "error": 0.0007596611976623535,
+          "budget": 0.006211982498168945
+        },
+        {
+          "gradient": "dk",
+          "error": 0.022545814514160156,
+          "budget": 0.13654945922851564
+        },
+        {
+          "gradient": "dv",
+          "error": 0.001170337200164795,
+          "budget": 0.0073375566101074215
+        },
+        {
+          "gradient": "dg",
+          "error": 0.015355825424194336,
+          "budget": 0.21856926513671876
+        },
+        {
+          "gradient": "dbeta",
+          "error": 0.011982440948486328,
+          "budget": 0.07356690002441406
+        },
+        {
+          "gradient": "dh0",
+          "error": 0.00014954805374145508,
+          "budget": 0.010230766067504882
+        }
+      ],
+      "passed": true
+    }
+  ],
+  "initial_native_screen": {
+    "note": "45/45 passed and gradient max errors exactly matched the rounding screen. This screen preceded eliminating the redundant expanded-factor copy; the final implementation passed all 152 backward/reference tests.",
+    "rows": [
+      {
+        "cache_dtype": "torch.float32",
+        "lengths": [
+          129
+        ],
+        "heads": 8,
+        "key_heads": 2,
+        "mode": "both",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 8.344650268554688e-07,
+            "budget": 0.005356179008483886
+          },
+          {
+            "gradient": "dk",
+            "error": 1.5974044799804688e-05,
+            "budget": 0.09593056274414062
+          },
+          {
+            "gradient": "dv",
+            "error": 7.748603820800781e-07,
+            "budget": 0.00556276870727539
+          },
+          {
+            "gradient": "dg",
+            "error": 1.811981201171875e-05,
+            "budget": 0.10836742950439453
+          },
+          {
+            "gradient": "dbeta",
+            "error": 5.7220458984375e-06,
+            "budget": 0.05524920059204102
+          },
+          {
+            "gradient": "dh0",
+            "error": 9.5367431640625e-07,
+            "budget": 0.012228475341796875
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.float32",
+        "lengths": [
+          256
+        ],
+        "heads": 16,
+        "key_heads": 4,
+        "mode": "both",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 9.5367431640625e-07,
+            "budget": 0.006576286087036132
+          },
+          {
+            "gradient": "dk",
+            "error": 1.52587890625e-05,
+            "budget": 0.13316582275390626
+          },
+          {
+            "gradient": "dv",
+            "error": 7.152557373046875e-07,
+            "budget": 0.007133589515686035
+          },
+          {
+            "gradient": "dg",
+            "error": 1.9073486328125e-05,
+            "budget": 0.13638161254882814
+          },
+          {
+            "gradient": "dbeta",
+            "error": 9.5367431640625e-06,
+            "budget": 0.06863449645996093
+          },
+          {
+            "gradient": "dh0",
+            "error": 1.0728836059570312e-06,
+            "budget": 0.008993850479125976
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.float32",
+        "lengths": [
+          0,
+          1,
+          17,
+          0,
+          129
+        ],
+        "heads": 8,
+        "key_heads": 2,
+        "mode": "strided",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 7.37607479095459e-07,
+            "budget": 0.006229744682312011
+          },
+          {
+            "gradient": "dk",
+            "error": 1.52587890625e-05,
+            "budget": 0.13178490234375
+          },
+          {
+            "gradient": "dv",
+            "error": 9.5367431640625e-07,
+            "budget": 0.007075773010253906
+          },
+          {
+            "gradient": "dg",
+            "error": 1.823902130126953e-05,
+            "budget": 0.16997383666992189
+          },
+          {
+            "gradient": "dbeta",
+            "error": 7.152557373046875e-06,
+            "budget": 0.0678815705871582
+          },
+          {
+            "gradient": "dh0",
+            "error": 1.0728836059570312e-06,
+            "budget": 0.01475928855895996
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.float32",
+        "lengths": [
+          257
+        ],
+        "heads": 8,
+        "key_heads": 2,
+        "mode": "replace",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 0.00010204315185546875,
+            "budget": 0.077372060546875
+          },
+          {
+            "gradient": "dk",
+            "error": 0.00067138671875,
+            "budget": 11.896250234375
+          },
+          {
+            "gradient": "dv",
+            "error": 7.62939453125e-06,
+            "budget": 0.0077004296875
+          },
+          {
+            "gradient": "dg",
+            "error": 0.00048065185546875,
+            "budget": 2.06623314453125
+          },
+          {
+            "gradient": "dbeta",
+            "error": 8.96453857421875e-05,
+            "budget": 0.1021828515625
+          },
+          {
+            "gradient": "dh0",
+            "error": 4.57763671875e-05,
+            "budget": 0.733499990234375
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.float32",
+        "lengths": [
+          17,
+          0,
+          19
+        ],
+        "heads": 64,
+        "key_heads": 16,
+        "mode": "both",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 7.152557373046875e-07,
+            "budget": 0.005087600479125976
+          },
+          {
+            "gradient": "dk",
+            "error": 1.52587890625e-05,
+            "budget": 0.12046669555664062
+          },
+          {
+            "gradient": "dv",
+            "error": 9.5367431640625e-07,
+            "budget": 0.007431493530273437
+          },
+          {
+            "gradient": "dg",
+            "error": 2.288818359375e-05,
+            "budget": 0.1563649041748047
+          },
+          {
+            "gradient": "dbeta",
+            "error": 7.62939453125e-06,
+            "budget": 0.07287834716796875
+          },
+          {
+            "gradient": "dh0",
+            "error": 1.430511474609375e-06,
+            "budget": 0.025362001190185546
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.float32",
+        "lengths": [
+          129,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "heads": 64,
+        "key_heads": 16,
+        "mode": "both",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 8.940696716308594e-07,
+            "budget": 0.006472335586547851
+          },
+          {
+            "gradient": "dk",
+            "error": 1.33514404296875e-05,
+            "budget": 0.1271309716796875
+          },
+          {
+            "gradient": "dv",
+            "error": 9.5367431640625e-07,
+            "budget": 0.008479104766845703
+          },
+          {
+            "gradient": "dg",
+            "error": 2.47955322265625e-05,
+            "budget": 0.17392204833984376
+          },
+          {
+            "gradient": "dbeta",
+            "error": 1.1444091796875e-05,
+            "budget": 0.06894539428710937
+          },
+          {
+            "gradient": "dh0",
+            "error": 1.1920928955078125e-06,
+            "budget": 0.012218461761474609
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.float32",
+        "lengths": [
+          513
+        ],
+        "heads": 8,
+        "key_heads": 2,
+        "mode": "weak",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 5.245208740234375e-06,
+            "budget": 0.06010030342102051
+          },
+          {
+            "gradient": "dk",
+            "error": 0.0001068115234375,
+            "budget": 1.13727806640625
+          },
+          {
+            "gradient": "dv",
+            "error": 5.0067901611328125e-06,
+            "budget": 0.049370990524291995
+          },
+          {
+            "gradient": "dg",
+            "error": 0.000274658203125,
+            "budget": 2.6690316064453126
+          },
+          {
+            "gradient": "dbeta",
+            "error": 5.91278076171875e-05,
+            "budget": 0.706461416015625
+          },
+          {
+            "gradient": "dh0",
+            "error": 9.5367431640625e-06,
+            "budget": 0.11806057525634765
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.float32",
+        "lengths": [
+          0,
+          0
+        ],
+        "heads": 8,
+        "key_heads": 2,
+        "mode": "both",
+        "gradients": [
+          {
+            "gradient": "dh0",
+            "error": 0.0,
+            "budget": 1e-05
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.float32",
+        "lengths": [
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1
+        ],
+        "heads": 8,
+        "key_heads": 2,
+        "mode": "both",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 4.76837158203125e-07,
+            "budget": 0.0015916688537597657
+          },
+          {
+            "gradient": "dk",
+            "error": 7.62939453125e-06,
+            "budget": 0.05340431762695313
+          },
+          {
+            "gradient": "dv",
+            "error": 4.76837158203125e-07,
+            "budget": 0.0022778375244140625
+          },
+          {
+            "gradient": "dg",
+            "error": 3.814697265625e-06,
+            "budget": 0.019647107849121093
+          },
+          {
+            "gradient": "dbeta",
+            "error": 4.76837158203125e-06,
+            "budget": 0.03909538818359375
+          },
+          {
+            "gradient": "dh0",
+            "error": 4.76837158203125e-07,
+            "budget": 0.009502874145507812
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.float32",
+        "lengths": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "heads": 48,
+        "key_heads": 16,
+        "mode": "both",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 5.364418029785156e-07,
+            "budget": 0.0019602639770507813
+          },
+          {
+            "gradient": "dk",
+            "error": 1.52587890625e-05,
+            "budget": 0.1121926171875
+          },
+          {
+            "gradient": "dv",
+            "error": 9.5367431640625e-07,
+            "budget": 0.004361615905761718
+          },
+          {
+            "gradient": "dg",
+            "error": 9.5367431640625e-06,
+            "budget": 0.05809258056640625
+          },
+          {
+            "gradient": "dbeta",
+            "error": 8.106231689453125e-06,
+            "budget": 0.04097221923828125
+          },
+          {
+            "gradient": "dh0",
+            "error": 9.5367431640625e-07,
+            "budget": 0.01087139678955078
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.float32",
+        "lengths": [
+          65
+        ],
+        "heads": 12,
+        "key_heads": 3,
+        "mode": "both",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 7.152557373046875e-07,
+            "budget": 0.004769073257446289
+          },
+          {
+            "gradient": "dk",
+            "error": 9.5367431640625e-06,
+            "budget": 0.12712715698242189
+          },
+          {
+            "gradient": "dv",
+            "error": 7.152557373046875e-07,
+            "budget": 0.005824075469970703
+          },
+          {
+            "gradient": "dg",
+            "error": 1.9073486328125e-05,
+            "budget": 0.12179611755371093
+          },
+          {
+            "gradient": "dbeta",
+            "error": 6.67572021484375e-06,
+            "budget": 0.05377052856445313
+          },
+          {
+            "gradient": "dh0",
+            "error": 5.960464477539062e-07,
+            "budget": 0.009629474411010742
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.float32",
+        "lengths": [
+          65
+        ],
+        "heads": 24,
+        "key_heads": 6,
+        "mode": "both",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 9.5367431640625e-07,
+            "budget": 0.006481812725067138
+          },
+          {
+            "gradient": "dk",
+            "error": 1.33514404296875e-05,
+            "budget": 0.13196037841796876
+          },
+          {
+            "gradient": "dv",
+            "error": 9.5367431640625e-07,
+            "budget": 0.005835996398925781
+          },
+          {
+            "gradient": "dg",
+            "error": 2.0503997802734375e-05,
+            "budget": 0.14100693298339845
+          },
+          {
+            "gradient": "dbeta",
+            "error": 1.1444091796875e-05,
+            "budget": 0.06977318359375
+          },
+          {
+            "gradient": "dh0",
+            "error": 7.152557373046875e-07,
+            "budget": 0.009308086166381836
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.float32",
+        "lengths": [
+          65
+        ],
+        "heads": 32,
+        "key_heads": 8,
+        "mode": "both",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 8.940696716308594e-07,
+            "budget": 0.005708442459106445
+          },
+          {
+            "gradient": "dk",
+            "error": 1.1444091796875e-05,
+            "budget": 0.14214180541992189
+          },
+          {
+            "gradient": "dv",
+            "error": 8.344650268554688e-07,
+            "budget": 0.007480607757568359
+          },
+          {
+            "gradient": "dg",
+            "error": 2.002716064453125e-05,
+            "budget": 0.13230560852050782
+          },
+          {
+            "gradient": "dbeta",
+            "error": 6.67572021484375e-06,
+            "budget": 0.07156132293701171
+          },
+          {
+            "gradient": "dh0",
+            "error": 7.152557373046875e-07,
+            "budget": 0.011507020721435546
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.float32",
+        "lengths": [
+          65
+        ],
+        "heads": 48,
+        "key_heads": 12,
+        "mode": "both",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 9.5367431640625e-07,
+            "budget": 0.006743894348144531
+          },
+          {
+            "gradient": "dk",
+            "error": 1.52587890625e-05,
+            "budget": 0.1202034814453125
+          },
+          {
+            "gradient": "dv",
+            "error": 9.5367431640625e-07,
+            "budget": 0.007618652114868164
+          },
+          {
+            "gradient": "dg",
+            "error": 2.6702880859375e-05,
+            "budget": 0.16177223754882814
+          },
+          {
+            "gradient": "dbeta",
+            "error": 6.67572021484375e-06,
+            "budget": 0.08875320983886718
+          },
+          {
+            "gradient": "dh0",
+            "error": 9.5367431640625e-07,
+            "budget": 0.010063157806396484
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.float32",
+        "lengths": [
+          65
+        ],
+        "heads": 64,
+        "key_heads": 16,
+        "mode": "both",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 7.152557373046875e-07,
+            "budget": 0.006211982498168945
+          },
+          {
+            "gradient": "dk",
+            "error": 1.52587890625e-05,
+            "budget": 0.13654945922851564
+          },
+          {
+            "gradient": "dv",
+            "error": 8.344650268554688e-07,
+            "budget": 0.0073375566101074215
+          },
+          {
+            "gradient": "dg",
+            "error": 2.0265579223632812e-05,
+            "budget": 0.21856926513671876
+          },
+          {
+            "gradient": "dbeta",
+            "error": 9.5367431640625e-06,
+            "budget": 0.07356690002441406
+          },
+          {
+            "gradient": "dh0",
+            "error": 9.5367431640625e-07,
+            "budget": 0.010230766067504882
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.float16",
+        "lengths": [
+          129
+        ],
+        "heads": 8,
+        "key_heads": 2,
+        "mode": "both",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 9.143352508544922e-05,
+            "budget": 0.005356179008483886
+          },
+          {
+            "gradient": "dk",
+            "error": 0.0017542839050292969,
+            "budget": 0.09593056274414062
+          },
+          {
+            "gradient": "dv",
+            "error": 0.00014030933380126953,
+            "budget": 0.00556276870727539
+          },
+          {
+            "gradient": "dg",
+            "error": 0.0016632080078125,
+            "budget": 0.10836742950439453
+          },
+          {
+            "gradient": "dbeta",
+            "error": 0.0013804435729980469,
+            "budget": 0.05524920059204102
+          },
+          {
+            "gradient": "dh0",
+            "error": 2.034008502960205e-05,
+            "budget": 0.012228475341796875
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.float16",
+        "lengths": [
+          256
+        ],
+        "heads": 16,
+        "key_heads": 4,
+        "mode": "both",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 9.274482727050781e-05,
+            "budget": 0.006576286087036132
+          },
+          {
+            "gradient": "dk",
+            "error": 0.0016984939575195312,
+            "budget": 0.13316582275390626
+          },
+          {
+            "gradient": "dv",
+            "error": 0.00013256072998046875,
+            "budget": 0.007133589515686035
+          },
+          {
+            "gradient": "dg",
+            "error": 0.0015032291412353516,
+            "budget": 0.13638161254882814
+          },
+          {
+            "gradient": "dbeta",
+            "error": 0.0008943080902099609,
+            "budget": 0.06863449645996093
+          },
+          {
+            "gradient": "dh0",
+            "error": 1.5564262866973877e-05,
+            "budget": 0.008993850479125976
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.float16",
+        "lengths": [
+          0,
+          1,
+          17,
+          0,
+          129
+        ],
+        "heads": 8,
+        "key_heads": 2,
+        "mode": "strided",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 9.447336196899414e-05,
+            "budget": 0.006229744682312011
+          },
+          {
+            "gradient": "dk",
+            "error": 0.00188446044921875,
+            "budget": 0.13178490234375
+          },
+          {
+            "gradient": "dv",
+            "error": 0.00015535950660705566,
+            "budget": 0.007075773010253906
+          },
+          {
+            "gradient": "dg",
+            "error": 0.0021581649780273438,
+            "budget": 0.16997383666992189
+          },
+          {
+            "gradient": "dbeta",
+            "error": 0.0012259483337402344,
+            "budget": 0.0678815705871582
+          },
+          {
+            "gradient": "dh0",
+            "error": 2.8192996978759766e-05,
+            "budget": 0.01475928855895996
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.float16",
+        "lengths": [
+          257
+        ],
+        "heads": 8,
+        "key_heads": 2,
+        "mode": "replace",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 0.00010204315185546875,
+            "budget": 0.077372060546875
+          },
+          {
+            "gradient": "dk",
+            "error": 0.00067138671875,
+            "budget": 11.896250234375
+          },
+          {
+            "gradient": "dv",
+            "error": 7.62939453125e-06,
+            "budget": 0.0077004296875
+          },
+          {
+            "gradient": "dg",
+            "error": 0.00048065185546875,
+            "budget": 2.06623314453125
+          },
+          {
+            "gradient": "dbeta",
+            "error": 8.96453857421875e-05,
+            "budget": 0.1021828515625
+          },
+          {
+            "gradient": "dh0",
+            "error": 4.57763671875e-05,
+            "budget": 0.733499990234375
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.float16",
+        "lengths": [
+          17,
+          0,
+          19
+        ],
+        "heads": 64,
+        "key_heads": 16,
+        "mode": "both",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 7.140636444091797e-05,
+            "budget": 0.005087600479125976
+          },
+          {
+            "gradient": "dk",
+            "error": 0.0033740997314453125,
+            "budget": 0.12046669555664062
+          },
+          {
+            "gradient": "dv",
+            "error": 0.00015991926193237305,
+            "budget": 0.007431493530273437
+          },
+          {
+            "gradient": "dg",
+            "error": 0.0020694732666015625,
+            "budget": 0.1563649041748047
+          },
+          {
+            "gradient": "dbeta",
+            "error": 0.0013170242309570312,
+            "budget": 0.07287834716796875
+          },
+          {
+            "gradient": "dh0",
+            "error": 3.910064697265625e-05,
+            "budget": 0.025362001190185546
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.float16",
+        "lengths": [
+          129,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "heads": 64,
+        "key_heads": 16,
+        "mode": "both",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 0.00011134147644042969,
+            "budget": 0.006472335586547851
+          },
+          {
+            "gradient": "dk",
+            "error": 0.0020923614501953125,
+            "budget": 0.1271309716796875
+          },
+          {
+            "gradient": "dv",
+            "error": 0.00015556812286376953,
+            "budget": 0.008479104766845703
+          },
+          {
+            "gradient": "dg",
+            "error": 0.0016574859619140625,
+            "budget": 0.17392204833984376
+          },
+          {
+            "gradient": "dbeta",
+            "error": 0.001216888427734375,
+            "budget": 0.06894539428710937
+          },
+          {
+            "gradient": "dh0",
+            "error": 2.2277235984802246e-05,
+            "budget": 0.012218461761474609
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.float16",
+        "lengths": [
+          513
+        ],
+        "heads": 8,
+        "key_heads": 2,
+        "mode": "weak",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 0.0008853673934936523,
+            "budget": 0.06010030342102051
+          },
+          {
+            "gradient": "dk",
+            "error": 0.014592170715332031,
+            "budget": 1.13727806640625
+          },
+          {
+            "gradient": "dv",
+            "error": 0.0008298158645629883,
+            "budget": 0.049370990524291995
+          },
+          {
+            "gradient": "dg",
+            "error": 0.0382080078125,
+            "budget": 2.6690316064453126
+          },
+          {
+            "gradient": "dbeta",
+            "error": 0.009469032287597656,
+            "budget": 0.706461416015625
+          },
+          {
+            "gradient": "dh0",
+            "error": 0.0005037486553192139,
+            "budget": 0.11806057525634765
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.float16",
+        "lengths": [
+          0,
+          0
+        ],
+        "heads": 8,
+        "key_heads": 2,
+        "mode": "both",
+        "gradients": [
+          {
+            "gradient": "dh0",
+            "error": 0.0,
+            "budget": 1e-05
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.float16",
+        "lengths": [
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1
+        ],
+        "heads": 8,
+        "key_heads": 2,
+        "mode": "both",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 4.76837158203125e-07,
+            "budget": 0.0015916688537597657
+          },
+          {
+            "gradient": "dk",
+            "error": 7.62939453125e-06,
+            "budget": 0.05340431762695313
+          },
+          {
+            "gradient": "dv",
+            "error": 4.76837158203125e-07,
+            "budget": 0.0022778375244140625
+          },
+          {
+            "gradient": "dg",
+            "error": 3.814697265625e-06,
+            "budget": 0.019647107849121093
+          },
+          {
+            "gradient": "dbeta",
+            "error": 4.76837158203125e-06,
+            "budget": 0.03909538818359375
+          },
+          {
+            "gradient": "dh0",
+            "error": 4.76837158203125e-07,
+            "budget": 0.009502874145507812
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.float16",
+        "lengths": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "heads": 48,
+        "key_heads": 16,
+        "mode": "both",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 5.364418029785156e-07,
+            "budget": 0.0019602639770507813
+          },
+          {
+            "gradient": "dk",
+            "error": 1.52587890625e-05,
+            "budget": 0.1121926171875
+          },
+          {
+            "gradient": "dv",
+            "error": 9.5367431640625e-07,
+            "budget": 0.004361615905761718
+          },
+          {
+            "gradient": "dg",
+            "error": 9.5367431640625e-06,
+            "budget": 0.05809258056640625
+          },
+          {
+            "gradient": "dbeta",
+            "error": 8.106231689453125e-06,
+            "budget": 0.04097221923828125
+          },
+          {
+            "gradient": "dh0",
+            "error": 9.5367431640625e-07,
+            "budget": 0.01087139678955078
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.float16",
+        "lengths": [
+          65
+        ],
+        "heads": 12,
+        "key_heads": 3,
+        "mode": "both",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 7.593631744384766e-05,
+            "budget": 0.004769073257446289
+          },
+          {
+            "gradient": "dk",
+            "error": 0.0017199516296386719,
+            "budget": 0.12712715698242189
+          },
+          {
+            "gradient": "dv",
+            "error": 8.669495582580566e-05,
+            "budget": 0.005824075469970703
+          },
+          {
+            "gradient": "dg",
+            "error": 0.001361846923828125,
+            "budget": 0.12179611755371093
+          },
+          {
+            "gradient": "dbeta",
+            "error": 0.0008093118667602539,
+            "budget": 0.05377052856445313
+          },
+          {
+            "gradient": "dh0",
+            "error": 1.4185905456542969e-05,
+            "budget": 0.009629474411010742
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.float16",
+        "lengths": [
+          65
+        ],
+        "heads": 24,
+        "key_heads": 6,
+        "mode": "both",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 8.693337440490723e-05,
+            "budget": 0.006481812725067138
+          },
+          {
+            "gradient": "dk",
+            "error": 0.0019063949584960938,
+            "budget": 0.13196037841796876
+          },
+          {
+            "gradient": "dv",
+            "error": 0.00014215707778930664,
+            "budget": 0.005835996398925781
+          },
+          {
+            "gradient": "dg",
+            "error": 0.0012999773025512695,
+            "budget": 0.14100693298339845
+          },
+          {
+            "gradient": "dbeta",
+            "error": 0.0011107921600341797,
+            "budget": 0.06977318359375
+          },
+          {
+            "gradient": "dh0",
+            "error": 1.7959624528884888e-05,
+            "budget": 0.009308086166381836
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.float16",
+        "lengths": [
+          65
+        ],
+        "heads": 32,
+        "key_heads": 8,
+        "mode": "both",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 7.424503564834595e-05,
+            "budget": 0.005708442459106445
+          },
+          {
+            "gradient": "dk",
+            "error": 0.001990199089050293,
+            "budget": 0.14214180541992189
+          },
+          {
+            "gradient": "dv",
+            "error": 0.0001226663589477539,
+            "budget": 0.007480607757568359
+          },
+          {
+            "gradient": "dg",
+            "error": 0.0019030570983886719,
+            "budget": 0.13230560852050782
+          },
+          {
+            "gradient": "dbeta",
+            "error": 0.0019106864929199219,
+            "budget": 0.07156132293701171
+          },
+          {
+            "gradient": "dh0",
+            "error": 2.2351741790771484e-05,
+            "budget": 0.011507020721435546
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.float16",
+        "lengths": [
+          65
+        ],
+        "heads": 48,
+        "key_heads": 12,
+        "mode": "both",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 7.897615432739258e-05,
+            "budget": 0.006743894348144531
+          },
+          {
+            "gradient": "dk",
+            "error": 0.0026569366455078125,
+            "budget": 0.1202034814453125
+          },
+          {
+            "gradient": "dv",
+            "error": 0.00014591217041015625,
+            "budget": 0.007618652114868164
+          },
+          {
+            "gradient": "dg",
+            "error": 0.0019445419311523438,
+            "budget": 0.16177223754882814
+          },
+          {
+            "gradient": "dbeta",
+            "error": 0.0013780593872070312,
+            "budget": 0.08875320983886718
+          },
+          {
+            "gradient": "dh0",
+            "error": 2.1085143089294434e-05,
+            "budget": 0.010063157806396484
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.float16",
+        "lengths": [
+          65
+        ],
+        "heads": 64,
+        "key_heads": 16,
+        "mode": "both",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 9.810924530029297e-05,
+            "budget": 0.006211982498168945
+          },
+          {
+            "gradient": "dk",
+            "error": 0.00240325927734375,
+            "budget": 0.13654945922851564
+          },
+          {
+            "gradient": "dv",
+            "error": 0.0001575946807861328,
+            "budget": 0.0073375566101074215
+          },
+          {
+            "gradient": "dg",
+            "error": 0.002385169267654419,
+            "budget": 0.21856926513671876
+          },
+          {
+            "gradient": "dbeta",
+            "error": 0.0016775131225585938,
+            "budget": 0.07356690002441406
+          },
+          {
+            "gradient": "dh0",
+            "error": 2.2113323211669922e-05,
+            "budget": 0.010230766067504882
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.bfloat16",
+        "lengths": [
+          129
+        ],
+        "heads": 8,
+        "key_heads": 2,
+        "mode": "both",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 0.0006893277168273926,
+            "budget": 0.005356179008483886
+          },
+          {
+            "gradient": "dk",
+            "error": 0.014340877532958984,
+            "budget": 0.09593056274414062
+          },
+          {
+            "gradient": "dv",
+            "error": 0.000841975212097168,
+            "budget": 0.00556276870727539
+          },
+          {
+            "gradient": "dg",
+            "error": 0.010591506958007812,
+            "budget": 0.10836742950439453
+          },
+          {
+            "gradient": "dbeta",
+            "error": 0.006721019744873047,
+            "budget": 0.05524920059204102
+          },
+          {
+            "gradient": "dh0",
+            "error": 0.00016376376152038574,
+            "budget": 0.012228475341796875
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.bfloat16",
+        "lengths": [
+          256
+        ],
+        "heads": 16,
+        "key_heads": 4,
+        "mode": "both",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 0.0007877945899963379,
+            "budget": 0.006576286087036132
+          },
+          {
+            "gradient": "dk",
+            "error": 0.014510154724121094,
+            "budget": 0.13316582275390626
+          },
+          {
+            "gradient": "dv",
+            "error": 0.000905156135559082,
+            "budget": 0.007133589515686035
+          },
+          {
+            "gradient": "dg",
+            "error": 0.012434005737304688,
+            "budget": 0.13638161254882814
+          },
+          {
+            "gradient": "dbeta",
+            "error": 0.007172524929046631,
+            "budget": 0.06863449645996093
+          },
+          {
+            "gradient": "dh0",
+            "error": 0.00011271238327026367,
+            "budget": 0.008993850479125976
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.bfloat16",
+        "lengths": [
+          0,
+          1,
+          17,
+          0,
+          129
+        ],
+        "heads": 8,
+        "key_heads": 2,
+        "mode": "strided",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 0.0005921125411987305,
+            "budget": 0.006229744682312011
+          },
+          {
+            "gradient": "dk",
+            "error": 0.012894630432128906,
+            "budget": 0.13178490234375
+          },
+          {
+            "gradient": "dv",
+            "error": 0.0008689016103744507,
+            "budget": 0.007075773010253906
+          },
+          {
+            "gradient": "dg",
+            "error": 0.014774322509765625,
+            "budget": 0.16997383666992189
+          },
+          {
+            "gradient": "dbeta",
+            "error": 0.011105775833129883,
+            "budget": 0.0678815705871582
+          },
+          {
+            "gradient": "dh0",
+            "error": 0.000263899564743042,
+            "budget": 0.01475928855895996
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.bfloat16",
+        "lengths": [
+          257
+        ],
+        "heads": 8,
+        "key_heads": 2,
+        "mode": "replace",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 0.00010204315185546875,
+            "budget": 0.077372060546875
+          },
+          {
+            "gradient": "dk",
+            "error": 0.00067138671875,
+            "budget": 11.896250234375
+          },
+          {
+            "gradient": "dv",
+            "error": 7.62939453125e-06,
+            "budget": 0.0077004296875
+          },
+          {
+            "gradient": "dg",
+            "error": 0.00048065185546875,
+            "budget": 2.06623314453125
+          },
+          {
+            "gradient": "dbeta",
+            "error": 8.96453857421875e-05,
+            "budget": 0.1021828515625
+          },
+          {
+            "gradient": "dh0",
+            "error": 4.57763671875e-05,
+            "budget": 0.733499990234375
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.bfloat16",
+        "lengths": [
+          17,
+          0,
+          19
+        ],
+        "heads": 64,
+        "key_heads": 16,
+        "mode": "both",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 0.0005050897598266602,
+            "budget": 0.005087600479125976
+          },
+          {
+            "gradient": "dk",
+            "error": 0.017932415008544922,
+            "budget": 0.12046669555664062
+          },
+          {
+            "gradient": "dv",
+            "error": 0.0012539029121398926,
+            "budget": 0.007431493530273437
+          },
+          {
+            "gradient": "dg",
+            "error": 0.012050628662109375,
+            "budget": 0.1563649041748047
+          },
+          {
+            "gradient": "dbeta",
+            "error": 0.008603870868682861,
+            "budget": 0.07287834716796875
+          },
+          {
+            "gradient": "dh0",
+            "error": 0.00027060508728027344,
+            "budget": 0.025362001190185546
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.bfloat16",
+        "lengths": [
+          129,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "heads": 64,
+        "key_heads": 16,
+        "mode": "both",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 0.0007721781730651855,
+            "budget": 0.006472335586547851
+          },
+          {
+            "gradient": "dk",
+            "error": 0.017705440521240234,
+            "budget": 0.1271309716796875
+          },
+          {
+            "gradient": "dv",
+            "error": 0.001008152961730957,
+            "budget": 0.008479104766845703
+          },
+          {
+            "gradient": "dg",
+            "error": 0.018065452575683594,
+            "budget": 0.17392204833984376
+          },
+          {
+            "gradient": "dbeta",
+            "error": 0.010340690612792969,
+            "budget": 0.06894539428710937
+          },
+          {
+            "gradient": "dh0",
+            "error": 0.00014838576316833496,
+            "budget": 0.012218461761474609
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.bfloat16",
+        "lengths": [
+          513
+        ],
+        "heads": 8,
+        "key_heads": 2,
+        "mode": "weak",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 0.007498979568481445,
+            "budget": 0.06010030342102051
+          },
+          {
+            "gradient": "dk",
+            "error": 0.11722564697265625,
+            "budget": 1.13727806640625
+          },
+          {
+            "gradient": "dv",
+            "error": 0.005879044532775879,
+            "budget": 0.049370990524291995
+          },
+          {
+            "gradient": "dg",
+            "error": 0.3078799247741699,
+            "budget": 2.6690316064453126
+          },
+          {
+            "gradient": "dbeta",
+            "error": 0.07839679718017578,
+            "budget": 0.706461416015625
+          },
+          {
+            "gradient": "dh0",
+            "error": 0.0046749114990234375,
+            "budget": 0.11806057525634765
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.bfloat16",
+        "lengths": [
+          0,
+          0
+        ],
+        "heads": 8,
+        "key_heads": 2,
+        "mode": "both",
+        "gradients": [
+          {
+            "gradient": "dh0",
+            "error": 0.0,
+            "budget": 1e-05
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.bfloat16",
+        "lengths": [
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1
+        ],
+        "heads": 8,
+        "key_heads": 2,
+        "mode": "both",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 4.76837158203125e-07,
+            "budget": 0.0015916688537597657
+          },
+          {
+            "gradient": "dk",
+            "error": 7.62939453125e-06,
+            "budget": 0.05340431762695313
+          },
+          {
+            "gradient": "dv",
+            "error": 4.76837158203125e-07,
+            "budget": 0.0022778375244140625
+          },
+          {
+            "gradient": "dg",
+            "error": 3.814697265625e-06,
+            "budget": 0.019647107849121093
+          },
+          {
+            "gradient": "dbeta",
+            "error": 4.76837158203125e-06,
+            "budget": 0.03909538818359375
+          },
+          {
+            "gradient": "dh0",
+            "error": 4.76837158203125e-07,
+            "budget": 0.009502874145507812
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.bfloat16",
+        "lengths": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "heads": 48,
+        "key_heads": 16,
+        "mode": "both",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 5.364418029785156e-07,
+            "budget": 0.0019602639770507813
+          },
+          {
+            "gradient": "dk",
+            "error": 1.52587890625e-05,
+            "budget": 0.1121926171875
+          },
+          {
+            "gradient": "dv",
+            "error": 9.5367431640625e-07,
+            "budget": 0.004361615905761718
+          },
+          {
+            "gradient": "dg",
+            "error": 9.5367431640625e-06,
+            "budget": 0.05809258056640625
+          },
+          {
+            "gradient": "dbeta",
+            "error": 8.106231689453125e-06,
+            "budget": 0.04097221923828125
+          },
+          {
+            "gradient": "dh0",
+            "error": 9.5367431640625e-07,
+            "budget": 0.01087139678955078
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.bfloat16",
+        "lengths": [
+          65
+        ],
+        "heads": 12,
+        "key_heads": 3,
+        "mode": "both",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 0.000697016716003418,
+            "budget": 0.004769073257446289
+          },
+          {
+            "gradient": "dk",
+            "error": 0.01432180404663086,
+            "budget": 0.12712715698242189
+          },
+          {
+            "gradient": "dv",
+            "error": 0.0009393692016601562,
+            "budget": 0.005824075469970703
+          },
+          {
+            "gradient": "dg",
+            "error": 0.010231971740722656,
+            "budget": 0.12179611755371093
+          },
+          {
+            "gradient": "dbeta",
+            "error": 0.007760047912597656,
+            "budget": 0.05377052856445313
+          },
+          {
+            "gradient": "dh0",
+            "error": 0.00011208653450012207,
+            "budget": 0.009629474411010742
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.bfloat16",
+        "lengths": [
+          65
+        ],
+        "heads": 24,
+        "key_heads": 6,
+        "mode": "both",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 0.0006511807441711426,
+            "budget": 0.006481812725067138
+          },
+          {
+            "gradient": "dk",
+            "error": 0.0179901123046875,
+            "budget": 0.13196037841796876
+          },
+          {
+            "gradient": "dv",
+            "error": 0.0007731765508651733,
+            "budget": 0.005835996398925781
+          },
+          {
+            "gradient": "dg",
+            "error": 0.014309167861938477,
+            "budget": 0.14100693298339845
+          },
+          {
+            "gradient": "dbeta",
+            "error": 0.007878303527832031,
+            "budget": 0.06977318359375
+          },
+          {
+            "gradient": "dh0",
+            "error": 0.00021094828844070435,
+            "budget": 0.009308086166381836
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.bfloat16",
+        "lengths": [
+          65
+        ],
+        "heads": 32,
+        "key_heads": 8,
+        "mode": "both",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 0.0007637739181518555,
+            "budget": 0.005708442459106445
+          },
+          {
+            "gradient": "dk",
+            "error": 0.0161895751953125,
+            "budget": 0.14214180541992189
+          },
+          {
+            "gradient": "dv",
+            "error": 0.0011304020881652832,
+            "budget": 0.007480607757568359
+          },
+          {
+            "gradient": "dg",
+            "error": 0.016040802001953125,
+            "budget": 0.13230560852050782
+          },
+          {
+            "gradient": "dbeta",
+            "error": 0.010268211364746094,
+            "budget": 0.07156132293701171
+          },
+          {
+            "gradient": "dh0",
+            "error": 0.00015652040019631386,
+            "budget": 0.011507020721435546
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.bfloat16",
+        "lengths": [
+          65
+        ],
+        "heads": 48,
+        "key_heads": 12,
+        "mode": "both",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 0.0006258785724639893,
+            "budget": 0.006743894348144531
+          },
+          {
+            "gradient": "dk",
+            "error": 0.024784088134765625,
+            "budget": 0.1202034814453125
+          },
+          {
+            "gradient": "dv",
+            "error": 0.001265108585357666,
+            "budget": 0.007618652114868164
+          },
+          {
+            "gradient": "dg",
+            "error": 0.015467464923858643,
+            "budget": 0.16177223754882814
+          },
+          {
+            "gradient": "dbeta",
+            "error": 0.013166666030883789,
+            "budget": 0.08875320983886718
+          },
+          {
+            "gradient": "dh0",
+            "error": 0.0001800060272216797,
+            "budget": 0.010063157806396484
+          }
+        ],
+        "passed": true
+      },
+      {
+        "cache_dtype": "torch.bfloat16",
+        "lengths": [
+          65
+        ],
+        "heads": 64,
+        "key_heads": 16,
+        "mode": "both",
+        "gradients": [
+          {
+            "gradient": "dq",
+            "error": 0.0007596611976623535,
+            "budget": 0.006211982498168945
+          },
+          {
+            "gradient": "dk",
+            "error": 0.022545814514160156,
+            "budget": 0.13654945922851564
+          },
+          {
+            "gradient": "dv",
+            "error": 0.001170337200164795,
+            "budget": 0.0073375566101074215
+          },
+          {
+            "gradient": "dg",
+            "error": 0.015355825424194336,
+            "budget": 0.21856926513671876
+          },
+          {
+            "gradient": "dbeta",
+            "error": 0.011982440948486328,
+            "budget": 0.07356690002441406
+          },
+          {
+            "gradient": "dh0",
+            "error": 0.00014954805374145508,
+            "budget": 0.010230766067504882
+          }
+        ],
+        "passed": true
+      }
+    ]
+  },
+  "validation": {
+    "backward": "152 passed in 365.06s",
+    "forward": "266 passed in 164.65s"
+  },
+  "timing_method": "Synchronized wall time. Same inputs/caches in one process; rotate dtype order, 3 warmup + 15 measured samples per mode. Forward uses preallocated buffers; backward includes allocation and enqueue. No TP communication.",
+  "timing_library": {
+    "device_library": "/mounted_home/autokernel_gdn/pto-kernels/build/gdn_mega_bwd/489f4a6f2f023f9f/kernel.so"
+  },
+  "timings": [
+    {
+      "tokens": 2048,
+      "heads": 16,
+      "key_heads": 2,
+      "samples_ms": {
+        "forward_none": [
+          0.3966307267546654,
+          0.3976607695221901,
+          0.3897310234606266,
+          0.3901510499417782,
+          0.3889109939336777,
+          0.3881910815834999,
+          0.3929799422621727,
+          0.3933408297598362,
+          0.39182091131806374,
+          0.39191078394651413,
+          0.3844797611236572,
+          0.39087096229195595,
+          0.3892509266734123,
+          0.3870408982038498,
+          0.3901999443769455
+        ],
+        "forward_float32": [
+          0.39235083386301994,
+          0.398050993680954,
+          0.3937310539186001,
+          0.3939801827073097,
+          0.39634108543395996,
+          0.3922702744603157,
+          0.39912108331918716,
+          0.3943708725273609,
+          0.39108097553253174,
+          0.40477002039551735,
+          0.3928006626665592,
+          0.39607100188732147,
+          0.391300767660141,
+          0.39512990042567253,
+          0.39253104478120804
+        ],
+        "forward_float16": [
+          0.43342122808098793,
+          0.4256106913089752,
+          0.42291125282645226,
+          0.42608100920915604,
+          0.42486097663640976,
+          0.42111100628972054,
+          0.4257112741470337,
+          0.42141973972320557,
+          0.4257708787918091,
+          0.42765121906995773,
+          0.4237811081111431,
+          0.4228297621011734,
+          0.4267510958015919,
+          0.42623095214366913,
+          0.4302710294723511
+        ],
+        "forward_bfloat16": [
+          0.4299702122807503,
+          0.425850972533226,
+          0.42427005246281624,
+          0.42466074228286743,
+          0.42652105912566185,
+          0.42297132313251495,
+          0.4236609674990177,
+          0.42202090844511986,
+          0.4283408634364605,
+          0.4239007830619812,
+          0.42655086144804955,
+          0.42921118438243866,
+          0.4243808798491955,
+          0.4254709929227829,
+          0.4200506955385208
+        ],
+        "backward_float32": [
+          1.6434229910373688,
+          1.652263104915619,
+          1.7041731625795364,
+          1.6420427709817886,
+          1.6391640529036522,
+          1.6502132639288902,
+          1.6447328962385654,
+          1.6544731333851814,
+          1.6320939175784588,
+          1.6237227246165276,
+          1.6332636587321758,
+          1.6426830552518368,
+          1.6411240212619305,
+          1.6446532681584358,
+          1.6340543515980244
+        ],
+        "backward_float16": [
+          1.6758041456341743,
+          1.6830731183290482,
+          1.6410541720688343,
+          1.6380231827497482,
+          1.65982311591506,
+          1.6661337576806545,
+          1.6413433477282524,
+          1.6365540213882923,
+          1.6472525894641876,
+          1.6392329707741737,
+          1.6381433233618736,
+          1.6433126293122768,
+          1.6584228724241257,
+          1.6413629055023193,
+          1.637892797589302
+        ],
+        "backward_bfloat16": [
+          1.6899430193006992,
+          1.6339737921953201,
+          1.649503130465746,
+          1.698304433375597,
+          1.647863071411848,
+          1.6792230308055878,
+          1.640962902456522,
+          1.6441228799521923,
+          1.634703017771244,
+          1.6522337682545185,
+          1.6233930364251137,
+          1.635492779314518,
+          1.6378732398152351,
+          1.6565541736781597,
+          1.6405628994107246
+        ]
+      },
+      "medians_ms": {
+        "forward_none": 0.3901999443769455,
+        "forward_float32": 0.3939801827073097,
+        "forward_float16": 0.4257112741470337,
+        "forward_bfloat16": 0.42466074228286743,
+        "backward_float32": 1.6426830552518368,
+        "backward_float16": 1.6413629055023193,
+        "backward_bfloat16": 1.6441228799521923
+      },
+      "inverse_bytes": {
+        "float32": 16777216,
+        "float16": 8388608,
+        "bfloat16": 8388608
+      }
+    },
+    {
+      "tokens": 8192,
+      "heads": 16,
+      "key_heads": 2,
+      "samples_ms": {
+        "forward_none": [
+          1.339942216873169,
+          1.3389629311859608,
+          1.3221632689237595,
+          1.3218722306191921,
+          1.3204719871282578,
+          1.3087932020425797,
+          1.3133920729160309,
+          1.3141618110239506,
+          1.3243933208286762,
+          1.3174829073250294,
+          1.3219919055700302,
+          1.3357028365135193,
+          1.3301130384206772,
+          1.3192719779908657,
+          1.3162228278815746
+        ],
+        "forward_float32": [
+          1.3372632674872875,
+          1.3305624015629292,
+          1.330672763288021,
+          1.333562657237053,
+          1.3329330831766129,
+          1.3326932676136494,
+          1.3270732015371323,
+          1.347293145954609,
+          1.3345922343432903,
+          1.3343431055545807,
+          1.3293330557644367,
+          1.3450919650495052,
+          1.3377130962908268,
+          1.3399231247603893,
+          1.3331021182239056
+        ],
+        "forward_float16": [
+          1.4399229548871517,
+          1.4507127925753593,
+          1.4470131136476994,
+          1.457293052226305,
+          1.4380626380443573,
+          1.4458918012678623,
+          1.4468031004071236,
+          1.4405730180442333,
+          1.435933168977499,
+          1.453183125704527,
+          1.4447933062911034,
+          1.4499332755804062,
+          1.4395220205187798,
+          1.4482829719781876,
+          1.445892732590437
+        ],
+        "forward_bfloat16": [
+          1.4375033788383007,
+          1.4530029147863388,
+          1.4399420469999313,
+          1.4428431168198586,
+          1.443113200366497,
+          1.453302800655365,
+          1.4452729374170303,
+          1.4461930841207504,
+          1.4468231238424778,
+          1.4445120468735695,
+          1.4416626654565334,
+          1.450772862881422,
+          1.445563044399023,
+          1.4425432309508324,
+          1.445252913981676
+        ],
+        "backward_float32": [
+          4.957409109920263,
+          4.950280301272869,
+          4.952909890562296,
+          4.963649902492762,
+          4.937299992889166,
+          4.967530257999897,
+          4.933179821819067,
+          4.943170119076967,
+          4.957640077918768,
+          4.95125912129879,
+          4.973329603672028,
+          4.959000274538994,
+          4.963200073689222,
+          4.975099582225084,
+          4.954810254275799
+        ],
+        "backward_float16": [
+          4.981849808245897,
+          4.962740000337362,
+          4.993839655071497,
+          4.976259078830481,
+          4.9865697510540485,
+          4.984470084309578,
+          4.975669085979462,
+          4.983230028301477,
+          4.977640230208635,
+          4.998889751732349,
+          4.955470096319914,
+          4.932910203933716,
+          4.98178880661726,
+          4.975869785994291,
+          5.003069993108511
+        ],
+        "backward_bfloat16": [
+          4.981509875506163,
+          4.9938298761844635,
+          4.9850596114993095,
+          4.989190027117729,
+          4.972120281308889,
+          4.956489894539118,
+          4.951530136168003,
+          4.945490043610334,
+          4.965350031852722,
+          4.9868798814713955,
+          4.979009740054607,
+          4.975010175257921,
+          4.970620386302471,
+          4.9861399456858635,
+          4.994759801775217
+        ]
+      },
+      "medians_ms": {
+        "forward_none": 1.3218722306191921,
+        "forward_float32": 1.333562657237053,
+        "forward_float16": 1.445892732590437,
+        "forward_bfloat16": 1.445252913981676,
+        "backward_float32": 4.957409109920263,
+        "backward_float16": 4.98178880661726,
+        "backward_bfloat16": 4.979009740054607
+      },
+      "inverse_bytes": {
+        "float32": 67108864,
+        "float16": 33554432,
+        "bfloat16": 33554432
+      }
+    },
+    {
+      "tokens": 8192,
+      "heads": 64,
+      "key_heads": 16,
+      "samples_ms": {
+        "forward_none": [
+          4.067617934197187,
+          4.088087938725948,
+          4.083097912371159,
+          4.099557641893625,
+          4.092528019100428,
+          4.08328790217638,
+          4.079638049006462,
+          4.0865992195904255,
+          4.076508339494467,
+          4.082818049937487,
+          4.07812837511301,
+          4.077327903360128,
+          4.079167731106281,
+          4.082298371940851,
+          4.093758296221495
+        ],
+        "forward_float32": [
+          4.10242797806859,
+          4.1054291650652885,
+          4.105158150196075,
+          4.095728043466806,
+          4.093097988516092,
+          4.116817843168974,
+          4.098779056221247,
+          4.098608158528805,
+          4.105358850210905,
+          4.098657984286547,
+          4.119598306715488,
+          4.079977981746197,
+          4.097638186067343,
+          4.107977729290724,
+          4.089327994734049
+        ],
+        "forward_float16": [
+          4.358788952231407,
+          4.367158282548189,
+          4.362139385193586,
+          4.372359253466129,
+          4.371569026261568,
+          4.37505915760994,
+          4.354559350758791,
+          4.370578099042177,
+          4.35987813398242,
+          4.357418976724148,
+          4.353018011897802,
+          4.376589320600033,
+          4.370588809251785,
+          4.372069146484137,
+          4.353658761829138
+        ],
+        "forward_bfloat16": [
+          4.356097895652056,
+          4.367198795080185,
+          4.358069039881229,
+          4.37006913125515,
+          4.36535757035017,
+          4.361349157989025,
+          4.3705180287361145,
+          4.394648130983114,
+          4.365409258753061,
+          4.355159122496843,
+          4.365139175206423,
+          4.356849007308483,
+          4.364419262856245,
+          4.368137568235397,
+          4.368719179183245
+        ],
+        "backward_float32": [
+          16.4206032641232,
+          16.387053299695253,
+          16.404302325099707,
+          16.41051284968853,
+          16.3658419623971,
+          16.398112755268812,
+          16.41721185296774,
+          16.388962976634502,
+          16.429493203759193,
+          16.43721340224147,
+          16.41518296673894,
+          16.443061642348766,
+          16.3766429759562,
+          16.431102994829416,
+          16.402103006839752
+        ],
+        "backward_float16": [
+          16.451983246952295,
+          16.461173072457314,
+          16.449503134936094,
+          16.44421322271228,
+          16.49252325296402,
+          16.450693365186453,
+          16.514373011887074,
+          16.459763050079346,
+          16.45888201892376,
+          16.462643165141344,
+          16.470063012093306,
+          16.51170291006565,
+          16.516652889549732,
+          16.491052694618702,
+          16.47260319441557
+        ],
+        "backward_bfloat16": [
+          16.59018313512206,
+          16.512481961399317,
+          16.44022297114134,
+          16.445122193545103,
+          16.48222329095006,
+          16.44652197137475,
+          16.472353134304285,
+          16.477492172271013,
+          16.460523009300232,
+          16.449651680886745,
+          16.47644303739071,
+          16.47722302004695,
+          16.46231207996607,
+          16.493532806634903,
+          16.490621957927942
+        ]
+      },
+      "medians_ms": {
+        "forward_none": 4.082818049937487,
+        "forward_float32": 4.098779056221247,
+        "forward_float16": 4.367158282548189,
+        "forward_bfloat16": 4.36535757035017,
+        "backward_float32": 16.41051284968853,
+        "backward_float16": 16.462643165141344,
+        "backward_bfloat16": 16.47644303739071
+      },
+      "inverse_bytes": {
+        "float32": 268435456,
+        "float16": 134217728,
+        "bfloat16": 134217728
+      }
+    },
+    {
+      "tokens": 32768,
+      "heads": 64,
+      "key_heads": 16,
+      "samples_ms": {
+        "forward_none": [
+          16.124411951750517,
+          16.147431917488575,
+          16.114392317831516,
+          16.06788206845522,
+          16.105172224342823,
+          16.142982058227062,
+          16.164683271199465,
+          16.141971573233604,
+          16.06518169865012,
+          16.151382122188807,
+          16.14361209794879,
+          16.171962022781372,
+          16.13290188834071,
+          16.076802276074886,
+          16.126612201333046
+        ],
+        "forward_float32": [
+          16.19667187333107,
+          16.24401193112135,
+          16.201843041926622,
+          16.183511819690466,
+          16.176731791347265,
+          16.240471974015236,
+          16.191752161830664,
+          16.19430212303996,
+          16.18948206305504,
+          16.24409295618534,
+          16.173951793462038,
+          16.22360199689865,
+          16.218092758208513,
+          16.215831972658634,
+          16.172821633517742
+        ],
+        "forward_float16": [
+          17.226374242454767,
+          17.27112429216504,
+          17.190183978527784,
+          17.206053715199232,
+          17.233435064554214,
+          17.22037512809038,
+          17.224663868546486,
+          17.18644518405199,
+          17.2338942065835,
+          17.23933406174183,
+          17.223494593054056,
+          17.236994113773108,
+          17.224463634192944,
+          17.268055118620396,
+          17.20796385779977
+        ],
+        "forward_bfloat16": [
+          17.2429452650249,
+          17.220255453139544,
+          17.215194180607796,
+          17.23278407007456,
+          17.23049394786358,
+          17.227073665708303,
+          17.22294418141246,
+          17.222964204847813,
+          17.22376374527812,
+          17.25876424461603,
+          17.240463756024837,
+          17.29049487039447,
+          17.217894084751606,
+          17.221733927726746,
+          17.192745115607977
+        ],
+        "backward_float32": [
+          64.0186769887805,
+          64.03102679178119,
+          64.05121693387628,
+          63.97293694317341,
+          63.99682769551873,
+          64.02437807992101,
+          64.05535759404302,
+          64.11727797240019,
+          64.04560711234808,
+          64.38879808411002,
+          64.08339785411954,
+          64.12850692868233,
+          64.05996717512608,
+          64.01116820052266,
+          64.02945797890425
+        ],
+        "backward_float16": [
+          64.18512715026736,
+          64.19106712564826,
+          64.29207790642977,
+          64.24823822453618,
+          64.25354769453406,
+          64.2562466673553,
+          64.24420699477196,
+          64.25840826705098,
+          64.34092810377479,
+          64.24268800765276,
+          64.2349780537188,
+          64.12328779697418,
+          64.2143776640296,
+          64.25887811928988,
+          64.1789068467915
+        ],
+        "backward_bfloat16": [
+          64.20117802917957,
+          64.10825811326504,
+          64.2578680999577,
+          64.26663789898157,
+          64.24401700496674,
+          64.16572723537683,
+          64.18486777693033,
+          64.09258674830198,
+          64.29422786459327,
+          64.19385690242052,
+          64.1526966355741,
+          64.29231818765402,
+          64.21851692721248,
+          64.20892709866166,
+          64.2791367135942
+        ]
+      },
+      "medians_ms": {
+        "forward_none": 16.13290188834071,
+        "forward_float32": 16.19667187333107,
+        "forward_float16": 17.224663868546486,
+        "forward_bfloat16": 17.22376374527812,
+        "backward_float32": 64.04560711234808,
+        "backward_float16": 64.24420699477196,
+        "backward_bfloat16": 64.20892709866166
+      },
+      "inverse_bytes": {
+        "float32": 1073741824,
+        "float16": 536870912,
+        "bfloat16": 536870912
+      }
+    }
+  ],
+  "benchmark_script": "import json, statistics, time\nimport torch, torch_npu\nfrom csrc.kernel.gdn_mega_bwd.backward import backward\nfrom csrc.kernel.gdn_mega_bwd.binding import build\nfrom test_gdn_mega import _prepare_gdn_mega, pto_gdn_mega\n\ntorch.npu.set_device(0)\ntorch.npu.config.allow_internal_format = False\nnative = build()\nprint(json.dumps({'device_library': native.device_library._name}), flush=True)\n\ndef measure(length, heads, key_heads):\n    torch.manual_seed(42)\n    q = torch.randn(1,length,key_heads,128,device='npu',dtype=torch.float16)*.1\n    k = torch.nn.functional.normalize(torch.randn_like(q), dim=-1)\n    v = torch.randn(1,length,heads,128,device='npu',dtype=torch.float16)\n    g = -torch.rand(1,length,heads,device='npu')*.1\n    beta, do = torch.rand_like(g).half(), torch.randn_like(v)\n    cu = torch.tensor([0,length],device='npu',dtype=torch.int32)\n    launch = _prepare_gdn_mega(q,k,v,g,beta,cu)\n    gates = tuple(launch[x] for x in ('g_t','g_sum','beta_t'))\n    caches = {str(dt).split('.')[-1]: torch.empty(length//128,heads,128,128,device='npu',dtype=dt)\n              for dt in (torch.float32, torch.float16, torch.bfloat16)}\n    pto_gdn_mega(**launch)\n    reference = launch['out'].clone(), launch['final_state'].clone()\n    for cache in caches.values():\n        pto_gdn_mega(**launch,inverse_cache=cache)\n        for name, expected in zip(('out','final_state'),reference):\n            torch.testing.assert_close(launch[name],expected,atol=0,rtol=0)\n    for name in ('float16','bfloat16'):\n        torch.testing.assert_close(caches[name],caches['float32'].to(caches[name].dtype),atol=0,rtol=0)\n    torch.npu.synchronize()\n    samples = {}\n    for direction in ('forward','backward'):\n        modes = list(caches.items()) + ([('none',None)] if direction=='forward' else [])\n        for trial in range(18):\n            rotated = modes[trial%len(modes):] + modes[:trial%len(modes)]\n            for name, cache in rotated:\n                start = time.perf_counter()\n                if direction=='forward': pto_gdn_mega(**launch,inverse_cache=cache)\n                else: backward(q,k,v,g,beta,do,inverse_cache=cache,gate_cache=gates)\n                torch.npu.synchronize()\n                if trial>=3: samples.setdefault(direction+'_'+name,[]).append((time.perf_counter()-start)*1000)\n    print(json.dumps(dict(tokens=length,heads=heads,key_heads=key_heads,samples_ms=samples,\n        medians_ms={k:statistics.median(v) for k,v in samples.items()},\n        inverse_bytes={k:v.numel()*v.element_size() for k,v in caches.items()})),flush=True)\n\nfor shape in ((2048,16,2),(8192,16,2),(8192,64,16),(32768,64,16)):\n    measure(*shape)\n",
+  "source_sha256": {
+    "csrc/kernel/gdn_mega/common.h": "d240cbfd074d0f2aca2ad18cfa20f6916fd4fac91128cf7af1718e9429362f2b",
+    "csrc/kernel/gdn_mega/fused_pipeline.h": "8ba48ca3f3d434af1252c11c9972f8ebc1eb52046e4775b217b9d2f2da583976",
+    "csrc/kernel/gdn_mega/gate_scan.h": "fa0ee27c77c9031fdd211a1aac82e8ad77e975442aa6cd580f3d541a0d3cca77",
+    "csrc/kernel/gdn_mega/inverse.h": "c5f6ec5892526b0bfda119769d9de4b5783c801f8de2a186b67b906b5a46ddb9",
+    "csrc/kernel/gdn_mega/inverse_cache.h": "c35bc039084975282471b29489c43495de68320db525d3d7c51d648deac72c3b",
+    "csrc/kernel/gdn_mega/recurrence_pipeline.h": "e2046c0adca98b12bc5e3f57475bc6ecc6fa24c9ce6acc41c5ce57cb9a229cf7",
+    "csrc/kernel/gdn_mega/shared_grams.h": "b215866b7da964b0952a5a83087f1e94a0debcbfc8fa614354e6d276211a9d24",
+    "csrc/kernel/gdn_mega/kernel_gdn_mega.cpp": "a737385a735b3dec4dea591dc8759df0cbdefea2723b73f0f7d128d234bfe293",
+    "csrc/kernel/gdn_mega_bwd/blocked_inverse.h": "1445991e38a1f9ffe24affb2599e227ac83dc005fcf30c069d62a1b976e86cde",
+    "csrc/kernel/gdn_mega_bwd/device_ops.h": "8240d61788cd270aa7c930a3dd78ff8bdbbb5efc6776fed7cf623db8162d6efe",
+    "csrc/kernel/gdn_mega_bwd/epilogues.h": "466c4019fbf4359a9fc910178191844f3bb5b35c91a74c80588a9e6c47ad90ca",
+    "csrc/kernel/gdn_mega_bwd/layout.h": "82396b3600ec5485ea4aa58cd16a9151eab1619a9cb3263f058eeafaf9d55be8",
+    "csrc/kernel/gdn_mega_bwd/pipeline.h": "fc618be4860ad234b608b7f307873ce237356fdd6f3e15549c57e8cb7e84830e",
+    "csrc/kernel/gdn_mega_bwd/primitives.h": "0694a4c37de9dae93d73a0beccea1f51ccbbfe85849bdb8baa9474bbfea15b0a",
+    "csrc/kernel/gdn_mega_bwd/resident_cube.h": "15cf2a92939303554eb34cc6e677157b6982dd4a06345040d7748bd67168c33c",
+    "csrc/kernel/gdn_mega_bwd/kernel.cpp": "9bbd8559d84b4206b353485c0d268bac3825b1a27790eca5b70e9df39b228552",
+    "csrc/kernel/gdn_mega_bwd/launch.cpp": "98c80f77c566d14ef35570b7655ce0f9932f208b1e295a026b8cbdc3c15d4152",
+    "csrc/kernel/gdn_mega_bwd/backward.py": "ee613594865dde3aebd518a1077b45a9ac0cf93ff4f7c87620f51cb602a54071",
+    "csrc/kernel/gdn_mega_bwd/binding.py": "5a2dec6196e2847d19ee1f8801ee31600e7f72c0abd500d9d6ffe91edc7ab9dd",
+    "csrc/host/torch_gdn_mega.h": "c59a3b2bf10c4655c1f5204707182e08ecd0e71b353ed1d06ba3e895bac84003",
+    "tests/test_gdn_mega_bwd.py": "026036ffddc1cdfae700586b9e15ab4b6b63ce1d17ea868301b6186bcfbe84fe",
+    "tests/check_gdn_inverse_precision.py": "d05d442916c511183fa7ab65d9e17df63d128d708e899c89e48ec9fbc2660772"
+  }
+}

@@ -1,0 +1,5764 @@
+{
+  "name": "gdn_mega_bwd_cached_v7",
+  "date": "2026-11-04",
+  "device": "Ascend910B2",
+  "saved_values": [
+    "inverse_factors",
+    "gate_prefix_hi",
+    "gate_prefix_lo",
+    "beta"
+  ],
+  "timing": "Synchronized wall time. Backward consumes buffers from forward and includes allocation/enqueue; forward execution is excluded. Forward denominator is forward_cache_ms with cache writes and preallocated buffers.",
+  "validation": "60 measured cached configurations, five forward and backward samples per case; 20 unsupported cache producers are N/A. All supported benchmark cases also check cached and uncached forward outputs are bitwise equal.",
+  "notes": [
+    "No uncached backward times are substituted for unsupported forward shapes.",
+    "TP divides both head counts per device; communication is excluded.",
+    "Kernel code unchanged from the 113-test-passing v7 runtime."
+  ],
+  "source_sha256": {
+    "csrc/host/pybind11.cpp": "8ac3f397e5f4fe17b534deb1b743ed9e3bbfe9386a86942ebc63d75770371372",
+    "csrc/host/torch_gdn_mega.h": "c3be5d22db343abaece1c87c1bfabf99ed33f87b5d28ed8f83c42a7213d15db0",
+    "csrc/kernel/gdn_mega/common.h": "d240cbfd074d0f2aca2ad18cfa20f6916fd4fac91128cf7af1718e9429362f2b",
+    "csrc/kernel/gdn_mega/fused_pipeline.h": "27b17e41ef76a66d7a517768873913d1d79088f6cfd1457fbb12447c2d011695",
+    "csrc/kernel/gdn_mega/gate_scan.h": "fa0ee27c77c9031fdd211a1aac82e8ad77e975442aa6cd580f3d541a0d3cca77",
+    "csrc/kernel/gdn_mega/inverse.h": "c5f6ec5892526b0bfda119769d9de4b5783c801f8de2a186b67b906b5a46ddb9",
+    "csrc/kernel/gdn_mega/kernel_gdn_mega.cpp": "e283438cc44e298129b14e8265fd963de57e16cd86784be6e9a3936e961c17d6",
+    "csrc/kernel/gdn_mega/recurrence_pipeline.h": "10098c75c1725297fe6936ae095d26337dac622cc0775580684182adfaf9b6e2",
+    "csrc/kernel/gdn_mega/shared_grams.h": "b215866b7da964b0952a5a83087f1e94a0debcbfc8fa614354e6d276211a9d24",
+    "csrc/kernel/gdn_mega_bwd/backward.py": "0fe8e1d6831794976e0102965e1eba384e39978ae7c37123661da8e7eadc228b",
+    "csrc/kernel/gdn_mega_bwd/binding.py": "f453d02a0b463f945f58f0f2481160aac06677a9ed2cb50edc1c8d2f62fb677a",
+    "csrc/kernel/gdn_mega_bwd/blocked_inverse.h": "3826fb698ad1d2f32f33ec01601b608393e871e8433fdf128ad2b7a56792bbac",
+    "csrc/kernel/gdn_mega_bwd/device_ops.h": "f60cbe08a58a497519c28b6a5e5f044c6f466ee2e6cf0bd4dfad650145e6e480",
+    "csrc/kernel/gdn_mega_bwd/kernel.cpp": "814c7aeada1186930ddc83a95037d31068577aa730993b6833eac7256639b4c9",
+    "csrc/kernel/gdn_mega_bwd/launch.cpp": "c50e5589730c08ff9397b97d9eb7297d5870802788d7539fa21348502f2a50d9",
+    "csrc/kernel/gdn_mega_bwd/layout.h": "331ab68cb0c347df9a132897808eb52fe1e3d78e5dc65b94ae6d809dd3067d9d",
+    "csrc/kernel/gdn_mega_bwd/pipeline.h": "1865e14244e860f67e585b0bcb76e7ea18abbedc79e0b1f293fe0a2e8c6b85fb",
+    "csrc/kernel/gdn_mega_bwd/primitives.h": "09c5684ea9dd779712be4fab292ace061e74c2c5a0c002a4d56460b52d8861b2",
+    "tests/benchmark_gdn_mega_bwd.py": "706207a8c74f3c979e324e6c8653af0375df4c4b802d44384708990a78bedf8a",
+    "tests/benchmark_gdn_mega_bwd_sweep.py": "82b2af0d08af565e590a7442f7a012e98b78203f2a175603ad9bb257a1a8acb8",
+    "tests/gdn_mega_bwd_reference.py": "ca176acb78ce36c1366da70a881d782b6b2219c81ee2706bbc7139f6381500b3",
+    "tests/test_gdn_mega_bwd.py": "093b84966b853455c5c091f49a1ccd48ba3c226a2b9815fc37296d8446fad6b2"
+  },
+  "results": [
+    {
+      "tokens": 256,
+      "heads": 64,
+      "key_heads": 16,
+      "median_ms": 1.1405418626964092,
+      "enqueue_median_ms": 0.3261808305978775,
+      "samples_ms": [
+        1.1918116360902786,
+        1.1405418626964092,
+        1.1396431364119053,
+        1.1363718658685684,
+        1.1469321325421333
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.24702027440071106,
+          0.24539092555642128,
+          0.24335971102118492,
+          0.23974990472197533,
+          0.23829098790884018
+        ],
+        "forward_cache_ms": [
+          0.2619214355945587,
+          0.23840973153710365,
+          0.24790083989501,
+          0.23967120796442032,
+          0.24465005844831467
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 186.2589955329895,
+          "min_us": 185.47600507736206,
+          "max_us": 192.15699434280396,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            192.15699434280396,
+            186.12500429153442,
+            186.80800199508667,
+            185.47600507736206,
+            186.2589955329895
+          ]
+        },
+        "cache": {
+          "median_us": 186.83300018310547,
+          "min_us": 185.7890009880066,
+          "max_us": 187.54700422286987,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            185.7890009880066,
+            187.54700422286987,
+            186.95299625396729,
+            186.83300018310547,
+            186.11899614334106
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 0.24335971102118492,
+        "forward_cache_ms": 0.24465005844831467
+      },
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 0.24465005844831467,
+      "bwd_fwd_ratio": 4.661931699220758,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 1024,
+      "heads": 64,
+      "key_heads": 16,
+      "median_ms": 3.0970661900937557,
+      "enqueue_median_ms": 0.3341999836266041,
+      "samples_ms": [
+        3.112667240202427,
+        3.0988259240984917,
+        3.0970661900937557,
+        3.0876868404448032,
+        3.086456097662449
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.5993610247969627,
+          0.6156321614980698,
+          0.6038420833647251,
+          0.5992911756038666,
+          0.6063710898160934
+        ],
+        "forward_cache_ms": [
+          0.6107408553361893,
+          0.6126607768237591,
+          0.6046108901500702,
+          0.6152507849037647,
+          0.6149318069219589
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 532.6700210571289,
+          "min_us": 531.9920063018799,
+          "max_us": 536.1680030822754,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            536.1680030822754,
+            533.4370136260986,
+            532.6700210571289,
+            531.9920063018799,
+            532.0859909057617
+          ]
+        },
+        "cache": {
+          "median_us": 539.5430088043213,
+          "min_us": 539.1129970550537,
+          "max_us": 539.9360179901123,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            539.1129970550537,
+            539.9360179901123,
+            539.3099784851074,
+            539.5430088043213,
+            539.8900032043457
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 0.6038420833647251,
+        "forward_cache_ms": 0.6126607768237591
+      },
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 0.6126607768237591,
+      "bwd_fwd_ratio": 5.0551076668397075,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 4096,
+      "heads": 64,
+      "key_heads": 16,
+      "median_ms": 10.652991943061352,
+      "enqueue_median_ms": 0.3359098918735981,
+      "samples_ms": [
+        10.678710881620646,
+        10.613392107188702,
+        10.652991943061352,
+        10.6248720549047,
+        10.686112102121115
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          2.1270643919706345,
+          2.1155052818357944,
+          2.123443875461817,
+          2.121634781360626,
+          2.1256543695926666
+        ],
+        "forward_cache_ms": [
+          2.1422551944851875,
+          2.131763845682144,
+          2.148604951798916,
+          2.1485239267349243,
+          2.1408540196716785
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 2035.5789184570312,
+          "min_us": 2033.8970184326172,
+          "max_us": 2039.1700744628906,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            2039.1700744628906,
+            2035.5789184570312,
+            2034.14306640625,
+            2035.8129501342773,
+            2033.8970184326172
+          ]
+        },
+        "cache": {
+          "median_us": 2070.659065246582,
+          "min_us": 2069.997978210449,
+          "max_us": 2071.3550567626953,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            2070.008087158203,
+            2069.997978210449,
+            2071.3550567626953,
+            2071.2520599365234,
+            2070.659065246582
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 2.123443875461817,
+        "forward_cache_ms": 2.1422551944851875
+      },
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 2.1422551944851875,
+      "bwd_fwd_ratio": 4.972793143639177,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 16384,
+      "heads": 64,
+      "key_heads": 16,
+      "median_ms": 39.99811224639416,
+      "enqueue_median_ms": 0.3496697172522545,
+      "samples_ms": [
+        39.98323203995824,
+        40.02754203975201,
+        39.9639718234539,
+        40.014130994677544,
+        39.99811224639416
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          8.113996125757694,
+          8.073077071458101,
+          8.102655876427889,
+          8.09761742129922,
+          8.080926723778248
+        ],
+        "forward_cache_ms": [
+          8.149166591465473,
+          8.132717106491327,
+          8.126337081193924,
+          8.130516856908798,
+          8.144166320562363
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 8014.859771728516,
+          "min_us": 8007.862854003906,
+          "max_us": 8017.1966552734375,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            8017.1966552734375,
+            8015.740966796875,
+            8007.862854003906,
+            8007.893371582031,
+            8014.859771728516
+          ]
+        },
+        "cache": {
+          "median_us": 8110.186767578125,
+          "min_us": 8105.886077880859,
+          "max_us": 8111.135101318359,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            8110.186767578125,
+            8105.886077880859,
+            8110.742950439453,
+            8111.135101318359,
+            8108.625030517578
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 8.09761742129922,
+        "forward_cache_ms": 8.132717106491327
+      },
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 8.132717106491327,
+      "bwd_fwd_ratio": 4.918173314361161,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 32768,
+      "heads": 64,
+      "key_heads": 16,
+      "median_ms": 81.66801603510976,
+      "enqueue_median_ms": 0.35797106102108955,
+      "samples_ms": [
+        81.66801603510976,
+        81.60358713939786,
+        81.69341692700982,
+        81.6840473562479,
+        81.62949699908495
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          16.545324120670557,
+          16.490083187818527,
+          16.5332043543458,
+          16.48780284449458,
+          16.494903713464737
+        ],
+        "forward_cache_ms": [
+          16.632653772830963,
+          16.619373578578234,
+          16.648823861032724,
+          16.563724260777235,
+          16.630584374070168
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 16456.588745117188,
+          "min_us": 16455.9814453125,
+          "max_us": 16464.027404785156,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            16464.027404785156,
+            16455.9814453125,
+            16460.006713867188,
+            16456.468200683594,
+            16456.588745117188
+          ]
+        },
+        "cache": {
+          "median_us": 16573.968505859375,
+          "min_us": 16566.86553955078,
+          "max_us": 16576.78985595703,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            16576.78985595703,
+            16573.968505859375,
+            16570.297241210938,
+            16566.86553955078,
+            16574.15771484375
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 16.494903713464737,
+        "forward_cache_ms": 16.630584374070168
+      },
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 16.630584374070168,
+      "bwd_fwd_ratio": 4.9107123476937895,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 256,
+      "heads": 32,
+      "key_heads": 8,
+      "median_ms": 0.8092322386801243,
+      "enqueue_median_ms": 0.3203810192644596,
+      "samples_ms": [
+        0.8754907175898552,
+        0.8267420344054699,
+        0.8069518953561783,
+        0.8055209182202816,
+        0.8092322386801243
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.19015977159142494,
+          0.1902710646390915,
+          0.1888102851808071,
+          0.1924498938024044,
+          0.19051088020205498
+        ],
+        "forward_cache_ms": [
+          0.19945111125707626,
+          0.1889299601316452,
+          0.19288063049316406,
+          0.18986081704497337,
+          0.18782960250973701
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 129.1990041732788,
+          "min_us": 129.06399965286255,
+          "max_us": 135.94599962234497,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            135.94599962234497,
+            130.0719976425171,
+            129.18299436569214,
+            129.1990041732788,
+            129.06399965286255
+          ]
+        },
+        "cache": {
+          "median_us": 130.06099462509155,
+          "min_us": 129.88899946212769,
+          "max_us": 131.25699758529663,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            130.06099462509155,
+            131.25699758529663,
+            129.88899946212769,
+            130.0819993019104,
+            129.91299629211426
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 0.1902710646390915,
+        "forward_cache_ms": 0.18986081704497337
+      },
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 0.18986081704497337,
+      "bwd_fwd_ratio": 4.262239314436517,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 1024,
+      "heads": 32,
+      "key_heads": 8,
+      "median_ms": 1.7744340002536774,
+      "enqueue_median_ms": 0.3355806693434715,
+      "samples_ms": [
+        1.7786640673875809,
+        1.7744340002536774,
+        1.7607929185032845,
+        1.7703738994896412,
+        1.7754929140210152
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.4217210225760937,
+          0.41087111458182335,
+          0.41193095967173576,
+          0.4163309931755066,
+          0.4157307557761669
+        ],
+        "forward_cache_ms": [
+          0.41717104613780975,
+          0.41631096974015236,
+          0.41768094524741173,
+          0.4190197214484215,
+          0.4299897700548172
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 348.2800006866455,
+          "min_us": 347.87700176239014,
+          "max_us": 350.6809949874878,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            350.6809949874878,
+            348.33199977874756,
+            347.87700176239014,
+            348.2800006866455,
+            348.1149911880493
+          ]
+        },
+        "cache": {
+          "median_us": 350.93400478363037,
+          "min_us": 349.7080087661743,
+          "max_us": 351.419997215271,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            351.419997215271,
+            351.1270046234131,
+            349.7080087661743,
+            350.93400478363037,
+            349.79400634765625
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 0.4157307557761669,
+        "forward_cache_ms": 0.41768094524741173
+      },
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 0.41768094524741173,
+      "bwd_fwd_ratio": 4.248300097105455,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 4096,
+      "heads": 32,
+      "key_heads": 8,
+      "median_ms": 5.968121811747551,
+      "enqueue_median_ms": 0.3237207420170307,
+      "samples_ms": [
+        5.997362080961466,
+        5.943101830780506,
+        5.97494188696146,
+        5.968121811747551,
+        5.9669120237231255
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          1.4051729813218117,
+          1.3897423632442951,
+          1.4019631780683994,
+          1.3989428989589214,
+          1.4101429842412472
+        ],
+        "forward_cache_ms": [
+          1.4281030744314194,
+          1.4115520752966404,
+          1.4137029647827148,
+          1.4276928268373013,
+          1.423122826963663
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 1322.5310325622559,
+          "min_us": 1321.737003326416,
+          "max_us": 1324.680995941162,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            1324.680995941162,
+            1322.566032409668,
+            1322.0979690551758,
+            1321.737003326416,
+            1322.5310325622559
+          ]
+        },
+        "cache": {
+          "median_us": 1350.096035003662,
+          "min_us": 1348.878002166748,
+          "max_us": 1350.6699562072754,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            1348.878002166748,
+            1350.6699562072754,
+            1349.0449905395508,
+            1350.33597946167,
+            1350.096035003662
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 1.4019631780683994,
+        "forward_cache_ms": 1.423122826963663
+      },
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 1.423122826963663,
+      "bwd_fwd_ratio": 4.193680052536981,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 16384,
+      "heads": 32,
+      "key_heads": 8,
+      "median_ms": 22.137784864753485,
+      "enqueue_median_ms": 0.33847102895379066,
+      "samples_ms": [
+        22.14010525494814,
+        22.14592508971691,
+        22.137784864753485,
+        22.13713526725769,
+        22.137264721095562
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          5.469170864671469,
+          5.457990802824497,
+          5.47074107453227,
+          5.4620411247015,
+          5.469682160764933
+        ],
+        "forward_cache_ms": [
+          5.474611185491085,
+          5.485960748046637,
+          5.47797093167901,
+          5.474040750414133,
+          5.470991134643555
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 5384.175872802734,
+          "min_us": 5383.460998535156,
+          "max_us": 5391.11213684082,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            5391.11213684082,
+            5383.460998535156,
+            5384.246826171875,
+            5383.953857421875,
+            5384.175872802734
+          ]
+        },
+        "cache": {
+          "median_us": 5465.489959716797,
+          "min_us": 5462.596130371094,
+          "max_us": 5466.019821166992,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            5463.74397277832,
+            5465.856170654297,
+            5462.596130371094,
+            5466.019821166992,
+            5465.489959716797
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 5.469170864671469,
+        "forward_cache_ms": 5.474611185491085
+      },
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 5.474611185491085,
+      "bwd_fwd_ratio": 4.043718195627015,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 32768,
+      "heads": 32,
+      "key_heads": 8,
+      "median_ms": 42.83510707318783,
+      "enqueue_median_ms": 0.34699076786637306,
+      "samples_ms": [
+        42.80810710042715,
+        42.79958689585328,
+        42.93234692886472,
+        42.83510707318783,
+        42.852676939219236
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          10.46964107081294,
+          10.463961865752935,
+          10.476830881088972,
+          10.467610787600279,
+          10.464721824973822
+        ],
+        "forward_cache_ms": [
+          10.509821120649576,
+          10.519640985876322,
+          10.52672229707241,
+          10.51673199981451,
+          10.52014110609889
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 10386.589813232422,
+          "min_us": 10384.306335449219,
+          "max_us": 10389.617919921875,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            10386.947631835938,
+            10385.352325439453,
+            10384.306335449219,
+            10389.617919921875,
+            10386.589813232422
+          ]
+        },
+        "cache": {
+          "median_us": 10408.168029785156,
+          "min_us": 10406.697082519531,
+          "max_us": 10410.157012939453,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            10407.48291015625,
+            10406.697082519531,
+            10410.157012939453,
+            10408.168029785156,
+            10409.278869628906
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 10.467610787600279,
+        "forward_cache_ms": 10.519640985876322
+      },
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 10.519640985876322,
+      "bwd_fwd_ratio": 4.071917200472742,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 256,
+      "heads": 16,
+      "key_heads": 4,
+      "median_ms": 0.7038922049105167,
+      "enqueue_median_ms": 0.32753124833106995,
+      "samples_ms": [
+        0.7407120428979397,
+        0.7170508615672588,
+        0.6946418434381485,
+        0.6935405544936657,
+        0.7038922049105167
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.13421010226011276,
+          0.1366906799376011,
+          0.1311199739575386,
+          0.13080984354019165,
+          0.1314198598265648
+        ],
+        "forward_cache_ms": [
+          0.13958988711237907,
+          0.1298501156270504,
+          0.1356201246380806,
+          0.13202987611293793,
+          0.1303311437368393
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 79.55399751663208,
+          "min_us": 79.3150007724762,
+          "max_us": 85.69499850273132,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            85.69499850273132,
+            79.59399819374084,
+            79.55399751663208,
+            79.47199940681458,
+            79.3150007724762
+          ]
+        },
+        "cache": {
+          "median_us": 79.97300028800964,
+          "min_us": 79.94300127029419,
+          "max_us": 80.18699884414673,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            79.94300127029419,
+            80.11299967765808,
+            79.97300028800964,
+            80.18699884414673,
+            79.97199892997742
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 0.1314198598265648,
+        "forward_cache_ms": 0.13202987611293793
+      },
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 0.13202987611293793,
+      "bwd_fwd_ratio": 5.331310046132359,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 1024,
+      "heads": 16,
+      "key_heads": 4,
+      "median_ms": 1.165641937404871,
+      "enqueue_median_ms": 0.3239898942410946,
+      "samples_ms": [
+        1.1967220343649387,
+        1.1575729586184025,
+        1.162962056696415,
+        1.165641937404871,
+        1.178612932562828
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.2561812289059162,
+          0.25806017220020294,
+          0.2637198194861412,
+          0.25815097615122795,
+          0.25277072563767433
+        ],
+        "forward_cache_ms": [
+          0.2633598633110523,
+          0.25523966178297997,
+          0.25676097720861435,
+          0.2742800861597061,
+          0.27276016771793365
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 195.6339955329895,
+          "min_us": 195.55100202560425,
+          "max_us": 199.20899868011475,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            199.20899868011475,
+            195.55100202560425,
+            195.86700201034546,
+            195.60999870300293,
+            195.6339955329895
+          ]
+        },
+        "cache": {
+          "median_us": 198.95299673080444,
+          "min_us": 198.73600006103516,
+          "max_us": 199.11500215530396,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            199.11500215530396,
+            198.95299673080444,
+            199.02199506759644,
+            198.75500202178955,
+            198.73600006103516
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 0.25806017220020294,
+        "forward_cache_ms": 0.2633598633110523
+      },
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 0.2633598633110523,
+      "bwd_fwd_ratio": 4.426042460494978,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 4096,
+      "heads": 16,
+      "key_heads": 4,
+      "median_ms": 3.24050709605217,
+      "enqueue_median_ms": 0.3245011903345585,
+      "samples_ms": [
+        3.2476061023771763,
+        3.2686269842088223,
+        3.229706082493067,
+        3.24050709605217,
+        3.220906015485525
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.7426212541759014,
+          0.7389718666672707,
+          0.7415306754410267,
+          0.7399721071124077,
+          0.7291818037629128
+        ],
+        "forward_cache_ms": [
+          0.756680965423584,
+          0.7465309463441372,
+          0.742791686207056,
+          0.7442822679877281,
+          0.7456112653017044
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 662.647008895874,
+          "min_us": 662.5440120697021,
+          "max_us": 666.1459922790527,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            666.1459922790527,
+            662.5440120697021,
+            662.647008895874,
+            662.5939846038818,
+            663.4170055389404
+          ]
+        },
+        "cache": {
+          "median_us": 668.5100078582764,
+          "min_us": 667.3180103302002,
+          "max_us": 668.7510013580322,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            668.5100078582764,
+            668.6530113220215,
+            667.3180103302002,
+            668.7510013580322,
+            668.267011642456
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 0.7399721071124077,
+        "forward_cache_ms": 0.7456112653017044
+      },
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 0.7456112653017044,
+      "bwd_fwd_ratio": 4.346108014799012,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 16384,
+      "heads": 16,
+      "key_heads": 4,
+      "median_ms": 11.396253015846014,
+      "enqueue_median_ms": 0.33314013853669167,
+      "samples_ms": [
+        11.398782953619957,
+        11.406472884118557,
+        11.396253015846014,
+        11.383392848074436,
+        11.348632164299488
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          2.7042250148952007,
+          2.7151857502758503,
+          2.7189156971871853,
+          2.698705065995455,
+          2.700145822018385
+        ],
+        "forward_cache_ms": [
+          2.7315160259604454,
+          2.7275546453893185,
+          2.743716351687908,
+          2.705745864659548,
+          2.7220449410378933
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 2621.97208404541,
+          "min_us": 2619.2100524902344,
+          "max_us": 2628.7729263305664,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            2628.7729263305664,
+            2619.2100524902344,
+            2622.2089767456055,
+            2621.97208404541,
+            2621.7090606689453
+          ]
+        },
+        "cache": {
+          "median_us": 2643.589973449707,
+          "min_us": 2643.001937866211,
+          "max_us": 2644.4320678710938,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            2643.001937866211,
+            2643.51806640625,
+            2644.4320678710938,
+            2643.6630249023438,
+            2643.589973449707
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 2.7042250148952007,
+        "forward_cache_ms": 2.7275546453893185
+      },
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 2.7275546453893185,
+      "bwd_fwd_ratio": 4.178194205975061,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 32768,
+      "heads": 16,
+      "key_heads": 4,
+      "median_ms": 22.21040427684784,
+      "enqueue_median_ms": 0.34800078719854355,
+      "samples_ms": [
+        22.237785160541534,
+        22.17265497893095,
+        22.22008490934968,
+        22.21040427684784,
+        22.18423457816243
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          5.408251192420721,
+          5.410900805145502,
+          5.394881125539541,
+          5.395400803536177,
+          5.424710921943188
+        ],
+        "forward_cache_ms": [
+          5.41923101991415,
+          5.405911244452,
+          5.422290880233049,
+          5.421810783445835,
+          5.426391027867794
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 5306.986999511719,
+          "min_us": 5306.024932861328,
+          "max_us": 5313.058090209961,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            5313.058090209961,
+            5306.964111328125,
+            5306.024932861328,
+            5306.986999511719,
+            5307.540130615234
+          ]
+        },
+        "cache": {
+          "median_us": 5347.629165649414,
+          "min_us": 5345.323181152344,
+          "max_us": 5349.914932250977,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            5348.191833496094,
+            5347.441101074219,
+            5347.629165649414,
+            5345.323181152344,
+            5349.914932250977
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 5.408251192420721,
+        "forward_cache_ms": 5.421810783445835
+      },
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 5.421810783445835,
+      "bwd_fwd_ratio": 4.096491958860284,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 256,
+      "heads": 8,
+      "key_heads": 2,
+      "median_ms": 0.5815508775413036,
+      "enqueue_median_ms": 0.31803082674741745,
+      "samples_ms": [
+        0.6389911286532879,
+        0.5815508775413036,
+        0.5767117254436016,
+        0.5691708065569401,
+        0.5815909244120121
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.1515401527285576,
+          0.13978034257888794,
+          0.1354101113975048,
+          0.13543106615543365,
+          0.13547111302614212
+        ],
+        "forward_cache_ms": [
+          0.13761082664132118,
+          0.13652117922902107,
+          0.13640988618135452,
+          0.1500900834798813,
+          0.13878010213375092
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 80.98700046539307,
+          "min_us": 80.66700100898743,
+          "max_us": 87.04299926757812,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            87.04299926757812,
+            80.98700046539307,
+            80.78399896621704,
+            80.66700100898743,
+            81.16099834442139
+          ]
+        },
+        "cache": {
+          "median_us": 81.10100030899048,
+          "min_us": 80.68100214004517,
+          "max_us": 81.34300112724304,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            81.34300112724304,
+            81.21899962425232,
+            80.68100214004517,
+            81.10100030899048,
+            80.99300265312195
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 0.13547111302614212,
+        "forward_cache_ms": 0.13761082664132118
+      },
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 0.13761082664132118,
+      "bwd_fwd_ratio": 4.226054677057496,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 1024,
+      "heads": 8,
+      "key_heads": 2,
+      "median_ms": 0.9065722115337849,
+      "enqueue_median_ms": 0.3427397459745407,
+      "samples_ms": [
+        0.9065722115337849,
+        0.9133610874414444,
+        0.9245118126273155,
+        0.9021121077239513,
+        0.8960720151662827
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.2703499048948288,
+          0.2637011930346489,
+          0.2634609118103981,
+          0.2638101577758789,
+          0.2571200020611286
+        ],
+        "forward_cache_ms": [
+          0.267841387540102,
+          0.2977512776851654,
+          0.2697897143661976,
+          0.29851077124476433,
+          0.2666511572897434
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 197.87299633026123,
+          "min_us": 197.59199619293213,
+          "max_us": 201.56099796295166,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            201.56099796295166,
+            197.6740002632141,
+            197.59199619293213,
+            197.9349970817566,
+            197.87299633026123
+          ]
+        },
+        "cache": {
+          "median_us": 193.64399909973145,
+          "min_us": 193.5330033302307,
+          "max_us": 194.5580005645752,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            193.64399909973145,
+            193.58700513839722,
+            193.5330033302307,
+            193.681001663208,
+            194.5580005645752
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 0.2637011930346489,
+        "forward_cache_ms": 0.2697897143661976
+      },
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 0.2697897143661976,
+      "bwd_fwd_ratio": 3.3602919728187044,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 4096,
+      "heads": 8,
+      "key_heads": 2,
+      "median_ms": 2.122804056853056,
+      "enqueue_median_ms": 0.3429511561989784,
+      "samples_ms": [
+        2.1208138205111027,
+        2.122804056853056,
+        2.2363951429724693,
+        2.1309140138328075,
+        2.116114366799593
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.7177707739174366,
+          0.7131421007215977,
+          0.7187011651694775,
+          0.715021975338459,
+          0.7150811143219471
+        ],
+        "forward_cache_ms": [
+          0.7133116014301777,
+          0.7087909616529942,
+          0.7118224166333675,
+          0.7135909982025623,
+          0.716762151569128
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 640.3950214385986,
+          "min_us": 639.9489879608154,
+          "max_us": 643.3189868927002,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            643.3189868927002,
+            639.9489879608154,
+            640.6280040740967,
+            640.142011642456,
+            640.3950214385986
+          ]
+        },
+        "cache": {
+          "median_us": 642.6139831542969,
+          "min_us": 642.1249866485596,
+          "max_us": 643.0769920349121,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            642.4849987030029,
+            642.6139831542969,
+            642.1249866485596,
+            642.8369998931885,
+            643.0769920349121
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 0.7150811143219471,
+        "forward_cache_ms": 0.7133116014301777
+      },
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 0.7133116014301777,
+      "bwd_fwd_ratio": 2.9759842018507334,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 16384,
+      "heads": 8,
+      "key_heads": 2,
+      "median_ms": 7.1022240445017815,
+      "enqueue_median_ms": 0.34148991107940674,
+      "samples_ms": [
+        7.152675185352564,
+        7.1022240445017815,
+        7.098474074155092,
+        7.109544239938259,
+        7.09638511762023
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          2.46527511626482,
+          2.4581048637628555,
+          2.466705162078142,
+          2.449384890496731,
+          2.4579749442636967
+        ],
+        "forward_cache_ms": [
+          2.4836650118231773,
+          2.476084977388382,
+          2.508284989744425,
+          2.4832948110997677,
+          2.4823653511703014
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 2387.7790451049805,
+          "min_us": 2386.7080688476562,
+          "max_us": 2390.7669067382812,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            2390.7669067382812,
+            2389.1679763793945,
+            2386.7080688476562,
+            2387.7790451049805,
+            2387.118911743164
+          ]
+        },
+        "cache": {
+          "median_us": 2463.5780334472656,
+          "min_us": 2459.196090698242,
+          "max_us": 2466.6099548339844,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            2459.196090698242,
+            2461.6960525512695,
+            2464.7750854492188,
+            2466.6099548339844,
+            2463.5780334472656
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 2.4581048637628555,
+        "forward_cache_ms": 2.4832948110997677
+      },
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 2.4832948110997677,
+      "bwd_fwd_ratio": 2.8600003562832903,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 32768,
+      "heads": 8,
+      "key_heads": 2,
+      "median_ms": 13.641716912388802,
+      "enqueue_median_ms": 0.3638709895312786,
+      "samples_ms": [
+        13.657617848366499,
+        13.647796586155891,
+        13.633827678859234,
+        13.618136756122112,
+        13.641716912388802
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          4.9488903023302555,
+          4.9401200376451015,
+          4.9399095587432384,
+          4.938739817589521,
+          4.938980098813772
+        ],
+        "forward_cache_ms": [
+          4.963909741491079,
+          4.959759768098593,
+          4.957260098308325,
+          4.964559804648161,
+          5.030610132962465
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 4869.503021240234,
+          "min_us": 4867.522048950195,
+          "max_us": 4873.4039306640625,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            4873.4039306640625,
+            4872.293853759766,
+            4869.503021240234,
+            4867.522048950195,
+            4869.297027587891
+          ]
+        },
+        "cache": {
+          "median_us": 4907.199859619141,
+          "min_us": 4906.695938110352,
+          "max_us": 4907.873916625977,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            4906.789016723633,
+            4906.695938110352,
+            4907.221984863281,
+            4907.199859619141,
+            4907.873916625977
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 4.9399095587432384,
+        "forward_cache_ms": 4.963909741491079
+      },
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 4.963909741491079,
+      "bwd_fwd_ratio": 2.7481798869878418,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 256,
+      "heads": 48,
+      "key_heads": 16,
+      "median_ms": 1.3245921581983566,
+      "enqueue_median_ms": 0.32695988193154335,
+      "samples_ms": [
+        1.3876128941774368,
+        1.3245921581983566,
+        1.3165827840566635,
+        1.3327025808393955,
+        1.324221957474947
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.20074006170034409,
+          0.18943008035421371,
+          0.18853088840842247,
+          0.18798001110553741,
+          0.18631992861628532
+        ],
+        "forward_cache_ms": [
+          0.19002100452780724,
+          0.18681073561310768,
+          0.18802983686327934,
+          0.1849709078669548,
+          0.18310965970158577
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 133.65700244903564,
+          "min_us": 133.32500457763672,
+          "max_us": 139.79699611663818,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            139.79699611663818,
+            133.87000560760498,
+            133.32500457763672,
+            133.65700244903564,
+            133.64399671554565
+          ]
+        },
+        "cache": {
+          "median_us": 134.39799547195435,
+          "min_us": 134.18400287628174,
+          "max_us": 134.64499711990356,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            134.18400287628174,
+            134.52800512313843,
+            134.36399698257446,
+            134.64499711990356,
+            134.39799547195435
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 0.18853088840842247,
+        "forward_cache_ms": 0.18681073561310768
+      },
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 0.18681073561310768,
+      "bwd_fwd_ratio": 7.090556941768265,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 1024,
+      "heads": 48,
+      "key_heads": 16,
+      "median_ms": 2.6517948135733604,
+      "enqueue_median_ms": 0.33750105649232864,
+      "samples_ms": [
+        2.6532048359513283,
+        2.659135963767767,
+        2.6501649990677834,
+        2.643684856593609,
+        2.6517948135733604
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.42610010132193565,
+          0.43013133108615875,
+          0.42983097955584526,
+          0.43465103954076767,
+          0.4266006872057915
+        ],
+        "forward_cache_ms": [
+          0.4359399899840355,
+          0.4379609599709511,
+          0.43705105781555176,
+          0.43320097029209137,
+          0.4497207701206207
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 369.7920083999634,
+          "min_us": 369.2460060119629,
+          "max_us": 373.9449977874756,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            373.9449977874756,
+            369.89099979400635,
+            369.6820020675659,
+            369.2460060119629,
+            369.7920083999634
+          ]
+        },
+        "cache": {
+          "median_us": 372.0249891281128,
+          "min_us": 371.83101177215576,
+          "max_us": 372.7070093154907,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            372.7070093154907,
+            371.83101177215576,
+            371.9409942626953,
+            372.3710060119629,
+            372.0249891281128
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 0.42983097955584526,
+        "forward_cache_ms": 0.43705105781555176
+      },
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 0.43705105781555176,
+      "bwd_fwd_ratio": 6.06747144561882,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 4096,
+      "heads": 48,
+      "key_heads": 16,
+      "median_ms": 8.365677203983068,
+      "enqueue_median_ms": 0.3345608711242676,
+      "samples_ms": [
+        8.39582597836852,
+        8.365677203983068,
+        8.396826684474945,
+        8.35148710757494,
+        8.364336099475622
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          1.4877128414809704,
+          1.4525530859827995,
+          1.4658928848803043,
+          1.4688330702483654,
+          1.4653331600129604
+        ],
+        "forward_cache_ms": [
+          1.4755530282855034,
+          1.4705727808177471,
+          1.4830529689788818,
+          1.4719930477440357,
+          1.4818329364061356
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 1393.3560371398926,
+          "min_us": 1390.6889915466309,
+          "max_us": 1397.9280471801758,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            1397.9280471801758,
+            1393.3560371398926,
+            1392.222023010254,
+            1395.0400352478027,
+            1390.6889915466309
+          ]
+        },
+        "cache": {
+          "median_us": 1418.1909561157227,
+          "min_us": 1417.6420211791992,
+          "max_us": 1419.6849822998047,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            1419.6849822998047,
+            1418.1909561157227,
+            1418.0520057678223,
+            1417.6420211791992,
+            1419.108009338379
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 1.4658928848803043,
+        "forward_cache_ms": 1.4755530282855034
+      },
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 1.4755530282855034,
+      "bwd_fwd_ratio": 5.669519863819087,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 16384,
+      "heads": 48,
+      "key_heads": 16,
+      "median_ms": 30.32387001439929,
+      "enqueue_median_ms": 0.36924099549651146,
+      "samples_ms": [
+        30.32387001439929,
+        31.253961846232414,
+        30.60237132012844,
+        30.251139774918556,
+        30.27387009933591
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          5.6477319449186325,
+          5.628120619803667,
+          5.652120802551508,
+          5.639300681650639,
+          5.648162215948105
+        ],
+        "forward_cache_ms": [
+          5.677490960806608,
+          5.644490942358971,
+          5.681301932781935,
+          5.658422131091356,
+          5.664441268891096
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 5581.705093383789,
+          "min_us": 5580.099868774414,
+          "max_us": 5587.350082397461,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            5587.350082397461,
+            5581.705093383789,
+            5580.099868774414,
+            5580.356979370117,
+            5585.61897277832
+          ]
+        },
+        "cache": {
+          "median_us": 5626.744079589844,
+          "min_us": 5624.5330810546875,
+          "max_us": 5628.535079956055,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            5627.859878540039,
+            5626.744079589844,
+            5625.246810913086,
+            5624.5330810546875,
+            5628.535079956055
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 5.6477319449186325,
+        "forward_cache_ms": 5.664441268891096
+      },
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 5.664441268891096,
+      "bwd_fwd_ratio": 5.353373541171107,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 32768,
+      "heads": 48,
+      "key_heads": 16,
+      "median_ms": 60.74344227090478,
+      "enqueue_median_ms": 0.3646509721875191,
+      "samples_ms": [
+        60.74344227090478,
+        60.666151344776154,
+        60.66572107374668,
+        60.8429410494864,
+        60.80957083031535
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          11.543323285877705,
+          11.496352963149548,
+          11.48225273936987,
+          11.482743080705404,
+          11.52346283197403
+        ],
+        "forward_cache_ms": [
+          11.542023159563541,
+          11.54508301988244,
+          11.538142804056406,
+          11.544743087142706,
+          11.556652840226889
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 11388.8427734375,
+          "min_us": 11386.649322509766,
+          "max_us": 11402.787017822266,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            11402.787017822266,
+            11386.649322509766,
+            11388.548278808594,
+            11389.752960205078,
+            11388.8427734375
+          ]
+        },
+        "cache": {
+          "median_us": 11484.73129272461,
+          "min_us": 11480.181121826172,
+          "max_us": 11487.348937988281,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            11484.73129272461,
+            11484.986877441406,
+            11484.56802368164,
+            11487.348937988281,
+            11480.181121826172
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 11.496352963149548,
+        "forward_cache_ms": 11.544743087142706
+      },
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 11.544743087142706,
+      "bwd_fwd_ratio": 5.261567261601022,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 256,
+      "heads": 24,
+      "key_heads": 8,
+      "median_ms": 0.857421662658453,
+      "enqueue_median_ms": 0.326559878885746,
+      "samples_ms": [
+        0.9112423285841942,
+        0.8593620732426643,
+        0.8543310686945915,
+        0.857421662658453,
+        0.8394019678235054
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.13919034972786903,
+          0.1421612687408924,
+          0.1351512037217617,
+          0.14474987983703613,
+          0.13821013271808624
+        ],
+        "forward_cache_ms": [
+          0.14857016503810883,
+          0.13990001752972603,
+          0.13862038031220436,
+          0.14098035171627998,
+          0.13848068192601204
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 82.0959985256195,
+          "min_us": 81.84900283813477,
+          "max_us": 87.90299892425537,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            87.90299892425537,
+            82.09800124168396,
+            82.0959985256195,
+            82.09199905395508,
+            81.84900283813477
+          ]
+        },
+        "cache": {
+          "median_us": 82.00100064277649,
+          "min_us": 81.93299770355225,
+          "max_us": 82.33000040054321,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            81.96099996566772,
+            82.33000040054321,
+            82.00100064277649,
+            81.93299770355225,
+            82.14899897575378
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 0.13919034972786903,
+        "forward_cache_ms": 0.13990001752972603
+      },
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 0.13990001752972603,
+      "bwd_fwd_ratio": 6.128817406876076,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 1024,
+      "heads": 24,
+      "key_heads": 8,
+      "median_ms": 1.4519519172608852,
+      "enqueue_median_ms": 0.3256797790527344,
+      "samples_ms": [
+        1.4735832810401917,
+        1.4457129873335361,
+        1.4488431625068188,
+        1.4526331797242165,
+        1.4519519172608852
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.26614032685756683,
+          0.25634001940488815,
+          0.25990093126893044,
+          0.2571898512542248,
+          0.2609696239233017
+        ],
+        "forward_cache_ms": [
+          0.25957124307751656,
+          0.2611307427287102,
+          0.26412028819322586,
+          0.2631307579576969,
+          0.28188107535243034
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 197.7239966392517,
+          "min_us": 197.3580002784729,
+          "max_us": 202.44500637054443,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            202.44500637054443,
+            197.7239966392517,
+            197.8250026702881,
+            197.3580002784729,
+            197.5200057029724
+          ]
+        },
+        "cache": {
+          "median_us": 199.50799942016602,
+          "min_us": 199.22000169754028,
+          "max_us": 199.77400302886963,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            199.50799942016602,
+            199.22000169754028,
+            199.6559977531433,
+            199.46500062942505,
+            199.77400302886963
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 0.25990093126893044,
+        "forward_cache_ms": 0.2631307579576969
+      },
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 0.2631307579576969,
+      "bwd_fwd_ratio": 5.51798629901835,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 4096,
+      "heads": 24,
+      "key_heads": 8,
+      "median_ms": 4.310997668653727,
+      "enqueue_median_ms": 0.3309706225991249,
+      "samples_ms": [
+        4.318319261074066,
+        4.310997668653727,
+        4.298918880522251,
+        4.288878291845322,
+        4.318918567150831
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.768790952861309,
+          0.7472317665815353,
+          0.7625119760632515,
+          0.7674312219023705,
+          0.768252182751894
+        ],
+        "forward_cache_ms": [
+          0.7651322521269321,
+          0.7539708167314529,
+          0.7653818465769291,
+          0.7529421709477901,
+          0.7720310240983963
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 676.4599800109863,
+          "min_us": 676.3830184936523,
+          "max_us": 680.1040172576904,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            680.1040172576904,
+            676.7660140991211,
+            676.3830184936523,
+            676.4269828796387,
+            676.4599800109863
+          ]
+        },
+        "cache": {
+          "median_us": 696.8920230865479,
+          "min_us": 696.649980545044,
+          "max_us": 697.7009773254395,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            697.7009773254395,
+            696.9649791717529,
+            696.649980545044,
+            696.8920230865479,
+            696.8890190124512
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 0.7674312219023705,
+        "forward_cache_ms": 0.7651322521269321
+      },
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 0.7651322521269321,
+      "bwd_fwd_ratio": 5.634317017312911,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 16384,
+      "heads": 24,
+      "key_heads": 8,
+      "median_ms": 15.248251147568226,
+      "enqueue_median_ms": 0.32925140112638474,
+      "samples_ms": [
+        15.370559878647327,
+        15.248251147568226,
+        15.259720385074615,
+        15.230809804052114,
+        15.231890138238668
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          2.8406050987541676,
+          2.831835765391588,
+          2.8646253049373627,
+          2.8297058306634426,
+          2.8440249152481556
+        ],
+        "forward_cache_ms": [
+          2.8641358949244022,
+          2.858466003090143,
+          2.876466140151024,
+          2.8575859032571316,
+          2.8656860813498497
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 2761.241912841797,
+          "min_us": 2758.885955810547,
+          "max_us": 2763.87996673584,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            2763.87996673584,
+            2761.8629455566406,
+            2761.241912841797,
+            2758.885955810547,
+            2760.5119705200195
+          ]
+        },
+        "cache": {
+          "median_us": 2788.3970260620117,
+          "min_us": 2786.1160278320312,
+          "max_us": 2788.8010025024414,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            2788.8010025024414,
+            2788.6669158935547,
+            2788.3970260620117,
+            2787.101936340332,
+            2786.1160278320312
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 2.8406050987541676,
+        "forward_cache_ms": 2.8641358949244022
+      },
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 2.8641358949244022,
+      "bwd_fwd_ratio": 5.323857424010496,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 32768,
+      "heads": 24,
+      "key_heads": 8,
+      "median_ms": 30.271969735622406,
+      "enqueue_median_ms": 0.33554108813405037,
+      "samples_ms": [
+        30.304799787700176,
+        30.271969735622406,
+        30.253389850258827,
+        30.26873990893364,
+        30.285160057246685
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          5.7830107398331165,
+          5.7909018360078335,
+          5.766851827502251,
+          5.794750992208719,
+          5.815692245960236
+        ],
+        "forward_cache_ms": [
+          5.836111027747393,
+          5.821431055665016,
+          5.815552081912756,
+          5.80805167555809,
+          5.827091168612242
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 5672.845077514648,
+          "min_us": 5670.869064331055,
+          "max_us": 5682.450866699219,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            5682.450866699219,
+            5677.082061767578,
+            5670.904159545898,
+            5670.869064331055,
+            5672.845077514648
+          ]
+        },
+        "cache": {
+          "median_us": 5705.088043212891,
+          "min_us": 5702.278900146484,
+          "max_us": 5706.6131591796875,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            5706.6131591796875,
+            5705.088043212891,
+            5702.278900146484,
+            5705.070877075195,
+            5706.1859130859375
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 5.7909018360078335,
+        "forward_cache_ms": 5.821431055665016
+      },
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 5.821431055665016,
+      "bwd_fwd_ratio": 5.200090741633676,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 256,
+      "heads": 12,
+      "key_heads": 4,
+      "median_ms": 0.6996123120188713,
+      "enqueue_median_ms": 0.3438512794673443,
+      "samples_ms": [
+        0.7162708789110184,
+        0.7016207091510296,
+        0.6772419437766075,
+        0.6797607056796551,
+        0.6996123120188713
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.13301102444529533,
+          0.13490021228790283,
+          0.13604993000626564,
+          0.13498030602931976,
+          0.13162009418010712
+        ],
+        "forward_cache_ms": [
+          0.14128023758530617,
+          0.13400008901953697,
+          0.13534119352698326,
+          0.1324308104813099,
+          0.13289973139762878
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 81.72100186347961,
+          "min_us": 81.51699900627136,
+          "max_us": 87.7210021018982,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            87.7210021018982,
+            82.14100003242493,
+            81.72100186347961,
+            81.51699900627136,
+            81.55900239944458
+          ]
+        },
+        "cache": {
+          "median_us": 82.09400177001953,
+          "min_us": 81.98400139808655,
+          "max_us": 82.33100175857544,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            82.09400177001953,
+            82.03700184822083,
+            82.33100175857544,
+            81.98400139808655,
+            82.23599791526794
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 0.13490021228790283,
+        "forward_cache_ms": 0.13400008901953697
+      },
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 0.13400008901953697,
+      "bwd_fwd_ratio": 5.22098393469626,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 1024,
+      "heads": 12,
+      "key_heads": 4,
+      "median_ms": 1.1003818362951279,
+      "enqueue_median_ms": 0.3273310139775276,
+      "samples_ms": [
+        1.104012131690979,
+        1.0796720162034035,
+        1.0798922739923,
+        1.1135316453874111,
+        1.1003818362951279
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.26232004165649414,
+          0.2682609483599663,
+          0.2657710574567318,
+          0.2620299346745014,
+          0.2636602148413658
+        ],
+        "forward_cache_ms": [
+          0.26490073651075363,
+          0.2638399600982666,
+          0.2659102901816368,
+          0.26005133986473083,
+          0.2910001203417778
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 198.85599613189697,
+          "min_us": 198.31000566482544,
+          "max_us": 202.48899459838867,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            202.48899459838867,
+            199.22499656677246,
+            198.48699569702148,
+            198.85599613189697,
+            198.31000566482544
+          ]
+        },
+        "cache": {
+          "median_us": 200.9000062942505,
+          "min_us": 200.86100101470947,
+          "max_us": 201.0240077972412,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            200.86100101470947,
+            200.87499618530273,
+            200.9079933166504,
+            201.0240077972412,
+            200.9000062942505
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 0.2636602148413658,
+        "forward_cache_ms": 0.26490073651075363
+      },
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 0.26490073651075363,
+      "bwd_fwd_ratio": 4.153940267547946,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 4096,
+      "heads": 12,
+      "key_heads": 4,
+      "median_ms": 2.7013951912522316,
+      "enqueue_median_ms": 0.3303801640868187,
+      "samples_ms": [
+        2.715385053306818,
+        2.7013951912522316,
+        2.707965672016144,
+        2.6870151050388813,
+        2.674275077879429
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.7255822420120239,
+          0.7210811600089073,
+          0.7239519618451595,
+          0.7368410006165504,
+          0.7176119834184647
+        ],
+        "forward_cache_ms": [
+          0.7330807857215405,
+          0.7296819239854813,
+          0.7238211110234261,
+          0.7300321012735367,
+          0.7296307012438774
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 658.066987991333,
+          "min_us": 657.3609828948975,
+          "max_us": 661.8420124053955,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            661.8420124053955,
+            658.066987991333,
+            657.6310157775879,
+            657.3609828948975,
+            658.7639808654785
+          ]
+        },
+        "cache": {
+          "median_us": 663.2359981536865,
+          "min_us": 662.9000186920166,
+          "max_us": 664.2059803009033,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            664.2059803009033,
+            662.9000186920166,
+            663.2359981536865,
+            663.2349967956543,
+            663.6660099029541
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 0.7239519618451595,
+        "forward_cache_ms": 0.7296819239854813
+      },
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 0.7296819239854813,
+      "bwd_fwd_ratio": 3.7021544627244762,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 16384,
+      "heads": 12,
+      "key_heads": 4,
+      "median_ms": 9.348517749458551,
+      "enqueue_median_ms": 0.33211102709174156,
+      "samples_ms": [
+        9.362508077174425,
+        9.310249239206314,
+        9.359387680888176,
+        9.348517749458551,
+        9.311818983405828
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          2.6301750913262367,
+          2.643955871462822,
+          2.6344861835241318,
+          2.6342147029936314,
+          2.6428047567605972
+        ],
+        "forward_cache_ms": [
+          2.6604151353240013,
+          2.640844788402319,
+          2.642144914716482,
+          2.6463852263987064,
+          2.6462646201252937
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 2559.5069885253906,
+          "min_us": 2554.5400619506836,
+          "max_us": 2561.1400604248047,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            2561.1400604248047,
+            2554.5400619506836,
+            2557.925033569336,
+            2560.8150482177734,
+            2559.5069885253906
+          ]
+        },
+        "cache": {
+          "median_us": 2586.0050201416016,
+          "min_us": 2584.1140747070312,
+          "max_us": 2587.5619888305664,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            2587.5619888305664,
+            2585.256004333496,
+            2584.1140747070312,
+            2586.0050201416016,
+            2586.2199783325195
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 2.6344861835241318,
+        "forward_cache_ms": 2.6462646201252937
+      },
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 2.6462646201252937,
+      "bwd_fwd_ratio": 3.532722192014162,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 32768,
+      "heads": 12,
+      "key_heads": 4,
+      "median_ms": 17.881424631923437,
+      "enqueue_median_ms": 0.32578082755208015,
+      "samples_ms": [
+        17.993626184761524,
+        17.881424631923437,
+        17.87979481741786,
+        17.897465731948614,
+        17.879275139421225
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          5.280550103634596,
+          5.272590089589357,
+          5.278010852634907,
+          5.262980237603188,
+          5.276141222566366
+        ],
+        "forward_cache_ms": [
+          5.284690763801336,
+          5.286500323563814,
+          5.3040096536278725,
+          5.276860669255257,
+          5.288340151309967
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 5198.637008666992,
+          "min_us": 5198.085021972656,
+          "max_us": 5203.490829467773,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            5203.490829467773,
+            5198.830032348633,
+            5198.094940185547,
+            5198.637008666992,
+            5198.085021972656
+          ]
+        },
+        "cache": {
+          "median_us": 5248.51188659668,
+          "min_us": 5246.841049194336,
+          "max_us": 5253.454971313477,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            5247.75505065918,
+            5249.5361328125,
+            5246.841049194336,
+            5253.454971313477,
+            5248.51188659668
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 5.276141222566366,
+        "forward_cache_ms": 5.286500323563814
+      },
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 5.286500323563814,
+      "bwd_fwd_ratio": 3.3824692211252803,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 256,
+      "median_ms": null,
+      "samples_ms": [],
+      "forward_medians": {},
+      "forward_samples": {},
+      "forward_device": {},
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "heads": 6,
+      "key_heads": 2,
+      "inverse_cache": true,
+      "gate_cache": true,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "unsupported forward cache producer",
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 1024,
+      "median_ms": null,
+      "samples_ms": [],
+      "forward_medians": {},
+      "forward_samples": {},
+      "forward_device": {},
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "heads": 6,
+      "key_heads": 2,
+      "inverse_cache": true,
+      "gate_cache": true,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "unsupported forward cache producer",
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 4096,
+      "median_ms": null,
+      "samples_ms": [],
+      "forward_medians": {},
+      "forward_samples": {},
+      "forward_device": {},
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "heads": 6,
+      "key_heads": 2,
+      "inverse_cache": true,
+      "gate_cache": true,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "unsupported forward cache producer",
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 16384,
+      "median_ms": null,
+      "samples_ms": [],
+      "forward_medians": {},
+      "forward_samples": {},
+      "forward_device": {},
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "heads": 6,
+      "key_heads": 2,
+      "inverse_cache": true,
+      "gate_cache": true,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "unsupported forward cache producer",
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 32768,
+      "median_ms": null,
+      "samples_ms": [],
+      "forward_medians": {},
+      "forward_samples": {},
+      "forward_device": {},
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "heads": 6,
+      "key_heads": 2,
+      "inverse_cache": true,
+      "gate_cache": true,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "unsupported forward cache producer",
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 256,
+      "heads": 32,
+      "key_heads": 16,
+      "median_ms": 0.8543920703232288,
+      "enqueue_median_ms": 0.3221603110432625,
+      "samples_ms": [
+        0.8943416178226471,
+        0.8477321825921535,
+        0.9329612366855145,
+        0.8514518849551678,
+        0.8543920703232288
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.19545992836356163,
+          0.1925211399793625,
+          0.18319999799132347,
+          0.1831110566854477,
+          0.17919111996889114
+        ],
+        "forward_cache_ms": [
+          0.18797023221850395,
+          0.1833699643611908,
+          0.1858910545706749,
+          0.1848801039159298,
+          0.18214993178844452
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 127.35799551010132,
+          "min_us": 127.30100154876709,
+          "max_us": 132.6550006866455,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            132.6550006866455,
+            127.34299898147583,
+            127.51599550247192,
+            127.30100154876709,
+            127.35799551010132
+          ]
+        },
+        "cache": {
+          "median_us": 128.2349944114685,
+          "min_us": 128.16400527954102,
+          "max_us": 128.33199501037598,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            128.2349944114685,
+            128.33199501037598,
+            128.23799848556519,
+            128.16400527954102,
+            128.22500467300415
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 0.18319999799132347,
+        "forward_cache_ms": 0.1848801039159298
+      },
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 0.1848801039159298,
+      "bwd_fwd_ratio": 4.621330539232848,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 1024,
+      "heads": 32,
+      "key_heads": 16,
+      "median_ms": 1.8473630771040916,
+      "enqueue_median_ms": 0.3298399969935417,
+      "samples_ms": [
+        1.8553338013589382,
+        1.846003346145153,
+        1.8428442999720573,
+        1.8529142253100872,
+        1.8473630771040916
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.4226900637149811,
+          0.4214099608361721,
+          0.42111100628972054,
+          0.42625097557902336,
+          0.4207710735499859
+        ],
+        "forward_cache_ms": [
+          0.4273010417819023,
+          0.42682094499468803,
+          0.4216209053993225,
+          0.45137107372283936,
+          0.4473910667002201
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 356.6230058670044,
+          "min_us": 356.10899925231934,
+          "max_us": 361.22100353240967,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            361.22100353240967,
+            356.57100677490234,
+            357.0580005645752,
+            356.10899925231934,
+            356.6230058670044
+          ]
+        },
+        "cache": {
+          "median_us": 361.968994140625,
+          "min_us": 361.3610029220581,
+          "max_us": 362.52601146698,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            361.5730047225952,
+            362.52601146698,
+            361.3610029220581,
+            362.0490074157715,
+            361.968994140625
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 0.4214099608361721,
+        "forward_cache_ms": 0.4273010417819023
+      },
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 0.4273010417819023,
+      "bwd_fwd_ratio": 4.323329213990075,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 4096,
+      "heads": 32,
+      "key_heads": 16,
+      "median_ms": 5.907751154154539,
+      "enqueue_median_ms": 0.3512711264193058,
+      "samples_ms": [
+        5.907751154154539,
+        5.8863419108092785,
+        5.907232407480478,
+        5.925341043621302,
+        5.911872256547213
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          1.3984129764139652,
+          1.402942929416895,
+          1.4018728397786617,
+          1.4114119112491608,
+          1.3914830051362514
+        ],
+        "forward_cache_ms": [
+          1.4149118214845657,
+          1.4156331308186054,
+          1.4144731685519218,
+          1.4174627140164375,
+          1.4117429964244366
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 1336.433982849121,
+          "min_us": 1334.296989440918,
+          "max_us": 1338.4849548339844,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            1338.4849548339844,
+            1338.1400108337402,
+            1336.433982849121,
+            1334.296989440918,
+            1334.6949577331543
+          ]
+        },
+        "cache": {
+          "median_us": 1347.4889755249023,
+          "min_us": 1346.7049598693848,
+          "max_us": 1347.7120399475098,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            1347.4889755249023,
+            1347.6249694824219,
+            1346.7049598693848,
+            1347.0190048217773,
+            1347.7120399475098
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 1.4018728397786617,
+        "forward_cache_ms": 1.4149118214845657
+      },
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 1.4149118214845657,
+      "bwd_fwd_ratio": 4.1753493500082275,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 16384,
+      "heads": 32,
+      "key_heads": 16,
+      "median_ms": 22.3649637773633,
+      "enqueue_median_ms": 0.3418908454477787,
+      "samples_ms": [
+        22.42943411692977,
+        22.3649637773633,
+        22.36204408109188,
+        22.32907386496663,
+        22.373344283550978
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          5.725691094994545,
+          5.674791056662798,
+          5.746390670537949,
+          5.7023316621780396,
+          5.690230987966061
+        ],
+        "forward_cache_ms": [
+          5.73292188346386,
+          5.700782407075167,
+          5.720561370253563,
+          5.706571042537689,
+          5.699540954083204
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 5617.51594543457,
+          "min_us": 5615.576934814453,
+          "max_us": 5622.8851318359375,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            5615.576934814453,
+            5622.8851318359375,
+            5620.777893066406,
+            5617.311859130859,
+            5617.51594543457
+          ]
+        },
+        "cache": {
+          "median_us": 5637.968063354492,
+          "min_us": 5631.055068969727,
+          "max_us": 5640.3350830078125,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            5638.594818115234,
+            5640.3350830078125,
+            5637.968063354492,
+            5636.631011962891,
+            5631.055068969727
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 5.7023316621780396,
+        "forward_cache_ms": 5.706571042537689
+      },
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 5.706571042537689,
+      "bwd_fwd_ratio": 3.919159791519513,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 32768,
+      "heads": 32,
+      "key_heads": 16,
+      "median_ms": 43.09026524424553,
+      "enqueue_median_ms": 0.338100828230381,
+      "samples_ms": [
+        43.1839139200747,
+        43.034374713897705,
+        43.09026524424553,
+        43.059914372861385,
+        43.099215254187584
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          11.009091977030039,
+          11.018782388418913,
+          16.462313011288643,
+          11.062861885875463,
+          10.990242008119822
+        ],
+        "forward_cache_ms": [
+          11.05594215914607,
+          11.032821144908667,
+          11.05933217331767,
+          11.035921052098274,
+          11.020800564438105
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 10916.47720336914,
+          "min_us": 10915.648651123047,
+          "max_us": 10930.712127685547,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            10930.712127685547,
+            10915.673065185547,
+            10916.607666015625,
+            10915.648651123047,
+            10916.47720336914
+          ]
+        },
+        "cache": {
+          "median_us": 10952.72216796875,
+          "min_us": 10947.303771972656,
+          "max_us": 10955.455017089844,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            10955.316925048828,
+            10952.72216796875,
+            10947.303771972656,
+            10951.873016357422,
+            10955.455017089844
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 11.018782388418913,
+        "forward_cache_ms": 11.035921052098274
+      },
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 11.035921052098274,
+      "bwd_fwd_ratio": 3.9045463483134215,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 256,
+      "heads": 16,
+      "key_heads": 8,
+      "median_ms": 0.7024519145488739,
+      "enqueue_median_ms": 0.32386090606451035,
+      "samples_ms": [
+        0.7344810292124748,
+        0.7024519145488739,
+        0.7056412287056446,
+        0.6834422238171101,
+        0.6932108663022518
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.13095978647470474,
+          0.13400008901953697,
+          0.12865988537669182,
+          0.1301397569477558,
+          0.1389901153743267
+        ],
+        "forward_cache_ms": [
+          0.13528112322092056,
+          0.13699010014533997,
+          0.1321900635957718,
+          0.130590982735157,
+          0.1311497762799263
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 81.44299983978271,
+          "min_us": 81.03200197219849,
+          "max_us": 86.88600063323975,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            86.88600063323975,
+            81.27800226211548,
+            81.51000142097473,
+            81.44299983978271,
+            81.03200197219849
+          ]
+        },
+        "cache": {
+          "median_us": 81.93600177764893,
+          "min_us": 81.87100291252136,
+          "max_us": 82.93799757957458,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            82.93799757957458,
+            81.93600177764893,
+            82.42999911308289,
+            81.87100291252136,
+            81.9320023059845
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 0.13095978647470474,
+        "forward_cache_ms": 0.1321900635957718
+      },
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 0.1321900635957718,
+      "bwd_fwd_ratio": 5.31395397990672,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 1024,
+      "heads": 16,
+      "key_heads": 8,
+      "median_ms": 1.1387728154659271,
+      "enqueue_median_ms": 0.3372109495103359,
+      "samples_ms": [
+        1.165212132036686,
+        1.1480418033897877,
+        1.138182356953621,
+        1.1387728154659271,
+        1.1213421821594238
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.2592802047729492,
+          0.25327131152153015,
+          0.26072096079587936,
+          0.2593398094177246,
+          0.2575409598648548
+        ],
+        "forward_cache_ms": [
+          0.2622506581246853,
+          0.28932979330420494,
+          0.2654413692653179,
+          0.26324111968278885,
+          0.27038995176553726
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 198.85599613189697,
+          "min_us": 198.4410047531128,
+          "max_us": 202.89700031280518,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            202.59199142456055,
+            198.4410047531128,
+            198.85599613189697,
+            198.57100248336792,
+            202.89700031280518
+          ]
+        },
+        "cache": {
+          "median_us": 200.07901191711426,
+          "min_us": 199.6440052986145,
+          "max_us": 200.18599033355713,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            199.74700212478638,
+            199.6440052986145,
+            200.18599033355713,
+            200.07901191711426,
+            200.17900466918945
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 0.2592802047729492,
+        "forward_cache_ms": 0.2654413692653179
+      },
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 0.2654413692653179,
+      "bwd_fwd_ratio": 4.290110537847942,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 4096,
+      "heads": 16,
+      "key_heads": 8,
+      "median_ms": 3.1683160923421383,
+      "enqueue_median_ms": 0.33617112785577774,
+      "samples_ms": [
+        3.183656372129917,
+        3.1459368765354156,
+        3.200335893779993,
+        3.1683160923421383,
+        3.1473259441554546
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.7149321027100086,
+          0.7143411785364151,
+          0.7169218733906746,
+          0.7294612005352974,
+          0.7165218703448772
+        ],
+        "forward_cache_ms": [
+          0.722820870578289,
+          0.7229819893836975,
+          0.7355608977377415,
+          0.7190117612481117,
+          0.722621101886034
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 652.7850151062012,
+          "min_us": 652.0599842071533,
+          "max_us": 656.1629772186279,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            656.1629772186279,
+            652.8339862823486,
+            652.7850151062012,
+            652.3330211639404,
+            652.0599842071533
+          ]
+        },
+        "cache": {
+          "median_us": 663.9699935913086,
+          "min_us": 663.277006149292,
+          "max_us": 664.3439769744873,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            664.3439769744873,
+            664.084005355835,
+            663.9699935913086,
+            663.3729934692383,
+            663.277006149292
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 0.7165218703448772,
+        "forward_cache_ms": 0.722820870578289
+      },
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 0.722820870578289,
+      "bwd_fwd_ratio": 4.383265925632921,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 16384,
+      "heads": 16,
+      "key_heads": 8,
+      "median_ms": 11.229722294956446,
+      "enqueue_median_ms": 0.32690074294805527,
+      "samples_ms": [
+        11.264162138104439,
+        11.229722294956446,
+        11.231862008571625,
+        11.199172120541334,
+        11.197961866855621
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          2.8023160994052887,
+          2.796974964439869,
+          2.8219548985362053,
+          2.7889362536370754,
+          2.7936152182519436
+        ],
+        "forward_cache_ms": [
+          2.8150049038231373,
+          2.798565663397312,
+          2.8125857934355736,
+          2.802005037665367,
+          2.810616046190262
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 2736.111068725586,
+          "min_us": 2733.629035949707,
+          "max_us": 2738.563919067383,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            2738.563919067383,
+            2734.1129302978516,
+            2737.6129150390625,
+            2736.111068725586,
+            2733.629035949707
+          ]
+        },
+        "cache": {
+          "median_us": 2773.2059478759766,
+          "min_us": 2772.6070404052734,
+          "max_us": 2774.1430282592773,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            2772.6070404052734,
+            2773.0119705200195,
+            2773.2059478759766,
+            2773.8229751586914,
+            2774.1430282592773
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 2.796974964439869,
+        "forward_cache_ms": 2.810616046190262
+      },
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 2.810616046190262,
+      "bwd_fwd_ratio": 3.9954665135346845,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 32768,
+      "heads": 16,
+      "key_heads": 8,
+      "median_ms": 22.544153966009617,
+      "enqueue_median_ms": 0.3515109419822693,
+      "samples_ms": [
+        22.616844158619642,
+        22.544153966009617,
+        22.48928416520357,
+        22.532104048877954,
+        22.593914065510035
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          5.779031198471785,
+          5.731252022087574,
+          5.752282217144966,
+          5.737591069191694,
+          5.748411174863577
+        ],
+        "forward_cache_ms": [
+          5.779711063951254,
+          5.781501065939665,
+          5.765431094914675,
+          5.763811059296131,
+          5.768662318587303
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 5632.47184753418,
+          "min_us": 5630.540084838867,
+          "max_us": 5635.314178466797,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            5635.314178466797,
+            5632.47184753418,
+            5630.540084838867,
+            5632.276916503906,
+            5632.912826538086
+          ]
+        },
+        "cache": {
+          "median_us": 5667.419815063477,
+          "min_us": 5665.396881103516,
+          "max_us": 5668.901824951172,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            5665.396881103516,
+            5666.827011108398,
+            5667.419815063477,
+            5668.901824951172,
+            5667.824935913086
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 5.748411174863577,
+        "forward_cache_ms": 5.768662318587303
+      },
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 5.768662318587303,
+      "bwd_fwd_ratio": 3.9080384187803334,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 256,
+      "heads": 8,
+      "key_heads": 4,
+      "median_ms": 0.5900110118091106,
+      "enqueue_median_ms": 0.3287508152425289,
+      "samples_ms": [
+        0.6436007097363472,
+        0.5843313410878181,
+        0.5943910218775272,
+        0.5900110118091106,
+        0.5753720179200172
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.13385992497205734,
+          0.1348201185464859,
+          0.14312099665403366,
+          0.13644015416502953,
+          0.12962985783815384
+        ],
+        "forward_cache_ms": [
+          0.1388099044561386,
+          0.13221008703112602,
+          0.13130996376276016,
+          0.13040006160736084,
+          0.12973090633749962
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 81.3979983329773,
+          "min_us": 81.31800293922424,
+          "max_us": 87.26099729537964,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            87.26099729537964,
+            81.86399936676025,
+            81.32100105285645,
+            81.3979983329773,
+            81.31800293922424
+          ]
+        },
+        "cache": {
+          "median_us": 81.86299800872803,
+          "min_us": 81.53300285339355,
+          "max_us": 82.04299807548523,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            81.53300285339355,
+            81.88899755477905,
+            81.86299800872803,
+            81.68699741363525,
+            82.04299807548523
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 0.1348201185464859,
+        "forward_cache_ms": 0.13130996376276016
+      },
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 0.13130996376276016,
+      "bwd_fwd_ratio": 4.493269169391389,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 1024,
+      "heads": 8,
+      "key_heads": 4,
+      "median_ms": 0.9095421992242336,
+      "enqueue_median_ms": 0.325080007314682,
+      "samples_ms": [
+        0.9190719574689865,
+        0.9151706472039223,
+        0.9061717428267002,
+        0.8974317461252213,
+        0.9095421992242336
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.24515995755791664,
+          0.2534608356654644,
+          0.2518901601433754,
+          0.24850107729434967,
+          0.25277119129896164
+        ],
+        "forward_cache_ms": [
+          0.25075068697333336,
+          0.24581002071499825,
+          0.24622119963169098,
+          0.24851970374584198,
+          0.25580963119864464
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 188.5740041732788,
+          "min_us": 188.46700191497803,
+          "max_us": 192.08099842071533,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            192.08099842071533,
+            188.46700191497803,
+            188.47800493240356,
+            188.5740041732788,
+            188.68199586868286
+          ]
+        },
+        "cache": {
+          "median_us": 189.36599493026733,
+          "min_us": 189.274001121521,
+          "max_us": 190.2899980545044,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            190.2899980545044,
+            189.274001121521,
+            189.46900367736816,
+            189.30599689483643,
+            189.36599493026733
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 0.2518901601433754,
+        "forward_cache_ms": 0.24851970374584198
+      },
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 0.24851970374584198,
+      "bwd_fwd_ratio": 3.6598393830149223,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 4096,
+      "heads": 8,
+      "key_heads": 4,
+      "median_ms": 2.1468838676810265,
+      "enqueue_median_ms": 0.3256401978433132,
+      "samples_ms": [
+        2.1538841538131237,
+        2.137554343789816,
+        2.1542850881814957,
+        2.1352036856114864,
+        2.1468838676810265
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.7017608731985092,
+          0.6995410658419132,
+          0.6990218535065651,
+          0.7024314254522324,
+          0.7027219980955124
+        ],
+        "forward_cache_ms": [
+          0.7110820151865482,
+          0.7048412226140499,
+          0.7085008546710014,
+          0.7224520668387413,
+          0.7033008150756359
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 644.3480014801025,
+          "min_us": 643.1029796600342,
+          "max_us": 647.2670078277588,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            647.2670078277588,
+            644.3480014801025,
+            645.2640056610107,
+            643.5810089111328,
+            643.1029796600342
+          ]
+        },
+        "cache": {
+          "median_us": 661.9909763336182,
+          "min_us": 661.7030143737793,
+          "max_us": 662.4300003051758,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            661.9900226593018,
+            661.9909763336182,
+            662.4300003051758,
+            662.3350143432617,
+            661.7030143737793
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 0.7017608731985092,
+        "forward_cache_ms": 0.7085008546710014
+      },
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 0.7085008546710014,
+      "bwd_fwd_ratio": 3.0301782327107434,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 16384,
+      "heads": 8,
+      "key_heads": 4,
+      "median_ms": 7.169004064053297,
+      "enqueue_median_ms": 0.3355001099407673,
+      "samples_ms": [
+        7.182674016803503,
+        7.169004064053297,
+        7.150583900511265,
+        7.140133995562792,
+        7.170574273914099
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          2.527885138988495,
+          2.53230519592762,
+          2.5209151208400726,
+          2.5523449294269085,
+          2.531233709305525
+        ],
+        "forward_cache_ms": [
+          2.562785055488348,
+          2.5897049345076084,
+          2.5610453449189663,
+          2.5749951601028442,
+          2.54946481436491
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 2446.7639923095703,
+          "min_us": 2446.392059326172,
+          "max_us": 2450.448989868164,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            2450.448989868164,
+            2446.77791595459,
+            2446.392059326172,
+            2446.6699600219727,
+            2446.7639923095703
+          ]
+        },
+        "cache": {
+          "median_us": 2449.2340087890625,
+          "min_us": 2448.1000900268555,
+          "max_us": 2450.3129959106445,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            2450.078010559082,
+            2450.3129959106445,
+            2448.1000900268555,
+            2449.2340087890625,
+            2448.6339569091797
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 2.531233709305525,
+        "forward_cache_ms": 2.562785055488348
+      },
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 2.562785055488348,
+      "bwd_fwd_ratio": 2.7973489421988287,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 32768,
+      "heads": 8,
+      "key_heads": 4,
+      "median_ms": 13.6939468793571,
+      "enqueue_median_ms": 0.329440925270319,
+      "samples_ms": [
+        13.727516867220402,
+        13.695616275072098,
+        13.681027106940746,
+        13.653586152940989,
+        13.6939468793571
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          5.140119697898626,
+          5.133459810167551,
+          5.153109785169363,
+          5.126719828695059,
+          5.1559098064899445
+        ],
+        "forward_cache_ms": [
+          5.178989842534065,
+          5.151260178536177,
+          5.196910351514816,
+          5.155249964445829,
+          5.180989857763052
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 5029.708099365234,
+          "min_us": 5029.0069580078125,
+          "max_us": 5035.704040527344,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            5035.704040527344,
+            5029.0069580078125,
+            5029.431915283203,
+            5029.747009277344,
+            5029.708099365234
+          ]
+        },
+        "cache": {
+          "median_us": 5043.6279296875,
+          "min_us": 5041.019058227539,
+          "max_us": 5046.990966796875,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            5041.019058227539,
+            5043.6279296875,
+            5046.990966796875,
+            5043.902969360352,
+            5041.233062744141
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 5.140119697898626,
+        "forward_cache_ms": 5.178989842534065
+      },
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 5.178989842534065,
+      "bwd_fwd_ratio": 2.64413472428374,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 256,
+      "median_ms": null,
+      "samples_ms": [],
+      "forward_medians": {},
+      "forward_samples": {},
+      "forward_device": {},
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "heads": 4,
+      "key_heads": 2,
+      "inverse_cache": true,
+      "gate_cache": true,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "unsupported forward cache producer",
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 1024,
+      "median_ms": null,
+      "samples_ms": [],
+      "forward_medians": {},
+      "forward_samples": {},
+      "forward_device": {},
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "heads": 4,
+      "key_heads": 2,
+      "inverse_cache": true,
+      "gate_cache": true,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "unsupported forward cache producer",
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 4096,
+      "median_ms": null,
+      "samples_ms": [],
+      "forward_medians": {},
+      "forward_samples": {},
+      "forward_device": {},
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "heads": 4,
+      "key_heads": 2,
+      "inverse_cache": true,
+      "gate_cache": true,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "unsupported forward cache producer",
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 16384,
+      "median_ms": null,
+      "samples_ms": [],
+      "forward_medians": {},
+      "forward_samples": {},
+      "forward_device": {},
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "heads": 4,
+      "key_heads": 2,
+      "inverse_cache": true,
+      "gate_cache": true,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "unsupported forward cache producer",
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 32768,
+      "median_ms": null,
+      "samples_ms": [],
+      "forward_medians": {},
+      "forward_samples": {},
+      "forward_device": {},
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "heads": 4,
+      "key_heads": 2,
+      "inverse_cache": true,
+      "gate_cache": true,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "unsupported forward cache producer",
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 256,
+      "heads": 16,
+      "key_heads": 16,
+      "median_ms": 0.7074209861457348,
+      "enqueue_median_ms": 0.32570958137512207,
+      "samples_ms": [
+        0.743381679058075,
+        0.7074209861457348,
+        0.719921663403511,
+        0.7016509771347046,
+        0.688611064106226
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.1408606767654419,
+          0.1420401968061924,
+          0.13147015124559402,
+          0.132750254124403,
+          0.13395026326179504
+        ],
+        "forward_cache_ms": [
+          0.13777008280158043,
+          0.13509998098015785,
+          0.13407086953520775,
+          0.13455981388688087,
+          0.13792002573609352
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 80.48700094223022,
+          "min_us": 79.96299862861633,
+          "max_us": 86.24399900436401,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            86.24399900436401,
+            80.48700094223022,
+            80.34899830818176,
+            79.96299862861633,
+            80.51699995994568
+          ]
+        },
+        "cache": {
+          "median_us": 81.18199706077576,
+          "min_us": 80.87599873542786,
+          "max_us": 81.66800141334534,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            81.01199865341187,
+            81.4769983291626,
+            80.87599873542786,
+            81.66800141334534,
+            81.18199706077576
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 0.13395026326179504,
+        "forward_cache_ms": 0.13509998098015785
+      },
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 0.13509998098015785,
+      "bwd_fwd_ratio": 5.23627746660922,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 1024,
+      "heads": 16,
+      "key_heads": 16,
+      "median_ms": 1.1429418809711933,
+      "enqueue_median_ms": 0.3244001418352127,
+      "samples_ms": [
+        1.1531328782439232,
+        1.1397521011531353,
+        1.1429418809711933,
+        1.1597718112170696,
+        1.1366321705281734
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.2681706100702286,
+          0.2654111012816429,
+          0.2592797391116619,
+          0.2616909332573414,
+          0.2620411105453968
+        ],
+        "forward_cache_ms": [
+          0.26371004059910774,
+          0.26455987244844437,
+          0.26969099417328835,
+          0.2728002145886421,
+          0.28763990849256516
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 200.9740114212036,
+          "min_us": 200.53200721740723,
+          "max_us": 204.3760061264038,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            204.3760061264038,
+            200.61299800872803,
+            200.9740114212036,
+            201.03399753570557,
+            200.53200721740723
+          ]
+        },
+        "cache": {
+          "median_us": 203.79300117492676,
+          "min_us": 203.63600254058838,
+          "max_us": 203.90300750732422,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            203.79300117492676,
+            203.90300750732422,
+            203.84299755096436,
+            203.63600254058838,
+            203.73799800872803
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 0.2620411105453968,
+        "forward_cache_ms": 0.26969099417328835
+      },
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 0.26969099417328835,
+      "bwd_fwd_ratio": 4.237968288391576,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 4096,
+      "heads": 16,
+      "key_heads": 16,
+      "median_ms": 3.2174959778785706,
+      "enqueue_median_ms": 0.3240811638534069,
+      "samples_ms": [
+        3.2294467091560364,
+        3.2331962138414383,
+        3.190985880792141,
+        3.2030963338911533,
+        3.2174959778785706
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.7871617563068867,
+          0.7427912205457687,
+          0.7835319265723228,
+          0.7614013738930225,
+          0.779581256210804
+        ],
+        "forward_cache_ms": [
+          0.7757609710097313,
+          0.7473216392099857,
+          0.7670610211789608,
+          0.7530022412538528,
+          0.7709711790084839
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 675.5929946899414,
+          "min_us": 674.6339797973633,
+          "max_us": 678.7879943847656,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            678.7879943847656,
+            675.3560066223145,
+            675.5929946899414,
+            675.6020069122314,
+            674.6339797973633
+          ]
+        },
+        "cache": {
+          "median_us": 726.4530181884766,
+          "min_us": 724.675989151001,
+          "max_us": 727.0080089569092,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            726.3329982757568,
+            726.7680168151855,
+            724.675989151001,
+            726.4530181884766,
+            727.0080089569092
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 0.779581256210804,
+        "forward_cache_ms": 0.7670610211789608
+      },
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 0.7670610211789608,
+      "bwd_fwd_ratio": 4.194576297115619,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 16384,
+      "heads": 16,
+      "key_heads": 16,
+      "median_ms": 11.72215212136507,
+      "enqueue_median_ms": 0.32973987981677055,
+      "samples_ms": [
+        11.741342954337597,
+        11.727862991392612,
+        11.72215212136507,
+        11.713083367794752,
+        11.716792825609446
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          3.1144260428845882,
+          3.124936018139124,
+          3.1670359894633293,
+          3.1278757378458977,
+          3.1167459674179554
+        ],
+        "forward_cache_ms": [
+          3.1393663957715034,
+          3.136425744742155,
+          3.13352607190609,
+          3.123586066067219,
+          3.146235831081867
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 3024.2300033569336,
+          "min_us": 3020.383071899414,
+          "max_us": 3029.3270111083984,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            3029.3270111083984,
+            3020.383071899414,
+            3024.2300033569336,
+            3024.644088745117,
+            3020.797920227051
+          ]
+        },
+        "cache": {
+          "median_us": 3053.023910522461,
+          "min_us": 3051.4129638671875,
+          "max_us": 3055.965995788574,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            3054.0159225463867,
+            3053.023910522461,
+            3051.995086669922,
+            3055.965995788574,
+            3051.4129638671875
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 3.124936018139124,
+        "forward_cache_ms": 3.136425744742155
+      },
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 3.136425744742155,
+      "bwd_fwd_ratio": 3.7374237668517627,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 32768,
+      "heads": 16,
+      "key_heads": 16,
+      "median_ms": 22.26074319332838,
+      "enqueue_median_ms": 0.3192299045622349,
+      "samples_ms": [
+        22.313213907182217,
+        22.279933094978333,
+        22.26074319332838,
+        22.223003208637238,
+        22.203432861715555
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          5.983781069517136,
+          5.957942456007004,
+          5.976072046905756,
+          5.972291808575392,
+          5.984992254525423
+        ],
+        "forward_cache_ms": [
+          6.020791828632355,
+          6.0073621571063995,
+          6.013491190969944,
+          6.006211042404175,
+          6.0128020122647285
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 5853.316879272461,
+          "min_us": 5852.502059936523,
+          "max_us": 5864.249038696289,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            5864.249038696289,
+            5853.229141235352,
+            5853.316879272461,
+            5852.502059936523,
+            5857.981109619141
+          ]
+        },
+        "cache": {
+          "median_us": 5898.268890380859,
+          "min_us": 5896.453094482422,
+          "max_us": 5901.5838623046875,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            5896.776962280273,
+            5900.54817199707,
+            5896.453094482422,
+            5898.268890380859,
+            5901.5838623046875
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 5.976072046905756,
+        "forward_cache_ms": 6.0128020122647285
+      },
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 6.0128020122647285,
+      "bwd_fwd_ratio": 3.7022245448830016,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 256,
+      "heads": 8,
+      "key_heads": 8,
+      "median_ms": 0.5993610247969627,
+      "enqueue_median_ms": 0.33218134194612503,
+      "samples_ms": [
+        0.6497520953416824,
+        0.5913707427680492,
+        0.5921809934079647,
+        0.5993610247969627,
+        0.6075012497603893
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.13298960402607918,
+          0.13811979442834854,
+          0.1304103061556816,
+          0.13049086555838585,
+          0.13113999739289284
+        ],
+        "forward_cache_ms": [
+          0.13708090409636497,
+          0.12939097359776497,
+          0.12937001883983612,
+          0.13284990563988686,
+          0.1355302520096302
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 78.90200018882751,
+          "min_us": 78.5539984703064,
+          "max_us": 86.14799976348877,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            86.14799976348877,
+            78.90200018882751,
+            78.70399951934814,
+            79.01899814605713,
+            78.5539984703064
+          ]
+        },
+        "cache": {
+          "median_us": 79.35199737548828,
+          "min_us": 79.23799753189087,
+          "max_us": 79.42699790000916,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            79.35199737548828,
+            79.23799753189087,
+            79.40000295639038,
+            79.24399971961975,
+            79.42699790000916
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 0.13113999739289284,
+        "forward_cache_ms": 0.13284990563988686
+      },
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 0.13284990563988686,
+      "bwd_fwd_ratio": 4.5115653030393315,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 1024,
+      "heads": 8,
+      "key_heads": 8,
+      "median_ms": 0.9000720456242561,
+      "enqueue_median_ms": 0.3230213187634945,
+      "samples_ms": [
+        0.9334920905530453,
+        0.8900421671569347,
+        0.8879010565578938,
+        0.9063920006155968,
+        0.9000720456242561
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.26214076206088066,
+          0.25248993188142776,
+          0.2552410587668419,
+          0.252631027251482,
+          0.25234976783394814
+        ],
+        "forward_cache_ms": [
+          0.2639899030327797,
+          0.2589011564850807,
+          0.2625598572194576,
+          0.2833898179233074,
+          0.25647087022662163
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 191.3949966430664,
+          "min_us": 191.09400510787964,
+          "max_us": 195.11899948120117,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            195.11899948120117,
+            191.3949966430664,
+            191.44699573516846,
+            191.17200374603271,
+            191.09400510787964
+          ]
+        },
+        "cache": {
+          "median_us": 191.38799905776978,
+          "min_us": 191.2209987640381,
+          "max_us": 191.74599647521973,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            191.38799905776978,
+            191.3699984550476,
+            191.74599647521973,
+            191.4039969444275,
+            191.2209987640381
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 0.252631027251482,
+        "forward_cache_ms": 0.2625598572194576
+      },
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 0.2625598572194576,
+      "bwd_fwd_ratio": 3.428064195174898,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 4096,
+      "heads": 8,
+      "key_heads": 8,
+      "median_ms": 2.1706451661884785,
+      "enqueue_median_ms": 0.3223712556064129,
+      "samples_ms": [
+        2.190214116126299,
+        2.190993633121252,
+        2.163034398108721,
+        2.1595139987766743,
+        2.1706451661884785
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.721340999007225,
+          0.7183421403169632,
+          0.7216311059892178,
+          0.7344521582126617,
+          0.7245908491313457
+        ],
+        "forward_cache_ms": [
+          0.7330821827054024,
+          0.7335306145250797,
+          0.7298518903553486,
+          0.728880986571312,
+          0.7260506972670555
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 651.1690139770508,
+          "min_us": 650.5050182342529,
+          "max_us": 653.8849830627441,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            653.8849830627441,
+            651.1099815368652,
+            651.6610145568848,
+            650.5050182342529,
+            651.1690139770508
+          ]
+        },
+        "cache": {
+          "median_us": 663.5340213775635,
+          "min_us": 663.493013381958,
+          "max_us": 663.6680126190186,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            663.5109901428223,
+            663.493013381958,
+            663.6680126190186,
+            663.5340213775635,
+            663.6340141296387
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 0.7216311059892178,
+        "forward_cache_ms": 0.7298518903553486
+      },
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 0.7298518903553486,
+      "bwd_fwd_ratio": 2.9740899419081313,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 16384,
+      "heads": 8,
+      "key_heads": 8,
+      "median_ms": 7.321745157241821,
+      "enqueue_median_ms": 0.3257710486650467,
+      "samples_ms": [
+        7.3706540279090405,
+        7.328014355152845,
+        7.321745157241821,
+        7.291263900697231,
+        7.299574092030525
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          2.681685145944357,
+          2.6686950586736202,
+          2.694095019251108,
+          2.6746047660708427,
+          2.6917350478470325
+        ],
+        "forward_cache_ms": [
+          2.7029849588871,
+          2.68045486882329,
+          2.698694821447134,
+          2.6789852418005466,
+          2.693664748221636
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 2619.1200256347656,
+          "min_us": 2616.994094848633,
+          "max_us": 2624.307060241699,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            2624.307060241699,
+            2619.1200256347656,
+            2620.1480865478516,
+            2618.465042114258,
+            2616.994094848633
+          ]
+        },
+        "cache": {
+          "median_us": 2650.8739471435547,
+          "min_us": 2650.8010864257812,
+          "max_us": 2655.9940338134766,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            2655.9940338134766,
+            2650.8010864257812,
+            2650.8739471435547,
+            2651.0040283203125,
+            2650.802993774414
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 2.681685145944357,
+        "forward_cache_ms": 2.693664748221636
+      },
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 2.693664748221636,
+      "bwd_fwd_ratio": 2.718135269831057,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 32768,
+      "heads": 8,
+      "key_heads": 8,
+      "median_ms": 14.597417786717415,
+      "enqueue_median_ms": 0.34507084637880325,
+      "samples_ms": [
+        14.66296799480915,
+        14.423657674342394,
+        14.597417786717415,
+        14.545257668942213,
+        14.597868081182241
+      ],
+      "inverse_cache": true,
+      "gate_cache": true,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          5.57616027072072,
+          5.571430083364248,
+          5.576031282544136,
+          5.573991220444441,
+          5.56899094954133
+        ],
+        "forward_cache_ms": [
+          5.5840108543634415,
+          5.5984812788665295,
+          5.579221062362194,
+          5.575370974838734,
+          5.578040145337582
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 5497.097015380859,
+          "min_us": 5492.631149291992,
+          "max_us": 5504.555892944336,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            5504.555892944336,
+            5502.724075317383,
+            5496.091079711914,
+            5497.097015380859,
+            5492.631149291992
+          ]
+        },
+        "cache": {
+          "median_us": 5499.005889892578,
+          "min_us": 5497.761154174805,
+          "max_us": 5499.467849731445,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            5499.467849731445,
+            5499.005889892578,
+            5497.761154174805,
+            5498.971176147461,
+            5499.042892456055
+          ]
+        }
+      },
+      "forward_medians": {
+        "forward_no_cache_ms": 5.573991220444441,
+        "forward_cache_ms": 5.579221062362194
+      },
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "ok",
+      "forward_status": "ok",
+      "forward_median_ms": 5.579221062362194,
+      "bwd_fwd_ratio": 2.616389926757445,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 256,
+      "median_ms": null,
+      "samples_ms": [],
+      "forward_medians": {},
+      "forward_samples": {},
+      "forward_device": {},
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "heads": 4,
+      "key_heads": 4,
+      "inverse_cache": true,
+      "gate_cache": true,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "unsupported forward cache producer",
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 1024,
+      "median_ms": null,
+      "samples_ms": [],
+      "forward_medians": {},
+      "forward_samples": {},
+      "forward_device": {},
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "heads": 4,
+      "key_heads": 4,
+      "inverse_cache": true,
+      "gate_cache": true,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "unsupported forward cache producer",
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 4096,
+      "median_ms": null,
+      "samples_ms": [],
+      "forward_medians": {},
+      "forward_samples": {},
+      "forward_device": {},
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "heads": 4,
+      "key_heads": 4,
+      "inverse_cache": true,
+      "gate_cache": true,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "unsupported forward cache producer",
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 16384,
+      "median_ms": null,
+      "samples_ms": [],
+      "forward_medians": {},
+      "forward_samples": {},
+      "forward_device": {},
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "heads": 4,
+      "key_heads": 4,
+      "inverse_cache": true,
+      "gate_cache": true,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "unsupported forward cache producer",
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 32768,
+      "median_ms": null,
+      "samples_ms": [],
+      "forward_medians": {},
+      "forward_samples": {},
+      "forward_device": {},
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "heads": 4,
+      "key_heads": 4,
+      "inverse_cache": true,
+      "gate_cache": true,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "unsupported forward cache producer",
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 256,
+      "median_ms": null,
+      "samples_ms": [],
+      "forward_medians": {},
+      "forward_samples": {},
+      "forward_device": {},
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "heads": 2,
+      "key_heads": 2,
+      "inverse_cache": true,
+      "gate_cache": true,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "unsupported forward cache producer",
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 1024,
+      "median_ms": null,
+      "samples_ms": [],
+      "forward_medians": {},
+      "forward_samples": {},
+      "forward_device": {},
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "heads": 2,
+      "key_heads": 2,
+      "inverse_cache": true,
+      "gate_cache": true,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "unsupported forward cache producer",
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 4096,
+      "median_ms": null,
+      "samples_ms": [],
+      "forward_medians": {},
+      "forward_samples": {},
+      "forward_device": {},
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "heads": 2,
+      "key_heads": 2,
+      "inverse_cache": true,
+      "gate_cache": true,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "unsupported forward cache producer",
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 16384,
+      "median_ms": null,
+      "samples_ms": [],
+      "forward_medians": {},
+      "forward_samples": {},
+      "forward_device": {},
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "heads": 2,
+      "key_heads": 2,
+      "inverse_cache": true,
+      "gate_cache": true,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "unsupported forward cache producer",
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    },
+    {
+      "tokens": 32768,
+      "median_ms": null,
+      "samples_ms": [],
+      "forward_medians": {},
+      "forward_samples": {},
+      "forward_device": {},
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "heads": 2,
+      "key_heads": 2,
+      "inverse_cache": true,
+      "gate_cache": true,
+      "saved_values": [
+        "inverse_factors",
+        "gate_prefix_hi",
+        "gate_prefix_lo",
+        "beta"
+      ],
+      "backward_status": "unsupported forward cache producer",
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "timing": "synchronized wall including backward allocation; forward excluded; no TP communication",
+      "forward_timing": "synchronized wall, preallocated buffers, inverse cache written and gate/beta buffers retained",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42
+    }
+  ]
+}

@@ -94,7 +94,7 @@ PYBIND11_MODULE(pto_kernels_ops, m) {
         py::arg("o_workspace_qk"), py::arg("o_workspace_qs"),
         py::arg("o_workspace_gated"), py::arg("block_dim"),
         py::arg("batch_size"), py::arg("seq_len"), py::arg("total_tokens"),
-        py::arg("num_matrices"));
+        py::arg("num_matrices"), py::arg("inverse_cache") = py::none());
   m.def("pto_scan_ul1", &pto_isa_ops::run_scan_ul1);
   m.def("pto_simple_matmul", &pto_isa_ops::run_simple_matmul);
   m.def("pto_swiglu", &pto_isa_ops::run_swiglu, py::arg("x"),

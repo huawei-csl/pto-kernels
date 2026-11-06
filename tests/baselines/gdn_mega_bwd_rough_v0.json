@@ -1,0 +1,128 @@
+{
+  "name": "gdn_mega_bwd_rough_native_baseline_v0",
+  "status": "Correctness baseline before sequence-wide stage fusion; not a fused backward megakernel.",
+  "measurement_date": "2026-11-03",
+  "device": "Ascend910B2",
+  "container_image": "quay.io/ascend/cann:9.1.0-910b-ubuntu22.04-py3.11",
+  "torch": "2.10.0+cpu",
+  "torch_npu": "2.10.0",
+  "python": "3.11.15",
+  "config": {
+    "batch": 1,
+    "key_heads": 2,
+    "value_heads": 8,
+    "head_dim": 128,
+    "chunk_size": 128,
+    "q_k_v_beta_dout_dtype": "float16",
+    "g_dtype": "float32",
+    "initial_state": null,
+    "dfinal_state": null,
+    "scale": 1.0,
+    "seed": 42,
+    "warmup_calls": 1,
+    "measured_calls": 5,
+    "OMP_NUM_THREADS": 4
+  },
+  "method": "Median hardware wall time, includes validation, allocation, enqueue and final synchronization; excludes compilation and input creation. Backward includes its own forward-state recomputation. No model forward is timed.",
+  "command": "PYTHONPATH=. python tests/benchmark_gdn_mega_bwd.py",
+  "results": [
+    {
+      "tokens": 128,
+      "python_orchestration_samples_ms": [
+        6.114688701927662,
+        5.999689921736717,
+        6.020299158990383,
+        6.040479987859726,
+        5.994589067995548
+      ],
+      "python_orchestration_median_ms": 6.020299158990383,
+      "native_orchestration_samples_ms": [
+        5.058578215539455,
+        5.004538223147392,
+        5.032517947256565,
+        4.97006718069315,
+        4.966137930750847
+      ],
+      "native_orchestration_median_ms": 5.004538223147392,
+      "confirmation_native_median_ms": 5.021937657147646,
+      "confirmation_enqueue_median_ms": 0.35224994644522667
+    },
+    {
+      "tokens": 512,
+      "python_orchestration_samples_ms": [
+        25.43440042063594,
+        25.488099548965693,
+        25.438920129090548,
+        25.063669309020042,
+        25.24820016697049
+      ],
+      "python_orchestration_median_ms": 25.43440042063594,
+      "native_orchestration_samples_ms": [
+        19.59689101204276,
+        19.56053962931037,
+        19.634120631963015,
+        19.549159798771143,
+        19.552340731024742
+      ],
+      "native_orchestration_median_ms": 19.56053962931037,
+      "confirmation_native_median_ms": 19.561700988560915,
+      "confirmation_enqueue_median_ms": 0.35563018172979355
+    },
+    {
+      "tokens": 2048,
+      "python_orchestration_samples_ms": [
+        101.7053802497685,
+        102.13794000446796,
+        102.27183112874627,
+        102.18681022524834,
+        102.01946087181568
+      ],
+      "python_orchestration_median_ms": 102.13794000446796,
+      "native_orchestration_samples_ms": [
+        77.74045085534453,
+        77.74782134220004,
+        77.7308507822454,
+        77.76960125193,
+        77.75219064205885
+      ],
+      "native_orchestration_median_ms": 77.74782134220004,
+      "confirmation_native_median_ms": 77.77670118957758,
+      "confirmation_enqueue_median_ms": 0.33818138763308525
+    }
+  ],
+  "launch_count": {
+    "method": "Counted the native control flow with device launch functions stubbed; not a profiler measurement. One sequence, all heads handled inside launches.",
+    "tokens": 1024,
+    "chunks": 8,
+    "initialization": 2,
+    "forward_state_replay": 147,
+    "reverse_chunks": 784,
+    "write_dh0": 1,
+    "total": 934,
+    "formula_nonempty_single_sequence": "119 * ceil(tokens / 128) - 18"
+  },
+  "validation": {
+    "native_backward_and_reference_tests": 57,
+    "hardware_tests": 49,
+    "cpu_reference_tests": 8,
+    "elapsed_seconds": 41.51,
+    "atol": 2e-05,
+    "rtol": 0.0002,
+    "prior_forward_tests": 266,
+    "prior_forward_note": "Passed before native host-orchestration refactor; forward and PTO device code were unchanged by that refactor."
+  },
+  "build_seconds": {
+    "device": 4.71,
+    "native_host": 12.09
+  },
+  "workspace": {
+    "formula_bytes": "4 * (max(1, max_sequence_chunks) + 2 + 96) * value_heads * 128 * 128",
+    "tokens_8192_heads_16_MiB": 162
+  },
+  "source_sha256": {
+    "csrc/kernel/gdn_mega_bwd/backward.py": "8bc85dacef2ba45d4ad5395618e9380c9ae918d33fc2c8e9698bf1602f705830",
+    "csrc/kernel/gdn_mega_bwd/binding.py": "946164416b645c2787267f5beb8d35442c1d8dc625b91fe3d331bfa2f3515a1c",
+    "csrc/kernel/gdn_mega_bwd/kernel.cpp": "84d70acfb32c23b5e64be2a8e5981be6bf21aaa2c3280bf3d058bab7e58dbb9d",
+    "csrc/kernel/gdn_mega_bwd/launch.cpp": "ba422afaabe9833b2cd09948e047851dab7e734f5797cc4aa399b6cab385be30"
+  }
+}

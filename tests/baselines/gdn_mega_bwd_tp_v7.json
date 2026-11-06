@@ -1,0 +1,4859 @@
+{
+  "name": "gdn_mega_bwd_tp_v7",
+  "date": "2026-11-04",
+  "device": "Ascend910B2",
+  "baseline_commit": "f33546c",
+  "original_baseline_commit": "2b6bd11",
+  "baseline_kernel": "build/gdn_mega_bwd/f904ccf485dc78bc/kernel.so",
+  "baseline_kernel_sha256": "91748a5715b2a9d59b2f9c1922ee64337b71a154448fa980504849e3aba87162",
+  "changes": [
+    "Reuse forward blocked triangular solve on both vector subcores and Cube",
+    "Pipeline native preparation with all cache modes",
+    "Load gate/beta panels and transpose instead of scalar GM gathers",
+    "Native FP32 vector prefix scan; FP32-input accuracy path retained",
+    "Compute shared QK/KK once per key-head group; keep K/KK read-only aliases"
+  ],
+  "paired_method": "Identical rounded inputs, alternating snapshot/current order in one process; three warmup pairs, eleven measured pairs. Synchronized wall time includes allocation/enqueue.",
+  "paired_driver": "build/gdn_mega_bwd/tp_v7/gdn_tp_ab.py",
+  "paired_driver_sha256": "bc52f7d54eb3cf7ae246e80d052f6566cbe2179c4babd7b008c3c3a9ff54c97d",
+  "paired_results": [
+    {
+      "global_heads": 64,
+      "tp": 1,
+      "heads": 64,
+      "key_heads": 16,
+      "tokens": 4096,
+      "cached": false,
+      "samples_ms": {
+        "snapshot": [
+          20.79764800146222,
+          20.757647696882486,
+          20.90485906228423,
+          20.904398057609797,
+          20.842258352786303,
+          20.782578270882368,
+          20.79787803813815,
+          20.775568205863237,
+          20.767787005752325,
+          20.766848232597113,
+          20.784257911145687
+        ],
+        "current": [
+          12.001796159893274,
+          11.941266246140003,
+          11.92192593589425,
+          12.01127702370286,
+          11.89467590302229,
+          11.947856284677982,
+          11.92430593073368,
+          11.941805947571993,
+          11.981816031038761,
+          11.996945831924677,
+          11.924645863473415
+        ]
+      },
+      "medians_ms": {
+        "snapshot": 20.784257911145687,
+        "current": 11.941805947571993
+      }
+    },
+    {
+      "global_heads": 64,
+      "tp": 1,
+      "heads": 64,
+      "key_heads": 16,
+      "tokens": 16384,
+      "cached": false,
+      "samples_ms": {
+        "snapshot": [
+          80.32285841181874,
+          80.35857789218426,
+          80.43752796947956,
+          80.41339786723256,
+          80.33706713467836,
+          80.34060709178448,
+          80.52701829001307,
+          80.45812789350748,
+          80.32784704118967,
+          80.3156471811235,
+          80.36743709817529
+        ],
+        "current": [
+          45.18758179619908,
+          45.544184278696775,
+          45.4526930116117,
+          45.165431685745716,
+          45.18911195918918,
+          45.28902331367135,
+          45.11536192148924,
+          45.16537208110094,
+          45.241111889481544,
+          45.174041762948036,
+          45.1369215734303
+        ]
+      },
+      "medians_ms": {
+        "snapshot": 80.35857789218426,
+        "current": 45.18758179619908
+      }
+    },
+    {
+      "global_heads": 64,
+      "tp": 2,
+      "heads": 32,
+      "key_heads": 8,
+      "tokens": 4096,
+      "cached": false,
+      "samples_ms": {
+        "snapshot": [
+          11.052881833165884,
+          11.04366173967719,
+          11.02862088009715,
+          11.053211987018585,
+          11.015132069587708,
+          11.06253219768405,
+          11.03090075775981,
+          11.036352254450321,
+          11.04216231033206,
+          11.069261934608221,
+          11.049982160329819
+        ],
+        "current": [
+          6.610800977796316,
+          6.613340694457293,
+          6.575500592589378,
+          6.60258112475276,
+          6.589620839804411,
+          6.617631297558546,
+          6.607951130717993,
+          6.627380847930908,
+          6.607030984014273,
+          6.591180805116892,
+          6.613501347601414
+        ]
+      },
+      "medians_ms": {
+        "snapshot": 11.04366173967719,
+        "current": 6.607951130717993
+      }
+    },
+    {
+      "global_heads": 64,
+      "tp": 2,
+      "heads": 32,
+      "key_heads": 8,
+      "tokens": 16384,
+      "cached": false,
+      "samples_ms": {
+        "snapshot": [
+          42.51993028447032,
+          42.51718893647194,
+          42.4677487462759,
+          42.430778965353966,
+          42.459709104150534,
+          42.428669054061174,
+          42.526820208877325,
+          42.51500917598605,
+          42.47805941849947,
+          42.51175886020064,
+          42.51370904967189
+        ],
+        "current": [
+          24.649704806506634,
+          24.805317167192698,
+          24.65175511315465,
+          24.652265943586826,
+          24.647396057844162,
+          24.65638518333435,
+          24.628374725580215,
+          24.639455135911703,
+          24.631505832076073,
+          24.719635024666786,
+          24.657795671373606
+        ]
+      },
+      "medians_ms": {
+        "snapshot": 42.51175886020064,
+        "current": 24.65175511315465
+      }
+    },
+    {
+      "global_heads": 48,
+      "tp": 1,
+      "heads": 48,
+      "key_heads": 16,
+      "tokens": 4096,
+      "cached": false,
+      "samples_ms": {
+        "snapshot": [
+          16.107084695249796,
+          16.151255927979946,
+          16.092334873974323,
+          16.12048503011465,
+          16.148246359080076,
+          16.094855032861233,
+          16.092204954475164,
+          16.119565814733505,
+          16.082745976746082,
+          16.094455029815435,
+          16.07578480616212
+        ],
+        "current": [
+          9.390104096382856,
+          9.359644260257483,
+          9.371853899210691,
+          9.351553861051798,
+          9.383693803101778,
+          9.350073989480734,
+          9.35834413394332,
+          9.345634374767542,
+          9.356813039630651,
+          9.340513963252306,
+          9.344404097646475
+        ]
+      },
+      "medians_ms": {
+        "snapshot": 16.094855032861233,
+        "current": 9.356813039630651
+      }
+    },
+    {
+      "global_heads": 48,
+      "tp": 1,
+      "heads": 48,
+      "key_heads": 16,
+      "tokens": 16384,
+      "cached": false,
+      "samples_ms": {
+        "snapshot": [
+          61.12282583490014,
+          61.13249622285366,
+          61.10945623368025,
+          61.11396476626396,
+          61.24810595065355,
+          61.163506004959345,
+          61.18194619193673,
+          61.131466180086136,
+          61.10011599957943,
+          61.10412580892444,
+          61.09682470560074
+        ],
+        "current": [
+          34.02901906520128,
+          34.01186875998974,
+          33.9614087715745,
+          34.01400987058878,
+          34.01211928576231,
+          34.074979834258556,
+          33.97583914920688,
+          34.10247899591923,
+          33.98974938318133,
+          34.04929907992482,
+          33.996019046753645
+        ]
+      },
+      "medians_ms": {
+        "snapshot": 61.12282583490014,
+        "current": 34.01211928576231
+      }
+    },
+    {
+      "global_heads": 48,
+      "tp": 2,
+      "heads": 24,
+      "key_heads": 8,
+      "tokens": 4096,
+      "cached": false,
+      "samples_ms": {
+        "snapshot": [
+          8.153087925165892,
+          8.171537891030312,
+          8.172229398041964,
+          8.154758252203465,
+          8.184598293155432,
+          8.175307884812355,
+          8.166329003870487,
+          8.188208099454641,
+          8.205397985875607,
+          8.194289170205593,
+          8.156337775290012
+        ],
+        "current": [
+          4.810321610420942,
+          4.833583254367113,
+          4.819922149181366,
+          4.807181656360626,
+          4.817472770810127,
+          4.830323159694672,
+          4.843172151595354,
+          4.856141749769449,
+          4.812983330339193,
+          4.822622053325176,
+          4.830952733755112
+        ]
+      },
+      "medians_ms": {
+        "snapshot": 8.172229398041964,
+        "current": 4.822622053325176
+      }
+    },
+    {
+      "global_heads": 48,
+      "tp": 2,
+      "heads": 24,
+      "key_heads": 8,
+      "tokens": 16384,
+      "cached": false,
+      "samples_ms": {
+        "snapshot": [
+          31.171105336397886,
+          31.05436498299241,
+          31.141396146267653,
+          31.092614866793156,
+          31.078136060386896,
+          31.132644973695278,
+          31.09849477186799,
+          31.06470499187708,
+          31.224246136844158,
+          31.306855846196413,
+          31.098194885998964
+        ],
+        "current": [
+          17.454811837524176,
+          17.550521064549685,
+          17.4703411757946,
+          17.414210829883814,
+          17.383670900017023,
+          17.448272090405226,
+          17.427651211619377,
+          17.472262028604746,
+          17.453481908887625,
+          17.411581240594387,
+          17.45520206168294
+        ]
+      },
+      "medians_ms": {
+        "snapshot": 31.09849477186799,
+        "current": 17.453481908887625
+      }
+    },
+    {
+      "global_heads": 32,
+      "tp": 1,
+      "heads": 32,
+      "key_heads": 16,
+      "tokens": 4096,
+      "cached": false,
+      "samples_ms": {
+        "snapshot": [
+          11.089561972767115,
+          11.105981189757586,
+          11.08829164877534,
+          11.072542052716017,
+          11.042212136089802,
+          11.064731050282717,
+          11.037421878427267,
+          11.018480639904737,
+          11.06228120625019,
+          11.085041798651218,
+          11.050160974264145
+        ],
+        "current": [
+          6.713601760566235,
+          6.762581877410412,
+          6.716991309076548,
+          6.70674117282033,
+          6.696631200611591,
+          6.710751913487911,
+          6.717330776154995,
+          6.705811247229576,
+          6.7022317089140415,
+          6.715921219438314,
+          6.761621683835983
+        ]
+      },
+      "medians_ms": {
+        "snapshot": 11.064731050282717,
+        "current": 6.713601760566235
+      }
+    },
+    {
+      "global_heads": 32,
+      "tp": 1,
+      "heads": 32,
+      "key_heads": 16,
+      "tokens": 16384,
+      "cached": false,
+      "samples_ms": {
+        "snapshot": [
+          41.85257479548454,
+          41.889904998242855,
+          41.91372497007251,
+          41.907915845513344,
+          41.87308577820659,
+          41.82452475652099,
+          41.879285126924515,
+          41.88675479963422,
+          41.85115499421954,
+          41.825344786047935,
+          41.81569488719106
+        ],
+        "current": [
+          24.446734227240086,
+          24.491974152624607,
+          24.51196499168873,
+          24.484713561832905,
+          24.474293924868107,
+          24.47523409500718,
+          24.473654106259346,
+          24.4836644269526,
+          24.403723888099194,
+          24.5122741907835,
+          24.486144073307514
+        ]
+      },
+      "medians_ms": {
+        "snapshot": 41.87308577820659,
+        "current": 24.4836644269526
+      }
+    },
+    {
+      "global_heads": 32,
+      "tp": 2,
+      "heads": 16,
+      "key_heads": 8,
+      "tokens": 4096,
+      "cached": false,
+      "samples_ms": {
+        "snapshot": [
+          5.696116015315056,
+          5.708927288651466,
+          5.666686221957207,
+          5.712986923754215,
+          5.712626036256552,
+          5.69625711068511,
+          5.701636429876089,
+          5.692206788808107,
+          5.700747016817331,
+          5.6926170364022255,
+          5.697476677596569
+        ],
+        "current": [
+          3.6144168116152287,
+          3.6186869256198406,
+          3.629107028245926,
+          3.610956948250532,
+          3.6340970546007156,
+          3.6266869865357876,
+          3.601507283747196,
+          3.6411769688129425,
+          3.5938858054578304,
+          3.6160158924758434,
+          3.5977670922875404
+        ]
+      },
+      "medians_ms": {
+        "snapshot": 5.697476677596569,
+        "current": 3.6160158924758434
+      }
+    },
+    {
+      "global_heads": 32,
+      "tp": 2,
+      "heads": 16,
+      "key_heads": 8,
+      "tokens": 16384,
+      "cached": false,
+      "samples_ms": {
+        "snapshot": [
+          21.390059031546116,
+          21.3477099314332,
+          21.351599134504795,
+          21.360910031944513,
+          21.390960086137056,
+          21.367920096963644,
+          21.39126881957054,
+          21.40109008178115,
+          21.38908999040723,
+          21.339058876037598,
+          21.385150030255318
+        ],
+        "current": [
+          13.112790882587433,
+          13.104211073368788,
+          13.039591256529093,
+          13.093771412968636,
+          13.188860844820738,
+          13.089870568364859,
+          13.111811131238937,
+          13.127910904586315,
+          13.103561010211706,
+          13.091111090034246,
+          13.028599787503481
+        ]
+      },
+      "medians_ms": {
+        "snapshot": 21.385150030255318,
+        "current": 13.103561010211706
+      }
+    },
+    {
+      "global_heads": 16,
+      "tp": 1,
+      "heads": 16,
+      "key_heads": 16,
+      "tokens": 4096,
+      "cached": false,
+      "samples_ms": {
+        "snapshot": [
+          5.624925717711449,
+          5.6297960691154,
+          5.646516103297472,
+          5.605395883321762,
+          5.5863759480416775,
+          5.601466167718172,
+          5.6130969896912575,
+          5.612015724182129,
+          5.59687614440918,
+          5.620375741273165,
+          5.612265784293413
+        ],
+        "current": [
+          3.672646824270487,
+          3.687147982418537,
+          3.696057014167309,
+          3.7299678660929203,
+          3.6983671598136425,
+          3.659586887806654,
+          3.685147035866976,
+          3.654097206890583,
+          3.72114684432745,
+          3.7141479551792145,
+          3.7115770392119884
+        ]
+      },
+      "medians_ms": {
+        "snapshot": 5.612265784293413,
+        "current": 3.696057014167309
+      }
+    },
+    {
+      "global_heads": 16,
+      "tp": 1,
+      "heads": 16,
+      "key_heads": 16,
+      "tokens": 16384,
+      "cached": false,
+      "samples_ms": {
+        "snapshot": [
+          21.24041924253106,
+          21.23413886874914,
+          21.23364806175232,
+          21.178439259529114,
+          21.234918851405382,
+          21.267958916723728,
+          21.196418907493353,
+          21.19768923148513,
+          21.208108868449926,
+          21.219978109002113,
+          21.19434904307127
+        ],
+        "current": [
+          13.577532954514027,
+          13.560732826590538,
+          13.57575273141265,
+          13.593182899057865,
+          13.518833089619875,
+          13.570933137089014,
+          13.57929315418005,
+          13.56409303843975,
+          13.559333048760891,
+          13.52348318323493,
+          13.552483171224594
+        ]
+      },
+      "medians_ms": {
+        "snapshot": 21.219978109002113,
+        "current": 13.56409303843975
+      }
+    },
+    {
+      "global_heads": 16,
+      "tp": 2,
+      "heads": 8,
+      "key_heads": 8,
+      "tokens": 4096,
+      "cached": false,
+      "samples_ms": {
+        "snapshot": [
+          3.2605547457933426,
+          3.258565440773964,
+          3.2516960054636,
+          3.291674889624119,
+          3.242475911974907,
+          3.239284735172987,
+          3.2697347924113274,
+          3.2632253132760525,
+          3.2400060445070267,
+          3.2467851415276527,
+          3.248584922403097
+        ],
+        "current": [
+          2.511702012270689,
+          2.46006203815341,
+          2.522330731153488,
+          2.501141745597124,
+          2.548190765082836,
+          2.4950308725237846,
+          2.4958420544862747,
+          2.4924520403146744,
+          2.478100825101137,
+          2.5319610722362995,
+          2.4948720820248127
+        ]
+      },
+      "medians_ms": {
+        "snapshot": 3.2516960054636,
+        "current": 2.4958420544862747
+      }
+    },
+    {
+      "global_heads": 16,
+      "tp": 2,
+      "heads": 8,
+      "key_heads": 8,
+      "tokens": 16384,
+      "cached": false,
+      "samples_ms": {
+        "snapshot": [
+          11.66134374216199,
+          11.722194962203503,
+          11.685755103826523,
+          11.6951041854918,
+          11.693643871694803,
+          11.739435140043497,
+          11.69793400913477,
+          11.648574844002724,
+          11.747715063393116,
+          11.69962389394641,
+          11.694174259901047
+        ],
+        "current": [
+          8.757361210882664,
+          8.774891030043364,
+          8.700770325958729,
+          8.806961122900248,
+          8.889861404895782,
+          8.871361147612333,
+          8.826390840113163,
+          8.830620907247066,
+          8.829070720821619,
+          8.884690701961517,
+          8.875541854649782
+        ]
+      },
+      "medians_ms": {
+        "snapshot": 11.6951041854918,
+        "current": 8.829070720821619
+      }
+    },
+    {
+      "global_heads": 64,
+      "tp": 1,
+      "heads": 64,
+      "key_heads": 16,
+      "tokens": 8192,
+      "cached": true,
+      "samples_ms": {
+        "snapshot": [
+          20.648375619202852,
+          20.64032619819045,
+          20.660575944930315,
+          20.642895717173815,
+          20.669226069003344,
+          20.675135776400566,
+          20.67654626443982,
+          20.674915984272957,
+          20.673975814133883,
+          20.687225740402937,
+          20.70247707888484
+        ],
+        "current": [
+          20.414965227246284,
+          20.24602424353361,
+          20.232163835316896,
+          20.244114100933075,
+          20.211374387145042,
+          20.262725185602903,
+          20.226174034178257,
+          20.215963944792747,
+          20.246684085577726,
+          20.2353042550385,
+          20.262253936380148
+        ]
+      },
+      "medians_ms": {
+        "snapshot": 20.673975814133883,
+        "current": 20.244114100933075
+      }
+    },
+    {
+      "global_heads": 64,
+      "tp": 2,
+      "heads": 32,
+      "key_heads": 8,
+      "tokens": 8192,
+      "cached": true,
+      "samples_ms": {
+        "snapshot": [
+          11.153331957757473,
+          11.17823226377368,
+          11.17846230044961,
+          11.18171215057373,
+          11.146492324769497,
+          11.190012097358704,
+          11.144442018121481,
+          11.18940208107233,
+          11.173310689628124,
+          11.172761674970388,
+          11.155412066727877
+        ],
+        "current": [
+          11.002800893038511,
+          11.011200957000256,
+          11.010351125150919,
+          11.039441917091608,
+          11.001960840076208,
+          11.054831091314554,
+          11.019241064786911,
+          11.032211128622293,
+          11.009690817445517,
+          11.015631724148989,
+          11.017460841685534
+        ]
+      },
+      "medians_ms": {
+        "snapshot": 11.173310689628124,
+        "current": 11.015631724148989
+      }
+    },
+    {
+      "global_heads": 48,
+      "tp": 1,
+      "heads": 48,
+      "key_heads": 16,
+      "tokens": 8192,
+      "cached": true,
+      "samples_ms": {
+        "snapshot": [
+          15.617233235388994,
+          15.629511792212725,
+          15.605052001774311,
+          15.623833052814007,
+          15.607132110744715,
+          15.60845272615552,
+          15.624611638486385,
+          15.583232045173645,
+          15.573542099446058,
+          15.621632803231478,
+          15.710792038589716
+        ],
+        "current": [
+          15.406930819153786,
+          15.323981642723083,
+          15.295401215553284,
+          15.359991230070591,
+          15.298500657081604,
+          15.369441360235214,
+          15.356241725385189,
+          15.374911949038506,
+          15.344241168349981,
+          15.35659097135067,
+          15.35795209929347
+        ]
+      },
+      "medians_ms": {
+        "snapshot": 15.617233235388994,
+        "current": 15.35659097135067
+      }
+    },
+    {
+      "global_heads": 16,
+      "tp": 1,
+      "heads": 16,
+      "key_heads": 16,
+      "tokens": 8192,
+      "cached": true,
+      "samples_ms": {
+        "snapshot": [
+          6.098487880080938,
+          6.104969419538975,
+          6.111617665737867,
+          6.086847744882107,
+          6.091167684644461,
+          6.105838343501091,
+          6.118908990174532,
+          6.090248003602028,
+          6.110407877713442,
+          6.102729123085737,
+          6.0662380419671535
+        ],
+        "current": [
+          6.145598366856575,
+          6.135337986052036,
+          6.138809025287628,
+          6.1570387333631516,
+          6.157898809760809,
+          6.116508971899748,
+          6.13641832023859,
+          6.1286380514502525,
+          6.138619035482407,
+          6.118407938629389,
+          6.159378681331873
+        ]
+      },
+      "medians_ms": {
+        "snapshot": 6.102729123085737,
+        "current": 6.138619035482407
+      }
+    }
+  ],
+  "profile_config": {
+    "tokens": 4096,
+    "heads": 64,
+    "key_heads": 16,
+    "inverse_cache": false,
+    "gate_cache": false
+  },
+  "stage_trace_before": [
+    {
+      "name": "_Z13gdn_bwd_stageILi0EEv4Plan",
+      "duration_us": 12898.2065
+    },
+    {
+      "name": "_Z13gdn_bwd_stageILi1EEv4Plan",
+      "duration_us": 2348.819
+    },
+    {
+      "name": "_Z13gdn_bwd_stageILi2EEv4Plan",
+      "duration_us": 3989.3605
+    },
+    {
+      "name": "_Z13gdn_bwd_stageILi3EEv4Plan",
+      "duration_us": 1197.848
+    }
+  ],
+  "stage_trace_after": [
+    {
+      "name": "_Z13gdn_bwd_stageILi0EEv4Plan",
+      "duration_us": 4202.968
+    },
+    {
+      "name": "_Z13gdn_bwd_stageILi1EEv4Plan",
+      "duration_us": 2268.664
+    },
+    {
+      "name": "_Z13gdn_bwd_stageILi2EEv4Plan",
+      "duration_us": 3952.983
+    },
+    {
+      "name": "_Z13gdn_bwd_stageILi3EEv4Plan",
+      "duration_us": 1191.0685
+    }
+  ],
+  "stage_trace_note": "Hardware trace durations, not Cube utilization counters.",
+  "validation": {
+    "passed": 113,
+    "hardware": 103,
+    "cpu_reference": 10,
+    "seconds": 205.35,
+    "bound": "Per gradient tensor max error <= 2 * reordered PyTorch max error + 1e-5",
+    "added_coverage": "Packed [17,0,19] H64/Hk16 exercises grouped scheduling/aliases across three dtypes and three cache modes."
+  },
+  "launch_count": "4 * ceil(packed_sequence_count / 64)",
+  "workspace_8k_h16_MiB": 816.5,
+  "workspace_changed": false,
+  "forward_changed": false,
+  "extensive_notes": [
+    "80 backward configurations measured with five samples per case and full recomputation.",
+    "Forward measurements are reused from v6: code unchanged; timings were collected separately.",
+    "Both directions report synchronized wall time. Backward includes allocation; forward uses preallocated buffers.",
+    "TP divides both global head counts; communication is excluded.",
+    "Forward unsupported for local value heads 2,4,6: corresponding 20 cells retain N/A."
+  ],
+  "extensive_results": [
+    {
+      "tokens": 256,
+      "heads": 64,
+      "key_heads": 16,
+      "median_ms": 1.2332238256931305,
+      "enqueue_median_ms": 0.3003212623298168,
+      "samples_ms": [
+        1.2895939871668816,
+        1.2332238256931305,
+        1.2696036137640476,
+        1.2233336456120014,
+        1.2317043729126453
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.244777649641037,
+          0.255608931183815,
+          0.24608895182609558,
+          0.24667801335453987,
+          0.23940857499837875
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 186.18500232696533,
+          "min_us": 184.94199514389038,
+          "max_us": 191.98299646377563,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            191.98299646377563,
+            184.94199514389038,
+            186.0949993133545,
+            186.18500232696533,
+            186.27300262451172
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 0.24608895182609558,
+      "bwd_fwd_ratio": 5.0112929351034685,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 1024,
+      "heads": 64,
+      "key_heads": 16,
+      "median_ms": 3.3982708118855953,
+      "enqueue_median_ms": 0.29853079468011856,
+      "samples_ms": [
+        3.40814096853137,
+        3.424400929361582,
+        3.3944910392165184,
+        3.3982708118855953,
+        3.383469767868519
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.6111967377364635,
+          0.613317359238863,
+          0.6078970618546009,
+          0.6046467460691929,
+          0.6059166043996811
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 533.636999130249,
+          "min_us": 533.2129955291748,
+          "max_us": 534.1549873352051,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            533.843994140625,
+            533.2560062408447,
+            534.1549873352051,
+            533.636999130249,
+            533.2129955291748
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 0.6078970618546009,
+      "bwd_fwd_ratio": 5.590207660352875,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 4096,
+      "heads": 64,
+      "key_heads": 16,
+      "median_ms": 11.962397955358028,
+      "enqueue_median_ms": 0.3088507801294327,
+      "samples_ms": [
+        11.965848039835691,
+        12.110207695513964,
+        11.96171808987856,
+        11.933828238397837,
+        11.962397955358028
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          2.121067140251398,
+          2.1272157318890095,
+          2.138647250831127,
+          2.120967023074627,
+          2.1164068020880222
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 2046.544075012207,
+          "min_us": 2043.0559158325195,
+          "max_us": 2049.4359970092773,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            2049.4359970092773,
+            2046.544075012207,
+            2045.166015625,
+            2043.0559158325195,
+            2046.957015991211
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 2.121067140251398,
+      "bwd_fwd_ratio": 5.639801649060573,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 16384,
+      "heads": 64,
+      "key_heads": 16,
+      "median_ms": 45.16689432784915,
+      "enqueue_median_ms": 0.3068610094487667,
+      "samples_ms": [
+        45.17027409747243,
+        45.12678273022175,
+        45.16732273623347,
+        45.16689432784915,
+        45.074212830513716
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          8.123230189085007,
+          8.101869840174913,
+          8.090749848634005,
+          8.100059814751148,
+          8.094120305031538
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 7998.528289794922,
+          "min_us": 7998.055267333984,
+          "max_us": 8001.499938964844,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            7998.055267333984,
+            8001.499938964844,
+            7998.3612060546875,
+            7999.398040771484,
+            7998.528289794922
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 8.100059814751148,
+      "bwd_fwd_ratio": 5.5761186165063865,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 32768,
+      "heads": 64,
+      "key_heads": 16,
+      "median_ms": 91.57813992351294,
+      "enqueue_median_ms": 0.3323107957839966,
+      "samples_ms": [
+        91.57712012529373,
+        91.7537109926343,
+        91.69812081381679,
+        91.57813992351294,
+        91.49583987891674
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          16.566528007388115,
+          16.54794905334711,
+          16.540818847715855,
+          16.58637821674347,
+          16.58889790996909
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 16452.735900878906,
+          "min_us": 16452.227783203125,
+          "max_us": 16460.02655029297,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            16460.02655029297,
+            16452.735900878906,
+            16452.561950683594,
+            16452.227783203125,
+            16452.755737304688
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 16.566528007388115,
+      "bwd_fwd_ratio": 5.527901795878543,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 256,
+      "heads": 32,
+      "key_heads": 8,
+      "median_ms": 0.8483231067657471,
+      "enqueue_median_ms": 0.3066509962081909,
+      "samples_ms": [
+        0.9298818185925484,
+        0.8760532364249229,
+        0.8483231067657471,
+        0.8364520035684109,
+        0.8372832089662552
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.20484905689954758,
+          0.18707895651459694,
+          0.19011925905942917,
+          0.18416903913021088,
+          0.18404889851808548
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 128.33900451660156,
+          "min_us": 128.10399532318115,
+          "max_us": 133.56499671936035,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            133.56499671936035,
+            128.32900285720825,
+            128.4909963607788,
+            128.33900451660156,
+            128.10399532318115
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 0.18707895651459694,
+      "bwd_fwd_ratio": 4.534572581387882,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 1024,
+      "heads": 32,
+      "key_heads": 8,
+      "median_ms": 1.937916036695242,
+      "enqueue_median_ms": 0.3038509748876095,
+      "samples_ms": [
+        1.9870158284902573,
+        1.9450061954557896,
+        1.937916036695242,
+        1.9300156272947788,
+        1.9109961576759815
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.4184967838227749,
+          0.4137079231441021,
+          0.4191780462861061,
+          0.4084869287908077,
+          0.41516777127981186
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 347.38099575042725,
+          "min_us": 346.9789981842041,
+          "max_us": 347.64599800109863,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            347.38099575042725,
+            347.0510005950928,
+            347.64599800109863,
+            346.9789981842041,
+            347.4400043487549
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 0.41516777127981186,
+      "bwd_fwd_ratio": 4.667790157991669,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 4096,
+      "heads": 32,
+      "key_heads": 8,
+      "median_ms": 6.647860165685415,
+      "enqueue_median_ms": 0.30931131914258003,
+      "samples_ms": [
+        6.65024109184742,
+        6.635110825300217,
+        6.664460990577936,
+        6.612561177462339,
+        6.647860165685415
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          1.3710716739296913,
+          1.3724509626626968,
+          1.3774721883237362,
+          1.374551560729742,
+          1.3883719220757484
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 1309.03902053833,
+          "min_us": 1308.6560249328613,
+          "max_us": 1313.1699562072754,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            1313.1699562072754,
+            1308.6560249328613,
+            1308.8330268859863,
+            1309.531021118164,
+            1309.03902053833
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 1.374551560729742,
+      "bwd_fwd_ratio": 4.836384720378261,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 16384,
+      "heads": 32,
+      "key_heads": 8,
+      "median_ms": 24.79069773107767,
+      "enqueue_median_ms": 0.3196508623659611,
+      "samples_ms": [
+        24.79069773107767,
+        24.76603677496314,
+        24.801068007946014,
+        24.821276776492596,
+        24.71853792667389
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          5.425627809017897,
+          5.423258058726788,
+          5.418448243290186,
+          5.4277079179883,
+          5.413818173110485
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 5347.998046875,
+          "min_us": 5347.248840332031,
+          "max_us": 5348.4771728515625,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            5348.123931884766,
+            5348.4771728515625,
+            5347.248840332031,
+            5347.77717590332,
+            5347.998046875
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 5.423258058726788,
+      "bwd_fwd_ratio": 4.5711816518090895,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 32768,
+      "heads": 32,
+      "key_heads": 8,
+      "median_ms": 47.752810176461935,
+      "enqueue_median_ms": 0.325941015034914,
+      "samples_ms": [
+        47.752810176461935,
+        47.72408865392208,
+        47.79368918389082,
+        47.796479891985655,
+        47.746559139341116
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          10.400939267128706,
+          10.382368229329586,
+          10.394538752734661,
+          10.39104862138629,
+          10.385098867118359
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 10333.41293334961,
+          "min_us": 10328.370666503906,
+          "max_us": 10336.43798828125,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            10336.43798828125,
+            10333.309936523438,
+            10334.190368652344,
+            10328.370666503906,
+            10333.41293334961
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 10.39104862138629,
+      "bwd_fwd_ratio": 4.595571815358433,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 256,
+      "heads": 16,
+      "key_heads": 4,
+      "median_ms": 0.7204520516097546,
+      "enqueue_median_ms": 0.3009107895195484,
+      "samples_ms": [
+        0.7769530639052391,
+        0.719012226909399,
+        0.7166122086346149,
+        0.7251217029988766,
+        0.7204520516097546
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.14068884775042534,
+          0.13694865629076958,
+          0.14027906581759453,
+          0.14185020700097084,
+          0.1357700675725937
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 81.19900226593018,
+          "min_us": 81.12800121307373,
+          "max_us": 86.03500127792358,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            86.03500127792358,
+            81.12800121307373,
+            81.19900226593018,
+            81.1959981918335,
+            81.21299743652344
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 0.14027906581759453,
+      "bwd_fwd_ratio": 5.135848655754248,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 1024,
+      "heads": 16,
+      "key_heads": 4,
+      "median_ms": 1.2832842767238617,
+      "enqueue_median_ms": 0.2933409996330738,
+      "samples_ms": [
+        1.2952438555657864,
+        1.303554978221655,
+        1.280573196709156,
+        1.2832842767238617,
+        1.273714005947113
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.27037784457206726,
+          0.2653691917657852,
+          0.2630092203617096,
+          5.272589158266783,
+          0.3242078237235546
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 199.344003200531,
+          "min_us": 199.02100563049316,
+          "max_us": 199.39600229263306,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            199.39600229263306,
+            199.344003200531,
+            199.02100563049316,
+            199.36100244522095,
+            199.2509961128235
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 0.27037784457206726,
+      "bwd_fwd_ratio": 4.746262693065487,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 4096,
+      "heads": 16,
+      "key_heads": 4,
+      "median_ms": 3.6472706124186516,
+      "enqueue_median_ms": 0.30200090259313583,
+      "samples_ms": [
+        3.64952115342021,
+        3.6472706124186516,
+        3.6405716091394424,
+        3.6348910070955753,
+        3.6593908444046974
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.7350863888859749,
+          0.7356158457696438,
+          0.7375059649348259,
+          0.7340260781347752,
+          0.7287259213626385
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 670.2020168304443,
+          "min_us": 669.8530197143555,
+          "max_us": 673.0179786682129,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            673.0179786682129,
+            671.382999420166,
+            669.897985458374,
+            669.8530197143555,
+            670.2020168304443
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 0.7350863888859749,
+      "bwd_fwd_ratio": 4.961689765397641,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 16384,
+      "heads": 16,
+      "key_heads": 4,
+      "median_ms": 12.902820017188787,
+      "enqueue_median_ms": 0.30726101249456406,
+      "samples_ms": [
+        12.938439846038818,
+        12.914209626615047,
+        12.902820017188787,
+        12.870670296251774,
+        12.849128805100918
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          2.706184983253479,
+          2.7020350098609924,
+          2.695254050195217,
+          2.7049039490520954,
+          2.701355144381523
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 2638.809013366699,
+          "min_us": 2636.6859436035156,
+          "max_us": 2640.390968322754,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            2640.390968322754,
+            2638.809013366699,
+            2636.6859436035156,
+            2637.7859115600586,
+            2639.5069122314453
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 2.7020350098609924,
+      "bwd_fwd_ratio": 4.775223107805912,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 32768,
+      "heads": 16,
+      "key_heads": 4,
+      "median_ms": 25.216097943484783,
+      "enqueue_median_ms": 0.3463807515799999,
+      "samples_ms": [
+        25.262068025767803,
+        25.21410770714283,
+        25.2381581813097,
+        25.216097943484783,
+        25.172987952828407
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          5.383930169045925,
+          5.3999703377485275,
+          5.363720003515482,
+          5.372690036892891,
+          5.3726499900221825
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 5316.63703918457,
+          "min_us": 5312.393951416016,
+          "max_us": 5323.657989501953,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            5323.657989501953,
+            5316.63703918457,
+            5312.393951416016,
+            5313.51318359375,
+            5320.512008666992
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 5.372690036892891,
+      "bwd_fwd_ratio": 4.693384090712898,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 256,
+      "heads": 8,
+      "key_heads": 2,
+      "median_ms": 0.6032111123204231,
+      "enqueue_median_ms": 0.31853094696998596,
+      "samples_ms": [
+        0.6443322636187077,
+        0.6032111123204231,
+        0.6007319316267967,
+        0.5902517586946487,
+        0.6053121760487556
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.14603883028030396,
+          0.1456388272345066,
+          0.1394292339682579,
+          0.13857893645763397,
+          0.14196895062923431
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 80.71399927139282,
+          "min_us": 80.57699799537659,
+          "max_us": 86.67799830436707,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            86.67799830436707,
+            80.71399927139282,
+            80.57699799537659,
+            80.81799745559692,
+            80.61500191688538
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 0.14196895062923431,
+      "bwd_fwd_ratio": 4.248894632571931,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 1024,
+      "heads": 8,
+      "key_heads": 2,
+      "median_ms": 0.9759431704878807,
+      "enqueue_median_ms": 0.3105606883764267,
+      "samples_ms": [
+        0.9759431704878807,
+        0.9959531016647816,
+        0.9621027857065201,
+        0.9634029120206833,
+        0.9783226996660233
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.2569393254816532,
+          0.2596280537545681,
+          0.2580089494585991,
+          0.2566487528383732,
+          0.25259796530008316
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 193.77100467681885,
+          "min_us": 193.2860016822815,
+          "max_us": 194.01700496673584,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            193.9669966697693,
+            193.2860016822815,
+            193.77100467681885,
+            193.4630036354065,
+            194.01700496673584
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 0.2569393254816532,
+      "bwd_fwd_ratio": 3.7983409844265665,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 4096,
+      "heads": 8,
+      "key_heads": 2,
+      "median_ms": 2.4062269367277622,
+      "enqueue_median_ms": 0.29735080897808075,
+      "samples_ms": [
+        2.4062669835984707,
+        2.396897878497839,
+        2.4406868033111095,
+        2.4062269367277622,
+        2.391117624938488
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.7156860083341599,
+          0.711596105247736,
+          0.710036139935255,
+          0.7103756070137024,
+          0.7103863172233105
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 649.8089790344238,
+          "min_us": 649.232006072998,
+          "max_us": 654.5889854431152,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            654.5889854431152,
+            649.8089790344238,
+            649.5639801025391,
+            650.0309944152832,
+            649.232006072998
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 0.7103863172233105,
+      "bwd_fwd_ratio": 3.38720901344636,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 16384,
+      "heads": 8,
+      "key_heads": 2,
+      "median_ms": 8.381856139749289,
+      "enqueue_median_ms": 0.3224508836865425,
+      "samples_ms": [
+        8.381856139749289,
+        8.422146085649729,
+        8.389235008507967,
+        8.351255673915148,
+        8.345774840563536
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          2.550785895437002,
+          2.5652749463915825,
+          2.554396167397499,
+          2.5618160143494606,
+          2.5529563426971436
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 2468.989944458008,
+          "min_us": 2467.959976196289,
+          "max_us": 2470.0740814208984,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            2470.0740814208984,
+            2467.959976196289,
+            2468.2300567626953,
+            2468.989944458008,
+            2469.841957092285
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 2.554396167397499,
+      "bwd_fwd_ratio": 3.2813454102105832,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 32768,
+      "heads": 8,
+      "key_heads": 2,
+      "median_ms": 16.214859671890736,
+      "enqueue_median_ms": 0.3252909518778324,
+      "samples_ms": [
+        16.214859671890736,
+        16.169698908925056,
+        16.18234906345606,
+        16.216599848121405,
+        16.5686197578907
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          5.1300120539963245,
+          5.126662086695433,
+          5.120621062815189,
+          5.128062330186367,
+          5.124840885400772
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 5068.183898925781,
+          "min_us": 5067.715072631836,
+          "max_us": 5073.012161254883,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            5073.012161254883,
+            5068.069076538086,
+            5068.313980102539,
+            5067.715072631836,
+            5068.183898925781
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 64,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 5.126662086695433,
+      "bwd_fwd_ratio": 3.1628493155363366,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 256,
+      "heads": 48,
+      "key_heads": 16,
+      "median_ms": 1.3783853501081467,
+      "enqueue_median_ms": 0.3033513203263283,
+      "samples_ms": [
+        1.4215740375220776,
+        1.386093907058239,
+        1.3783853501081467,
+        1.3608341105282307,
+        1.3580843806266785
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.1988993026316166,
+          0.19719917327165604,
+          0.1950790174305439,
+          0.19088899716734886,
+          0.19035907462239265
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 133.46400260925293,
+          "min_us": 133.37700366973877,
+          "max_us": 139.21300172805786,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            139.21300172805786,
+            133.37700366973877,
+            133.71000289916992,
+            133.46400260925293,
+            133.41599702835083
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 0.1950790174305439,
+      "bwd_fwd_ratio": 7.065779642851175,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 1024,
+      "heads": 48,
+      "key_heads": 16,
+      "median_ms": 2.862179186195135,
+      "enqueue_median_ms": 0.2967109903693199,
+      "samples_ms": [
+        2.876447979360819,
+        2.861968707293272,
+        2.862179186195135,
+        2.8912178240716457,
+        2.8605591505765915
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.42913807556033134,
+          0.4309481009840965,
+          0.4273778758943081,
+          0.4269280470907688,
+          0.42563769966363907
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 360.3909969329834,
+          "min_us": 360.35499572753906,
+          "max_us": 360.6790065765381,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            360.35499572753906,
+            360.6790065765381,
+            360.3909969329834,
+            360.440993309021,
+            360.3610038757324
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 0.4273778758943081,
+      "bwd_fwd_ratio": 6.697069145673233,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 4096,
+      "heads": 48,
+      "key_heads": 16,
+      "median_ms": 9.322857949882746,
+      "enqueue_median_ms": 0.29276078566908836,
+      "samples_ms": [
+        9.335988201200962,
+        9.313608054071665,
+        9.322857949882746,
+        9.306027553975582,
+        9.351817891001701
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          1.4299917966127396,
+          1.4242320321500301,
+          1.4352020807564259,
+          1.4287619851529598,
+          1.4221719466149807
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 1352.118968963623,
+          "min_us": 1351.7239570617676,
+          "max_us": 1355.0419807434082,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            1355.0419807434082,
+            1351.7239570617676,
+            1351.807975769043,
+            1353.3100128173828,
+            1352.118968963623
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 1.4287619851529598,
+      "bwd_fwd_ratio": 6.52513018036707,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 16384,
+      "heads": 48,
+      "key_heads": 16,
+      "median_ms": 33.89672236517072,
+      "enqueue_median_ms": 0.2839108929038048,
+      "samples_ms": [
+        33.9237917214632,
+        33.84124208241701,
+        33.89672236517072,
+        33.88893185183406,
+        33.90136221423745
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          5.783797707408667,
+          5.787689238786697,
+          5.842457991093397,
+          5.753798875957727,
+          5.803608801215887
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 5734.788131713867,
+          "min_us": 5733.37516784668,
+          "max_us": 5747.069931030273,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            5747.069931030273,
+            5733.995819091797,
+            5736.294174194336,
+            5733.37516784668,
+            5734.788131713867
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 5.787689238786697,
+      "bwd_fwd_ratio": 5.856693572628074,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 32768,
+      "heads": 48,
+      "key_heads": 16,
+      "median_ms": 68.31365497782826,
+      "enqueue_median_ms": 0.3254706971347332,
+      "samples_ms": [
+        68.3440756984055,
+        68.54204600676894,
+        68.27814504504204,
+        68.27492592856288,
+        68.31365497782826
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          11.508667841553688,
+          11.46223908290267,
+          11.460589244961739,
+          11.464428156614304,
+          11.45234890282154
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 11359.174346923828,
+          "min_us": 11350.67367553711,
+          "max_us": 11365.00473022461,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            11365.00473022461,
+            11359.174346923828,
+            11350.67367553711,
+            11360.04867553711,
+            11352.825927734375
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 11.46223908290267,
+      "bwd_fwd_ratio": 5.959887460358982,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 256,
+      "heads": 24,
+      "key_heads": 8,
+      "median_ms": 0.8796928450465202,
+      "enqueue_median_ms": 0.29989099130034447,
+      "samples_ms": [
+        0.9319819509983063,
+        0.8954531513154507,
+        0.8796928450465202,
+        0.8760918863117695,
+        0.8765328675508499
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.15163980424404144,
+          0.14407001435756683,
+          0.14118989929556847,
+          0.13932958245277405,
+          0.15745917335152626
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 81.61600232124329,
+          "min_us": 81.27800226211548,
+          "max_us": 87.85099983215332,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            87.85099983215332,
+            82.36500024795532,
+            81.61600232124329,
+            81.27800226211548,
+            81.29799962043762
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 0.14407001435756683,
+      "bwd_fwd_ratio": 6.1060092828422565,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 1024,
+      "heads": 24,
+      "key_heads": 8,
+      "median_ms": 1.5837950631976128,
+      "enqueue_median_ms": 0.29285112395882607,
+      "samples_ms": [
+        1.6107140108942986,
+        1.591274980455637,
+        1.5837950631976128,
+        1.5699248760938644,
+        1.5624440275132656
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.26192888617515564,
+          0.26266882196068764,
+          0.2656583674252033,
+          0.2664690837264061,
+          0.26381760835647583
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 197.2059965133667,
+          "min_us": 197.0729947090149,
+          "max_us": 197.34699726104736,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            197.0729947090149,
+            197.0900058746338,
+            197.2059965133667,
+            197.22399711608887,
+            197.34699726104736
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 0.26381760835647583,
+      "bwd_fwd_ratio": 6.00337131802649,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 4096,
+      "heads": 24,
+      "key_heads": 8,
+      "median_ms": 4.822964314371347,
+      "enqueue_median_ms": 0.29424112290143967,
+      "samples_ms": [
+        4.838624037802219,
+        4.827385302633047,
+        4.822964314371347,
+        4.814463667571545,
+        4.804763942956924
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.7587657310068607,
+          0.7534460164606571,
+          0.7487358525395393,
+          0.7523363456130028,
+          0.7546856068074703
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 679.725980758667,
+          "min_us": 678.3919811248779,
+          "max_us": 683.3189964294434,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            683.3189964294434,
+            678.8819789886475,
+            679.725980758667,
+            679.8250198364258,
+            678.3919811248779
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 0.7534460164606571,
+      "bwd_fwd_ratio": 6.401207530471016,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 16384,
+      "heads": 24,
+      "key_heads": 8,
+      "median_ms": 17.30546122416854,
+      "enqueue_median_ms": 0.2929014153778553,
+      "samples_ms": [
+        17.299441155046225,
+        17.336321994662285,
+        17.30546122416854,
+        17.299880739301443,
+        17.340462189167738
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          2.840694971382618,
+          2.845495007932186,
+          2.8440053574740887,
+          2.83882487565279,
+          2.833855338394642
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 2759.303092956543,
+          "min_us": 2758.0429077148438,
+          "max_us": 2760.9750747680664,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            2758.975028991699,
+            2759.303092956543,
+            2760.9750747680664,
+            2758.0429077148438,
+            2759.423065185547
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 2.840694971382618,
+      "bwd_fwd_ratio": 6.091981503999937,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 32768,
+      "heads": 24,
+      "key_heads": 8,
+      "median_ms": 34.52690225094557,
+      "enqueue_median_ms": 0.3160708583891392,
+      "samples_ms": [
+        34.619223326444626,
+        34.53152161091566,
+        34.511303063482046,
+        34.52690225094557,
+        34.495862666517496
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          5.795230157673359,
+          5.7846601121127605,
+          5.779630038887262,
+          5.7564000599086285,
+          5.76870096847415
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 5672.071075439453,
+          "min_us": 5671.435928344727,
+          "max_us": 5679.161071777344,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            5679.161071777344,
+            5672.071075439453,
+            5671.617889404297,
+            5672.219085693359,
+            5671.435928344727
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 5.779630038887262,
+      "bwd_fwd_ratio": 5.973894871927294,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 256,
+      "heads": 12,
+      "key_heads": 4,
+      "median_ms": 0.6852117367088795,
+      "enqueue_median_ms": 0.30948081985116005,
+      "samples_ms": [
+        0.7183919660747051,
+        0.6972821429371834,
+        0.6852117367088795,
+        0.6608422845602036,
+        0.674322247505188
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.13601966202259064,
+          0.13749022036790848,
+          0.13541942462325096,
+          0.13400893658399582,
+          0.13532908633351326
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 81.82100057601929,
+          "min_us": 81.72799944877625,
+          "max_us": 87.51400113105774,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            87.51400113105774,
+            82.10600018501282,
+            81.82100057601929,
+            81.72799944877625,
+            81.77899718284607
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 0.13541942462325096,
+      "bwd_fwd_ratio": 5.059922079976342,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 1024,
+      "heads": 12,
+      "key_heads": 4,
+      "median_ms": 1.1797738261520863,
+      "enqueue_median_ms": 0.2880808897316456,
+      "samples_ms": [
+        1.2021730653941631,
+        1.224094070494175,
+        1.1755130253732204,
+        1.1797738261520863,
+        1.1626328341662884
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.2593081444501877,
+          0.25792932137846947,
+          0.2666679210960865,
+          0.2590790390968323,
+          0.26082806289196014
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 197.98099994659424,
+          "min_us": 197.86900281906128,
+          "max_us": 198.23700189590454,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            197.89899587631226,
+            197.98099994659424,
+            198.12699556350708,
+            197.86900281906128,
+            198.23700189590454
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 0.2593081444501877,
+      "bwd_fwd_ratio": 4.5496983083719424,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 4096,
+      "heads": 12,
+      "key_heads": 4,
+      "median_ms": 3.0743791721761227,
+      "enqueue_median_ms": 0.30194083228707314,
+      "samples_ms": [
+        3.0742590315639973,
+        3.0625290237367153,
+        3.0781589448451996,
+        3.0879592522978783,
+        3.0743791721761227
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.7232758216559887,
+          0.7212958298623562,
+          0.7204958237707615,
+          0.7257168181240559,
+          0.715336762368679
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 654.8759937286377,
+          "min_us": 654.5539855957031,
+          "max_us": 658.6190223693848,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            658.6190223693848,
+            654.8759937286377,
+            654.8160076141357,
+            655.4210186004639,
+            654.5539855957031
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 0.7212958298623562,
+      "bwd_fwd_ratio": 4.262299939766464,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 16384,
+      "heads": 12,
+      "key_heads": 4,
+      "median_ms": 10.739502031356096,
+      "enqueue_median_ms": 0.29960088431835175,
+      "samples_ms": [
+        10.755530558526516,
+        10.738182347267866,
+        10.699860751628876,
+        10.739502031356096,
+        10.759330820292234
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          2.5879573076963425,
+          2.5902166962623596,
+          2.58244713768363,
+          2.580548170953989,
+          2.5849570520222187
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 2539.802932739258,
+          "min_us": 2537.8780364990234,
+          "max_us": 2540.1840209960938,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            2540.1840209960938,
+            2538.8059616088867,
+            2537.8780364990234,
+            2539.802932739258,
+            2540.048027038574
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 2.5849570520222187,
+      "bwd_fwd_ratio": 4.154615266414022,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 32768,
+      "heads": 12,
+      "key_heads": 4,
+      "median_ms": 20.849850960075855,
+      "enqueue_median_ms": 0.2998807467520237,
+      "samples_ms": [
+        20.92220215126872,
+        20.837100688368082,
+        20.849850960075855,
+        20.97426215186715,
+        20.829521119594574
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          5.238533951342106,
+          5.217734258621931,
+          5.227163899689913,
+          5.213384050875902,
+          5.218963138759136
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 5173.382949829102,
+          "min_us": 5171.606063842773,
+          "max_us": 5178.068923950195,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            5173.382949829102,
+            5171.65412902832,
+            5171.606063842773,
+            5176.641845703125,
+            5178.068923950195
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 5.218963138759136,
+      "bwd_fwd_ratio": 3.9950178619259473,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 256,
+      "heads": 6,
+      "key_heads": 2,
+      "median_ms": 0.5735610611736774,
+      "enqueue_median_ms": 0.29933033511042595,
+      "samples_ms": [
+        0.6346320733428001,
+        0.6072120741009712,
+        0.5735610611736774,
+        0.5665821954607964,
+        0.5545411258935928
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {},
+      "forward_device": {},
+      "forward_medians": {},
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 1024,
+      "heads": 6,
+      "key_heads": 2,
+      "median_ms": 0.833702739328146,
+      "enqueue_median_ms": 0.29448093846440315,
+      "samples_ms": [
+        0.8409828878939152,
+        0.8247918449342251,
+        0.833702739328146,
+        0.8244416676461697,
+        0.8361628279089928
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {},
+      "forward_device": {},
+      "forward_medians": {},
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 4096,
+      "heads": 6,
+      "key_heads": 2,
+      "median_ms": 2.0694457925856113,
+      "enqueue_median_ms": 0.2871612086892128,
+      "samples_ms": [
+        2.087116241455078,
+        2.06386623904109,
+        2.0694457925856113,
+        2.055646385997534,
+        2.087135799229145
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {},
+      "forward_device": {},
+      "forward_medians": {},
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 16384,
+      "heads": 6,
+      "key_heads": 2,
+      "median_ms": 7.418861147016287,
+      "enqueue_median_ms": 0.29102060943841934,
+      "samples_ms": [
+        7.418861147016287,
+        7.393311709165573,
+        7.42363091558218,
+        7.457291707396507,
+        7.414721883833408
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {},
+      "forward_device": {},
+      "forward_medians": {},
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 32768,
+      "heads": 6,
+      "key_heads": 2,
+      "median_ms": 14.24424210563302,
+      "enqueue_median_ms": 0.3139609470963478,
+      "samples_ms": [
+        14.24424210563302,
+        16.8323190882802,
+        14.303111005574465,
+        14.216710813343525,
+        14.15286073461175
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {},
+      "forward_device": {},
+      "forward_medians": {},
+      "global_value_heads": 48,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 256,
+      "heads": 32,
+      "key_heads": 16,
+      "median_ms": 0.8962429128587246,
+      "enqueue_median_ms": 0.2987608313560486,
+      "samples_ms": [
+        0.9513520635664463,
+        0.896872952580452,
+        0.8962429128587246,
+        0.8749719709157944,
+        0.8813431486487389
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.19197864457964897,
+          0.18701888620853424,
+          0.18763914704322815,
+          0.18327869474887848,
+          0.19521918147802353
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 129.43600416183472,
+          "min_us": 129.13000583648682,
+          "max_us": 134.67899560928345,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            134.67899560928345,
+            129.13000583648682,
+            129.43600416183472,
+            129.90299463272095,
+            129.32000160217285
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 0.18763914704322815,
+      "bwd_fwd_ratio": 4.776417538565387,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 1024,
+      "heads": 32,
+      "key_heads": 16,
+      "median_ms": 2.0029046572744846,
+      "enqueue_median_ms": 0.3020414151251316,
+      "samples_ms": [
+        2.002765890210867,
+        2.010506112128496,
+        2.001646440476179,
+        2.0029046572744846,
+        2.00337590649724
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.42610708624124527,
+          0.42129820212721825,
+          0.4173680208623409,
+          0.42162835597991943,
+          0.4166578873991966
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 358.2119941711426,
+          "min_us": 357.7270030975342,
+          "max_us": 358.8900089263916,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            358.8900089263916,
+            358.2119941711426,
+            357.91800022125244,
+            358.4239959716797,
+            357.7270030975342
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 0.42129820212721825,
+      "bwd_fwd_ratio": 4.754125811981683,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 4096,
+      "heads": 32,
+      "key_heads": 16,
+      "median_ms": 6.555959116667509,
+      "enqueue_median_ms": 0.303381122648716,
+      "samples_ms": [
+        9.173905942589045,
+        6.7392089404165745,
+        6.530579179525375,
+        6.555959116667509,
+        6.508368998765945
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          1.4241733588278294,
+          1.4265133067965508,
+          1.4238129369914532,
+          1.4224532060325146,
+          1.4313426800072193
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 1354.0419578552246,
+          "min_us": 1353.6669731140137,
+          "max_us": 1358.02001953125,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            1358.02001953125,
+            1353.6669731140137,
+            1353.7710189819336,
+            1355.1230430603027,
+            1354.0419578552246
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 1.4241733588278294,
+      "bwd_fwd_ratio": 4.603343459579537,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 16384,
+      "heads": 32,
+      "key_heads": 16,
+      "median_ms": 25.040692184120417,
+      "enqueue_median_ms": 0.30412105843424797,
+      "samples_ms": [
+        25.071411859244108,
+        24.99929117038846,
+        25.05750209093094,
+        25.040692184120417,
+        25.03606164827943
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          5.710581783205271,
+          5.717831663787365,
+          5.724992137402296,
+          5.691572092473507,
+          5.717581603676081
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 5649.517822265625,
+          "min_us": 5644.263076782227,
+          "max_us": 5653.887176513672,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            5653.887176513672,
+            5646.93603515625,
+            5649.517822265625,
+            5644.263076782227,
+            5650.5828857421875
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 5.717581603676081,
+      "bwd_fwd_ratio": 4.3795950665611265,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 32768,
+      "heads": 32,
+      "key_heads": 16,
+      "median_ms": 48.45592938363552,
+      "enqueue_median_ms": 0.31599076464772224,
+      "samples_ms": [
+        48.49314922466874,
+        48.437568824738264,
+        48.45592938363552,
+        48.421049024909735,
+        48.542289063334465
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          10.990616865456104,
+          11.0345259308815,
+          10.978156235069036,
+          10.97768684849143,
+          10.991396382451057
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 10885.405731201172,
+          "min_us": 10878.450775146484,
+          "max_us": 10887.21694946289,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            10887.21694946289,
+            10884.219360351562,
+            10878.450775146484,
+            10886.296844482422,
+            10885.405731201172
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 10.990616865456104,
+      "bwd_fwd_ratio": 4.408845288378145,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 256,
+      "heads": 16,
+      "key_heads": 8,
+      "median_ms": 0.7184618152678013,
+      "enqueue_median_ms": 0.30634086579084396,
+      "samples_ms": [
+        0.7688417099416256,
+        0.7383120246231556,
+        0.7184618152678013,
+        0.7057520560920238,
+        0.6990418769419193
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.1572691835463047,
+          0.1394893042743206,
+          0.13339892029762268,
+          0.12955861166119576,
+          0.1306799240410328
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 80.68400025367737,
+          "min_us": 80.54999709129333,
+          "max_us": 85.81299781799316,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            85.81299781799316,
+            80.68400025367737,
+            80.68199753761292,
+            80.54999709129333,
+            80.73099851608276
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 0.13339892029762268,
+      "bwd_fwd_ratio": 5.385814320422241,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 1024,
+      "heads": 16,
+      "key_heads": 8,
+      "median_ms": 1.2131929397583008,
+      "enqueue_median_ms": 0.2937209792435169,
+      "samples_ms": [
+        1.2381738051772118,
+        1.2131929397583008,
+        1.2213140726089478,
+        1.2085828930139542,
+        1.2115328572690487
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.2632788382470608,
+          0.2589188516139984,
+          0.25496911257505417,
+          0.26296917349100113,
+          0.25865761563181877
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 195.9439992904663,
+          "min_us": 195.73500156402588,
+          "max_us": 196.0379958152771,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            195.9439992904663,
+            196.00499868392944,
+            196.0379958152771,
+            195.84800004959106,
+            195.73500156402588
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 0.2589188516139984,
+      "bwd_fwd_ratio": 4.685610693063609,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 4096,
+      "heads": 16,
+      "key_heads": 8,
+      "median_ms": 3.5263500176370144,
+      "enqueue_median_ms": 0.28490088880062103,
+      "samples_ms": [
+        3.5374597646296024,
+        3.512609750032425,
+        3.5192198120057583,
+        3.5512899048626423,
+        3.5263500176370144
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.7155961357057095,
+          0.7236069068312645,
+          0.7197866216301918,
+          0.7229559123516083,
+          0.7197367958724499
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 657.4429988861084,
+          "min_us": 657.2269916534424,
+          "max_us": 661.2030029296875,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            661.2030029296875,
+            657.834005355835,
+            657.4429988861084,
+            657.351016998291,
+            657.2269916534424
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 0.7197866216301918,
+      "bwd_fwd_ratio": 4.89916026731706,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 16384,
+      "heads": 16,
+      "key_heads": 8,
+      "median_ms": 12.710315641015768,
+      "enqueue_median_ms": 0.2982309088110924,
+      "samples_ms": [
+        12.688436079770327,
+        12.719556223601103,
+        12.656786013394594,
+        12.716375757008791,
+        12.710315641015768
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          2.8062472119927406,
+          2.7977670542895794,
+          2.789827063679695,
+          2.7991067618131638,
+          2.796696964651346
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 2730.8069229125977,
+          "min_us": 2730.139923095703,
+          "max_us": 2733.0209732055664,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            2733.0209732055664,
+            2730.139923095703,
+            2730.2879333496094,
+            2730.8069229125977,
+            2731.7909240722656
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 2.7977670542895794,
+      "bwd_fwd_ratio": 4.543021414712893,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 32768,
+      "heads": 16,
+      "key_heads": 8,
+      "median_ms": 25.62540303915739,
+      "enqueue_median_ms": 0.2974397502839565,
+      "samples_ms": [
+        25.4817521199584,
+        25.62540303915739,
+        25.635953061282635,
+        25.737912859767675,
+        25.599651969969273
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          5.712053272873163,
+          5.721382796764374,
+          5.72444312274456,
+          5.707563366740942,
+          5.712322890758514
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 5629.793930053711,
+          "min_us": 5626.5838623046875,
+          "max_us": 5634.178924560547,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            5634.178924560547,
+            5626.5838623046875,
+            5632.989883422852,
+            5629.793930053711,
+            5628.88298034668
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 5.712322890758514,
+      "bwd_fwd_ratio": 4.485986441805411,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 256,
+      "heads": 8,
+      "key_heads": 4,
+      "median_ms": 0.6018909625709057,
+      "enqueue_median_ms": 0.3084000200033188,
+      "samples_ms": [
+        0.6443220190703869,
+        0.6034919060766697,
+        0.5891220644116402,
+        0.6018909625709057,
+        0.5890121683478355
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.15582982450723648,
+          0.13707904145121574,
+          0.13708928599953651,
+          0.13193907216191292,
+          0.1333099789917469
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 81.74300193786621,
+          "min_us": 81.34599924087524,
+          "max_us": 87.17399835586548,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            87.17399835586548,
+            82.055002450943,
+            81.5999984741211,
+            81.74300193786621,
+            81.34599924087524
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 0.13707904145121574,
+      "bwd_fwd_ratio": 4.390831422505308,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 1024,
+      "heads": 8,
+      "key_heads": 4,
+      "median_ms": 0.9794626384973526,
+      "enqueue_median_ms": 0.2955310046672821,
+      "samples_ms": [
+        0.9794626384973526,
+        0.9747529402375221,
+        0.96112210303545,
+        0.9827530011534691,
+        0.983573030680418
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.24813786149024963,
+          0.2516089007258415,
+          0.2651689574122429,
+          0.2516983076930046,
+          0.24888897314667702
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 189.05800580978394,
+          "min_us": 189.02100324630737,
+          "max_us": 189.3239974975586,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            189.19399976730347,
+            189.05800580978394,
+            189.3239974975586,
+            189.02100324630737,
+            189.04800415039062
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 0.2516089007258415,
+      "bwd_fwd_ratio": 3.892798051546659,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 4096,
+      "heads": 8,
+      "key_heads": 4,
+      "median_ms": 2.419697120785713,
+      "enqueue_median_ms": 0.2886299043893814,
+      "samples_ms": [
+        2.4428870528936386,
+        2.4032858200371265,
+        2.4040169082581997,
+        2.434676978737116,
+        2.419697120785713
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.6911368109285831,
+          0.6915866397321224,
+          0.689476728439331,
+          0.6884471513330936,
+          0.6956467404961586
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 634.6099853515625,
+          "min_us": 633.8719844818115,
+          "max_us": 638.2400035858154,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            638.2400035858154,
+            634.6099853515625,
+            634.3540191650391,
+            633.8719844818115,
+            635.2340221405029
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 0.6911368109285831,
+      "bwd_fwd_ratio": 3.5010392769192933,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 16384,
+      "heads": 8,
+      "key_heads": 4,
+      "median_ms": 8.542044088244438,
+      "enqueue_median_ms": 0.3013308160007,
+      "samples_ms": [
+        8.542044088244438,
+        8.532044012099504,
+        8.534373715519905,
+        8.543863892555237,
+        8.586443960666656
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          2.5708680041134357,
+          2.5949282571673393,
+          2.5524175725877285,
+          2.5386479683220387,
+          2.557647880166769
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 2446.626091003418,
+          "min_us": 2445.332908630371,
+          "max_us": 2447.060012817383,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            2445.332908630371,
+            2446.866035461426,
+            2446.626091003418,
+            2447.060012817383,
+            2445.871925354004
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 2.557647880166769,
+      "bwd_fwd_ratio": 3.339804573758395,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 32768,
+      "heads": 8,
+      "key_heads": 4,
+      "median_ms": 16.516005620360374,
+      "enqueue_median_ms": 0.29525067657232285,
+      "samples_ms": [
+        16.571946907788515,
+        16.492115799337626,
+        16.52514562010765,
+        16.516005620360374,
+        16.50443719699979
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          5.339466035366058,
+          5.334686022251844,
+          5.349865648895502,
+          5.34191494807601,
+          5.3338161669671535
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 5224.375152587891,
+          "min_us": 5223.244857788086,
+          "max_us": 5231.039047241211,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            5231.039047241211,
+            5224.375152587891,
+            5224.626922607422,
+            5223.244857788086,
+            5223.8311767578125
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 5.339466035366058,
+      "bwd_fwd_ratio": 3.093194246571902,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 256,
+      "heads": 4,
+      "key_heads": 2,
+      "median_ms": 0.5511222407221794,
+      "enqueue_median_ms": 0.3036712296307087,
+      "samples_ms": [
+        0.6070523522794247,
+        0.576741062104702,
+        0.5506821908056736,
+        0.5422006361186504,
+        0.5511222407221794
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {},
+      "forward_device": {},
+      "forward_medians": {},
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 1024,
+      "heads": 4,
+      "key_heads": 2,
+      "median_ms": 0.8224621415138245,
+      "enqueue_median_ms": 0.284471083432436,
+      "samples_ms": [
+        0.8504022844135761,
+        0.8537932299077511,
+        0.8103419095277786,
+        0.8224621415138245,
+        0.8122329600155354
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {},
+      "forward_device": {},
+      "forward_medians": {},
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 4096,
+      "heads": 4,
+      "key_heads": 2,
+      "median_ms": 1.8212152644991875,
+      "enqueue_median_ms": 0.2892008051276207,
+      "samples_ms": [
+        1.8429453484714031,
+        1.8212152644991875,
+        1.817035023123026,
+        1.8404950387775898,
+        1.8125851638615131
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {},
+      "forward_device": {},
+      "forward_medians": {},
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 16384,
+      "heads": 4,
+      "key_heads": 2,
+      "median_ms": 6.045347079634666,
+      "enqueue_median_ms": 0.28593093156814575,
+      "samples_ms": [
+        6.026197224855423,
+        6.045347079634666,
+        6.073996890336275,
+        6.077677011489868,
+        6.04061596095562
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {},
+      "forward_device": {},
+      "forward_medians": {},
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 32768,
+      "heads": 4,
+      "key_heads": 2,
+      "median_ms": 12.32495391741395,
+      "enqueue_median_ms": 0.29694102704524994,
+      "samples_ms": [
+        12.357484083622694,
+        12.32495391741395,
+        12.319403700530529,
+        12.39686505869031,
+        12.279963586479425
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {},
+      "forward_device": {},
+      "forward_medians": {},
+      "global_value_heads": 32,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 256,
+      "heads": 16,
+      "key_heads": 16,
+      "median_ms": 0.7081520743668079,
+      "enqueue_median_ms": 0.29762135818600655,
+      "samples_ms": [
+        0.7746019400656223,
+        0.7407818920910358,
+        0.7030423730611801,
+        0.7023620419204235,
+        0.7081520743668079
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.14099013060331345,
+          0.1398799940943718,
+          0.14203926548361778,
+          0.1378888264298439,
+          0.13683922588825226
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 79.82900142669678,
+          "min_us": 79.64699864387512,
+          "max_us": 84.69799757003784,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            84.69799757003784,
+            79.67000007629395,
+            79.64699864387512,
+            79.82900142669678,
+            80.26099801063538
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 0.1398799940943718,
+      "bwd_fwd_ratio": 5.062568660741037,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 1024,
+      "heads": 16,
+      "key_heads": 16,
+      "median_ms": 1.207432709634304,
+      "enqueue_median_ms": 0.3009210340678692,
+      "samples_ms": [
+        1.2124041095376015,
+        1.219223253428936,
+        1.207432709634304,
+        1.1928142048418522,
+        1.1875131167471409
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.25982875376939774,
+          0.2584788016974926,
+          0.2592778764665127,
+          0.25497935712337494,
+          0.25789905339479446
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 193.59999895095825,
+          "min_us": 193.33699941635132,
+          "max_us": 194.47799921035767,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            193.33699941635132,
+            194.47799921035767,
+            194.47200298309326,
+            193.59999895095825,
+            193.5580015182495
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 0.2584788016974926,
+      "bwd_fwd_ratio": 4.671302643407515,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 4096,
+      "heads": 16,
+      "key_heads": 16,
+      "median_ms": 3.764650784432888,
+      "enqueue_median_ms": 0.28551090508699417,
+      "samples_ms": [
+        3.770700190216303,
+        3.758189734071493,
+        3.764650784432888,
+        3.7547401152551174,
+        3.7934696301817894
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.7663271389901638,
+          0.7573659531772137,
+          0.7615769281983376,
+          0.7738759741187096,
+          0.7601473480463028
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 707.8110218048096,
+          "min_us": 707.2239875793457,
+          "max_us": 712.0319843292236,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            712.0319843292236,
+            708.5999965667725,
+            707.243013381958,
+            707.2239875793457,
+            707.8110218048096
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 0.7615769281983376,
+      "bwd_fwd_ratio": 4.943231136661298,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 16384,
+      "heads": 16,
+      "key_heads": 16,
+      "median_ms": 13.191287405788898,
+      "enqueue_median_ms": 0.2871300093829632,
+      "samples_ms": [
+        13.189156074076891,
+        13.241535983979702,
+        13.151816092431545,
+        13.234935700893402,
+        13.191287405788898
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          3.042756114155054,
+          3.0361972749233246,
+          3.0114068649709225,
+          3.0246470123529434,
+          3.023965749889612
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 2976.8409729003906,
+          "min_us": 2976.181983947754,
+          "max_us": 2979.6239852905273,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            2976.181983947754,
+            2976.4270782470703,
+            2978.187942504883,
+            2976.8409729003906,
+            2979.6239852905273
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 3.0246470123529434,
+      "bwd_fwd_ratio": 4.361265083798022,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 32768,
+      "heads": 16,
+      "key_heads": 16,
+      "median_ms": 26.63256274536252,
+      "enqueue_median_ms": 0.2931607887148857,
+      "samples_ms": [
+        26.70475421473384,
+        26.63256274536252,
+        26.75230335444212,
+        26.583862956613302,
+        26.57451294362545
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          6.15641288459301,
+          6.194103043526411,
+          6.167402025312185,
+          6.1635831370949745,
+          6.184583064168692
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 6039.149856567383,
+          "min_us": 6035.334014892578,
+          "max_us": 6047.357940673828,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            6047.357940673828,
+            6040.922927856445,
+            6039.149856567383,
+            6035.334014892578,
+            6037.982177734375
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 1,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 6.167402025312185,
+      "bwd_fwd_ratio": 4.318279015387263,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 256,
+      "heads": 8,
+      "key_heads": 8,
+      "median_ms": 0.5891318432986736,
+      "enqueue_median_ms": 0.2911007031798363,
+      "samples_ms": [
+        0.6338716484606266,
+        0.5899211391806602,
+        0.5891318432986736,
+        0.5841618403792381,
+        0.5707810632884502
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.14104880392551422,
+          0.14341901987791061,
+          0.13927975669503212,
+          0.13364898040890694,
+          0.13340916484594345
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 78.6520004272461,
+          "min_us": 78.05299758911133,
+          "max_us": 84.48200225830078,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            84.48200225830078,
+            78.33200097084045,
+            78.6520004272461,
+            78.89699935913086,
+            78.05299758911133
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 0.13927975669503212,
+      "bwd_fwd_ratio": 4.229845436825688,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 1024,
+      "heads": 8,
+      "key_heads": 8,
+      "median_ms": 0.9351018816232681,
+      "enqueue_median_ms": 0.2762102521955967,
+      "samples_ms": [
+        0.9530629031360149,
+        0.9351018816232681,
+        0.9381030686199665,
+        0.930792186409235,
+        0.9271930903196335
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.2560787834227085,
+          0.25500915944576263,
+          0.2542180009186268,
+          0.2493392676115036,
+          0.2550790086388588
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 187.92999982833862,
+          "min_us": 187.83999681472778,
+          "max_us": 188.21699619293213,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            187.92999982833862,
+            187.83999681472778,
+            188.21699619293213,
+            187.84199953079224,
+            188.0270004272461
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 0.25500915944576263,
+      "bwd_fwd_ratio": 3.6669344883753205,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 4096,
+      "heads": 8,
+      "key_heads": 8,
+      "median_ms": 2.421615645289421,
+      "enqueue_median_ms": 0.27892086654901505,
+      "samples_ms": [
+        2.4348669685423374,
+        2.421615645289421,
+        2.413516864180565,
+        2.4309461005032063,
+        2.418776974081993
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          0.7102969102561474,
+          0.7092268206179142,
+          0.706986989825964,
+          0.7083970122039318,
+          0.710207037627697
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 643.7359809875488,
+          "min_us": 643.6600208282471,
+          "max_us": 647.8419780731201,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            647.8419780731201,
+            643.7359809875488,
+            643.8960075378418,
+            643.6600208282471,
+            643.6629772186279
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 0.7092268206179142,
+      "bwd_fwd_ratio": 3.4144445400127243,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 16384,
+      "heads": 8,
+      "key_heads": 8,
+      "median_ms": 9.17551526799798,
+      "enqueue_median_ms": 0.28628110885620117,
+      "samples_ms": [
+        9.18112462386489,
+        9.141084738075733,
+        9.112385101616383,
+        9.263414889574051,
+        9.17551526799798
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          2.777017652988434,
+          2.7707181870937347,
+          2.771258819848299,
+          2.763239201158285,
+          2.7655186131596565
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 2697.277069091797,
+          "min_us": 2696.8589782714844,
+          "max_us": 2699.1769790649414,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            2696.925926208496,
+            2697.3770141601562,
+            2696.8589782714844,
+            2699.1769790649414,
+            2697.277069091797
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 2.7707181870937347,
+      "bwd_fwd_ratio": 3.3116017755751526,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 32768,
+      "heads": 8,
+      "key_heads": 8,
+      "median_ms": 17.31294672936201,
+      "enqueue_median_ms": 0.29558083042502403,
+      "samples_ms": [
+        17.24780723452568,
+        17.475137021392584,
+        17.31294672936201,
+        17.126637045294046,
+        17.355456948280334
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {
+        "forward_no_cache_ms": [
+          5.540406797081232,
+          5.5217258632183075,
+          5.525285843759775,
+          5.514015909284353,
+          5.517506971955299
+        ]
+      },
+      "forward_device": {
+        "no_cache": {
+          "median_us": 5439.897155761719,
+          "min_us": 5437.5030517578125,
+          "max_us": 5442.776107788086,
+          "trials": 5,
+          "calls_per_trial": 20,
+          "trial_us": [
+            5442.776107788086,
+            5440.502166748047,
+            5437.5030517578125,
+            5438.447189331055,
+            5439.897155761719
+          ]
+        }
+      },
+      "forward_medians": {},
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 2,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "ok",
+      "forward_median_ms": 5.5217258632183075,
+      "bwd_fwd_ratio": 3.135423082969073,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 256,
+      "heads": 4,
+      "key_heads": 4,
+      "median_ms": 0.5760923959314823,
+      "enqueue_median_ms": 0.29496103525161743,
+      "samples_ms": [
+        0.5971910431981087,
+        0.5760923959314823,
+        0.5391011945903301,
+        0.5470020696520805,
+        10.036896914243698
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {},
+      "forward_device": {},
+      "forward_medians": {},
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 1024,
+      "heads": 4,
+      "key_heads": 4,
+      "median_ms": 0.8442020043730736,
+      "enqueue_median_ms": 0.33371103927493095,
+      "samples_ms": [
+        0.8796020410954952,
+        0.8764928206801414,
+        0.8442020043730736,
+        0.8262619376182556,
+        0.8080420084297657
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {},
+      "forward_device": {},
+      "forward_medians": {},
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 4096,
+      "heads": 4,
+      "key_heads": 4,
+      "median_ms": 1.8880050629377365,
+      "enqueue_median_ms": 0.3026910126209259,
+      "samples_ms": [
+        1.8894248642027378,
+        1.8880050629377365,
+        1.8550949171185493,
+        1.898184884339571,
+        1.85788469389081
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {},
+      "forward_device": {},
+      "forward_medians": {},
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 16384,
+      "heads": 4,
+      "key_heads": 4,
+      "median_ms": 6.360607221722603,
+      "enqueue_median_ms": 0.308190006762743,
+      "samples_ms": [
+        6.389777176082134,
+        6.332277320325375,
+        6.383907049894333,
+        6.306116934865713,
+        6.360607221722603
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {},
+      "forward_device": {},
+      "forward_medians": {},
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 32768,
+      "heads": 4,
+      "key_heads": 4,
+      "median_ms": 12.676275335252285,
+      "enqueue_median_ms": 0.3156210295855999,
+      "samples_ms": [
+        12.751224916428328,
+        12.567663099616766,
+        12.595604173839092,
+        12.719873804599047,
+        12.676275335252285
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {},
+      "forward_device": {},
+      "forward_medians": {},
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 4,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 256,
+      "heads": 2,
+      "key_heads": 2,
+      "median_ms": 0.5502817220985889,
+      "enqueue_median_ms": 0.3069210797548294,
+      "samples_ms": [
+        0.5776910111308098,
+        0.5502817220985889,
+        0.5504610016942024,
+        0.523942057043314,
+        0.5335411988198757
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {},
+      "forward_device": {},
+      "forward_medians": {},
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 1024,
+      "heads": 2,
+      "key_heads": 2,
+      "median_ms": 0.6623109802603722,
+      "enqueue_median_ms": 0.2886401489377022,
+      "samples_ms": [
+        0.6682421080768108,
+        0.6573721766471863,
+        0.6653820164501667,
+        0.6623109802603722,
+        0.6503919139504433
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {},
+      "forward_device": {},
+      "forward_medians": {},
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 4096,
+      "heads": 2,
+      "key_heads": 2,
+      "median_ms": 1.4446638524532318,
+      "enqueue_median_ms": 0.2814200706779957,
+      "samples_ms": [
+        1.4607543125748634,
+        1.43327284604311,
+        1.428843941539526,
+        1.45061407238245,
+        1.4446638524532318
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {},
+      "forward_device": {},
+      "forward_medians": {},
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 16384,
+      "heads": 2,
+      "key_heads": 2,
+      "median_ms": 4.700133111327887,
+      "enqueue_median_ms": 0.2849702723324299,
+      "samples_ms": [
+        4.733992740511894,
+        4.733432084321976,
+        4.688162822276354,
+        4.693321883678436,
+        4.700133111327887
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {},
+      "forward_device": {},
+      "forward_medians": {},
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    },
+    {
+      "tokens": 32768,
+      "heads": 2,
+      "key_heads": 2,
+      "median_ms": 9.79586597532034,
+      "enqueue_median_ms": 0.30122091993689537,
+      "samples_ms": [
+        9.772155899554491,
+        9.804225992411375,
+        9.782085660845041,
+        9.805385954678059,
+        9.79586597532034
+      ],
+      "inverse_cache": false,
+      "gate_cache": false,
+      "forward_samples": {},
+      "forward_device": {},
+      "forward_medians": {},
+      "global_value_heads": 16,
+      "global_qk_heads": 16,
+      "tp": 8,
+      "timing": "synchronized wall including allocation; no TP communication",
+      "dtype": "float16",
+      "head_dim": 128,
+      "chunk_size": 128,
+      "seed": 42,
+      "forward_status": "unsupported local value heads",
+      "forward_median_ms": null,
+      "bwd_fwd_ratio": null,
+      "forward_timing": "synchronized wall, preallocated buffers, no saved caches",
+      "forward_source": "Unchanged forward measurements from gdn_mega_bwd_extensive_v6.json"
+    }
+  ],
+  "extensive_relative_to_v6": {
+    "smallest_latency_ratio": 0.5528150159393869,
+    "largest_latency_ratio": 0.9434752512716857,
+    "faster_cases": 80
+  },
+  "limitations": [
+    "The 2x-forward goal is not reached.",
+    "Cached backward improvements are modest; large gains apply to full recomputation.",
+    "FP32-input accuracy schedule is retained; reported timings use FP16 q/k/v and FP32 gates."
+  ],
+  "source_sha256": {
+    "csrc/host/pybind11.cpp": "8ac3f397e5f4fe17b534deb1b743ed9e3bbfe9386a86942ebc63d75770371372",
+    "csrc/host/torch_gdn_mega.h": "c3be5d22db343abaece1c87c1bfabf99ed33f87b5d28ed8f83c42a7213d15db0",
+    "csrc/kernel/gdn_mega/common.h": "d240cbfd074d0f2aca2ad18cfa20f6916fd4fac91128cf7af1718e9429362f2b",
+    "csrc/kernel/gdn_mega/fused_pipeline.h": "27b17e41ef76a66d7a517768873913d1d79088f6cfd1457fbb12447c2d011695",
+    "csrc/kernel/gdn_mega/gate_scan.h": "fa0ee27c77c9031fdd211a1aac82e8ad77e975442aa6cd580f3d541a0d3cca77",
+    "csrc/kernel/gdn_mega/inverse.h": "c5f6ec5892526b0bfda119769d9de4b5783c801f8de2a186b67b906b5a46ddb9",
+    "csrc/kernel/gdn_mega/kernel_gdn_mega.cpp": "e283438cc44e298129b14e8265fd963de57e16cd86784be6e9a3936e961c17d6",
+    "csrc/kernel/gdn_mega/recurrence_pipeline.h": "10098c75c1725297fe6936ae095d26337dac622cc0775580684182adfaf9b6e2",
+    "csrc/kernel/gdn_mega/shared_grams.h": "b215866b7da964b0952a5a83087f1e94a0debcbfc8fa614354e6d276211a9d24",
+    "csrc/kernel/gdn_mega_bwd/backward.py": "0fe8e1d6831794976e0102965e1eba384e39978ae7c37123661da8e7eadc228b",
+    "csrc/kernel/gdn_mega_bwd/binding.py": "f453d02a0b463f945f58f0f2481160aac06677a9ed2cb50edc1c8d2f62fb677a",
+    "csrc/kernel/gdn_mega_bwd/blocked_inverse.h": "3826fb698ad1d2f32f33ec01601b608393e871e8433fdf128ad2b7a56792bbac",
+    "csrc/kernel/gdn_mega_bwd/device_ops.h": "f60cbe08a58a497519c28b6a5e5f044c6f466ee2e6cf0bd4dfad650145e6e480",
+    "csrc/kernel/gdn_mega_bwd/kernel.cpp": "814c7aeada1186930ddc83a95037d31068577aa730993b6833eac7256639b4c9",
+    "csrc/kernel/gdn_mega_bwd/launch.cpp": "c50e5589730c08ff9397b97d9eb7297d5870802788d7539fa21348502f2a50d9",
+    "csrc/kernel/gdn_mega_bwd/layout.h": "331ab68cb0c347df9a132897808eb52fe1e3d78e5dc65b94ae6d809dd3067d9d",
+    "csrc/kernel/gdn_mega_bwd/pipeline.h": "1865e14244e860f67e585b0bcb76e7ea18abbedc79e0b1f293fe0a2e8c6b85fb",
+    "csrc/kernel/gdn_mega_bwd/primitives.h": "09c5684ea9dd779712be4fab292ace061e74c2c5a0c002a4d56460b52d8861b2",
+    "tests/benchmark_gdn_mega_bwd.py": "57b9376572ae59ca31abfeead3dd9faf9017ef604788ef92bc100a79b046495d",
+    "tests/gdn_mega_bwd_reference.py": "ca176acb78ce36c1366da70a881d782b6b2219c81ee2706bbc7139f6381500b3",
+    "tests/test_gdn_mega_bwd.py": "093b84966b853455c5c091f49a1ccd48ba3c226a2b9815fc37296d8446fad6b2"
+  }
+}
