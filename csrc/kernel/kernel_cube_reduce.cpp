@@ -130,7 +130,7 @@ extern "C" __global__ AICORE void cube_reduce_fp16(__gm__ half* input,
 #endif
 }
 
-extern "C" __global__ AICORE void complete_cube_reduce_fp16(
+extern "C" __global__ AICORE void complete_cube_reduce_float(
     __gm__ float* partials, __gm__ float* output, uint32_t blocks,
     uint32_t size) {
   KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY);
@@ -156,7 +156,39 @@ extern "C" void pto_launch_cube_reduce_fp16(uint32_t blockDim, void* stream,
   cube_reduce_fp16<<<blockDim, nullptr, stream>>>(
       (__gm__ half*)input, (__gm__ half*)ones, (__gm__ float*)partials,
       num_tiles, size);
-  complete_cube_reduce_fp16<<<1, nullptr, stream>>>(
+  complete_cube_reduce_float<<<1, nullptr, stream>>>(
+      (__gm__ float*)partials, (__gm__ float*)output, blockDim, size);
+}
+
+extern "C" __global__ AICORE void cube_reduce_fp32(__gm__ float* input,
+                                                   __gm__ float* ones,
+                                                   __gm__ float* partials,
+                                                   uint32_t num_tiles,
+                                                   uint32_t size) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIC_ONLY);
+#if defined(__DAV_CUBE__)
+  switch (size) {
+    case 32:
+      CubeReduce<float, float, 32>(input, ones, partials, num_tiles);
+      break;
+    case 64:
+      CubeReduce<float, float, 64>(input, ones, partials, num_tiles);
+      break;
+    case 128:
+      CubeReduce<float, float, 128>(input, ones, partials, num_tiles);
+      break;
+  }
+#endif
+}
+
+extern "C" void pto_launch_cube_reduce_fp32(uint32_t blockDim, void* stream,
+                                            void* input, void* ones,
+                                            void* partials, void* output,
+                                            uint32_t num_tiles, uint32_t size) {
+  cube_reduce_fp32<<<blockDim, nullptr, stream>>>(
+      (__gm__ float*)input, (__gm__ float*)ones, (__gm__ float*)partials,
+      num_tiles, size);
+  complete_cube_reduce_float<<<1, nullptr, stream>>>(
       (__gm__ float*)partials, (__gm__ float*)output, blockDim, size);
 }
 

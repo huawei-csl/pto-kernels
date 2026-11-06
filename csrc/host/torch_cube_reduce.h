@@ -20,6 +20,9 @@ extern "C" {
 void pto_launch_cube_reduce_fp16(uint32_t blockDim, void* stream, void* input,
                                  void* ones, void* partials, void* output,
                                  uint32_t num_tiles, uint32_t size);
+void pto_launch_cube_reduce_fp32(uint32_t blockDim, void* stream, void* input,
+                                 void* ones, void* partials, void* output,
+                                 uint32_t num_tiles, uint32_t size);
 void pto_launch_cube_reduce_int8(uint32_t blockDim, void* stream, void* input,
                                  void* ones, void* partials, void* output,
                                  uint32_t num_tiles, uint32_t size);
@@ -38,14 +41,16 @@ at::Tensor run_cube_reduce(const at::Tensor& x) {
   TORCH_CHECK(x.device().type() == DEVICE_TYPE,
               "cube_reduce: tensor must be on NPU, got ", x.device());
   const auto dtype = x.scalar_type();
-  TORCH_CHECK(dtype == at::kHalf || dtype == at::kChar,
-              "cube_reduce: only float16 and int8 inputs are supported, got ",
-              dtype);
+  TORCH_CHECK(
+      dtype == at::kHalf || dtype == at::kFloat || dtype == at::kChar,
+      "cube_reduce: only float16, float32 and int8 inputs are supported, "
+      "got ",
+      dtype);
   TORCH_CHECK(x.numel() <= std::numeric_limits<uint32_t>::max(),
               "cube_reduce: input length exceeds uint32 range");
   const c10::DeviceGuard device_guard(x.device());
   const auto output_options =
-      x.options().dtype(dtype == at::kHalf ? at::kFloat : at::kInt);
+      x.options().dtype(dtype == at::kChar ? at::kInt : at::kFloat);
   const at::Tensor output = at::zeros({1}, output_options);
   if (x.numel() == 0) return output;
 
@@ -69,6 +74,9 @@ at::Tensor run_cube_reduce(const at::Tensor& x) {
   const at::Tensor partials = at::empty({block_dim, size, 16}, output_options);
   if (dtype == at::kHalf) {
     EXEC_KERNEL_CMD(cube_reduce_fp16, block_dim, input, ones, partials, output,
+                    num_tiles, matrix_size);
+  } else if (dtype == at::kFloat) {
+    EXEC_KERNEL_CMD(cube_reduce_fp32, block_dim, input, ones, partials, output,
                     num_tiles, matrix_size);
   } else {
     EXEC_KERNEL_CMD(cube_reduce_int8, block_dim, input, ones, partials, output,
