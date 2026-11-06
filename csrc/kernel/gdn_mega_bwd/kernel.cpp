@@ -174,9 +174,10 @@ AICORE inline void finish(const Plan& p,int c,int first_head,int heads,Ops& o) {
   if(!o.accurate) o.begin();
   for(int h=first_head;h<first_head+heads;++h) {
     o.used=0; auto x=chunk(p,c,h);
-    auto energy=o.accurate ? o.dotrows(x.m(DO_DV),x.m(V)) : x.v(RATIO);
-    auto dg=o.add(x.v(Q_ENERGY),energy,-1);
-    o.call(2,o.accurate ? 2 : 4,dg,x.v(END_STATE),x.v(END_KEYS),x.v(EXP),1,x.v(Q_ENERGY));
+    if(o.accurate) {
+      auto dg=o.add(x.v(Q_ENERGY),o.dotrows(x.m(DO_DV),x.m(V)),-1);
+      o.call(2,2,dg,x.v(END_STATE),x.v(END_KEYS),x.v(EXP),1,x.v(Q_ENERGY));
+    } else finish_gate(x);
     scatter_matrix(x.m(DO_DV),(__gm__ float*)p.output[2]+(int64_t(first)*p.heads+h)*128,length,p.heads*128);
     if(o.accurate) join();
   }
@@ -236,13 +237,13 @@ __global__ AICORE void gdn_bwd_stage(Plan p) {
         int count=share ? group : 1;
         head=share ? (task%p.key_heads)*group : head;
         index=share ? task/p.key_heads : index;
-        for(int j=0;j<count;++j) { o.used=0; pipelined_prepare(p,index,head+j,head,o); }
+        for(int j=0;j<count;++j) { pipelined_prepare(p,index,head+j,head); }
       }
       else { prepare(p,index,head,o); o.used=0; local_gradient(p,index,head,o); }
     }
     if constexpr(Stage==1) {
       if(o.accurate) { replay(p,index,head,o); o.used=0; state_gradient(p,index,head,o); }
-      else pipelined_states(p,index,head,o);
+      else pipelined_states(p,index,head);
     }
     if constexpr(Stage==2) {
       if(o.accurate) {
@@ -251,10 +252,10 @@ __global__ AICORE void gdn_bwd_stage(Plan p) {
       } else if(emit) {
         int c=task/groups,first_head=(task%groups)*fold;
         for(int h=first_head;h<first_head+fold;++h) {
-          o.used=0; pipelined_gradients<true>(p,c,h,o);
+          pipelined_gradients<true>(p,c,h);
         }
         scatter_gates(p,c,first_head,fold,false); join();
-      } else pipelined_gradients(p,index,head,o);
+      } else pipelined_gradients(p,index,head);
     }
     if constexpr(Stage==3) finish(p,task/groups,(task%groups)*fold,fold,o);
   }

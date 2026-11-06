@@ -291,12 +291,16 @@ AICORE inline void wy_epilogue(__gm__ float* raw,__gm__ float* decay,
   load<1,128>(weights,beta); TASSIGN(col,114688+stripe*256);
   TROWEXPANDMUL(c,c,col); sync(); store<64,128>(c,dkk+offset);
   load<64,128>(c,kk+offset); TMUL(a,a,c); sync(); TMUL(a,a,b); sync();
-  TROWSUM(sum,a,tmp); sync(); load<1,64>(base,base_db+stripe*64);
-  if(base_db2) {
-    Short second; TASSIGN(second,114688);
-    load<1,64>(second,base_db2+stripe*64); TADD(base,base,second); sync();
+  TROWSUM(sum,a,tmp); sync();
+  if(base_db) {
+    load<1,64>(base,base_db+stripe*64);
+    if(base_db2) {
+      Short second; TASSIGN(second,114688);
+      load<1,64>(second,base_db2+stripe*64); TADD(base,base,second); sync();
+    }
+    TADD(result,base,result); sync();
   }
-  TADD(result,base,result); sync(); store<1,64>(result,db+stripe*64);
+  store<1,64>(result,db+stripe*64);
 #endif
 }
 
@@ -485,7 +489,7 @@ AICORE inline void inverse(__gm__ float* l,__gm__ float* at,int batch) {
 // Scalars use one row with token positions as columns; matrices use 128 rows.
 template<class T>
 AICORE inline void pack_input(__gm__ T* x,__gm__ float* y,int heads,
-    int rows,int length,int group,int64_t st,int64_t sh,int64_t sd) {
+    int rows,int length,int group,int64_t st,int64_t sh,int64_t sd,float alpha=1) {
 #if defined(__DAV_VEC__)
   if(rows==128 && (sd==1 || !x)) {
     using InputTile=Tile<TileType::Vec,T,64,128,BLayout::RowMajor,64,128,SLayout::NoneBox,512,PadValue::Zero>;
@@ -500,8 +504,14 @@ AICORE inline void pack_input(__gm__ T* x,__gm__ float* y,int heads,
           x+(h/group)*sh+first*st,{1,1,1,n,128},{1,1,1,st,1});
         TLOAD(part,gm); sync(); TFILLPAD_INPLACE(input,part); sync();
       } else { TEXPANDS(input,static_cast<T>(0)); sync(); }
-      if constexpr(std::is_same_v<T,float>) store<64,128>(input,y+task*8192);
-      else { TCVT(output,input,RoundMode::CAST_NONE); sync(); store<64,128>(output,y+task*8192); }
+      if constexpr(std::is_same_v<T,float>) {
+        if(alpha!=1) { TMULS(input,input,alpha); sync(); }
+        store<64,128>(input,y+task*8192);
+      } else {
+        TCVT(output,input,RoundMode::CAST_NONE); sync();
+        if(alpha!=1) { TMULS(output,output,alpha); sync(); }
+        store<64,128>(output,y+task*8192);
+      }
     }
     return;
   }
@@ -520,8 +530,8 @@ AICORE inline void pack_input(__gm__ T* x,__gm__ float* y,int heads,
       }
       sync();
     }
-    if constexpr(std::is_same_v<T,float>) store<1,128>(input,y+task*128);
-    else { TCVT(output,input,RoundMode::CAST_NONE); sync(); store<1,128>(output,y+task*128); }
+    if constexpr(std::is_same_v<T,float>) { if(alpha!=1) { TMULS(input,input,alpha); sync(); } store<1,128>(input,y+task*128); }
+    else { TCVT(output,input,RoundMode::CAST_NONE); sync(); if(alpha!=1) { TMULS(output,output,alpha); sync(); } store<1,128>(output,y+task*128); }
   }
 #endif
 }

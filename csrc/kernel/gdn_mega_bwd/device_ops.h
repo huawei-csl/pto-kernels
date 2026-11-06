@@ -18,6 +18,18 @@ AICORE inline void join() {
 #endif
   sync();
 }
+// Explicit Cube/Vec dependency boundary; no operation dispatch or allocation.
+AICORE inline void phase_end(int& epoch,bool independent_stripes=false) {
+  if(independent_stripes) {
+    sync();
+#if defined(__DAV_CUBE__)
+    kernel_utils::SetCrossFlag<PIPE_FIX>(2+epoch); wait_flag_dev(4+epoch);
+#elif defined(__DAV_VEC__)
+    kernel_utils::SetCrossFlag<PIPE_MTE3>(4+epoch); wait_flag_dev(2+epoch);
+#endif
+    sync(); epoch^=1; // A fast subcore cannot signal twice into one epoch.
+  } else join();
+}
 AICORE inline __gm__ uint8_t* inverse_data(const Plan& p,int c,int h) {
   return (__gm__ uint8_t*)p.inverse_cache+
     (int64_t(c)*p.heads+h)*Matrix*(p.inverse_dtype==2 ? 4 : 2);
@@ -29,16 +41,7 @@ struct Ops {
   // Early Cube release is safe only when the next vector phase consumes
   // its own stripes; Cube still waits for both vector producers.
   AICORE void end(bool independent_stripes=false) {
-    if(independent_stripes) {
-      sync();
-#if defined(__DAV_CUBE__)
-      kernel_utils::SetCrossFlag<PIPE_FIX>(2+epoch); wait_flag_dev(4+epoch);
-#elif defined(__DAV_VEC__)
-      kernel_utils::SetCrossFlag<PIPE_MTE3>(4+epoch); wait_flag_dev(2+epoch);
-#endif
-      sync(); epoch^=1; // A fast subcore cannot signal twice into one epoch.
-    } else join();
-    parallel=false;
+    phase_end(epoch,independent_stripes); parallel=false;
   }
   template<bool TA,bool TB>
   AICORE void product(Buffer a,Buffer b,Buffer out) {
@@ -110,14 +113,14 @@ AICORE inline bool shared_grams(const Plan& p) {
     p.input[1].dtype!=2 && p.input[2].dtype!=2;
 }
 struct Chunk {
-  __gm__ float* base; __gm__ float* keys;
-  AICORE Buffer m(int slot) const { return {(slot==K || slot==KK ? keys : base)+slot*Matrix}; }
+  __gm__ float* base; __gm__ float* keys; bool shared_q=false;
+  AICORE Buffer m(int slot) const { return {(slot==K || slot==KK || (slot==Q_DQ && shared_q) ? keys : base)+slot*Matrix}; }
   AICORE Buffer v(int slot) const { return {base+MatrixSlots*Matrix+slot*128,true}; }
 };
 AICORE inline Chunk chunk(const Plan& p,int c,int h) {
   int kh=shared_grams(p) ? h/(p.heads/p.key_heads)*(p.heads/p.key_heads) : h;
   auto start=(__gm__ float*)p.workspace+int64_t(c)*p.heads*RecordSize;
-  return {start+h*RecordSize,start+kh*RecordSize};
+  return {start+h*RecordSize,start+kh*RecordSize,fused_output(p)};
 }
 AICORE inline int sequence(const Plan& p,int c) {
   int s=0; while(c>=p.offset[s+1]) ++s; return s;

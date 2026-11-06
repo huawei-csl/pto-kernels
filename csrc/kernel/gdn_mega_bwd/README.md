@@ -49,7 +49,7 @@ h0 is reused. Q/K normalization and its rstd belong to the upstream operation.
 
 At 8K/H=16, retained inverse factors cost **32 MiB** in FP16/BF16 or **64 MiB**
 in FP32; gates/beta cost **1.25 MiB**.
-The unchanged backward workspace is **816.5 MiB**: twelve FP32 matrices and
+The backward workspace still reserves **816.5 MiB**: twelve FP32 matrix slots and
 seven vectors per chunk/head, plus 45 MiB of reusable block scratch. Workspace
 exists only during backward. The current forward cache producer accepts FP16
 q/k/v/beta and FP32 gates.
@@ -59,7 +59,7 @@ q/k/v/beta and FP32 gates.
 | Stage | Work | Scheduling |
 | --- | --- | --- |
 | 0 | Pack inputs, gates, inverse, W/U; local value/state gradients | Independent chunk/key-head groups |
-| 1 | Replay H/Z; reverse state adjoints, complete dU, write dh0 | Forward/reverse chunk loops per sequence/head |
+| 1 | Replay H/Z; reverse state adjoints, complete dU, write dh0 | Interleaved forward/reverse scans per sequence/head |
 | 2 | Output/WY derivatives; fused final outputs on large native grids | Chunk/head groups when fused, otherwise individual heads |
 | 3 (fallback) | Final gate scans, shared-head reductions and outputs | Small grids and FP32 inputs only |
 
@@ -75,11 +75,53 @@ Aligned eight-head gate/beta transposes avoid partial-cache-line races.
 State bases and elementwise/reduction chains also stay in UB, and operand
 prefetches overlap earlier Cube products. There are no atomic reductions.
 
-Native FP16/BF16 inputs use FP32 Cube operands and accumulation. FP32 inputs
-use four K=32 partial products with compensated addition, local cancellation
-handling and compensated gate scans. No HF32 shortcut is enabled.
+Native schedules in `pipeline.h` use explicit scratch addresses and PTO phase
+boundaries, without the generic `Ops` expression interface. Interleaved scans
+pair forward Cube products with reverse vector updates and vice versa. Local
+key-gradient updates and gate-energy reductions stay in UB. The original V
+loads directly into UB at its consumers; no FP32 V copy is retained for inputs
+with contiguous feature dimensions. Strided feature dimensions retain packing.
 
-## Measured cached improvement (v8)
+Full contiguous Q/K chunks use their original FP16/BF16 operands directly on
+Cube for the shared Gram matrices, with FP32 accumulation. Other products keep
+FP32 operands/accumulation. The final symmetric key product accumulates its two
+terms in L0C, eliminating the vector transpose and its GM intermediate. FP32
+inputs retain the generic compensated path with four K=32 partial products,
+local cancellation handling and compensated gate scans. No HF32 shortcut is enabled.
+
+## Current cached improvement (v9)
+
+Safe pre-change snapshot: `e82451a`. Paired measurements use the same BF16
+inverse and gate/beta caches from forward, alternating implementations in one
+process (3 warmup pairs, 11 measured pairs). Times include allocation/enqueue
+and synchronization, excluding compilation and forward.
+
+| Tokens | Hv / Hqk | Snapshot ms | Current ms | Speedup |
+| --- | --- | --- | --- | --- |
+| 2048 | 16 / 2 | 1.673 | 1.466 | 1.14x |
+| 8192 | 16 / 2 | 5.171 | 4.273 | 1.21x |
+| 8192 | 64 / 16 | 16.945 | 13.811 | 1.23x |
+| 8192 | 48 / 16 | 13.049 | 10.752 | 1.21x |
+| 8192 | 32 / 16 | 9.504 | 7.724 | 1.23x |
+| 8192 | 32 / 8 | 9.420 | 7.610 | 1.24x |
+| 32768 | 64 / 16 | 64.456 | 52.946 | 1.22x |
+
+The requested **2x speedup is not achieved**; this version measures 1.14–1.24x.
+At 8K/Hv64/Hqk16, warmed device stage times change from 5.137 / 3.910 / 7.129 ms
+to 4.277 / 3.072 / 5.951 ms (preparation / scans / derivatives). These are kernel
+durations, not utilization counters. All 152 backward/reference tests pass with
+unchanged bounds. Existing heatmaps retain their historical measurements.
+
+[Raw samples, experiments and source hashes](../../../tests/baselines/gdn_mega_bwd_explicit_v9.json).
+Reproduce from the repository root after sourcing CANN:
+
+```bash
+OMP_NUM_THREADS=4 PYTHONPATH=python:.:tests python benchmarking/gdn_mega_bwd_compare.py build/gdn_mega_bwd/4ef9e56e099811b5/kernel.so
+```
+
+The baseline device library must share the current Plan/workspace ABI.
+
+## Historical cached improvement (v8)
 
 | Tokens | Local Hv / Hqk | Cached v7 (ms) | Cached v8 (ms) | Reduction |
 | --- | --- | --- | --- | --- |
@@ -186,5 +228,5 @@ No forward+backward ratio is inferred from sums: FLA measured that mode jointly.
 - `kernel.cpp`, `layout.h`: stages, task scheduling, dispatch and buffer metadata.
 - `pipeline.h`, `resident_cube.h`: native phase schedules and Cube operand reuse.
 - `epilogues.h`: local reductions, shared-head sums and direct output stores.
-- `device_ops.h`, `primitives.h`: synchronization, scratch, Cube/vector operations.
+- `device_ops.h`, `primitives.h`: shared synchronization/metadata, compensated fallback algebra and PTO primitives.
 - `blocked_inverse.h`: forward-style diagonal solves and Cube block joins for recomputation.

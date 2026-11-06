@@ -1,5 +1,89 @@
 # GDN backward development
 
+## Explicit native schedules (2026-11-06)
+
+Snapshot requested before optimization: `e82451a` (clean tree after commit).
+Baseline device library: `4ef9e56e099811b5/kernel.so`; native launcher:
+`4b84318d17296a18/launch.so`. No forward, launch ABI, saved-cache format,
+workspace sizing or numerical tolerance changes in this iteration.
+
+The FP16/BF16 schedules in `pipeline.h` no longer use `Ops`, its temporary
+allocator, or generic operation dispatch. `cube_load`/`cube_product` are inline
+PTO tile instructions, never launches. The generic algebra remains for the
+compensated FP32 accuracy path. This change alone does not explain the measured
+gain: the useful changes alter data movement and overlap.
+
+- Pack Q and apply its scale in the same UB pass. Full contiguous Q/K chunks
+  produce their shared Gram matrices directly from the original 16-bit inputs
+  on Cube, accumulating in FP32; tails/strides retain the FP32 packing path.
+- Share Q as well as K across value heads when fused outputs keep dQ elsewhere.
+- Weight all preparation RHS matrices in UB. Reuse inverse and dOut operands
+  across consecutive products. Preparation uses five phases instead of six.
+- Interleave independent forward replay and reverse adjoint scans. Forward
+  state bases occupy UB 96..128 KiB, reverse bases 128..160 KiB. Four phase
+  boundaries per paired step replace eight; the previous reverse update is
+  completed alongside the next forward product. Arithmetic order is retained.
+- Fuse the three local dK contributions into one UB lifetime; no intermediate
+  dK materialization. Delay independent key products into the WY vector phases.
+  Combine beta terms afterward in their original rounding order.
+- Form `(dKK+dKK.T) @ K` using two Cube products and one L0C accumulator. This
+  replaces vector transpose/add and a full GM write/read; operands stay in L1.
+  It adds one Cube product (nine -> ten in the derivative stage), but runs faster.
+- Load contiguous original V into UB at its two consumers, eliminating its
+  retained FP32 GM copy. Strided feature dimensions keep the existing fallback.
+- Combine gate energy terms in one UB pass instead of two GM vector operations.
+
+One implementation hazard: consecutive Cube products need M->MTE1 protection
+for L0A/B and FIX->M protection for L0C. A missing M->MTE1 dependency produced
+an L0B conflict during development; the final helper fences both resources.
+
+Rejected experiments:
+
+- Three BF16 products on high/low operand pairs passed 37 targeted cases but
+  slowed backward 12-16%. Extra packing/GM copies outweighed faster products.
+  No such approximate arithmetic remains enabled.
+- Replacing matrix gate exponentials with bounded outer products of vector
+  exponentials passed 19 targeted cases, but had no consistent timing gain.
+  Reverted to the original gate arithmetic, including its large-span behavior.
+
+All timings compare cached backward on identical inputs with the same actual
+BF16 inverse factors and gate/beta buffers produced by `gdn_mega` forward.
+Three warmup pairs, eleven measured pairs, alternating launch order in one
+process. Synchronized wall latency includes allocation/enqueue; compilation
+and forward are excluded. Baseline and candidate share the native launcher.
+Raw paired samples, source/library hashes and experiments are retained in
+`tests/baselines/gdn_mega_bwd_explicit_v9.json`; the comparison is reproducible
+with `benchmarking/gdn_mega_bwd_compare.py BASELINE_KERNEL_SO`.
+
+| Tokens | Hv / Hqk | Snapshot ms | Current ms | Speedup |
+| --- | --- | --- | --- | --- |
+| 2048 | 16 / 2 | 1.673 | 1.466 | 1.14x |
+| 8192 | 16 / 2 | 5.171 | 4.273 | 1.21x |
+| 8192 | 64 / 16 | 16.945 | 13.811 | 1.23x |
+| 8192 | 48 / 16 | 13.049 | 10.752 | 1.21x |
+| 8192 | 32 / 16 | 9.504 | 7.724 | 1.23x |
+| 8192 | 32 / 8 | 9.420 | 7.610 | 1.24x |
+| 32768 | 64 / 16 | 64.456 | 52.946 | 1.22x |
+
+All **152 backward/reference tests passed in 379.56s**, with unchanged per-gradient
+`2 * reordered_torch_error + 1e-5` bounds. Forward was not modified; its saved
+cache paths are exercised by the backward suite. Long timing cases check finite
+gradients; the full numerical oracle coverage reaches 513 tokens.
+
+Matched warmed hardware traces at 8K/Hv64/Hqk16:
+
+| Stage | Snapshot ms | Current ms |
+| --- | --- | --- |
+| Preparation | 5.137 | 4.277 |
+| Interleaved state scans | 3.910 | 3.072 |
+| Derivatives/output | 7.129 | 5.951 |
+
+These are kernel durations, not utilization counters. All three stages improve,
+but the total gain is **1.14–1.24x**, not the requested 2x. The derivative stage
+still contributes about 45% of device time; preparation and state scans account
+for the rest. No single wrapper removal can eliminate those remaining products
+and transfers. Existing heatmaps have not been regenerated.
+
 ## Export completed inverse factors once (2026-11-05)
 
 Replaced the initial low-precision export's duplicate writes. Forward now builds
