@@ -12,6 +12,7 @@ for the full License text.
 #include "torch_abs.h"
 #include "torch_batch_matrix_square.h"
 #include "torch_csr_gather.h"
+#include "torch_cube_reduce.h"
 #include "torch_flash_attention.h"
 #include "torch_gdn_chunk_cumsum.h"
 #include "torch_gdn_chunk_h.h"
@@ -97,6 +98,7 @@ PYBIND11_MODULE(pto_kernels_ops, m) {
         py::arg("num_matrices"));
   m.def("pto_scan_ul1", &pto_isa_ops::run_scan_ul1);
   m.def("pto_simple_matmul", &pto_isa_ops::run_simple_matmul);
+  m.def("pto_cube_reduce", &pto_isa_ops::run_cube_reduce, py::arg("x"));
   m.def("pto_swiglu", &pto_isa_ops::run_swiglu, py::arg("x"),
         py::arg("dim") = -1);
   m.def("pto_tri_inv_trick", &pto_isa_ops::run_tri_inv_trick);
