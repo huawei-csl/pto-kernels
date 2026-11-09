@@ -264,8 +264,9 @@ AICORE inline void mega_finish_inverse(
   pipe_barrier(PIPE_ALL);
   // With caching, the existing exchange itself becomes persistent storage.
   GlobalTensor<float, Shape<1, 1, 1, R, C>, pto::Stride<1, 1, 1, C, 1>> native(
-      inverse_cache.native() ? inverse_cache.native_at(stripe*C) :
-      reinterpret_cast<__gm__ float*>(stripe == 0 ? first : second));
+      inverse_cache.native()
+          ? inverse_cache.native_at(stripe * C)
+          : reinterpret_cast<__gm__ float*>(stripe == 0 ? first : second));
   TSTORE(native, a);
   pipe_barrier(PIPE_ALL);
   // Move residual weighting into this independent preparation step:
@@ -317,8 +318,8 @@ AICORE inline void mega_prepare_inverse(
     __gm__ float* full, __gm__ half* weighted_first,
     __gm__ half* attention_high, __gm__ half* attention_low, int64_t pos,
     int valid, int head, int kh, int64_t tokens, __gm__ half* first,
-    __gm__ half* second, __gm__ half* original_k,
-    __gm__ half* weighted_second, MegaInverseCache inverse_cache) {
+    __gm__ half* second, __gm__ half* original_k, __gm__ half* weighted_second,
+    MegaInverseCache inverse_cache) {
   mega_prepare_weights<H, C>(g, glow, beta, kk, kk_upper, qk, lower, full,
                              attention_high, attention_low, pos, valid, head,
                              kh, tokens);
@@ -497,8 +498,8 @@ AICORE inline void mega_fused_pipeline(
     __gm__ half* final_state, __gm__ half* initial, bool has_initial,
     __gm__ int32_t* cu, int64_t sequences, int kh, int64_t tokens,
     __gm__ float* kk, __gm__ float* kk_upper, __gm__ float* qk,
-    __gm__ float* lower, __gm__ float* full,
-    __gm__ half* spare_first, __gm__ half* spare_second, MegaInverseCache inverse_cache) {
+    __gm__ float* lower, __gm__ float* full, __gm__ half* spare_first,
+    __gm__ half* spare_second, MegaInverseCache inverse_cache) {
 #if defined(__DAV_VEC__)
   set_mask_norm();
   set_vector_mask(-1, -1);
@@ -546,9 +547,10 @@ AICORE inline void mega_fused_pipeline(
   auto first = uh_ws + block * C * C, second = ul_ws + block * C * C;
   constexpr bool compact_cache = Compact;
   MegaInverseCache slots[2] = {
-      {reinterpret_cast<__gm__ uint8_t*>(first),2,reinterpret_cast<__gm__ float*>(second)},
-      {reinterpret_cast<__gm__ uint8_t*>(spare_first+block*C*C),2,
-       reinterpret_cast<__gm__ float*>(spare_second+block*C*C)}};
+      {reinterpret_cast<__gm__ uint8_t*>(first), 2,
+       reinterpret_cast<__gm__ float*>(second)},
+      {reinterpret_cast<__gm__ uint8_t*>(spare_first + block * C * C), 2,
+       reinterpret_cast<__gm__ float*>(spare_second + block * C * C)}};
   auto solve_scratch =
       reinterpret_cast<__gm__ float*>(solve_ws + block * C * C);
   for (int64_t work = block; work < sequences * H; work += get_block_num()) {
@@ -556,14 +558,16 @@ AICORE inline void mega_fused_pipeline(
     int64_t start = cu[seq], end = cu[seq + 1];
     int64_t chunk_base = 0;
     if (inverse_cache.data)
-      for (int i = 0; i < seq; ++i) chunk_base += (cu[i+1]-cu[i]+C-1)/C;
-    auto saved = inverse_cache.at((chunk_base*H+head)*C*C);
+      for (int i = 0; i < seq; ++i)
+        chunk_base += (cu[i + 1] - cu[i] + C - 1) / C;
+    auto saved = inverse_cache.at((chunk_base * H + head) * C * C);
 #if defined(__DAV_VEC__)
     if (start < end)
       mega_prepare_inverse<H, C>(
           g, glow, beta, kk, kk_upper, qk, lower, full, weighted_first,
           att_high, att_low, start, min(static_cast<int64_t>(C), end - start),
-          head, kh, tokens, first, second, k, weighted_second, compact_cache ? slots[0] : saved);
+          head, kh, tokens, first, second, k, weighted_second,
+          compact_cache ? slots[0] : saved);
     mega_initialize_state<D>(has_initial ? initial + work * D * D : initial,
                              final_state + work * D * D, exchange, has_initial,
                              start == end);
@@ -580,7 +584,7 @@ AICORE inline void mega_fused_pipeline(
 #endif
     for (int64_t pos = start; pos < end; pos += C) {
       int valid = min(static_cast<int64_t>(C), end - pos);
-      int slot = ((pos-start)/C)&1;
+      int slot = ((pos - start) / C) & 1;
       auto working = compact_cache ? slots[slot] : saved;
 #if defined(__DAV_VEC__)
       mega_wait(7);
@@ -594,10 +598,11 @@ AICORE inline void mega_fused_pipeline(
           v, g, glow, beta, exchange, local_output, pos, valid, head, tokens);
       mega_signal<PIPE_MTE3>(6);
       if (pos + C < end)
-        mega_finish_inverse<H, C>(g, glow, lower, full, weighted_first, pos + C,
-                                  min(static_cast<int64_t>(C), end - pos - C),
-                                  head, kh, tokens, first, second, k,
-                                  weighted_second, compact_cache ? slots[slot^1] : saved.at(H*C*C));
+        mega_finish_inverse<H, C>(
+            g, glow, lower, full, weighted_first, pos + C,
+            min(static_cast<int64_t>(C), end - pos - C), head, kh, tokens,
+            first, second, k, weighted_second,
+            compact_cache ? slots[slot ^ 1] : saved.at(H * C * C));
       if (compact_cache) {
         mega_wait(8);
         saved.export_from(working);
@@ -641,8 +646,10 @@ AICORE inline void mega_fused_pipeline(
       TASSIGN(first_half, 64 * 1024);
       TASSIGN(second_half, 64 * 1024 + (C / 2) * 8 * sizeof(float));
       GlobalTensor<float, Shape<1, 1, 1, C / 2, C>, pto::Stride<1, 1, 1, C, 1>>
-          fg(working.native() ? working.native() : reinterpret_cast<__gm__ float*>(first)),
-          sg(working.native() ? working.native_at((C/2)*C) : reinterpret_cast<__gm__ float*>(second));
+          fg(working.native() ? working.native()
+                              : reinterpret_cast<__gm__ float*>(first)),
+          sg(working.native() ? working.native_at((C / 2) * C)
+                              : reinterpret_cast<__gm__ float*>(second));
       TLOAD(first_half, fg);
       TLOAD(second_half, sg);
       pipe_barrier(PIPE_ALL);
@@ -707,7 +714,7 @@ AICORE inline void mega_fused_pipeline(
       mega_load_pair<D, D>(state, sh, sh + D, D, 2 * D);
       mega_signal<PIPE_MTE2>(7);
 #endif
-      saved = saved.at(H*C*C);
+      saved = saved.at(H * C * C);
     }
 #if defined(__DAV_VEC__)
     mega_wait(7);

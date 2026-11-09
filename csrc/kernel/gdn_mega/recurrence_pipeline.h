@@ -77,11 +77,13 @@ AICORE inline void mega_float_join_level(Mat& inverse, __gm__ float* scratch,
         scratch + group * B * B);
     if constexpr (FirstOnly) {
       if (cache.native()) {
-        GlobalTensor<float, Shape<1,1,1,B,B>, pto::Stride<1,1,1,C,1>> saved(
-            cache.native_at((offset+B)*C + offset));
+        GlobalTensor<float, Shape<1, 1, 1, B, B>, pto::Stride<1, 1, 1, C, 1>>
+            saved(cache.native_at((offset + B) * C + offset));
         TSTORE(saved, acc);
-      } else TSTORE(out, acc);
-    } else TSTORE(out, acc);
+      } else
+        TSTORE(out, acc);
+    } else
+      TSTORE(out, acc);
   }
   set_flag(PIPE_FIX, PIPE_MTE2, EVENT_ID0);
   wait_flag(PIPE_FIX, PIPE_MTE2, EVENT_ID0);
@@ -104,10 +106,11 @@ AICORE inline void mega_float_join_level(Mat& inverse, __gm__ float* scratch,
       GlobalTensor<float, Shape<1, 1, 1, B, B>, pto::Stride<1, 1, 1, B, 1>> out(
           scratch + group * B * B);
       if (cache.native()) {
-        GlobalTensor<float, Shape<1,1,1,B,B>, pto::Stride<1,1,1,C,1>> saved(
-            cache.native_at((offset+B)*C + offset));
+        GlobalTensor<float, Shape<1, 1, 1, B, B>, pto::Stride<1, 1, 1, C, 1>>
+            saved(cache.native_at((offset + B) * C + offset));
         TSTORE(saved, acc);
-      } else TSTORE(out, acc);
+      } else
+        TSTORE(out, acc);
     }
     set_flag(PIPE_FIX, PIPE_MTE2, EVENT_ID0);
     wait_flag(PIPE_FIX, PIPE_MTE2, EVENT_ID0);
@@ -122,10 +125,11 @@ AICORE inline void mega_float_join_level(Mat& inverse, __gm__ float* scratch,
     GlobalTensor<float, Shape<1, 1, 1, B, B>, pto::Stride<1, 1, 1, B, 1>> block(
         scratch + group * B * B);
     if (cache.native()) {
-      GlobalTensor<float, Shape<1,1,1,B,B>, pto::Stride<1,1,1,C,1>> saved(
-          cache.native_at((offset+B)*C + offset));
+      GlobalTensor<float, Shape<1, 1, 1, B, B>, pto::Stride<1, 1, 1, C, 1>>
+          saved(cache.native_at((offset + B) * C + offset));
       TLOAD(destination, saved);
-    } else TLOAD(destination, block);
+    } else
+      TLOAD(destination, block);
   }
   pipe_barrier(PIPE_ALL);
 #endif

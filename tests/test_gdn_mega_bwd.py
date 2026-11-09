@@ -252,7 +252,7 @@ def backward(*args, **kwargs):
 # The five saved-buffer variants have identical fixed-seed model inputs.
 # Reuse only their CPU oracle results within this process; every NPU run and
 # assertion still executes. Nothing is cached on disk or in production code.
-_saved_references = {}
+saved_references = {}
 
 
 def test_native_binding():
@@ -270,15 +270,15 @@ def test_invalid_inputs(invalid, npu_device):
     q = torch.empty(1, 2, 2, 128, device=npu_device, dtype=torch.float16)
     v = torch.empty(1, 2, 8, 128, device=npu_device, dtype=q.dtype)
     g = torch.empty(1, 2, 8, device=npu_device)
-    args = dict(q=q, k=q, v=v, g=g, beta=g, dout=v)
+    args = {"q": q, "k": q, "v": v, "g": g, "beta": g, "dout": v}
     changes = {
-        "device": lambda: dict(q=q.cpu()),
-        "dtype": lambda: dict(q=torch.empty_like(q, dtype=torch.int32)),
-        "beta": lambda: dict(beta=g[..., :7]),
-        "state": lambda: dict(initial_state=v),
-        "bounds": lambda: dict(cu_seqlens=torch.tensor([0, 3, 2])),
-        "inverse": lambda: dict(inverse_cache=v),
-        "gates": lambda: dict(gate_cache=(g, g)),
+        "device": lambda: {"q": q.cpu()},
+        "dtype": lambda: {"q": torch.empty_like(q, dtype=torch.int32)},
+        "beta": lambda: {"beta": g[..., :7]},
+        "state": lambda: {"initial_state": v},
+        "bounds": lambda: {"cu_seqlens": torch.tensor([0, 3, 2])},
+        "inverse": lambda: {"inverse_cache": v},
+        "gates": lambda: {"gate_cache": (g, g)},
     }
     with pytest.raises(RuntimeError, match="gdn_mega_bwd:"):
         backward(**{**args, **changes[invalid]()})
@@ -306,55 +306,97 @@ class AllocationsOnly(TorchDispatchMode):
 
     allocations = 0
 
-    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+    def __torch_dispatch__(self, func, _types, args=(), kwargs=None):
         assert func == torch.ops.aten.empty.memory_format, str(func)
         self.allocations += 1
         return func(*args, **(kwargs or {}))
 
 
-@pytest.mark.parametrize(
-    "lengths,heads,key_heads,mode",
-    [
-        ([2], 2, 1, "both"),
-        ([129], 8, 2, "both"),
-        ([0, 1, 0, 17, 0], 8, 2, "output"),
-        ([3, 5], 8, 8, "state"),
-        ([0, 0], 8, 2, "both"),
-        ([257], 8, 1, "zero_state"),
-        ([129], 8, 2, "zero_beta"),
-        ([129], 8, 2, "replace"),
-        ([17], 64, 8, "both"),
-        ([17, 0, 19], 64, 16, "both"),
-        ([129] + [1] * 10, 64, 16, "both"),
-        ([513], 8, 2, "weak"),
-        ([257], 8, 2, "correlated_weak"),
-        ([256], 8, 2, "strong_decay"),
-        ([7], 8, 2, "defaults"),
-        ([128], 8, 2, "both"),
-        ([256], 8, 2, "both"),
-        ([129, 0, 131], 8, 2, "strided"),
-        ([257], 8, 2, "replace"),
-        ([513], 8, 2, "replace"),
-        ([127, 1, 0, 129], 3, 1, "both"),
-        ([0] * 64 + [1], 2, 1, "both"),
-        ([2], 64, 1, "both"),
-        ([129], 8, 2, "mixed"),
-    ],
-)
-@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
-def test_backward(
-    lengths,
-    heads,
-    key_heads,
-    mode,
-    dtype,
-    npu_device,
-    cache_mode=None,
-    cache_dtype=None,
-    error_report=None,
-    roundtrip=False,
-    flashqla_bound=False,
-):
+def forward_caches(inputs, cu, cache_mode, cache_dtype, roundtrip):
+    cache, gate_cache = None, None
+    if not cache_mode:
+        return cache, gate_cache
+    from test_gdn_mega import _prepare_gdn_mega, pto_gdn_mega
+
+    launch = _prepare_gdn_mega(*inputs[:5], cu.to(inputs[0].device), inputs[5])
+    heads = inputs[2].shape[2]
+    if cache_mode != "gates":
+        cache = torch.empty(
+            launch["num_matrices"] // heads,
+            heads,
+            128,
+            128,
+            device=inputs[0].device,
+            dtype=(torch.float32 if roundtrip else (cache_dtype or torch.float32)),
+        )
+    pto_gdn_mega(**launch)
+    out_before, state_before = (
+        launch["out"].clone(),
+        launch["final_state"].clone(),
+    )
+    pto_gdn_mega(**launch, inverse_cache=cache)
+    torch.testing.assert_close(launch["out"], out_before, atol=0, rtol=0)
+    torch.testing.assert_close(launch["final_state"], state_before, atol=0, rtol=0)
+    if cache is not None:
+        if cache.dtype != torch.float32:
+            full = torch.empty_like(cache, dtype=torch.float32)
+            pto_gdn_mega(**launch, inverse_cache=full)
+            torch.testing.assert_close(cache, full.to(cache.dtype), atol=0, rtol=0)
+        # Numerical storage experiment only; production does no Torch math.
+        if roundtrip:
+            cache = cache.to(cache_dtype).float()
+    if cache_mode != "inverse":
+        gate_cache = tuple(launch[name] for name in ("g_t", "g_sum", "beta_t"))
+    return cache, gate_cache
+
+
+def check_gradients(expected, baseline, actual, expected64, error_report):
+    failures = []
+    for index, (name, ref, pt, result) in enumerate(
+        zip(("dq", "dk", "dv", "dg", "dbeta", "dh0"), expected, baseline, actual)
+    ):
+        if not ref.numel():
+            assert result.shape == ref.shape
+            continue
+        result = result.cpu().double()
+        assert all(torch.isfinite(x).all() for x in (ref, pt, result)), name
+        error = (result - ref.double()).abs().max().item()
+        budget = 2 * (pt.double() - ref.double()).abs().max().item() + 1e-5
+        record = {"gradient": name, "error": error, "budget": budget}
+        if expected64 is not None:
+            ref64 = expected64[index]
+            diff = result - ref64
+            error_l2 = torch.linalg.vector_norm(diff).item()
+            reference_l2 = torch.linalg.vector_norm(ref64).item()
+            passed = error_l2 <= 0.02 * reference_l2
+            record["flashqla"] = {
+                "error_l2": error_l2,
+                "reference_l2": reference_l2,
+                "relative_l2": (
+                    error_l2 / reference_l2
+                    if reference_l2
+                    else (0.0 if error_l2 == 0 else None)
+                ),
+                "max_abs_error": diff.abs().max().item(),
+                "reference_max_abs": ref64.abs().max().item(),
+                "reference_rms": reference_l2 / ref64.numel() ** 0.5,
+                "threshold": 0.02,
+                "passed": passed,
+            }
+            if not passed:
+                failures.append(
+                    f"{name}: FlashQLA L2 error {error_l2:.9g} > 0.02 * reference L2 {reference_l2:.9g}"
+                )
+        if error_report is not None:
+            error_report.append(record)
+        if error > budget:
+            failures.append(
+                f"{name}: kernel error {error:.9g} > 2x PyTorch error + 1e-5 = {budget:.9g}"
+            )
+    return failures
+
+
+def backward_inputs(lengths, heads, key_heads, mode, dtype, cache_mode):
     torch.manual_seed(42)
     T, N = sum(lengths), len(lengths)
     q = torch.randn(1, T, key_heads, 128)
@@ -397,8 +439,62 @@ def test_backward(
         for x, dt in zip((q, k, v, g, beta, h0), input_dtypes)
     ]
     cu = torch.tensor([0, *torch.tensor(lengths).cumsum(0).tolist()], dtype=torch.int32)
+    return inputs, input_dtypes, cu, scale
+
+
+@pytest.mark.parametrize(
+    "lengths,heads,key_heads,mode",
+    [
+        ([2], 2, 1, "both"),
+        ([129], 8, 2, "both"),
+        ([0, 1, 0, 17, 0], 8, 2, "output"),
+        ([3, 5], 8, 8, "state"),
+        ([0, 0], 8, 2, "both"),
+        ([257], 8, 1, "zero_state"),
+        ([129], 8, 2, "zero_beta"),
+        ([129], 8, 2, "replace"),
+        ([17], 64, 8, "both"),
+        ([17, 0, 19], 64, 16, "both"),
+        ([129] + [1] * 10, 64, 16, "both"),
+        ([513], 8, 2, "weak"),
+        ([257], 8, 2, "correlated_weak"),
+        ([256], 8, 2, "strong_decay"),
+        ([7], 8, 2, "defaults"),
+        ([128], 8, 2, "both"),
+        ([256], 8, 2, "both"),
+        ([129, 0, 131], 8, 2, "strided"),
+        ([257], 8, 2, "replace"),
+        ([513], 8, 2, "replace"),
+        ([127, 1, 0, 129], 3, 1, "both"),
+        ([0] * 64 + [1], 2, 1, "both"),
+        ([2], 64, 1, "both"),
+        ([129], 8, 2, "mixed"),
+    ],
+)
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+def test_backward(
+    lengths,
+    heads,
+    key_heads,
+    mode,
+    dtype,
+    npu_device,
+    cache_mode=None,
+    cache_dtype=None,
+    *,
+    error_report=None,
+    roundtrip=False,
+    flashqla_bound=False,
+):
+    # Load the extension before the allocation-only guard (including no-cache runs).
+    from pto_kernels import pto_gdn_mega_bwd as backward
+
+    inputs, input_dtypes, cu, scale = backward_inputs(
+        lengths, heads, key_heads, mode, dtype, cache_mode
+    )
+    golden_dtype = inputs[0].dtype
     key = (tuple(lengths), heads, key_heads, mode, dtype, tuple(input_dtypes))
-    cached = _saved_references.get(key) if cache_mode else None
+    cached = saved_references.get(key) if cache_mode else None
     if cached is None:
         out, ht = recurrent_gdn_reference(
             *inputs, cu_seqlens=cu, scale=scale, dtype=golden_dtype
@@ -417,7 +513,7 @@ def test_backward(
         )
         baseline = torch.autograd.grad((pt_out, pt_ht), pt_inputs, (do, dh))
         if cache_mode:
-            _saved_references[key] = do, dh, expected, baseline
+            saved_references[key] = do, dh, expected, baseline
     else:
         do, dh, expected, baseline = cached
     expected64 = None
@@ -442,48 +538,11 @@ def test_backward(
     )
     with context:
         device_do, device_dh = do.to(npu_device), dh.to(npu_device)
-        cache, gate_cache = None, None
-        if cache_mode:
-            from test_gdn_mega import _prepare_gdn_mega, pto_gdn_mega
-
-            launch = _prepare_gdn_mega(
-                *device_inputs[:5], cu.to(npu_device), device_inputs[5]
-            )
-            if cache_mode != "gates":
-                cache = torch.empty(
-                    launch["num_matrices"] // heads,
-                    heads,
-                    128,
-                    128,
-                    device=npu_device,
-                    dtype=(
-                        torch.float32 if roundtrip else (cache_dtype or torch.float32)
-                    ),
-                )
-            pto_gdn_mega(**launch)
-            out_before, state_before = (
-                launch["out"].clone(),
-                launch["final_state"].clone(),
-            )
-            pto_gdn_mega(**launch, inverse_cache=cache)
-            torch.testing.assert_close(launch["out"], out_before, atol=0, rtol=0)
-            torch.testing.assert_close(
-                launch["final_state"], state_before, atol=0, rtol=0
-            )
-            if cache is not None:
-                if cache.dtype != torch.float32:
-                    full = torch.empty_like(cache, dtype=torch.float32)
-                    pto_gdn_mega(**launch, inverse_cache=full)
-                    torch.testing.assert_close(
-                        cache, full.to(cache.dtype), atol=0, rtol=0
-                    )
-                # Numerical storage experiment only; production does no Torch math.
-                if roundtrip:
-                    cache = cache.to(cache_dtype).float()
-                cache_before = cache.clone()
-            if cache_mode != "inverse":
-                gate_cache = tuple(launch[name] for name in ("g_t", "g_sum", "beta_t"))
-                gates_before = tuple(x.clone() for x in gate_cache)
+        cache, gate_cache = forward_caches(
+            device_inputs, cu, cache_mode, cache_dtype, roundtrip
+        )
+        cache_before = cache.clone() if cache is not None else None
+        gates_before = tuple(x.clone() for x in gate_cache) if gate_cache else ()
         if mode in ("defaults", "strided"):
             device_inputs = [
                 x.transpose(-1, -2).contiguous().transpose(-1, -2)
@@ -506,48 +565,7 @@ def test_backward(
             )
         assert guard.allocations == 7  # Six outputs and one reusable workspace.
         torch.npu.synchronize(npu_device)
-    failures = []
-    for index, (name, ref, pt, result) in enumerate(
-        zip(("dq", "dk", "dv", "dg", "dbeta", "dh0"), expected, baseline, actual)
-    ):
-        if not ref.numel():
-            assert result.shape == ref.shape
-            continue
-        result = result.cpu().double()
-        assert all(torch.isfinite(x).all() for x in (ref, pt, result)), name
-        error = (result - ref.double()).abs().max().item()
-        budget = 2 * (pt.double() - ref.double()).abs().max().item() + 1e-5
-        record = dict(gradient=name, error=error, budget=budget)
-        if expected64 is not None:
-            ref64 = expected64[index]
-            diff = result - ref64
-            error_l2 = torch.linalg.vector_norm(diff).item()
-            reference_l2 = torch.linalg.vector_norm(ref64).item()
-            passed = error_l2 <= 0.02 * reference_l2
-            record["flashqla"] = dict(
-                error_l2=error_l2,
-                reference_l2=reference_l2,
-                relative_l2=(
-                    error_l2 / reference_l2
-                    if reference_l2
-                    else (0.0 if error_l2 == 0 else None)
-                ),
-                max_abs_error=diff.abs().max().item(),
-                reference_max_abs=ref64.abs().max().item(),
-                reference_rms=reference_l2 / ref64.numel() ** 0.5,
-                threshold=0.02,
-                passed=passed,
-            )
-            if not passed:
-                failures.append(
-                    f"{name}: FlashQLA L2 error {error_l2:.9g} > 0.02 * reference L2 {reference_l2:.9g}"
-                )
-        if error_report is not None:
-            error_report.append(record)
-        if error > budget:
-            failures.append(
-                f"{name}: kernel error {error:.9g} > 2x PyTorch error + 1e-5 = {budget:.9g}"
-            )
+    failures = check_gradients(expected, baseline, actual, expected64, error_report)
     for actual_input, original in zip(device_inputs, inputs):
         torch.testing.assert_close(
             actual_input.cpu().double(), original.double(), atol=0, rtol=0
@@ -702,3 +720,20 @@ def test_grouped(length, heads, key_heads, mode, cache_dtype, npu_device):
     test_backward(
         [length], heads, key_heads, mode, torch.float16, npu_device, "both", cache_dtype
     )
+
+
+@pytest.mark.parametrize("with_initial_state", [False, True])
+def test_forward_oracle_consistency(with_initial_state):
+    from test_gdn_mega import _make_inputs, recurrent_reference
+
+    q, k, v, g, beta = _make_inputs(131, 8, 2, 42)
+    cu = torch.tensor([0, 0, 129, 131, 131], dtype=torch.int32)
+    initial = (
+        torch.randn(4, 8, 128, 128, dtype=torch.float16) * 0.1
+        if with_initial_state
+        else None
+    )
+    expected = recurrent_reference(q, k, v, g, beta, initial, cu)
+    actual = recurrent_gdn_reference(q, k, v, g, beta, initial, cu)
+    for ref, out in zip(expected, actual):
+        torch.testing.assert_close(out, ref, atol=1e-12, rtol=1e-12)

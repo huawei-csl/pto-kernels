@@ -129,6 +129,10 @@ in `tests/test_gdn_mega_bwd.py`. CPU-only checks need no compiled extension:
 After a device edit, the same build command recompiles only affected objects
 and relinks. Both kernels are included in the normal CMake/pip installation;
 imports and calls never invoke a compiler or require the source checkout.
+For A5, configure a separate build directory with `-DSOC_VERSION=Ascend950`
+(`dav-3510`). Forward and backward share the Cube/Vector synchronization helpers
+in `kernel_utils.h`; inverse gathers use the target's byte/element index units.
+A5 compilation is checked; numerical and performance validation currently use A2.
 
 The extensive run saves `heatmap.png` (backward/forward ms and ratio),
 `precision.png` (six gradient errors), `speedup.png` (FLA/PTO timings), and raw

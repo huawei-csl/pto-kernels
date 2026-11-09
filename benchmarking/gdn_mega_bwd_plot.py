@@ -1,11 +1,11 @@
 """The three GDN evaluation figures; consumes saved data, never imports Torch."""
 
-import matplotlib
-
-matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm, Normalize, TwoSlopeNorm
 import numpy as np
+
+plt.switch_backend("Agg")
+GRADIENTS = ("dq", "dk", "dv", "dg", "dbeta", "dh0")
 
 
 def panel(ax, values, labels, columns, rows, title, norm, cmap="YlOrRd"):
@@ -47,8 +47,6 @@ def save(fig, path, title, caption):
 
 
 def plot(report, destination):
-    from benchmarking.gdn_mega_bwd import fla_shape, GRADIENTS
-
     measured = {tuple(r["shape"]): r["median_ms"] for r in report["measurements"]}
     cache = report["cache_dtype"]
     cache_label = "No cache" if cache == "none" else f"{cache.upper()} cache"
@@ -164,7 +162,11 @@ def plot(report, destination):
         ),
     )
 
-    fla = {fla_shape(item): item for item in report["fla"]["results"]}
+    shape_keys = ("sequence_length_tokens", "value_heads", "query_key_heads")
+    fla = {
+        tuple(item["shape"][key] for key in shape_keys): item
+        for item in report["fla"]["results"]
+    }
     pairs = sorted({s[1:] for s in fla}, reverse=True)
     lengths = sorted({s[0] for s in fla})
     ticks = [f"{n // 1024}K" if n % 1024 == 0 else str(n) for n in lengths]
@@ -208,8 +210,8 @@ def plot(report, destination):
             "RdYlGn",
         )
         ax.set(xlabel="Sequence length", ylabel="Local value/QK heads")
-    bar = fig.colorbar(im, ax=axes.tolist(), label="FLA / PTO latency", shrink=0.7)
-    bar.set_ticks(
+    colorbar = fig.colorbar(im, ax=axes.tolist(), label="FLA / PTO latency", shrink=0.7)
+    colorbar.set_ticks(
         np.arange(-bound, bound + 1),
         labels=[f"{2.**v:g}×" for v in np.arange(-bound, bound + 1)],
     )

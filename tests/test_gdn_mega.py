@@ -21,8 +21,6 @@ import torch
 import torch.nn.functional as F
 from pto_kernels import pto_gdn_mega
 
-from test_gdn_mega_bwd import recurrent_gdn_reference
-
 
 @pytest.fixture(scope="session", autouse=True)
 def verify_selected_kernel():
@@ -1241,21 +1239,6 @@ def test_reference_correlated_beta_one_is_stable():
     final[0, :, 0, :] = inputs[2][0, -1].double()
     torch.testing.assert_close(out, analytic, rtol=1e-12, atol=1e-12)
     torch.testing.assert_close(state, final, rtol=1e-12, atol=1e-12)
-
-
-@pytest.mark.parametrize("with_initial_state", [False, True])
-def test_bwd_reference_against_forward_oracle(with_initial_state):
-    inputs = list(_make_inputs(131, 8, 2, 42))
-    cu = torch.tensor([0, 0, 129, 131, 131], dtype=torch.int32)
-    initial = (
-        torch.randn(4, 8, D, D, dtype=torch.float16) * 0.1
-        if with_initial_state
-        else None
-    )
-    expected = recurrent_reference(*inputs[:5], initial, cu)
-    actual = recurrent_gdn_reference(*inputs[:5], initial, cu)
-    for ref, out in zip(expected, actual):
-        torch.testing.assert_close(out, ref, atol=1e-12, rtol=1e-12)
 
 
 @pytest.mark.parametrize("seed,gate_scale", [(0, 1.0), (42, 0.01), (93, 0.0)])

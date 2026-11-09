@@ -19,7 +19,6 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / "python"), str(ROOT / "tests")]
 os.environ.setdefault("OMP_NUM_THREADS", "4")
 SUPPORTED_HEADS = (8, 12, 16, 24, 32, 48, 64)
-GRADIENTS = ("dq", "dk", "dv", "dg", "dbeta", "dh0")
 # label, sequence lengths, value heads, QK heads, input mode, dtype, saved caches
 DEV_CASES = (
     ("Cached tail", [129], 8, 2, "both", "float16", True),
@@ -47,10 +46,10 @@ AUDIT_CASES = tuple(
 @lru_cache(None)
 def runtime():
     import torch
-    import torch_npu  # noqa: F401
+    import torch_npu
 
-    torch.npu.set_device(os.environ.get("NPU_DEVICE", "npu:0"))
-    torch.npu.config.allow_internal_format = False
+    torch_npu.npu.set_device(os.environ.get("NPU_DEVICE", "npu:0"))
+    torch_npu.npu.config.allow_internal_format = False
     return torch
 
 
@@ -60,17 +59,17 @@ def check(case, cache_dtype, flashqla=False):
 
     label, lengths, heads, keys, mode, dtype, cached = case
     cached = cached and cache_dtype != "none"
-    row = dict(
-        label=label,
-        lengths=lengths,
-        heads=heads,
-        key_heads=keys,
-        mode=mode,
-        dtype=dtype,
-        cached=cached,
-        status="passed",
-        gradients={},
-    )
+    row = {
+        "label": label,
+        "lengths": lengths,
+        "heads": heads,
+        "key_heads": keys,
+        "mode": mode,
+        "dtype": dtype,
+        "cached": cached,
+        "status": "passed",
+        "gradients": {},
+    }
     records = []
     try:
         tests.test_backward(
@@ -82,13 +81,13 @@ def check(case, cache_dtype, flashqla=False):
             f"npu:{torch.npu.current_device()}",
             "both" if cached else None,
             getattr(torch, cache_dtype) if cached else torch.float16,
-            records,
+            error_report=records,
             flashqla_bound=flashqla,
         )
     except AssertionError as error:
         row.update(status="failed", failure=str(error))
     finally:
-        tests._saved_references.clear()  # No oracle reuse between these cases.
+        tests.saved_references.clear()  # No oracle reuse between these cases.
     row["gradients"] = {r["gradient"]: r for r in records}
     print(
         f"{label}: {row['status']}"
@@ -162,11 +161,11 @@ def measure(shape, cache_dtype, repeats, profile=None):
             trace.export_chrome_trace("trace.json")
         finally:
             os.chdir(previous)
-    return dict(
-        shape=list(shape),
-        samples_ms=samples,
-        median_ms={name: statistics.median(xs) for name, xs in samples.items()},
-    )
+    return {
+        "shape": list(shape),
+        "samples_ms": samples,
+        "median_ms": {name: statistics.median(xs) for name, xs in samples.items()},
+    }
 
 
 def fla_shape(item):
@@ -205,32 +204,44 @@ def provenance(cache_dtype):
         for p in ROOT.glob(pattern)
     ]
     git = ["git", "-c", f"safe.directory={ROOT}"]
-    return dict(
-        timestamp=datetime.now(timezone.utc).isoformat(),
-        commit=subprocess.check_output(
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "commit": subprocess.check_output(
             [*git, "rev-parse", "HEAD"], cwd=ROOT, text=True
         ).strip(),
-        dirty=subprocess.check_output(
+        "dirty": subprocess.check_output(
             [*git, "status", "--porcelain"], cwd=ROOT, text=True
         ),
-        source_sha256={
+        "source_sha256": {
             str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
             for p in sorted(sources)
             if p.is_file()
         },
-        forward_sha256=hashlib.sha256(
+        "forward_sha256": hashlib.sha256(
             (ROOT / "build/lib/libno_workspace_kernel.so").read_bytes()
         ).hexdigest(),
-        timing="Median synchronized wall ms; two warmups; backward includes allocation/enqueue, forward uses preallocated buffers. Compilation, input generation and TP communication excluded.",
-        inputs="FP16 q/k/v/beta/dout, FP32 g; seed42; q=.1*randn, normalized k, v/dout=randn, beta=uniform, g=-.1*uniform; h0/dht omitted; D=C=128.",
-        cache=(
+        "timing": (
+            "Median synchronized wall ms; two warmups; backward includes allocation/enqueue, forward "
+            "uses preallocated buffers. Compilation, input generation and TP communication excluded."
+        ),
+        "inputs": (
+            "FP16 q/k/v/beta/dout, FP32 g; seed42; q=.1*randn, normalized k, v/dout=randn, "
+            "beta=uniform, g=-.1*uniform; h0/dht omitted; D=C=128."
+        ),
+        "cache": (
             "No saved buffers passed to backward; inverse and gates/beta recomputed."
             if cache_dtype == "none"
             else "Forward saves inverse + gate/beta buffers; backward consumes those exact buffers."
         ),
-        bound="Per gradient: max|kernel-golden| <= 2*max|reordered low-precision Torch-golden| + 1e-5; FP32 golden for FP16/BF16, FP64 for FP32.",
-        fla_caveat="Exact shapes; different dtype, chunk size, inputs, state outputs and allocation/autograd overhead. FLA/PTO is a reported latency ratio, not a controlled same-workload comparison.",
-    )
+        "bound": (
+            "Per gradient: max|kernel-golden| <= 2*max|reordered low-precision Torch-golden| + 1e-5; "
+            "FP32 golden for FP16/BF16, FP64 for FP32."
+        ),
+        "fla_caveat": (
+            "Exact shapes; different dtype, chunk size, inputs, state outputs and allocation/autograd "
+            "overhead. FLA/PTO is a reported latency ratio, not a controlled same-workload comparison."
+        ),
+    }
 
 
 def save(report, destination):
@@ -245,7 +256,7 @@ def extensive(args):
     if not fla_shapes or len(set(fla_shapes)) != len(fla_shapes):
         raise ValueError("FLA results must contain nonempty, unique shapes")
     grid = [
-        dict(heads=h, tp=tp, shape=[length, h // tp, 16 // tp])
+        {"heads": h, "tp": tp, "shape": [length, h // tp, 16 // tp]}
         for h in (64, 48, 32, 16)
         for tp in (1, 2, 4, 8)
         for length in (256, 1024, 4096, 16384, 32768)
@@ -255,17 +266,17 @@ def extensive(args):
     for shape in sorted(shapes):
         if supported(shape):
             groups.setdefault(shape[1:], []).append(shape)
-    report = dict(
-        status="incomplete",
-        cache_dtype=args.cache_dtype,
-        metadata=provenance(args.cache_dtype),
-        fla=fla,
-        fla_sha256=hashlib.sha256(args.fla.read_bytes()).hexdigest(),
-        grid=grid,
-        measurements=[],
-        precision=[],
-        flashqla_bound=args.flashqla_bound,
-    )
+    report = {
+        "status": "incomplete",
+        "cache_dtype": args.cache_dtype,
+        "metadata": provenance(args.cache_dtype),
+        "fla": fla,
+        "fla_sha256": hashlib.sha256(args.fla.read_bytes()).hexdigest(),
+        "grid": grid,
+        "measurements": [],
+        "precision": [],
+        "flashqla_bound": args.flashqla_bound,
+    }
     args.output.mkdir(parents=True, exist_ok=True)
     save(report, args.output)
     # Separate processes release large NPU allocations between head groups.
@@ -285,7 +296,9 @@ def extensive(args):
         ]
         for shape in group:
             command += ["--shape", *map(str, shape)]
-        result = subprocess.run(command, capture_output=True, text=True, cwd=ROOT)
+        result = subprocess.run(
+            command, capture_output=True, text=True, cwd=ROOT, check=False
+        )
         log = args.output / f"h{heads}_k{keys}.log"
         log.write_text(result.stdout + result.stderr)
         if result.returncode:
