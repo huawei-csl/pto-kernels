@@ -88,12 +88,16 @@ def test_backward(
         h0.zero_()
     if mode == "zero_beta":
         beta.zero_()
+    beta_exponent = {"tiny_beta": -20, "small_beta": -15, "normal_beta": -12}
+    if mode in beta_exponent:
+        beta.fill_(2 ** beta_exponent[mode])
     if mode == "weak":
         g.mul_(1e-4)
-    if mode == "correlated_weak":
+    if mode in ("correlated_weak", "correlated"):
         k = torch.nn.functional.normalize(k[:, :1] + 1e-3 * k, dim=-1)
         beta.fill_(1)
-        g.mul_(1e-4)
+        if mode == "correlated_weak":
+            g.mul_(1e-4)
     if mode == "strong_decay":
         g.mul_(5).sub_(0.25)  # log retention [-0.75, -0.25], exp(g) ~0.47–0.78.
     if mode == "replace":
@@ -334,3 +338,55 @@ def test_queued_calls(npu_device):
     for a, b, saved in zip(first, second, consumed):
         torch.testing.assert_close(a, saved, atol=0, rtol=0)
         torch.testing.assert_close(a, -b, atol=2e-5, rtol=2e-4)
+
+
+@pytest.mark.parametrize(
+    "length,heads,key_heads",
+    [
+        (512, 64, 16),
+        (1536, 16, 2),
+        (384, 64, 64),
+        (768, 32, 16),
+        (1536, 48, 16),
+        (8192, 8, 2),
+    ],
+)
+def test_grouped_adjoint(length, heads, key_heads, npu_device):
+    test_backward(
+        [length],
+        heads,
+        key_heads,
+        "both",
+        torch.float16,
+        npu_device,
+        "both",
+        torch.bfloat16,
+    )
+
+
+@pytest.mark.parametrize(
+    "cache_dtype",
+    [
+        torch.float32,
+        torch.float16,
+        pytest.param(
+            torch.bfloat16,
+            marks=pytest.mark.xfail(
+                strict=True,
+                raises=AssertionError,
+                reason="99b370b82: BF16 inverse rounding exceeds gradient bounds for correlated keys",
+            ),
+        ),
+    ],
+)
+def test_grouped_correlated(cache_dtype, npu_device):
+    test_backward(
+        [512], 64, 16, "correlated", torch.float16, npu_device, "both", cache_dtype
+    )
+
+
+@pytest.mark.parametrize("mode", ["tiny_beta", "small_beta", "normal_beta"])
+def test_grouped_small_beta(mode, npu_device):
+    test_backward(
+        [384], 64, 64, mode, torch.float16, npu_device, "both", torch.bfloat16
+    )

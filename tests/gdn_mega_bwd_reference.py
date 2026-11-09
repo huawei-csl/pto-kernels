@@ -84,6 +84,9 @@ def recurrent_gdn_reference(
     q = q.repeat_interleave(heads // key_heads, dim=2)
     k = k.repeat_interleave(heads // key_heads, dim=2)
 
+    # Unbind once: per-token indexing would make backward scatter a full
+    # sequence tensor at every step. The recurrence and arithmetic are unchanged.
+    qs, ks, vs, gs, bs = (x[0].unbind(0) for x in (q, k, v, g, beta))
     outputs, states = [], []
     for seq, (start, end) in enumerate(zip(boundaries, boundaries[1:])):
         state = (
@@ -92,11 +95,11 @@ def recurrent_gdn_reference(
             else initial_state[seq]
         )
         for t in range(start, end):
-            qt, kt, vt = q[0, t], k[0, t], v[0, t]
-            decayed_state = g[0, t].exp()[:, None, None] * state
+            qt, kt, vt = qs[t], ks[t], vs[t]
+            decayed_state = gs[t].exp()[:, None, None] * state
             prediction = torch.einsum("hk,hkv->hv", kt, decayed_state)
             if reorder_ops:
-                kb = kt * beta[0, t, :, None]
+                kb = kt * bs[t][:, None]
                 state = (
                     decayed_state
                     + kb[:, :, None] * vt[:, None, :]
@@ -104,7 +107,7 @@ def recurrent_gdn_reference(
                 )
                 outputs.append(torch.einsum("hk,hkv->hv", qt * scale, state))
             else:
-                update = beta[0, t, :, None] * (vt - prediction)
+                update = bs[t][:, None] * (vt - prediction)
                 state = decayed_state + kt[:, :, None] * update[:, None, :]
                 outputs.append(scale * torch.einsum("hk,hkv->hv", qt, state))
         states.append(state)
