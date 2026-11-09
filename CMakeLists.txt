@@ -178,6 +178,7 @@ set(PTO_KERNEL_SOURCES
     csrc/kernel/gdn_mega/kernel_gdn_mega.cpp
     csrc/kernel/kernel_scan_ul1.cpp
     csrc/kernel/kernel_simple_matmul.cpp
+    csrc/kernel/kernel_cube_reduce.cpp
     csrc/kernel/kernel_batch_matrix_square.cpp
     csrc/kernel/kernel_tri_inv_ns.cpp
     csrc/kernel/kernel_tri_inv_rec_unroll.cpp
@@ -199,7 +200,8 @@ if(USE_ASC_LANGUAGE)
                                                        ${CMAKE_BINARY_DIR}/lib)
   target_compile_options(
     no_workspace_kernel
-    PRIVATE $<$<COMPILE_LANGUAGE:ASC>:--npu-arch=${NPU_ARCH}>)
+    PRIVATE $<$<COMPILE_LANGUAGE:ASC>:--npu-arch=${NPU_ARCH}>
+            $<$<COMPILE_LANGUAGE:ASC>:-UL2_CACHE_HINT>)
 endif()
 
 if(BASE_MODE STREQUAL "MEMORY")

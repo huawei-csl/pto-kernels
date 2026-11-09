@@ -24,7 +24,7 @@ constexpr unsigned UB_SIZE = 0x30000;  // 192KB UB of A2A3
  * (https://arxiv.org/abs/2505.15112v1).
  *
  * @tparam InputT Input data type. Supports `fp16` or `fp32`
- * @tparam OutputT Output data type 'fp32`
+ * @tparam OutputT Output data type `fp32`
  * @tparam matrix_size Size of the square matrix
  *
  * @param x Input matrix in GM
