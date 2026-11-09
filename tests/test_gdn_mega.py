@@ -21,7 +21,7 @@ import torch
 import torch.nn.functional as F
 from pto_kernels import pto_gdn_mega
 
-from gdn_mega_bwd_reference import recurrent_gdn_reference
+from test_gdn_mega_bwd import recurrent_gdn_reference
 
 
 @pytest.fixture(scope="session", autouse=True)

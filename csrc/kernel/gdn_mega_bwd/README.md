@@ -119,8 +119,12 @@ cmake --build build --target pto_kernels_ops -j 2        # Incremental build
 python benchmarking/gdn_mega_bwd.py                     # Four checks + one timing
 python benchmarking/gdn_mega_bwd.py --extensive --fla /path/to/gdn_ascend_benchmark.json
 python benchmarking/gdn_mega_bwd.py --plot-only          # Redraw saved results
-PYTHONPATH=python:.:tests python -m pytest -q tests/test_gdn_mega_bwd.py tests/test_gdn_mega_bwd_reference.py
+PYTHONPATH=python:.:tests python -m pytest -q tests/test_gdn_mega_bwd.py
 ```
+
+The recursive Torch oracle, its CPU gradchecks and the NPU tests live together
+in `tests/test_gdn_mega_bwd.py`. CPU-only checks need no compiled extension:
+`python -m pytest --noconftest tests/test_gdn_mega_bwd.py -k reference -q`.
 
 After a device edit, the same build command recompiles only affected objects
 and relinks. Both kernels are included in the normal CMake/pip installation;
@@ -130,7 +134,18 @@ The extensive run saves `heatmap.png` (backward/forward ms and ratio),
 `precision.png` (six gradient errors), `speedup.png` (FLA/PTO timings), and raw
 `results.json` under `benchmark_data/gdn_mega_bwd/eval/`. Use `--output` to change
 that directory. Inverse caching defaults to FP16; `--cache-dtype` selects the
-format. `--help` lists shape, profiling and optional FP64 audit options.
+format. `--cache-dtype none` disables both inverse and gate/beta reuse in backward
+and inverse export in forward. To produce separate reports for all three modes:
+
+```bash
+for cache in none float32 float16; do
+  python benchmarking/gdn_mega_bwd.py --extensive --cache-dtype "$cache" \
+    --output "benchmark_data/gdn_mega_bwd/cache_comparison/$cache"
+done
+```
+
+Each directory contains its own `heatmap.png`, `precision.png`, `speedup.png`
+and raw timings. `--help` lists shape, profiling and optional FP64 audit options.
 
 Each gradient must satisfy `max|kernel-golden| <=
 2*max|reordered_Torch-golden| + 1e-5`. The independent recursive autograd oracle

@@ -5,6 +5,9 @@ FP16/BF16 inputs use an FP32 golden recurrence; FP32 uses FP64. Golden leaves
 and gradients retain the higher precision, matching the kernel's FP32 gradient
 return contract. The baseline computes in the input dtype. All three use the
 same rounded inputs and upstream gradients, with a 1e-5 absolute allowance.
+
+CPU oracle checks: pytest --noconftest tests/test_gdn_mega_bwd.py -k reference
+All NPU cases:     pytest tests/test_gdn_mega_bwd.py
 """
 from contextlib import nullcontext
 
@@ -12,8 +15,238 @@ import pytest
 import torch
 from torch.utils._python_dispatch import TorchDispatchMode
 
-from pto_kernels import pto_gdn_mega_bwd as backward
-from gdn_mega_bwd_reference import recurrent_gdn_reference
+
+def recurrent_gdn_reference(
+    q,
+    k,
+    v,
+    g,
+    beta,
+    initial_state=None,
+    cu_seqlens=None,
+    *,
+    scale=1.0,
+    dtype=torch.float64,
+    reorder_ops=False,
+):
+    """CPU token recurrence; ordinary autograd computes all six gradients.
+
+    q/k: [1,T,Hk,K], v: [1,T,Hv,V], g/beta: [1,T,Hv]. g is log retention.
+    Optional h0: [N,Hv,K,V]; cu_seqlens delimits packed, independent sequences.
+    Returns output [1,T,Hv,V] and final states [N,Hv,K,V]. Empty states survive.
+    No normalization/sigmoid; scale affects output only (raw megakernel: 1).
+    Casts preserve gradients to the caller's leaves. FP64 is the default;
+    reorder_ops=True in the input dtype supplies the numerical error baseline.
+    No chunk algorithm, in-place state updates or device kernel dependencies.
+    """
+    if q.ndim != 4 or k.shape != q.shape or q.shape[0] != 1:
+        raise ValueError("q/k must have the same packed shape [1, T, Hk, K]")
+    if v.ndim != 4 or v.shape[:2] != q.shape[:2]:
+        raise ValueError("v must have packed shape [1, T, Hv, V]")
+    if g.shape != v.shape[:3] or beta.shape != g.shape:
+        raise ValueError("g/beta must have shape [1, T, Hv]")
+    tokens, key_heads, key_dim = q.shape[1:]
+    heads, value_dim = v.shape[2:]
+    if key_heads == 0 or heads == 0 or heads % key_heads:
+        raise ValueError("Hv must be a positive multiple of Hk")
+    if cu_seqlens is None:
+        boundaries = [0, tokens]
+    else:
+        if cu_seqlens.ndim != 1 or cu_seqlens.dtype not in (
+            torch.int32,
+            torch.int64,
+        ):
+            raise ValueError("cu_seqlens must be a one-dimensional integer tensor")
+        boundaries = cu_seqlens.cpu().tolist()
+    if (
+        len(boundaries) < 2
+        or boundaries[0] != 0
+        or boundaries[-1] != tokens
+        or any(a > b for a, b in zip(boundaries, boundaries[1:]))
+    ):
+        raise ValueError("cu_seqlens must be nondecreasing and span [0, T]")
+    if initial_state is not None and initial_state.shape != (
+        len(boundaries) - 1,
+        heads,
+        key_dim,
+        value_dim,
+    ):
+        raise ValueError("initial_state must have shape [N, Hv, K, V]")
+
+    q, k, v, g, beta = (x.to(device="cpu", dtype=dtype) for x in (q, k, v, g, beta))
+    if initial_state is not None:
+        initial_state = initial_state.to(device="cpu", dtype=dtype)
+    # Autograd sums contributions back into shared query/key heads.
+    q = q.repeat_interleave(heads // key_heads, dim=2)
+    k = k.repeat_interleave(heads // key_heads, dim=2)
+
+    # Unbind once: per-token indexing would make backward scatter a full
+    # sequence tensor at every step. The recurrence and arithmetic are unchanged.
+    qs, ks, vs, gs, bs = (x[0].unbind(0) for x in (q, k, v, g, beta))
+    outputs, states = [], []
+    for seq, (start, end) in enumerate(zip(boundaries, boundaries[1:])):
+        state = (
+            v.new_zeros(heads, key_dim, value_dim)
+            if initial_state is None
+            else initial_state[seq]
+        )
+        for t in range(start, end):
+            qt, kt, vt = qs[t], ks[t], vs[t]
+            decayed_state = gs[t].exp()[:, None, None] * state
+            prediction = torch.einsum("hk,hkv->hv", kt, decayed_state)
+            if reorder_ops:
+                kb = kt * bs[t][:, None]
+                state = (
+                    decayed_state
+                    + kb[:, :, None] * vt[:, None, :]
+                    - kb[:, :, None] * prediction[:, None, :]
+                )
+                outputs.append(torch.einsum("hk,hkv->hv", qt * scale, state))
+            else:
+                update = bs[t][:, None] * (vt - prediction)
+                state = decayed_state + kt[:, :, None] * update[:, None, :]
+                outputs.append(scale * torch.einsum("hk,hkv->hv", qt, state))
+        states.append(state)
+
+    final_state = torch.stack(states)
+    if outputs:
+        out = torch.stack(outputs, dim=0).unsqueeze(0)
+    else:
+        # Keep zero gradients connected when the entire packed input is empty.
+        out = v + (q.sum() + k.sum() + g.sum() + beta.sum()) * 0
+        final_state = final_state + out.sum()
+    return out, final_state
+
+
+def _reference_inputs(tokens=4, sequences=1, dtype=torch.float64):
+    rng = torch.Generator().manual_seed(42)
+
+    def randn(*shape):
+        return torch.randn(*shape, generator=rng, dtype=dtype) * 0.2
+
+    # Small unequal K/V dimensions and shared Q/K heads make gradcheck cheap.
+    values = (
+        randn(1, tokens, 1, 2),
+        randn(1, tokens, 1, 2),
+        randn(1, tokens, 2, 3),
+        -torch.rand(1, tokens, 2, generator=rng, dtype=dtype),
+        torch.rand(1, tokens, 2, generator=rng, dtype=dtype),
+        randn(sequences, 2, 2, 3),
+    )
+    return tuple(x.requires_grad_() for x in values)
+
+
+@pytest.mark.parametrize("with_initial_state", [False, True])
+def test_reference_gradcheck(with_initial_state):
+    inputs = _reference_inputs(sequences=4)
+    cu = torch.tensor([0, 0, 1, 4, 4])
+    if not with_initial_state:
+        inputs = inputs[:5]
+    # Finite differences independently validate every input and both outputs.
+    assert torch.autograd.gradcheck(
+        lambda *xs: recurrent_gdn_reference(*xs, cu_seqlens=cu, scale=0.7),
+        inputs,
+    )
+
+
+@pytest.mark.parametrize("loss_kind", ["output", "state", "both"])
+def test_reference_backward_across_call_boundary(loss_kind):
+    whole_inputs = _reference_inputs(tokens=5)
+    split_inputs = tuple(x.detach().clone().requires_grad_() for x in whole_inputs)
+    whole_o, whole_h = recurrent_gdn_reference(*whole_inputs)
+    q, k, v, g, beta, h0 = split_inputs
+    first_o, first_h = recurrent_gdn_reference(
+        *(x[:, :2] for x in (q, k, v, g, beta)), h0
+    )
+    second_o, split_h = recurrent_gdn_reference(
+        *(x[:, 2:] for x in (q, k, v, g, beta)), first_h
+    )
+    split_o = torch.cat((first_o, second_o), dim=1)
+    torch.testing.assert_close(split_o, whole_o)
+    torch.testing.assert_close(split_h, whole_h)
+
+    rng = torch.Generator().manual_seed(17)
+    do = torch.randn(whole_o.shape, generator=rng, dtype=torch.float64)
+    dh = torch.randn(whole_h.shape, generator=rng, dtype=torch.float64)
+    for out, state in ((whole_o, whole_h), (split_o, split_h)):
+        loss = 0
+        if loss_kind != "state":
+            loss = loss + (out * do).sum()
+        if loss_kind != "output":
+            loss = loss + (state * dh).sum()
+        loss.backward()
+    for whole, split in zip(whole_inputs, split_inputs):
+        if whole.grad is None:  # Queries have no effect on the final state.
+            assert split.grad is None
+        else:
+            torch.testing.assert_close(split.grad, whole.grad)
+    assert torch.count_nonzero(whole_inputs[1].grad[:, :2]) > 0
+
+
+def test_reference_packed_sequences_are_independent():
+    inputs = _reference_inputs(tokens=5, sequences=3)
+    q, k, v, g, beta, h0 = inputs
+    cu = torch.tensor([0, 2, 2, 5])
+    out, ht = recurrent_gdn_reference(*inputs, cu_seqlens=cu)
+    for seq, (start, end) in enumerate(zip(cu.tolist(), cu.tolist()[1:])):
+        seq_out, seq_ht = recurrent_gdn_reference(
+            *(x[:, start:end] for x in (q, k, v, g, beta)), h0[seq : seq + 1]
+        )
+        torch.testing.assert_close(out[:, start:end], seq_out)
+        torch.testing.assert_close(ht[seq : seq + 1], seq_ht)
+    # A loss on the last sequence must not leak into preceding sequences.
+    out[:, 2:].square().sum().backward()
+    for x in inputs[:5]:
+        assert torch.count_nonzero(x.grad[:, :2]) == 0
+    assert torch.count_nonzero(h0.grad[:2]) == 0
+
+
+def test_reference_empty_sequences():
+    inputs = _reference_inputs(tokens=0, sequences=2)
+    out, ht = recurrent_gdn_reference(*inputs, cu_seqlens=torch.tensor([0, 0, 0]))
+    assert out.shape == (1, 0, 2, 3)
+    torch.testing.assert_close(ht, inputs[-1])
+    (out.sum() + ht.sum()).backward()
+    for x in inputs[:5]:
+        assert x.grad is not None and x.grad.numel() == 0
+    torch.testing.assert_close(inputs[-1].grad, torch.ones_like(inputs[-1]))
+
+
+def test_reference_conversions_preserve_gradients_and_inputs():
+    inputs = _reference_inputs(dtype=torch.float32)
+    snapshots = [x.detach().clone() for x in inputs]
+    out, ht = recurrent_gdn_reference(*inputs, scale=2**-0.5)
+    assert out.dtype == ht.dtype == torch.float64
+    (out.square().sum() + ht.square().sum()).backward()
+    for x, snapshot in zip(inputs, snapshots):
+        torch.testing.assert_close(x, snapshot, rtol=0, atol=0)
+        assert x.grad is not None and x.grad.dtype == x.dtype
+        assert torch.isfinite(x.grad).all()
+
+
+@pytest.mark.parametrize("tokens", [0, 5])
+def test_reference_reordered_reference_matches_equations(tokens):
+    inputs = _reference_inputs(tokens=tokens, sequences=3)
+    cu = torch.tensor([0, 0, tokens // 2, tokens])
+    golden = recurrent_gdn_reference(*inputs, cu_seqlens=cu, scale=0.7)
+    reordered = recurrent_gdn_reference(
+        *inputs, cu_seqlens=cu, scale=0.7, reorder_ops=True
+    )
+    upstream = tuple(torch.randn_like(x) for x in golden)
+    for a, b in zip(golden, reordered):
+        torch.testing.assert_close(a, b, atol=1e-12, rtol=1e-12)
+    for a, b in zip(
+        torch.autograd.grad(golden, inputs, upstream),
+        torch.autograd.grad(reordered, inputs, upstream),
+    ):
+        torch.testing.assert_close(a, b, atol=1e-12, rtol=1e-12)
+
+
+def backward(*args, **kwargs):
+    # Keep CPU reference checks independent of CANN and the compiled extension.
+    from pto_kernels import pto_gdn_mega_bwd
+
+    return pto_gdn_mega_bwd(*args, **kwargs)
 
 
 # The five saved-buffer variants have identical fixed-seed model inputs.
@@ -24,7 +257,7 @@ _saved_references = {}
 
 def test_native_binding():
     import inspect
-    from pto_kernels import pto_kernels_ops
+    from pto_kernels import pto_gdn_mega_bwd as backward, pto_kernels_ops
 
     assert inspect.isbuiltin(backward)
     assert backward is pto_kernels_ops.pto_gdn_mega_bwd
@@ -280,13 +513,14 @@ def test_backward(
         if not ref.numel():
             assert result.shape == ref.shape
             continue
-        assert all(torch.isfinite(x).all() for x in (ref, pt, result.cpu())), name
-        error = (result.cpu().double() - ref.double()).abs().max().item()
+        result = result.cpu().double()
+        assert all(torch.isfinite(x).all() for x in (ref, pt, result)), name
+        error = (result - ref.double()).abs().max().item()
         budget = 2 * (pt.double() - ref.double()).abs().max().item() + 1e-5
         record = dict(gradient=name, error=error, budget=budget)
         if expected64 is not None:
             ref64 = expected64[index]
-            diff = result.cpu().double() - ref64
+            diff = result - ref64
             error_l2 = torch.linalg.vector_norm(diff).item()
             reference_l2 = torch.linalg.vector_norm(ref64).item()
             passed = error_l2 <= 0.02 * reference_l2
@@ -429,35 +663,28 @@ def test_cross_stream_inputs(cached, npu_device):
 
 
 @pytest.mark.parametrize(
-    "length,heads,key_heads",
+    "length,heads,key_heads,mode,cache_dtype",
     [
-        (512, 64, 16),
-        (1536, 16, 2),
-        (384, 64, 64),
-        (768, 32, 16),
-        (1536, 48, 16),
-        (8192, 8, 2),
-    ],
-)
-def test_grouped_adjoint(length, heads, key_heads, npu_device):
-    test_backward(
-        [length],
-        heads,
-        key_heads,
-        "both",
-        torch.float16,
-        npu_device,
-        "both",
-        torch.bfloat16,
-    )
-
-
-@pytest.mark.parametrize(
-    "cache_dtype",
-    [
-        torch.float32,
-        torch.float16,
+        *[
+            (t, h, k, "both", torch.bfloat16)
+            for t, h, k in (
+                (512, 64, 16),
+                (1536, 16, 2),
+                (384, 64, 64),
+                (768, 32, 16),
+                (1536, 48, 16),
+                (8192, 8, 2),
+            )
+        ],
+        *[
+            (512, 64, 16, "correlated", dtype)
+            for dtype in (torch.float32, torch.float16)
+        ],
         pytest.param(
+            512,
+            64,
+            16,
+            "correlated",
             torch.bfloat16,
             marks=pytest.mark.xfail(
                 strict=True,
@@ -465,16 +692,13 @@ def test_grouped_adjoint(length, heads, key_heads, npu_device):
                 reason="99b370b82: BF16 inverse rounding exceeds gradient bounds for correlated keys",
             ),
         ),
+        *[
+            (384, 64, 64, mode, torch.bfloat16)
+            for mode in ("tiny_beta", "small_beta", "normal_beta")
+        ],
     ],
 )
-def test_grouped_correlated(cache_dtype, npu_device):
+def test_grouped(length, heads, key_heads, mode, cache_dtype, npu_device):
     test_backward(
-        [512], 64, 16, "correlated", torch.float16, npu_device, "both", cache_dtype
-    )
-
-
-@pytest.mark.parametrize("mode", ["tiny_beta", "small_beta", "normal_beta"])
-def test_grouped_small_beta(mode, npu_device):
-    test_backward(
-        [384], 64, 64, mode, torch.float16, npu_device, "both", torch.bfloat16
+        [length], heads, key_heads, mode, torch.float16, npu_device, "both", cache_dtype
     )

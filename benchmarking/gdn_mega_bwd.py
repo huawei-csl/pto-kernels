@@ -59,6 +59,7 @@ def check(case, cache_dtype, flashqla=False):
     import test_gdn_mega_bwd as tests
 
     label, lengths, heads, keys, mode, dtype, cached = case
+    cached = cached and cache_dtype != "none"
     row = dict(
         label=label,
         lengths=lengths,
@@ -80,7 +81,7 @@ def check(case, cache_dtype, flashqla=False):
             getattr(torch, dtype),
             f"npu:{torch.npu.current_device()}",
             "both" if cached else None,
-            getattr(torch, cache_dtype),
+            getattr(torch, cache_dtype) if cached else torch.float16,
             records,
             flashqla_bound=flashqla,
         )
@@ -112,15 +113,18 @@ def measure(shape, cache_dtype, repeats, profile=None):
     beta, dout = torch.rand_like(g).half(), torch.randn_like(v)
     cu = torch.tensor([0, length], device=device, dtype=torch.int32)
     launch = _prepare_gdn_mega(q, k, v, g, beta, cu)
-    cache = torch.empty(
-        (length + 127) // 128,
-        heads,
-        128,
-        128,
-        device=device,
-        dtype=getattr(torch, cache_dtype),
-    )
-    gates = tuple(launch[name] for name in ("g_t", "g_sum", "beta_t"))
+    cache = None
+    gates = None
+    if cache_dtype != "none":
+        cache = torch.empty(
+            (length + 127) // 128,
+            heads,
+            128,
+            128,
+            device=device,
+            dtype=getattr(torch, cache_dtype),
+        )
+        gates = tuple(launch[name] for name in ("g_t", "g_sum", "beta_t"))
     calls = {
         "forward": lambda: pto_gdn_mega(**launch, inverse_cache=cache),
         "backward": lambda: backward(
@@ -128,7 +132,7 @@ def measure(shape, cache_dtype, repeats, profile=None):
         ),
     }
     samples = {name: [] for name in calls}
-    # Forward always precedes backward, producing the exact buffers it consumes.
+    # Forward precedes backward, producing its caches when enabled.
     # Two warmups exclude compilation; output destruction is outside timing.
     for trial in range(2 + repeats):
         for name, call in calls.items():
@@ -185,7 +189,7 @@ def supported(shape):
     return length > 0 and heads in SUPPORTED_HEADS and keys > 0 and heads % keys == 0
 
 
-def provenance():
+def provenance(cache_dtype):
     sources = [
         p
         for pattern in (
@@ -219,7 +223,11 @@ def provenance():
         ).hexdigest(),
         timing="Median synchronized wall ms; two warmups; backward includes allocation/enqueue, forward uses preallocated buffers. Compilation, input generation and TP communication excluded.",
         inputs="FP16 q/k/v/beta/dout, FP32 g; seed42; q=.1*randn, normalized k, v/dout=randn, beta=uniform, g=-.1*uniform; h0/dht omitted; D=C=128.",
-        cache="Forward saves inverse + gate/beta buffers; backward consumes those exact buffers.",
+        cache=(
+            "No saved buffers passed to backward; inverse and gates/beta recomputed."
+            if cache_dtype == "none"
+            else "Forward saves inverse + gate/beta buffers; backward consumes those exact buffers."
+        ),
         bound="Per gradient: max|kernel-golden| <= 2*max|reordered low-precision Torch-golden| + 1e-5; FP32 golden for FP16/BF16, FP64 for FP32.",
         fla_caveat="Exact shapes; different dtype, chunk size, inputs, state outputs and allocation/autograd overhead. FLA/PTO is a reported latency ratio, not a controlled same-workload comparison.",
     )
@@ -250,7 +258,7 @@ def extensive(args):
     report = dict(
         status="incomplete",
         cache_dtype=args.cache_dtype,
-        metadata=provenance(),
+        metadata=provenance(args.cache_dtype),
         fla=fla,
         fla_sha256=hashlib.sha256(args.fla.read_bytes()).hexdigest(),
         grid=grid,
@@ -331,7 +339,10 @@ def main():
         help="Timed samples per direction (development: 3, extensive: 5)",
     )
     parser.add_argument(
-        "--cache-dtype", choices=("float16", "bfloat16", "float32"), default="float16"
+        "--cache-dtype",
+        choices=("none", "float16", "bfloat16", "float32"),
+        default="float16",
+        help="Inverse cache dtype; none recomputes inverse and gates/beta in backward",
     )
     parser.add_argument(
         "--output", type=Path, default=Path("benchmark_data/gdn_mega_bwd/eval")
@@ -401,7 +412,7 @@ def main():
         else:
             fwd, bwd = (row["median_ms"][name] for name in ("forward", "backward"))
             print(
-                f"{shape}: cached forward {fwd:.3f} ms; backward {bwd:.3f} ms ({bwd/fwd:.2f}x); inverse={args.cache_dtype}"
+                f"{shape}: forward {fwd:.3f} ms; backward {bwd:.3f} ms ({bwd/fwd:.2f}x); inverse={args.cache_dtype}"
             )
     return 0
 

@@ -51,6 +51,12 @@ def plot(report, destination):
 
     measured = {tuple(r["shape"]): r["median_ms"] for r in report["measurements"]}
     cache = report["cache_dtype"]
+    cache_label = "No cache" if cache == "none" else f"{cache.upper()} cache"
+    cache_detail = (
+        "No saved buffers passed to backward; inverse and gates/beta recomputed."
+        if cache == "none"
+        else "Forward saves inverse + gates/beta; backward consumes them."
+    )
     lengths = sorted({r["shape"][0] for r in report["grid"]})
     ticks = [f"{n // 1024}K" if n % 1024 == 0 else str(n) for n in lengths]
     heads = sorted({r["heads"] for r in report["grid"]}, reverse=True)
@@ -96,9 +102,9 @@ def plot(report, destination):
     save(
         fig,
         destination / "heatmap.png",
-        f"Cached backward / forward · inverse={cache}",
+        f"Backward / forward · {cache_label}",
         "Each cell: backward / forward ms, then ratio. Median synchronized wall time; backward includes allocation.\n"
-        "Forward saves inverse + gates/beta; backward consumes them. FP16 inputs, D=C=128. No TP communication.\n"
+        f"{cache_detail} FP16 inputs, D=C=128. No TP communication.\n"
         "N/A: forward does not support local Hv=2/4/6. Repeated local shapes reuse the same timing samples.",
     )
 
@@ -140,7 +146,7 @@ def plot(report, destination):
         labels,
         GRADIENTS,
         [r["label"] for r in cases],
-        f"FP16 inputs · {cache} inverse + gates/beta",
+        f"FP16 inputs · {cache_label}",
         LogNorm(lo, hi),
     )
     fig.colorbar(im, ax=ax, label="Max absolute error", shrink=0.7)
@@ -213,8 +219,8 @@ def plot(report, destination):
     save(
         fig,
         destination / "speedup.png",
-        f"FLA / PTO speedup · PTO inverse={cache}",
+        f"FLA / PTO speedup · PTO {cache_label}",
         f"Each cell: speedup (>1× means PTO faster), then FLA / PTO ms. Exact shapes; PTO FP16/C=128 vs FLA {fla_dtype}/C={fla_chunk}.\n"
-        "PTO cache-saving forward uses preallocated buffers; backward includes allocation and consumes saved caches.\n"
+        f"PTO forward uses preallocated buffers; backward includes allocation. {cache_detail}\n"
         "Input distributions, state outputs and allocation/autograd overhead differ; full FLA metadata is saved in results.json.",
     )
