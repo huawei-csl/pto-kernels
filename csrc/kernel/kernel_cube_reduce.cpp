@@ -77,8 +77,8 @@ AICORE void CubeReduce(__gm__ InputT* input, __gm__ InputT* ones,
 }
 
 // A separate launch on the same stream orders all Fixpipe stores before
-// these reads. One AIV sums the first column, with no atomics or device-wide
-// barriers. Only S*16 elements of UB are needed regardless of block count.
+// these reads. One AIV folds every block into one running lane, with no
+// atomics or device-wide barriers. UB use is independent of the block count.
 template <typename T, uint32_t S>
 AICORE void CompleteCubeReduce(__gm__ T* partials, __gm__ T* output,
                                uint32_t blocks) {
@@ -86,22 +86,38 @@ AICORE void CompleteCubeReduce(__gm__ T* partials, __gm__ T* output,
                                    BaseShape2D<T, S, kColumns, Layout::ND>>;
   using OutputGlobal =
       GlobalTensor<T, Shape<1, 1, 1, 1, 1>, pto::Stride<1, 1, 1, 1, 1>>;
+  using RowTile = Tile<TileType::Vec, T, 1, kColumns>;
+  constexpr uint32_t kTileBytes = S * kColumns * sizeof(T);
+  constexpr uint32_t kRowBytes = kColumns * sizeof(T);
   Tile<TileType::Vec, T, S, kColumns> tile;
+  Tile<TileType::Vec, T, S, kColumns> reduce_tmp;
+  RowTile block_sums;
+  RowTile totals;
   Tile<TileType::Vec, T, 1, 8, BLayout::RowMajor, 1, 1> result;
   TASSIGN(tile, 0);
-  TASSIGN(result, S * kColumns * sizeof(T));
-  T total = 0;
+  TASSIGN(reduce_tmp, kTileBytes);
+  TASSIGN(block_sums, 2 * kTileBytes);
+  TASSIGN(totals, 2 * kTileBytes + kRowBytes);
+  TASSIGN(result, 2 * kTileBytes + 2 * kRowBytes);
+  TEXPANDS(totals, static_cast<T>(0));
   for (uint32_t block = 0; block < blocks; ++block) {
     InputGlobal source(partials + block * S * kColumns);
     TLOAD(tile, source);
-    // GetValue uses the scalar pipe, so an MTE2 -> V event is insufficient.
-    kernel_utils::SetWaitFlag<PIPE_MTE2, PIPE_S>(0);
-    for (uint32_t row = 0; row < S; ++row) {
-      total += tile.GetValue(row * kColumns);
-    }
-    kernel_utils::SetWaitFlag<PIPE_S, PIPE_MTE2>(0);
+    kernel_utils::SetWaitFlag<PIPE_MTE2, PIPE_V>(0);
+    // Every one of the 16 columns holds the same row sums, so reducing the
+    // block down its rows leaves this block's total in each lane. The pairwise
+    // tree TCOLSUM runs over the rows is both faster and, in fp32, more
+    // accurate than accumulating S values one at a time on the scalar pipe.
+    TCOLSUM(block_sums, tile, reduce_tmp, /*isBinary=*/true);
+    kernel_utils::PipeBarrierVec();
+    TADD(totals, totals, block_sums);
+    kernel_utils::PipeBarrierVec();
+    kernel_utils::SetWaitFlag<PIPE_V, PIPE_MTE2>(0);
   }
-  result.SetValue(0, total);
+  // GetValue uses the scalar pipe, so the vector accumulation must be visible
+  // to it before the single remaining scalar read.
+  kernel_utils::SetWaitFlag<PIPE_V, PIPE_S>(0);
+  result.SetValue(0, totals.GetValue(0));
   kernel_utils::SetWaitFlag<PIPE_S, PIPE_MTE3>(0);
   OutputGlobal destination(output);
   TSTORE(destination, result);

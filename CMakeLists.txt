@@ -200,7 +200,8 @@ if(USE_ASC_LANGUAGE)
                                                        ${CMAKE_BINARY_DIR}/lib)
   target_compile_options(
     no_workspace_kernel
-    PRIVATE $<$<COMPILE_LANGUAGE:ASC>:--npu-arch=${NPU_ARCH}>)
+    PRIVATE $<$<COMPILE_LANGUAGE:ASC>:--npu-arch=${NPU_ARCH}>
+            $<$<COMPILE_LANGUAGE:ASC>:-UL2_CACHE_HINT>)
 endif()
 
 if(BASE_MODE STREQUAL "MEMORY")
