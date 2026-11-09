@@ -20,7 +20,20 @@ extern "C" void pto_launch_gdn_mega_bwd(void* stream, Plan plan);
 
 namespace pto_isa_ops {
 
-// Metadata and allocations only. All gradient arithmetic runs in PTO.
+/// Launch packed GDN backward; all gradient arithmetic runs in PTO.
+/// @param q Queries [1,T,Hk,128].
+/// @param k Keys [1,T,Hk,128].
+/// @param v Values [1,T,Hv,128].
+/// @param g Log retention gates [1,T,Hv].
+/// @param beta Update weights [1,T,Hv].
+/// @param dout Output adjoints, shaped like v.
+/// @param initial_state Optional h0 [N,Hv,128,128]; defaults to zero.
+/// @param dfinal_state Optional final-state adjoints; defaults to zero.
+/// @param cu_seqlens Optional packed sequence boundaries [N+1].
+/// @param scale Query/output attention scale.
+/// @param inverse_cache Optional forward inverse factors [chunks,Hv,128,128].
+/// @param gate_cache Optional forward buffers (g_t, g_sum, beta_t).
+/// @return FP32 gradients (dq, dk, dv, dg, dbeta, dh0).
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor,
            at::Tensor>
 run_gdn_mega_bwd(const at::Tensor& q, const at::Tensor& k, const at::Tensor& v,

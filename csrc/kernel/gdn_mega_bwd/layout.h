@@ -9,18 +9,30 @@ constexpr int MaxSequences = 64, BlockCount = 24, Matrix = 128 * 128;
 // the running state adjoints; other scratch is reused between chunk tasks.
 constexpr int ScratchMatrices = 24, ProductParts = 4;
 constexpr int ScratchSize = (ScratchMatrices + 2 + ProductParts) * Matrix;
+/// Device tensor descriptor.
 struct Input {
-  uint64_t data;
-  int64_t stride[4];
-  int64_t dtype;
+  uint64_t data;      ///< Device address; zero for an omitted input.
+  int64_t stride[4];  ///< Element strides in tensor axis order.
+  int64_t dtype;      ///< 0=FP16, 1=BF16, 2=FP32.
 };
+/// Backward launch buffers and packed-sequence metadata.
 struct Plan {
-  Input input[8];
-  uint64_t output[6], workspace, inverse_cache, gate_cache[3];
-  int start[MaxSequences], length[MaxSequences], offset[MaxSequences + 1];
-  int sequences, sequence_base, heads, key_heads, chunks, tokens;
-  float scale;
-  int inverse_dtype;
+  Input input[8];                ///< q, k, v, g, beta, dout, h0, dht.
+  uint64_t output[6];            ///< FP32 dq, dk, dv, dg, dbeta, dh0 addresses.
+  uint64_t workspace;            ///< Reusable device workspace address.
+  uint64_t inverse_cache;        ///< Optional saved inverse factors.
+  uint64_t gate_cache[3];        ///< Optional g_t, g_sum, beta_t addresses.
+  int start[MaxSequences];       ///< Global token start of each sequence.
+  int length[MaxSequences];      ///< Token count of each sequence.
+  int offset[MaxSequences + 1];  ///< Chunk prefix sums within this launch.
+  int sequences;                 ///< Number of sequences in this launch.
+  int sequence_base;  ///< First sequence's index in the packed batch.
+  int heads;          ///< Value head count.
+  int key_heads;      ///< Shared query/key head count.
+  int chunks;         ///< Total 128-token chunks in this launch.
+  int tokens;         ///< Total tokens in the packed input.
+  float scale;        ///< Query/output attention scale.
+  int inverse_dtype;  ///< Inverse storage: 0=FP16, 1=BF16, 2=FP32.
 };
 // Several slots change meaning only after their previous consumers finish.
 enum MatrixSlot {
