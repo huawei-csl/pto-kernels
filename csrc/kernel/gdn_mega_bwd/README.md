@@ -1,20 +1,23 @@
 # Sequence-wide GDN backward
 
 PTO-ISA implementation for packed B=1, D=C=128, FP16/BF16/FP32 inputs and
-FP32 gradients. Dense matrix products execute on Cube. Python validates,
-allocates six outputs and one workspace, then enqueues once; the native
-launcher handles metadata and stream integration. Neither performs tensor math.
+FP32 gradients. Dense matrix products execute on Cube. The C++ host binding
+validates inputs, allocates six outputs and one workspace, and enqueues once
+on the current Torch NPU stream. It performs no model tensor arithmetic.
+Forward and backward are exported by the same compiled `pto_kernels` extension.
 
 ## Interface and saved forward buffers
 
 ```python
+from pto_kernels import pto_gdn_mega, pto_gdn_mega_bwd
+
 # Model forward: create the cache once and retain these buffers for backward.
 inverse_cache = torch.empty(num_chunks, H, 128, 128, device=q.device, dtype=torch.float16)
 pto_gdn_mega(**forward_launch_args, inverse_cache=inverse_cache)
 gate_cache = tuple(forward_launch_args[name] for name in ("g_t", "g_sum", "beta_t"))
 
 # Model backward: no separate Torch preprocessing or forward invocation.
-dq, dk, dv, dg, dbeta, dh0 = backward(
+dq, dk, dv, dg, dbeta, dh0 = pto_gdn_mega_bwd(
     q, k, v, g, beta, dout, h0, dht, cu_seqlens,
     scale=scale, inverse_cache=inverse_cache, gate_cache=gate_cache,
 )
@@ -32,7 +35,7 @@ the caller's cache allocation. With FP32, existing vector/Cube exchanges are
 redirected into the cache. With FP16/BF16, forward alternates between two
 existing per-core FP32 scratch slots. After Cube finishes the factors, Vec
 exports each completed stripe once while Cube computes the residual/output.
-Only the 16-bit cache is retained for backward. No extra allocations, matrix
+Only the selected cache is retained for backward. No extra allocations, matrix
 products or kernel launches are added; forward arithmetic stays unchanged.
 
 Backward expands smaller caches to FP32 while transposing into A.T, then fills
@@ -54,7 +57,7 @@ seven vectors per chunk/head, plus 45 MiB of reusable block scratch. Workspace
 exists only during backward. The current forward cache producer accepts FP16
 q/k/v/beta and FP32 gates.
 
-## Cache modes and reproducible reports
+## Cache modes
 
 There is one forward API and one backward API, each with optional cache buffers;
 there is no public `cache=True/False` switch. Forward without `inverse_cache`
@@ -63,12 +66,6 @@ Backward accepts `inverse_cache` and `gate_cache` independently and recomputes
 what is absent. Native FP16/BF16 versus compensated FP32 device schedules are a
 separate precision choice, not separate cached/recomputed APIs. Only one inverse
 cache is retained; the temporary FP32 forward scratch is reused, not also saved.
-
-[Report commands, exact timing contracts and numerical test coverage](../../../benchmarking/gdn_mega_report.md).
-The unified command creates cached backward/forward timing heatmaps, exact-shape
-comparisons against saved FLA times, and a small per-gradient max-error heatmap.
-It defaults to FP16 inverse factors; the same runner provides a fast development
-check, `--extensive` evaluation and `--plot-only` rendering. No production kernel or tolerance changes are needed for these reports.
 
 ## Device stages
 
@@ -91,10 +88,8 @@ Aligned eight-head gate/beta transposes avoid partial-cache-line races.
 State bases and elementwise/reduction chains also stay in UB, and operand
 prefetches overlap earlier Cube products. There are no atomic reductions.
 
-All schedules use explicit scratch addresses and PTO phase boundaries. The
-`Ops` expression interface and temporary allocator have been deleted.
-Interleaved scans
-pair forward Cube products with reverse vector updates and vice versa. Local
+All schedules use explicit scratch addresses and PTO phase boundaries.
+Interleaved scans pair forward Cube products with reverse vector updates and vice versa. Local
 key-gradient updates and gate-energy reductions stay in UB. The original V
 loads directly into UB at its consumers; no FP32 V copy is retained for inputs
 with contiguous feature dimensions. Strided feature dimensions retain packing.
@@ -116,17 +111,33 @@ and block weights use tiled DMA/transposes instead of scalar GM gathers.
 
 ## Validation and benchmarks
 
-The development command runs four small checks with the independent recursive
-Torch/autograd oracle, then times one cached forward/backward shape:
+From the repository root in the configured CANN build environment:
 
 ```bash
-python benchmarking/gdn_mega_bwd.py
+export OMP_NUM_THREADS=4 NPU_DEVICE=npu:0
+cmake --build build --target pto_kernels_ops -j 2        # Incremental build
+python benchmarking/gdn_mega_bwd.py                     # Four checks + one timing
 python benchmarking/gdn_mega_bwd.py --extensive --fla /path/to/gdn_ascend_benchmark.json
+python benchmarking/gdn_mega_bwd.py --plot-only          # Redraw saved results
+PYTHONPATH=python:.:tests python -m pytest -q tests/test_gdn_mega_bwd.py tests/test_gdn_mega_bwd_reference.py
 ```
 
-See [evaluation commands and outputs](../../../benchmarking/gdn_mega_report.md)
-for the complete pytest suite, numerical bounds, TP/FLA comparisons, profiling
-and replotting. The extensive runner writes exactly three PNGs plus raw JSON.
+After a device edit, the same build command recompiles only affected objects
+and relinks. Both kernels are included in the normal CMake/pip installation;
+imports and calls never invoke a compiler or require the source checkout.
+
+The extensive run saves `heatmap.png` (backward/forward ms and ratio),
+`precision.png` (six gradient errors), `speedup.png` (FLA/PTO timings), and raw
+`results.json` under `benchmark_data/gdn_mega_bwd/eval/`. Use `--output` to change
+that directory. Inverse caching defaults to FP16; `--cache-dtype` selects the
+format. `--help` lists shape, profiling and optional FP64 audit options.
+
+Each gradient must satisfy `max|kernel-golden| <=
+2*max|reordered_Torch-golden| + 1e-5`. The independent recursive autograd oracle
+uses FP32 for FP16/BF16 inputs and FP64 for FP32 inputs. Timing excludes
+compilation/warmup: forward saves caches into preallocated buffers; backward
+consumes them and includes allocation/dispatch. FLA comparisons match shapes
+but differ in dtype, chunk size, inputs and allocation/autograd overhead.
 
 Known limitation: the correlated-key case with 512 tokens, 64 value heads and
 16 QK heads exceeds gradient bounds with BF16 inverse caching. Its FP16/FP32
@@ -135,7 +146,8 @@ the evaluation report shows it as a failure and exits nonzero.
 
 ## Files
 
-- `backward.py`, `binding.py`, `launch.cpp`: validation, allocation, cached builds and enqueue.
+- [`torch_gdn_mega_bwd.h`](../../host/torch_gdn_mega_bwd.h): host validation, allocation, metadata and enqueue.
+- [`pybind11.cpp`](../../host/pybind11.cpp): public `pto_gdn_mega_bwd` binding alongside forward.
 - `kernel.cpp`, `layout.h`: explicit compensated stages, task scheduling, dispatch and buffer metadata.
 - `pipeline.h`, `resident_cube.h`: native phase schedules and Cube operand reuse.
 - `epilogues.h`: local reductions, shared-head sums and direct output stores.

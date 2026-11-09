@@ -287,7 +287,7 @@ __global__ AICORE void gdn_bwd_stage(Plan p) {
 #endif
 }
 
-extern "C" void launch_stages(Plan p,void* stream) {
+extern "C" void pto_launch_gdn_mega_bwd(void* stream,Plan p) {
   gdn_bwd_stage<0><<<BlockCount,nullptr,stream>>>(p);
   gdn_bwd_stage<1><<<BlockCount,nullptr,stream>>>(p);
   gdn_bwd_stage<2><<<BlockCount,nullptr,stream>>>(p);

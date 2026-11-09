@@ -1,4 +1,7 @@
-"""Fast GDN backward checks/timing; --extensive writes three evaluation PNGs."""
+"""Fast GDN backward checks/timing; --extensive writes three evaluation PNGs.
+
+Build first: cmake --build build --target pto_kernels_ops -j 2
+"""
 
 import argparse
 from datetime import datetime, timezone
@@ -96,7 +99,7 @@ def check(case, cache_dtype, flashqla=False):
 
 def measure(shape, cache_dtype, repeats, profile=None):
     torch = runtime()
-    from csrc.kernel.gdn_mega_bwd.backward import backward
+    from pto_kernels import pto_gdn_mega_bwd as backward
     from test_gdn_mega import _prepare_gdn_mega, pto_gdn_mega
 
     length, heads, keys = shape
@@ -188,6 +191,10 @@ def provenance():
         for pattern in (
             "csrc/kernel/gdn_mega/*.*",
             "csrc/kernel/gdn_mega_bwd/*.*",
+            "csrc/host/torch_gdn_mega*.h",
+            "csrc/host/pybind11.cpp",
+            "CMakeLists.txt",
+            "python/pto_kernels/*.py",
             "tests/*gdn*py",
             "benchmarking/*gdn*py",
         )

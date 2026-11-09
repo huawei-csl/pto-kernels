@@ -12,7 +12,7 @@ import pytest
 import torch
 from torch.utils._python_dispatch import TorchDispatchMode
 
-from csrc.kernel.gdn_mega_bwd.backward import backward
+from pto_kernels import pto_gdn_mega_bwd as backward
 from gdn_mega_bwd_reference import recurrent_gdn_reference
 
 
@@ -20,6 +20,52 @@ from gdn_mega_bwd_reference import recurrent_gdn_reference
 # Reuse only their CPU oracle results within this process; every NPU run and
 # assertion still executes. Nothing is cached on disk or in production code.
 _saved_references = {}
+
+
+def test_native_binding():
+    import inspect
+    from pto_kernels import pto_kernels_ops
+
+    assert inspect.isbuiltin(backward)
+    assert backward is pto_kernels_ops.pto_gdn_mega_bwd
+
+
+@pytest.mark.parametrize(
+    "invalid", ["device", "dtype", "beta", "state", "bounds", "inverse", "gates"]
+)
+def test_invalid_inputs(invalid, npu_device):
+    q = torch.empty(1, 2, 2, 128, device=npu_device, dtype=torch.float16)
+    v = torch.empty(1, 2, 8, 128, device=npu_device, dtype=q.dtype)
+    g = torch.empty(1, 2, 8, device=npu_device)
+    args = dict(q=q, k=q, v=v, g=g, beta=g, dout=v)
+    changes = {
+        "device": lambda: dict(q=q.cpu()),
+        "dtype": lambda: dict(q=torch.empty_like(q, dtype=torch.int32)),
+        "beta": lambda: dict(beta=g[..., :7]),
+        "state": lambda: dict(initial_state=v),
+        "bounds": lambda: dict(cu_seqlens=torch.tensor([0, 3, 2])),
+        "inverse": lambda: dict(inverse_cache=v),
+        "gates": lambda: dict(gate_cache=(g, g)),
+    }
+    with pytest.raises(RuntimeError, match="gdn_mega_bwd:"):
+        backward(**{**args, **changes[invalid]()})
+
+
+@pytest.mark.parametrize("metadata_device", ["cpu", "npu"])
+def test_strided_int64_boundaries(metadata_device, npu_device):
+    q = torch.randn(1, 2, 2, 128, device=npu_device) * 0.1
+    v = torch.randn(1, 2, 8, 128, device=npu_device)
+    g = -torch.rand(1, 2, 8, device=npu_device) * 0.1
+    args = (q, q, v, g, torch.rand_like(g), v)
+    expected = backward(*args)
+    cu = torch.tensor(
+        [0, -1, 2],
+        dtype=torch.int64,
+        device=npu_device if metadata_device == "npu" else "cpu",
+    )[::2]
+    actual = backward(*args, cu_seqlens=cu)
+    for a, b in zip(actual, expected):
+        torch.testing.assert_close(a, b, atol=0, rtol=0)
 
 
 class AllocationsOnly(TorchDispatchMode):
@@ -338,6 +384,48 @@ def test_queued_calls(npu_device):
     for a, b, saved in zip(first, second, consumed):
         torch.testing.assert_close(a, saved, atol=0, rtol=0)
         torch.testing.assert_close(a, -b, atol=2e-5, rtol=2e-4)
+
+
+@pytest.mark.parametrize("cached", [False, True])
+def test_cross_stream_inputs(cached, npu_device):
+    """Drop inputs/caches after enqueue, then reuse memory on their producer stream."""
+    torch.manual_seed(42)
+    q = torch.randn(1, 129, 2, 128, device=npu_device, dtype=torch.float16) * 0.1
+    k = torch.nn.functional.normalize(torch.randn_like(q), dim=-1)
+    v = torch.randn(1, 129, 8, 128, device=npu_device, dtype=q.dtype)
+    g = -torch.rand(1, 129, 8, device=npu_device) * 0.1
+    inputs = [q, k, v, g, torch.rand_like(g).half(), torch.randn_like(v)]
+    if cached:
+        from test_gdn_mega import _prepare_gdn_mega, pto_gdn_mega
+
+        launch = _prepare_gdn_mega(
+            *inputs[:5], torch.tensor([0, 129], device=npu_device)
+        )
+        cache = torch.empty(2, 8, 128, 128, device=npu_device, dtype=q.dtype)
+        pto_gdn_mega(**launch, inverse_cache=cache)
+        inputs += [cache, *(launch[name] for name in ("g_t", "g_sum", "beta_t"))]
+
+    def call(xs):
+        return backward(
+            *xs[:6],
+            inverse_cache=xs[6] if cached else None,
+            gate_cache=tuple(xs[7:]) if cached else None,
+        )
+
+    expected = call(inputs)
+    producer = torch.npu.current_stream(npu_device)
+    consumer = torch.npu.Stream(device=npu_device)
+    copies = [x.clone() for x in inputs]
+    consumer.wait_stream(producer)
+    with torch.npu.stream(consumer):
+        actual = call(copies)
+    del copies
+    pressure = [torch.empty_like(x).fill_(7) for _ in range(4) for x in inputs]
+    producer.wait_stream(consumer)
+    torch.npu.synchronize(npu_device)
+    for a, b in zip(actual, expected):
+        torch.testing.assert_close(a, b, atol=0, rtol=0)
+    del pressure
 
 
 @pytest.mark.parametrize(
