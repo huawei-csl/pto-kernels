@@ -21,7 +21,7 @@ import os
 from pathlib import Path
 
 import torch
-import torch_npu  # noqa: F401 -- registers the NPU backend
+import torch_npu  # noqa: F401  # pylint: disable=unused-import
 
 from utils import do_bench
 
@@ -65,10 +65,10 @@ def bench(args):
                 host = (0.1 * torch.randn(numel)).to(dtype)
             x = host.to(args.device)
 
-            def torch_sum():
+            def torch_sum(x=x, output_dtype=output_dtype):
                 return torch.sum(x, dtype=output_dtype)
 
-            def cube_reduce():
+            def cube_reduce(x=x):
                 return pto_cube_reduce(x)
 
             reference = host.sum(dtype=torch.int64 if is_int8 else torch.float64)
@@ -83,12 +83,12 @@ def bench(args):
                     rtol=tolerance,
                 )
 
-            timing = dict(
-                warmup_iters=args.warmup,
-                benchmark_iters=args.iters,
-                flush_cache=not args.no_flush_cache,
-                unit="us",
-            )
+            timing = {
+                "warmup_iters": args.warmup,
+                "benchmark_iters": args.iters,
+                "flush_cache": not args.no_flush_cache,
+                "unit": "us",
+            }
             torch_us = do_bench(torch_sum, **timing)
             cube_us = do_bench(cube_reduce, **timing)
             if torch_us <= 0 or cube_us <= 0:
@@ -97,21 +97,21 @@ def bench(args):
             torch_dtype = str(torch_result.dtype).removeprefix("torch.")
             cube_dtype = str(cube_result.dtype).removeprefix("torch.")
             rows.append(
-                dict(
-                    dtype=dtype_name,
-                    numel=numel,
-                    torch_output_dtype=torch_dtype,
-                    cube_output_dtype=cube_dtype,
-                    torch_time_us=torch_us,
-                    cube_time_us=cube_us,
-                    speedup=speedup,
-                    torch_bandwidth_gbps=x.nbytes / torch_us / 1e3,
-                    cube_bandwidth_gbps=x.nbytes / cube_us / 1e3,
-                    device=str(x.device),
-                    warmup_iters=args.warmup,
-                    benchmark_iters=args.iters,
-                    flush_cache=not args.no_flush_cache,
-                )
+                {
+                    "dtype": dtype_name,
+                    "numel": numel,
+                    "torch_output_dtype": torch_dtype,
+                    "cube_output_dtype": cube_dtype,
+                    "torch_time_us": torch_us,
+                    "cube_time_us": cube_us,
+                    "speedup": speedup,
+                    "torch_bandwidth_gbps": x.nbytes / torch_us / 1e3,
+                    "cube_bandwidth_gbps": x.nbytes / cube_us / 1e3,
+                    "device": str(x.device),
+                    "warmup_iters": args.warmup,
+                    "benchmark_iters": args.iters,
+                    "flush_cache": not args.no_flush_cache,
+                }
             )
             print(
                 f"{dtype_name:>8} {numel:>10} {torch_dtype:>10} {cube_dtype:>10} "
