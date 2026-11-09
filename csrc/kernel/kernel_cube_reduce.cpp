@@ -73,8 +73,10 @@ AICORE void CubeReduce(__gm__ InputT* input, __gm__ OutputT* partials,
     } else {
       TMATMUL_ACC(c_l0, c_l0, a_l0, b_l0);
     }
-    // Complete the multiply before reusing L0A and L1A next iteration.
-    pipe_barrier(PIPE_ALL);
+    // Complete the multiply before the next TMOV overwrites a_l0, and the
+    // TMOV's read of a_l1 before the next TLOAD refills it.
+    kernel_utils::SetWaitFlag<PIPE_M, PIPE_MTE1>(0);
+    kernel_utils::SetWaitFlag<PIPE_MTE1, PIPE_MTE2>(0);
   }
   kernel_utils::SetWaitFlag<PIPE_M, PIPE_FIX>(0);
   CGlobal c_global(partials + id * S * kColumns);
