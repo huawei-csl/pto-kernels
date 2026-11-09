@@ -18,13 +18,13 @@ for the full License text.
 
 extern "C" {
 void pto_launch_cube_reduce_fp16(uint32_t blockDim, void* stream, void* input,
-                                 void* ones, void* partials, void* output,
+                                 void* partials, void* output,
                                  uint32_t num_tiles, uint32_t size);
 void pto_launch_cube_reduce_fp32(uint32_t blockDim, void* stream, void* input,
-                                 void* ones, void* partials, void* output,
+                                 void* partials, void* output,
                                  uint32_t num_tiles, uint32_t size);
 void pto_launch_cube_reduce_int8(uint32_t blockDim, void* stream, void* input,
-                                 void* ones, void* partials, void* output,
+                                 void* partials, void* output,
                                  uint32_t num_tiles, uint32_t size);
 }
 
@@ -70,16 +70,15 @@ at::Tensor run_cube_reduce(const at::Tensor& x) {
     padded.narrow(0, 0, input.numel()).copy_(input);
     input = padded;
   }
-  const at::Tensor ones = at::ones({size, 16}, x.options());
   const at::Tensor partials = at::empty({block_dim, size, 16}, output_options);
   if (dtype == at::kHalf) {
-    EXEC_KERNEL_CMD(cube_reduce_fp16, block_dim, input, ones, partials, output,
+    EXEC_KERNEL_CMD(cube_reduce_fp16, block_dim, input, partials, output,
                     num_tiles, matrix_size);
   } else if (dtype == at::kFloat) {
-    EXEC_KERNEL_CMD(cube_reduce_fp32, block_dim, input, ones, partials, output,
+    EXEC_KERNEL_CMD(cube_reduce_fp32, block_dim, input, partials, output,
                     num_tiles, matrix_size);
   } else {
-    EXEC_KERNEL_CMD(cube_reduce_int8, block_dim, input, ones, partials, output,
+    EXEC_KERNEL_CMD(cube_reduce_int8, block_dim, input, partials, output,
                     num_tiles, matrix_size);
   }
   return output;

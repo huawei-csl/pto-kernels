@@ -17,15 +17,10 @@ constexpr uint32_t kColumns = 16;
 // Each block accumulates A[S,S] @ ones[S,16] in L0C. Any one
 // column of the resulting S x 16 matrix contains its row sums.
 template <typename InputT, typename OutputT, uint32_t S>
-AICORE void CubeReduce(__gm__ InputT* input, __gm__ InputT* ones,
-                       __gm__ OutputT* partials, uint32_t num_tiles) {
+AICORE void CubeReduce(__gm__ InputT* input, __gm__ OutputT* partials,
+                       uint32_t num_tiles) {
   using AGlobal = GlobalTensor<InputT, TileShape2D<InputT, S, S, Layout::ND>,
                                BaseShape2D<InputT, S, S, Layout::ND>>;
-  // All entries are one, so the same flat buffer also represents DN.
-  // DN -> ZN supports the 32 x 16 int8 B fractal without padding N.
-  using BGlobal =
-      GlobalTensor<InputT, TileShape2D<InputT, S, kColumns, Layout::DN>,
-                   BaseShape2D<InputT, S, kColumns, Layout::DN>, Layout::DN>;
   using CGlobal =
       GlobalTensor<OutputT, TileShape2D<OutputT, S, kColumns, Layout::ND>,
                    BaseShape2D<OutputT, S, kColumns, Layout::ND>>;
@@ -50,8 +45,13 @@ AICORE void CubeReduce(__gm__ InputT* input, __gm__ InputT* ones,
   const uint32_t count = num_tiles / blocks + (id < num_tiles % blocks);
   const uint32_t begin =
       id * (num_tiles / blocks) + min(id, num_tiles % blocks);
-  BGlobal b_global(ones);
-  TLOAD(b_l1, b_global);
+  // Build the all-ones operand on chip instead of copying it in from global
+  // memory: on a Mat tile TEXPANDS lowers to create_cbuf_matrix, which fills
+  // L1 directly. Every element is one, so the fractal layout of the tile is
+  // irrelevant and the flat fill is already the matrix we want. Like TLOAD it
+  // issues on MTE2, so the MTE2 -> MTE1 flag below still orders it before the
+  // move into L0B.
+  TEXPANDS(b_l1, static_cast<InputT>(1));
   kernel_utils::SetWaitFlag<PIPE_MTE2, PIPE_MTE1>(0);
   TMOV(b_l0, b_l1);
   kernel_utils::SetWaitFlag<PIPE_MTE1, PIPE_M>(0);
@@ -126,7 +126,6 @@ AICORE void CompleteCubeReduce(__gm__ T* partials, __gm__ T* output,
 }  // namespace
 
 extern "C" __global__ AICORE void cube_reduce_fp16(__gm__ half* input,
-                                                   __gm__ half* ones,
                                                    __gm__ float* partials,
                                                    uint32_t num_tiles,
                                                    uint32_t size) {
@@ -134,13 +133,13 @@ extern "C" __global__ AICORE void cube_reduce_fp16(__gm__ half* input,
 #if defined(__DAV_CUBE__)
   switch (size) {
     case 32:
-      CubeReduce<half, float, 32>(input, ones, partials, num_tiles);
+      CubeReduce<half, float, 32>(input, partials, num_tiles);
       break;
     case 64:
-      CubeReduce<half, float, 64>(input, ones, partials, num_tiles);
+      CubeReduce<half, float, 64>(input, partials, num_tiles);
       break;
     case 128:
-      CubeReduce<half, float, 128>(input, ones, partials, num_tiles);
+      CubeReduce<half, float, 128>(input, partials, num_tiles);
       break;
   }
 #endif
@@ -166,18 +165,16 @@ extern "C" __global__ AICORE void complete_cube_reduce_float(
 }
 
 extern "C" void pto_launch_cube_reduce_fp16(uint32_t blockDim, void* stream,
-                                            void* input, void* ones,
-                                            void* partials, void* output,
-                                            uint32_t num_tiles, uint32_t size) {
+                                            void* input, void* partials,
+                                            void* output, uint32_t num_tiles,
+                                            uint32_t size) {
   cube_reduce_fp16<<<blockDim, nullptr, stream>>>(
-      (__gm__ half*)input, (__gm__ half*)ones, (__gm__ float*)partials,
-      num_tiles, size);
+      (__gm__ half*)input, (__gm__ float*)partials, num_tiles, size);
   complete_cube_reduce_float<<<1, nullptr, stream>>>(
       (__gm__ float*)partials, (__gm__ float*)output, blockDim, size);
 }
 
 extern "C" __global__ AICORE void cube_reduce_fp32(__gm__ float* input,
-                                                   __gm__ float* ones,
                                                    __gm__ float* partials,
                                                    uint32_t num_tiles,
                                                    uint32_t size) {
@@ -185,31 +182,29 @@ extern "C" __global__ AICORE void cube_reduce_fp32(__gm__ float* input,
 #if defined(__DAV_CUBE__)
   switch (size) {
     case 32:
-      CubeReduce<float, float, 32>(input, ones, partials, num_tiles);
+      CubeReduce<float, float, 32>(input, partials, num_tiles);
       break;
     case 64:
-      CubeReduce<float, float, 64>(input, ones, partials, num_tiles);
+      CubeReduce<float, float, 64>(input, partials, num_tiles);
       break;
     case 128:
-      CubeReduce<float, float, 128>(input, ones, partials, num_tiles);
+      CubeReduce<float, float, 128>(input, partials, num_tiles);
       break;
   }
 #endif
 }
 
 extern "C" void pto_launch_cube_reduce_fp32(uint32_t blockDim, void* stream,
-                                            void* input, void* ones,
-                                            void* partials, void* output,
-                                            uint32_t num_tiles, uint32_t size) {
+                                            void* input, void* partials,
+                                            void* output, uint32_t num_tiles,
+                                            uint32_t size) {
   cube_reduce_fp32<<<blockDim, nullptr, stream>>>(
-      (__gm__ float*)input, (__gm__ float*)ones, (__gm__ float*)partials,
-      num_tiles, size);
+      (__gm__ float*)input, (__gm__ float*)partials, num_tiles, size);
   complete_cube_reduce_float<<<1, nullptr, stream>>>(
       (__gm__ float*)partials, (__gm__ float*)output, blockDim, size);
 }
 
 extern "C" __global__ AICORE void cube_reduce_int8(__gm__ int8_t* input,
-                                                   __gm__ int8_t* ones,
                                                    __gm__ int32_t* partials,
                                                    uint32_t num_tiles,
                                                    uint32_t size) {
@@ -217,13 +212,13 @@ extern "C" __global__ AICORE void cube_reduce_int8(__gm__ int8_t* input,
 #if defined(__DAV_CUBE__)
   switch (size) {
     case 32:
-      CubeReduce<int8_t, int32_t, 32>(input, ones, partials, num_tiles);
+      CubeReduce<int8_t, int32_t, 32>(input, partials, num_tiles);
       break;
     case 64:
-      CubeReduce<int8_t, int32_t, 64>(input, ones, partials, num_tiles);
+      CubeReduce<int8_t, int32_t, 64>(input, partials, num_tiles);
       break;
     case 128:
-      CubeReduce<int8_t, int32_t, 128>(input, ones, partials, num_tiles);
+      CubeReduce<int8_t, int32_t, 128>(input, partials, num_tiles);
       break;
   }
 #endif
@@ -249,12 +244,11 @@ extern "C" __global__ AICORE void complete_cube_reduce_int8(
 }
 
 extern "C" void pto_launch_cube_reduce_int8(uint32_t blockDim, void* stream,
-                                            void* input, void* ones,
-                                            void* partials, void* output,
-                                            uint32_t num_tiles, uint32_t size) {
+                                            void* input, void* partials,
+                                            void* output, uint32_t num_tiles,
+                                            uint32_t size) {
   cube_reduce_int8<<<blockDim, nullptr, stream>>>(
-      (__gm__ int8_t*)input, (__gm__ int8_t*)ones, (__gm__ int32_t*)partials,
-      num_tiles, size);
+      (__gm__ int8_t*)input, (__gm__ int32_t*)partials, num_tiles, size);
   complete_cube_reduce_int8<<<1, nullptr, stream>>>(
       (__gm__ int32_t*)partials, (__gm__ int32_t*)output, blockDim, size);
 }
