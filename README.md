@@ -119,7 +119,7 @@ y = pto_swiglu(x)  # fused SwiGLU on Ascend NPU
 | Attention | `pto_flash_attention` |
 | Linear algebra | `pto_simple_matmul`, `pto_batch_matrix_square`, `pto_tri_inv_col_sweep`, `pto_tri_inv_ns`, `pto_tri_inv_rank_one`, `pto_tri_inv_rec_unroll`, `pto_tri_inv_trick` |
 | Scan / gather | `pto_scan_ul1`, `pto_csr_gather` |
-| GDN (Gated DeltaNet) | `pto_gdn_chunk_cumsum`, `pto_gdn_chunk_o`, `pto_gdn_scaled_dot_kkt`, `pto_gdn_wy_fast` |
+| GDN (Gated DeltaNet) | `pto_gdn_chunk_cumsum`, `pto_gdn_chunk_h`, `pto_gdn_chunk_o`, `pto_gdn_scaled_dot_kkt`, `pto_gdn_wy_fast` |
 | GDN fused | `pto_gdn_mega` — one launch, two phases: shared Gram/gate preparation and a persistent fused inverse/WY/state/output pipeline. [Benchmarks](docs/gdn_mega/heatmap.md), [accuracy](docs/gdn_mega/error_heatmap.md) |
 | KDA (Kimi Delta Attention) | `pto_kda_chunk_h`, `pto_kda_chunk_o`, `pto_kda_gate_cumsum`, `pto_kda_kkt`, `pto_kda_wy` |
 

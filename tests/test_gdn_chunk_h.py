@@ -11,7 +11,7 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-from pto_kernels import get_aic_cores, pto_chunk_h
+from pto_kernels import get_aic_cores, pto_gdn_chunk_h
 
 # Compile-time kernel constants (default build: GDN_H=16, GDN_HG=16, GDN_D=128, GDN_C=128)
 C = 128  # chunk size
@@ -40,7 +40,7 @@ def test_regression_h2_final_state_reuse(npu_device):
     expected[:, :, 0, 0] = 1  # Each sequence has one unit K.T @ U contribution.
 
     for _ in range(100):
-        _, _, final_state = pto_chunk_h(
+        _, _, final_state = pto_gdn_chunk_h(
             k, w, u, g, batch_size=batch, seq_len=C, total_chunks=batch
         )
         torch.npu.synchronize()
@@ -177,7 +177,7 @@ def stats_ok(actual: torch.Tensor, expected: torch.Tensor) -> bool:
 
 
 @pytest.mark.parametrize("seq_len", [128, 256, 384, 512])
-def test_pto_chunk_h_fixed(npu_device, seq_len: int):
+def test_pto_gdn_chunk_h_fixed(npu_device, seq_len: int):
     torch.manual_seed(42)
     T = seq_len
 
@@ -190,7 +190,7 @@ def test_pto_chunk_h_fixed(npu_device, seq_len: int):
 
     tc_total = _count_total_chunks(T)
 
-    s_out, v_out, _fs_out = pto_chunk_h(
+    s_out, v_out, _fs_out = pto_gdn_chunk_h(
         k_cpu.to(npu_device),
         w_cpu.to(npu_device),
         u_cpu.to(npu_device),
@@ -222,7 +222,7 @@ def test_pto_chunk_h_fixed(npu_device, seq_len: int):
         [256, 128, 384],
     ],
 )
-def test_pto_chunk_h_varlen(npu_device, seqlens: list):
+def test_pto_gdn_chunk_h_varlen(npu_device, seqlens: list):
     torch.manual_seed(42)
 
     cu_seqlens_list = [0]
@@ -242,7 +242,7 @@ def test_pto_chunk_h_varlen(npu_device, seqlens: list):
     cu_npu = torch.tensor(cu_seqlens_list, dtype=torch.int32).to(npu_device)
     tc_total = _count_total_chunks(T, cu_seqlens_list)
 
-    s_out, v_out, _fs_out = pto_chunk_h(
+    s_out, v_out, _fs_out = pto_gdn_chunk_h(
         k_cpu.to(npu_device),
         w_cpu.to(npu_device),
         u_cpu.to(npu_device),
