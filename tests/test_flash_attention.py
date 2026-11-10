@@ -28,9 +28,9 @@ def _inputs(device, batch, num_q_heads, num_kv_heads, s0, s1, seed=0, f=1.0):
 
 
 def _reference(q, k, v, causal):
-    q = q.double().cpu()
-    k = k.double().cpu()
-    v = v.double().cpu()
+    q = q.cpu().double()
+    k = k.cpu().double()
+    v = v.cpu().double()
     groups = q.size(1) // k.size(1)
     if groups != 1:
         k = k.repeat_interleave(groups, dim=1)
@@ -51,6 +51,8 @@ CASES = [
     pytest.param(1, 4, 1, 1024, 1024, id="mqa"),
     pytest.param(1, 4, 2, 256, 512, id="gqa"),
     pytest.param(2, 4, 2, 128, 1024, id="batch-gqa"),
+    pytest.param(1, 1, 1, 384, 512, id="three-query-blocks"),
+    pytest.param(1, 1, 1, 640, 512, id="queries-longer-than-keys"),
 ]
 
 
@@ -70,11 +72,13 @@ def test_pto_fa_matches_reference(npu_device, causal, batch, nq, nkv, s0, s1):
 
 
 @pytest.mark.parametrize("qk_preload", [2, 4, 8])
-def test_pto_fa_qk_preload(npu_device, qk_preload):
+@pytest.mark.parametrize("causal", [False, True], ids=["non-causal", "causal"])
+def test_pto_fa_qk_preload(npu_device, qk_preload, causal):
     q, k, v = _inputs(npu_device, 1, 1, 1, 128, 1024)
-    actual = pto_flash_attention(q, k, v, qk_preload=qk_preload)
-    expected = _reference(q, k, v, causal=False)
-    torch.testing.assert_close(actual.cpu(), expected, rtol=0, atol=NON_CAUSAL_ATOL)
+    actual = pto_flash_attention(q, k, v, qk_preload=qk_preload, causal=causal)
+    expected = _reference(q, k, v, causal=causal)
+    atol = CAUSAL_ATOL if causal else NON_CAUSAL_ATOL
+    torch.testing.assert_close(actual.cpu(), expected, rtol=0, atol=atol)
 
 
 def test_pto_fa_back_to_back_causal_launches(npu_device):
