@@ -52,7 +52,7 @@ PYBIND11_MODULE(pto_kernels_ops, m) {
       },
       pybind11::arg("device_id") = 0);
   m.def("pto_abs", &pto_isa_ops::run_abs);
-  m.def("pto_chunk_h", &pto_isa_ops::run_gdn_chunk_h, py::arg("K"),
+  m.def("pto_gdn_chunk_h", &pto_isa_ops::run_gdn_chunk_h, py::arg("K"),
         py::arg("W"), py::arg("U"), py::arg("G"),
         py::arg("cu_seqlens") = at::zeros({1}), py::arg("batch_size"),
         py::arg("seq_len"), py::arg("total_chunks"));
