@@ -1119,9 +1119,9 @@ AICORE inline void compute_p(
           using MaskedSubTile = Tile<TileType::Vec, float, Vec_S0, Tile_S1,
                                      BLayout::RowMajor, Vec_S0, DYNAMIC>;
           MaskedSubTile maskedSub(Tile_S1 - sub_col * Cube_S1);
-          TASSIGN(maskedSub, (uint64_t)qkVecTile.data() +
-                                static_cast<uint64_t>(sub_col) * Cube_S1 *
-                                    sizeof(float));
+          TASSIGN(maskedSub,
+                  (uint64_t)qkVecTile.data() +
+                      static_cast<uint64_t>(sub_col) * Cube_S1 * sizeof(float));
           TEXPANDS(maskedSub, 0.0f);
           break;
         }
