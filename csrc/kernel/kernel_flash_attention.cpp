@@ -1109,12 +1109,21 @@ AICORE inline void compute_p(
     for (int sub_col = 0; sub_col < static_cast<int>(kTileFactor); ++sub_col) {
       const int sub_s1_index = s1_index + sub_col * static_cast<int>(Cube_S1);
       if constexpr (CAUSAL_MASK) {
-        // compute_qk skips causal subtiles that are fully above this row
-        // block's triangle. Do not read their unwritten fp16 FIFO bytes; the
-        // softmax causal mask overwrites those lanes before the row reduction
-        // sees them.
+        // compute_qk leaves these fp32 FIFO subtiles unwritten. The causal
+        // mask is additive, so stale UB NaNs would survive it. Fill only the
+        // skipped suffix; attended columns are populated by TLOAD below.
+        // A dynamic valid width preserves the physical row stride in
+        // TEXPANDS on A2/A3. Its writes are disjoint from the TLOADs, and the
+        // vector barrier in apply_causal_diag_mask orders them before TADD.
         if (sub_s1_index > blk_idx * static_cast<int>(Cube_S0)) {
-          continue;
+          using MaskedSubTile = Tile<TileType::Vec, float, Vec_S0, Tile_S1,
+                                     BLayout::RowMajor, Vec_S0, DYNAMIC>;
+          MaskedSubTile maskedSub(Tile_S1 - sub_col * Cube_S1);
+          TASSIGN(maskedSub,
+                  (uint64_t)qkVecTile.data() +
+                      static_cast<uint64_t>(sub_col) * Cube_S1 * sizeof(float));
+          TEXPANDS(maskedSub, 0.0f);
+          break;
         }
       }
       QKLoadGlobal qkLoadGlobal(qk_ptr + static_cast<size_t>(sub_col) *
