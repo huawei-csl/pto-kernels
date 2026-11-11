@@ -21,7 +21,8 @@ def test_block_fwd(npu_device, bsnd, tiles, heads, scale):
     ).float()
     inp = (
         x.transpose(1, 2).contiguous().reshape(1, tiles * 128, heads, 128)
-        if bsnd else x
+        if bsnd
+        else x
     )
     result = pto_tri_inv_block_fwd(inp.to(npu_device), is_bsnd_format=bsnd).cpu()
     if bsnd:

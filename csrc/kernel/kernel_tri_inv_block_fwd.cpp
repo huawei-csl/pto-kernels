@@ -4,7 +4,8 @@
 using namespace pto;
 // Algorithm-specific helpers live here so this kernel can be compiled and
 // maintained independently of the fused GDN implementation. kernel_utils.h
-// supplies only the common PTO types and architecture synchronization utilities.
+// supplies only the common PTO types and architecture synchronization
+// utilities.
 namespace {
 
 // Four independent 16x16 unit-triangular solves share one vector instruction
@@ -25,7 +26,7 @@ AICORE inline void block_fwd_copy_block16(D& dst, S& src) {
 
 template <typename Stripe, typename Identity>
 AICORE inline void block_fwd_diagonal_inverses(Stripe& a, Identity& identity,
-                                          int stripe) {
+                                               int stripe) {
   constexpr int B = 16, R = 64, Base = 128 * 1024,
                 Bytes = B * R * sizeof(float);
   using Batch = Tile<TileType::Vec, float, B, R>;
@@ -91,14 +92,16 @@ AICORE inline void block_fwd_diagonal_inverses(Stripe& a, Identity& identity,
 // Join all independent diagonal block pairs at one level together. Products
 // retain separate accumulators. Export/reload phases are synchronized once
 // per level, with independent DMA and matrix operations queued together.
-template <int B, int C, bool FirstOnly = false, typename Mat, typename OutputT = half>
+template <int B, int C, bool FirstOnly = false, typename Mat,
+          typename OutputT = half>
 AICORE inline void block_fwd_join_level(Mat& inverse, __gm__ float* scratch,
                                         __gm__ OutputT* output = nullptr,
                                         uint32_t output_stride = C) {
 #if defined(__DAV_CUBE__)
   constexpr int Groups = C / (2 * B), Rows = Groups * B;
   Tile<TileType::Mat, float, Rows, B, BLayout::ColMajor, Rows, B,
-       SLayout::RowMajor, 512> temporary;
+       SLayout::RowMajor, 512>
+      temporary;
   TASSIGN(temporary, 128 * 1024);
   TileLeft<float, B, B> left;
   TileRight<float, B, B> right;
@@ -138,9 +141,9 @@ AICORE inline void block_fwd_join_level(Mat& inverse, __gm__ float* scratch,
       TSTORE(out, acc);
       if (output != nullptr) {
         GlobalTensor<OutputT, Shape<1, 1, 1, B, B>,
-                     pto::Stride<1, 1, 1, DYNAMIC, 1>> result(
-            output + (offset + B) * output_stride + offset,
-            {}, {1, 1, 1, output_stride, 1});
+                     pto::Stride<1, 1, 1, DYNAMIC, 1>>
+            result(output + (offset + B) * output_stride + offset, {},
+                   {1, 1, 1, output_stride, 1});
         TSTORE(result, acc);
       }
     }
@@ -163,11 +166,11 @@ AICORE inline void block_fwd_join_level(Mat& inverse, __gm__ float* scratch,
 
 }  // namespace
 
-
 template <typename OutputT>
-__global__ AICORE void tri_inv_block_fwd(
-    __gm__ half* input, __gm__ OutputT* output, __gm__ float* workspace,
-    uint32_t tiles, uint32_t heads) {
+__global__ AICORE void tri_inv_block_fwd(__gm__ half* input,
+                                         __gm__ OutputT* output,
+                                         __gm__ float* workspace,
+                                         uint32_t tiles, uint32_t heads) {
   KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2);
   constexpr int C = 128, R = 64;
   const uint32_t stride = heads == 0 ? C : heads * C;
@@ -188,15 +191,16 @@ __global__ AICORE void tri_inv_block_fwd(
 #endif
   for (int j = 0; j < 16; ++j)
     for (int col = 0; col < R; ++col)
-      indices.SetValue(j * R + col,
+      indices.SetValue(
+          j * R + col,
           (((col / 16) * 16 + j) * C + stripe + (col / 16) * 16) * scale);
   TEXPANDS(mask, 0.0f);
   pipe_barrier(PIPE_ALL);
   for (int row = 0; row < R; ++row) {
     const int columns = stripe + row;
     if (columns > 0) {
-      Tile<TileType::Vec, float, 1, C, BLayout::RowMajor, 1, DYNAMIC>
-          prefix(columns);
+      Tile<TileType::Vec, float, 1, C, BLayout::RowMajor, 1, DYNAMIC> prefix(
+          columns);
       TASSIGN(prefix, 64 * 1024 + row * C * sizeof(float));
       TEXPANDS(prefix, -1.0f);
     }
@@ -208,14 +212,14 @@ __global__ AICORE void tri_inv_block_fwd(
   pipe_barrier(PIPE_ALL);
 #endif
   for (uint32_t tile = get_block_idx(); tile < tiles; tile += get_block_num()) {
-    const uint64_t offset = heads == 0 ? uint64_t(tile) * C * C
-        : uint64_t(tile / heads) * C * stride + (tile % heads) * C;
+    const uint64_t offset =
+        heads == 0 ? uint64_t(tile) * C * C
+                   : uint64_t(tile / heads) * C * stride + (tile % heads) * C;
     auto prepared = workspace + get_block_idx() * (C * C + R * R);
     auto scratch = prepared + C * C;
 #if defined(__DAV_VEC__)
-    GlobalTensor<half, Shape<1, 1, 1, R, C>,
-                 pto::Stride<1, 1, 1, DYNAMIC, 1>> src(
-        input + offset + stripe * stride, {}, {1, 1, 1, stride, 1});
+    GlobalTensor<half, Shape<1, 1, 1, R, C>, pto::Stride<1, 1, 1, DYNAMIC, 1>>
+        src(input + offset + stripe * stride, {}, {1, 1, 1, stride, 1});
     TLOAD(packed, src);
     pipe_barrier(PIPE_ALL);
     TCVT(a, packed, RoundMode::CAST_NONE);
@@ -225,12 +229,12 @@ __global__ AICORE void tri_inv_block_fwd(
     pipe_barrier(PIPE_ALL);
     block_fwd_diagonal_inverses(a, identity, stripe);
     pipe_barrier(PIPE_ALL);
-    GlobalTensor<float, Shape<1, 1, 1, R, C>,
-                 pto::Stride<1, 1, 1, C, 1>> gm(prepared + stripe * C);
+    GlobalTensor<float, Shape<1, 1, 1, R, C>, pto::Stride<1, 1, 1, C, 1>> gm(
+        prepared + stripe * C);
     TSTORE(gm, a);
     GlobalTensor<OutputT, Shape<1, 1, 1, R, C>,
-                 pto::Stride<1, 1, 1, DYNAMIC, 1>> dst(
-        output + offset + stripe * stride, {}, {1, 1, 1, stride, 1});
+                 pto::Stride<1, 1, 1, DYNAMIC, 1>>
+        dst(output + offset + stripe * stride, {}, {1, 1, 1, stride, 1});
     if constexpr (std::is_same_v<OutputT, float>) {
       TSTORE(dst, a);
     } else {
@@ -255,11 +259,12 @@ __global__ AICORE void tri_inv_block_fwd(
     kernel_utils::WaitBothVecOnA5<PIPE_MTE2>(0);
     pipe_barrier(PIPE_ALL);
 #endif
-    Tile<TileType::Mat, float, C, C, BLayout::ColMajor, C, C,
-         SLayout::RowMajor, 512> inverse;
+    Tile<TileType::Mat, float, C, C, BLayout::ColMajor, C, C, SLayout::RowMajor,
+         512>
+        inverse;
     TASSIGN(inverse, 64 * 1024);
-    GlobalTensor<float, Shape<1, 1, 1, C, C>,
-                 pto::Stride<1, 1, 1, C, 1>> gm(prepared);
+    GlobalTensor<float, Shape<1, 1, 1, C, C>, pto::Stride<1, 1, 1, C, 1>> gm(
+        prepared);
     TLOAD(inverse, gm);
     pipe_barrier(PIPE_ALL);
     block_fwd_join_level<16, C>(inverse, scratch, output + offset, stride);
@@ -277,17 +282,19 @@ __global__ AICORE void tri_inv_block_fwd(
   pipe_barrier(PIPE_ALL);
 }
 
-extern "C" void pto_launch_tri_inv_block_fwd_fp16(
-    uint32_t blockDim, void* stream, void* input, void* output,
-    void* workspace, uint32_t tiles, uint32_t heads) {
-  tri_inv_block_fwd<half><<<blockDim, nullptr, stream>>>(
-      (__gm__ half*)input, (__gm__ half*)output, (__gm__ float*)workspace,
-      tiles, heads);
+extern "C" void pto_launch_tri_inv_block_fwd_fp16(uint32_t blockDim,
+                                                  void* stream, void* input,
+                                                  void* output, void* workspace,
+                                                  uint32_t tiles,
+                                                  uint32_t heads) {
+  tri_inv_block_fwd<half>
+      <<<blockDim, nullptr, stream>>>((__gm__ half*)input, (__gm__ half*)output,
+                                      (__gm__ float*)workspace, tiles, heads);
 }
 
 extern "C" void pto_launch_tri_inv_block_fwd_fp32_out(
-    uint32_t blockDim, void* stream, void* input, void* output,
-    void* workspace, uint32_t tiles, uint32_t heads) {
+    uint32_t blockDim, void* stream, void* input, void* output, void* workspace,
+    uint32_t tiles, uint32_t heads) {
   tri_inv_block_fwd<float><<<blockDim, nullptr, stream>>>(
       (__gm__ half*)input, (__gm__ float*)output, (__gm__ float*)workspace,
       tiles, heads);
