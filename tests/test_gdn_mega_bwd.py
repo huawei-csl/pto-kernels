@@ -301,6 +301,103 @@ def test_strided_int64_boundaries(metadata_device, npu_device):
         torch.testing.assert_close(a, b, atol=0, rtol=0)
 
 
+@pytest.mark.parametrize("cache_dtype", [None, torch.float16, torch.float32])
+@pytest.mark.parametrize("heads,lengths", [(8, [256] + [0] * 64), (64, [1408, 0])])
+def test_graph_device_boundaries(cache_dtype, heads, lengths, npu_device):
+    """Replay changing chunk counts, cache offsets and the fusion threshold."""
+    inputs, dtypes, _, scale = backward_inputs(
+        lengths,
+        heads,
+        heads // 4,
+        "both",
+        torch.float16,
+        "both" if cache_dtype else None,
+    )
+    inputs = [x.detach().to(npu_device, dt) for x, dt in zip(inputs, dtypes)]
+    do, dh = torch.randn_like(inputs[2]), torch.randn_like(inputs[5])
+    tokens = sum(lengths)
+    # A strided int64 view also checks device indexing during replay.
+    cu = torch.empty(2 * (len(lengths) + 1), device=npu_device, dtype=torch.int64)[::2]
+    cache = (
+        torch.empty(
+            (tokens + 127) // 128 + 1,
+            heads,
+            128,
+            128,
+            device=npu_device,
+            dtype=cache_dtype,
+        )
+        if cache_dtype
+        else None
+    )
+    gates = None
+    graph, actual = None, None
+    for packing in (lengths, [1] + [0] * (len(lengths) - 2) + [tokens - 1], lengths):
+        cpu_cu = torch.tensor([0, *torch.tensor(packing).cumsum(0).tolist()])
+        cu.copy_(cpu_cu)
+        inputs[0].neg_()
+        do.neg_()
+        if cache_dtype:
+            fresh_cache, fresh_gates = forward_caches(
+                inputs, cpu_cu, "both", cache.dtype, False
+            )
+            cache[: fresh_cache.shape[0]].copy_(fresh_cache)
+            if gates is None:
+                gates = fresh_gates
+            else:
+                for dst, src in zip(gates, fresh_gates):
+                    dst.copy_(src)
+        args = (*inputs[:5], do, inputs[5], dh)
+        kwargs = {"scale": scale, "inverse_cache": cache, "gate_cache": gates}
+        expected = backward(*args, cpu_cu, **kwargs)
+        if graph is None:
+            for _ in range(2):
+                backward(*args, cu, **kwargs)
+            torch.npu.synchronize(npu_device)
+            graph = torch.npu.NPUGraph()
+            with torch.npu.graph(graph):
+                actual = backward(*args, cu, **kwargs)
+        graph.replay()
+        torch.npu.synchronize(npu_device)
+        for a, b in zip(actual, expected):
+            torch.testing.assert_close(a, b, atol=2e-5, rtol=2e-4)
+
+
+@pytest.mark.parametrize("cpu_bounds", [False, True])
+def test_graph_static_boundaries(cpu_bounds, npu_device):
+    inputs, dtypes, cu, scale = backward_inputs(
+        [129] + [0] * 63 + [128] if cpu_bounds else [257],
+        8,
+        2,
+        "both",
+        torch.float32,
+        None,
+    )
+    inputs = [x.detach().to(npu_device, dt) for x, dt in zip(inputs, dtypes)]
+    do, dh = torch.randn_like(inputs[2]), torch.randn_like(inputs[5])
+    boundaries = cu.clone() if cpu_bounds else None
+    args = (*inputs[:5], do, inputs[5], dh)
+    for _ in range(2):
+        backward(*args, boundaries, scale=scale)
+    torch.npu.synchronize(npu_device)
+    graph = torch.npu.NPUGraph()
+    with torch.npu.graph(graph):
+        with AllocationsOnly() as guard:
+            actual = backward(*args, boundaries, scale=scale)
+    assert guard.allocations == 7
+    if boundaries is not None:
+        boundaries.fill_(-1)
+    del boundaries
+    for _ in range(3):
+        inputs[0].neg_()
+        do.neg_()
+        expected = backward(*args, cu if cpu_bounds else None, scale=scale)
+        graph.replay()
+        torch.npu.synchronize(npu_device)
+        for a, b in zip(actual, expected):
+            torch.testing.assert_close(a, b, atol=0, rtol=0)
+
+
 class AllocationsOnly(TorchDispatchMode):
     """Reject accidental Torch computation inside the backward implementation."""
 
@@ -467,6 +564,7 @@ def backward_inputs(lengths, heads, key_heads, mode, dtype, cache_mode):
         ([513], 8, 2, "replace"),
         ([127, 1, 0, 129], 3, 1, "both"),
         ([0] * 64 + [1], 2, 1, "both"),
+        pytest.param([0, 1, 0, 3] * 16, 8, 2, "both", id="many_short_sequences"),
         ([2], 64, 1, "both"),
         ([129], 8, 2, "mixed"),
     ],
@@ -538,6 +636,7 @@ def test_backward(
     )
     with context:
         device_do, device_dh = do.to(npu_device), dh.to(npu_device)
+        device_cu = cu.to(npu_device)
         cache, gate_cache = forward_caches(
             device_inputs, cu, cache_mode, cache_dtype, roundtrip
         )
@@ -558,7 +657,7 @@ def test_backward(
                 device_do,
                 None if mode in ("zero_state", "defaults") else device_inputs[5],
                 None if mode in ("output", "defaults") else device_dh,
-                None if mode == "defaults" else cu,
+                None if mode == "defaults" else device_cu,
                 scale=scale,
                 inverse_cache=cache,
                 gate_cache=gate_cache,
@@ -661,9 +760,11 @@ def test_cross_stream_inputs(cached, npu_device):
         return backward(
             *xs[:6],
             inverse_cache=xs[6] if cached else None,
-            gate_cache=tuple(xs[7:]) if cached else None,
+            gate_cache=tuple(xs[7:-1]) if cached else None,
+            cu_seqlens=xs[-1],
         )
 
+    inputs.append(torch.tensor([0, 129], device=npu_device))
     expected = call(inputs)
     producer = torch.npu.current_stream(npu_device)
     consumer = torch.npu.Stream(device=npu_device)

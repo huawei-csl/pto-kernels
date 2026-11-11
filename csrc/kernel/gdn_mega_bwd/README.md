@@ -3,8 +3,15 @@
 PTO-ISA implementation for packed B=1, D=C=128, FP16/BF16/FP32 inputs and
 FP32 gradients. Dense matrix products execute on Cube. The C++ host binding
 validates inputs, allocates six outputs and one workspace, and enqueues once
-on the current Torch NPU stream. It performs no model tensor arithmetic.
+on the current Torch NPU stream. It performs no model tensor arithmetic or
+device-to-host transfers.
 Forward and backward are exported by the same compiled `pto_kernels` extension.
+One immutable `KernelArgs` carries buffers and dimensions. Each stage receives
+that block and a sequence-batch index, then reads a device metadata table.
+The host selects head grouping, precision and stage count once; compute-stage
+arguments contain no sequence arrays. Each core advances a sequence cursor as its
+chunk tasks increase, visiting each boundary at most once per stage. Resolved
+token bounds are reused across grouped heads; state stages index sequences directly.
 
 ## Interface and saved forward buffers
 
@@ -76,10 +83,27 @@ cache is retained; the temporary FP32 forward scratch is reused, not also saved.
 | 2 | Output/WY derivatives; fused final outputs on large native grids | Chunk/head groups when fused, otherwise individual heads |
 | 3 (fallback) | Final gate scans, shared-head reductions and outputs | Small grids and FP32 inputs only |
 
-Native-input grids use **three launches** when at least 96 chunk/head-group
-tasks exist; smaller grids preserve more parallelism with four launches.
-FP32 inputs retain four. This decision applies separately to each batch of up
-to 64 packed sequences. No host chunk loops or intra-kernel global barriers.
+Native-input grids use **three launches** when capacity covers at least 96 chunk/head-group
+tasks; smaller grids preserve more parallelism with four launches.
+FP32 inputs retain four. The fixed capacity selects the same schedule for every
+batch of up to 64 packed sequences. No host chunk loops or intra-kernel global barriers.
+
+NPU `cu_seqlens` adds one PTO metadata launch for the entire call: it reads
+boundaries and computes chunk counts/cache offsets on-device in O(N) work.
+Shape/dtype checks stay on the host; invalid device boundary values fail
+asynchronously on-device. Packed CPU boundaries use one small PTO metadata-upload
+launch per batch, with values embedded in kernel arguments. Omitted boundaries
+(and a validated single CPU sequence) need no metadata table or metadata launch.
+
+Graph replay can change NPU boundary **values** in-place with fixed tensor
+shapes, addresses and cache capacities; matching caches must be updated too.
+CPU boundaries are frozen at capture; replay does not retain or dereference
+the original host boundary storage. Tensor addresses and the launch schedule remain fixed. To avoid readback, NPU workspace reserves
+`min(T, floor((T + 127*min(N,64))/128))` chunk records per batch, capped by the
+inverse cache capacity when supplied. This can exceed the actual chunk count;
+single-sequence capacity is exact. Metadata adds 800 bytes per batch inside the
+same workspace allocation. Backward accepts padded inverse caches and validates
+that all active chunks fit on-device; forward must receive only the active view.
 
 Fused tasks own lcm(8,Hv/Hqk) value heads when Hv is divisible by eight,
 otherwise all heads. Q/K remain in Cube L1 across shared value heads. dQ/dK
@@ -127,7 +151,12 @@ in `tests/test_gdn_mega_bwd.py`. CPU-only checks need no compiled extension:
 `python -m pytest --noconftest tests/test_gdn_mega_bwd.py -k reference -q`.
 
 After a device edit, the same build command recompiles only affected objects
-and relinks. Both kernels are included in the normal CMake/pip installation;
+and relinks. Graph tests exercise changing boundaries, queries and upstream gradients,
+FP16/FP32 inverse caches, empty sequences, more than 64 sequences, and CPU
+boundary storage released after capture. They use `torch.npu.NPUGraph`, backed
+by ACL graph capture/replay.
+
+Both kernels are included in the normal CMake/pip installation;
 imports and calls never invoke a compiler or require the source checkout.
 For A5, configure a separate build directory with `-DSOC_VERSION=Ascend950`
 (`dav-3510`). Forward and backward share the Cube/Vector synchronization helpers

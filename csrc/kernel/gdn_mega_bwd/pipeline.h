@@ -141,18 +141,19 @@ AICORE inline void finish_state(__gm__ float* product, __gm__ float* out,
 
 // Replay and reverse propagation are independent scans. Interleave their
 // products so each vector update overlaps the opposite direction's Cube work.
-AICORE inline void pipelined_states(const Plan& p, int seq, int head) {
-  int begin = p.offset[seq], end = p.offset[seq + 1], epoch = 0;
+AICORE inline void pipelined_states(const KernelArgs& p, const Batch& batch,
+                                    int seq, int head) {
+  int begin = batch.offset(seq), end = batch.offset(seq + 1), epoch = 0;
   auto dh = scratch(p), forward = dh + 2 * Matrix, weighted = forward + Matrix,
        reverse = weighted + Matrix;
   if (begin < end)
-    native_pack(p.input[6], p.sequence_base + seq, head, 128,
-                chunk(p, begin, head).m(H), true);
-  native_pack(p.input[7], p.sequence_base + seq, head, 128, {dh}, true);
+    native_pack(p.input[6], batch.sequence_base + seq, head, 128,
+                chunk(p, batch, begin, head).m(H), true);
+  native_pack(p.input[7], batch.sequence_base + seq, head, 128, {dh}, true);
   join();
   for (int step = 0; step < end - begin; ++step) {
     int c = begin + step, r = end - 1 - step;
-    auto f = chunk(p, c, head), b = chunk(p, r, head);
+    auto f = chunk(p, batch, c, head), b = chunk(p, batch, r, head);
     bool next = c + 1 < end;
     cube_load<0>(f.m(W_DW).data);
     cube_load<1>(f.m(H).data);
@@ -182,11 +183,12 @@ AICORE inline void pipelined_states(const Plan& p, int seq, int head) {
     cube_load<4>(b.m(DU).data);
     cube_product<5, 4, true>(reverse);
     if (next)
-      finish_state<96 * 1024>(forward, chunk(p, c + 1, head).m(H).data, 1);
+      finish_state<96 * 1024>(forward, chunk(p, batch, c + 1, head).m(H).data,
+                              1);
     phase_end(epoch, true);
   }
   auto out = (__gm__ float*)p.output[5] +
-             ((p.sequence_base + seq) * p.heads + head) * Matrix;
+             ((batch.sequence_base + seq) * p.heads + head) * Matrix;
   if (begin < end)
     finish_state(reverse, out, -1);
   else
@@ -237,8 +239,8 @@ AICORE inline void pack_gate(const Input& input, int first, int head, int heads,
   }
 #endif
 }
-AICORE inline void pack_gate(const Plan& p, int input, int first, int head,
-                             int valid, Buffer out) {
+AICORE inline void pack_gate(const KernelArgs& p, int input, int first,
+                             int head, int valid, Buffer out) {
   auto x = p.input[input];
   if (x.stride[2] != 1) {
     native_pack(x, first, head, valid, out);
@@ -312,14 +314,12 @@ AICORE inline void prepare_rhs(const Input& input, int first, int head,
 // Cached preparation: Gram products run while vectors prepare gates; the
 // inverse completion runs alongside RHS weighting. Complete A^T directly in its
 // destination, avoiding the temporary factor copy and its extra GM traffic.
-AICORE inline void pipelined_prepare(const Plan& p, int c, int h,
-                                     int first_head) {
-  auto x = chunk(p, c, h), shared = chunk(p, c, first_head);
-  int seq = sequence(p, c);
+AICORE inline void pipelined_prepare(const KernelArgs& p, const Batch& batch,
+                                     int c, int h, int first_head,
+                                     TokenRange tokens) {
+  auto x = chunk(p, batch, c, h), shared = chunk(p, batch, c, first_head);
   bool leader = h == first_head;
-  int first = p.start[seq] + (c - p.offset[seq]) * 128;
-  int n = min(128, p.start[seq] + p.length[seq] - first),
-      kh = h / (p.heads / p.key_heads);
+  int first = tokens.first, n = tokens.length, kh = h / p.head_group;
   int epoch = 0;
   auto arena = scratch(p) + 2 * Matrix;
   Buffer factor{arena}, score{arena + Matrix}, qe{arena + 2 * Matrix},
@@ -366,7 +366,7 @@ AICORE inline void pipelined_prepare(const Plan& p, int c, int h,
   gates(hi.data, x.v(EXP).data, x.v(RATIO).data, x.m(DECAY).data, 1, false,
         p.gate_cache[0] ? lo.data : nullptr, n);
   if (p.inverse_cache) {
-    auto saved = inverse_data(p, c, h);
+    auto saved = inverse_data(p, batch, c, h);
     if (p.inverse_dtype == 2)
       transpose_inverse((__gm__ float*)saved, x.m(AT).data);
     else if (p.inverse_dtype == 0)
@@ -379,7 +379,7 @@ AICORE inline void pipelined_prepare(const Plan& p, int c, int h,
 
   if (p.inverse_cache) {
     if (p.inverse_dtype == 2)
-      complete_cached_inverse<true>((__gm__ float*)inverse_data(p, c, h),
+      complete_cached_inverse<true>((__gm__ float*)inverse_data(p, batch, c, h),
                                     x.m(AT).data);
     else  // Reuse the expanded transpose; no separate FP32 factor copy.
       complete_cached_inverse<true, true>(x.m(AT).data, x.m(AT).data);
@@ -451,13 +451,13 @@ AICORE inline void finish_gate(const Chunk& x) {
 // FP32 operands and accumulation are retained for the derivatives. FP32 inputs
 // use the separately compensated path in kernel.cpp.
 template <bool Emit = false>
-AICORE inline void pipelined_gradients(const Plan& p, int c, int h) {
-  auto x = chunk(p, c, h);
+AICORE inline void pipelined_gradients(const KernelArgs& p, const Batch& batch,
+                                       int c, int h, TokenRange tokens) {
+  auto x = chunk(p, batch, c, h);
   GradientOutput output;
-  int seq = sequence(p, c), first = p.start[seq] + (c - p.offset[seq]) * 128;
-  int length = min(128, p.start[seq] + p.length[seq] - first);
+  int first = tokens.first, length = tokens.length;
   if constexpr (Emit) {
-    int group = p.heads / p.key_heads;
+    int group = p.head_group;
     output = {(__gm__ float*)p.output[0] +
                   (int64_t(first) * p.key_heads + h / group) * 128,
               (__gm__ float*)p.output[1] +

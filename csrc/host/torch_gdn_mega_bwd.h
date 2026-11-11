@@ -16,7 +16,8 @@
 #include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"
 #include "utils.h"
 
-extern "C" void pto_launch_gdn_mega_bwd(void* stream, Plan plan);
+extern "C" void pto_launch_gdn_mega_bwd(void* stream, KernelArgs args,
+                                        const int64_t* cpu_bounds);
 
 namespace pto_isa_ops {
 
@@ -71,26 +72,30 @@ run_gdn_mega_bwd(const at::Tensor& q, const at::Tensor& k, const at::Tensor& v,
   const c10::DeviceGuard device_guard(q.device());
   const at::NoGradGuard no_grad;
 
-  // Sequence boundaries are scheduling metadata, never model data. Preserve
-  // their dtype/stride on CPU instead of introducing a tensor cast or scan.
-  std::vector<int64_t> bounds{0, tokens};
+  // CPU boundaries are read directly; device boundaries stay on device.
+  const bool device_bounds = cu_seqlens && !cu_seqlens->is_cpu();
+  std::vector<int64_t> bounds;
+  int sequences = 1;
   if (cu_seqlens) {
     const auto& cu = *cu_seqlens;
     check(cu.dim() == 1 && cu.numel() >= 2 && cu.numel() - 1 <= max_index &&
               (cu.scalar_type() == at::kInt || cu.scalar_type() == at::kLong),
           "cu_seqlens must be a 1D integer tensor");
-    auto cpu = cu.cpu();
-    bounds.resize(cpu.numel());
-    for (int64_t i = 0; i < cpu.numel(); ++i) {
-      bounds[i] = cpu.scalar_type() == at::kInt
-                      ? cpu.data_ptr<int32_t>()[i * cpu.stride(0)]
-                      : cpu.data_ptr<int64_t>()[i * cpu.stride(0)];
+    check(cu.is_cpu() || cu.device() == q.device(),
+          "cu_seqlens must be on CPU or the input NPU");
+    sequences = cu.numel() - 1;
+    if (!device_bounds) {
+      bounds.resize(cu.numel());
+      for (int64_t i = 0; i < cu.numel(); ++i)
+        bounds[i] = cu.scalar_type() == at::kInt
+                        ? cu.data_ptr<int32_t>()[i * cu.stride(0)]
+                        : cu.data_ptr<int64_t>()[i * cu.stride(0)];
     }
   }
-  check(bounds.front() == 0 && bounds.back() == tokens &&
-            std::is_sorted(bounds.begin(), bounds.end()),
-        "cu_seqlens must span [0,T] in nondecreasing order");
-  const int sequences = bounds.size() - 1;
+  if (!bounds.empty())
+    check(bounds.front() == 0 && bounds.back() == tokens &&
+              std::is_sorted(bounds.begin(), bounds.end()),
+          "cu_seqlens must span [0,T] in nondecreasing order");
   std::array<at::Tensor, 8> inputs{q,
                                    k,
                                    v,
@@ -112,18 +117,35 @@ run_gdn_mega_bwd(const at::Tensor& q, const at::Tensor& k, const at::Tensor& v,
             inputs[i].sizes() == at::IntArrayRef({sequences, heads, 128, 128}),
         "state must have shape [N,Hv,128,128]");
   }
-  int64_t chunks = 0;
-  for (int i = 0; i < sequences; ++i)
-    chunks += (bounds[i + 1] - bounds[i] + 127) / 128;
+  int64_t chunks = (tokens + 127) / 128;
+  // Device lengths are unknown on the host; reserve a shape-derived upper
+  // bound.
+  int64_t capacity = std::min(
+      tokens,
+      (tokens + 127 * std::min<int64_t>(sequences, MaxSequences)) / 128);
+  if (!bounds.empty()) {
+    chunks = capacity = 0;
+    int64_t batch_chunks = 0;
+    for (int i = 0; i < sequences; ++i) {
+      int64_t n = (bounds[i + 1] - bounds[i] + 127) / 128;
+      chunks += n;
+      batch_chunks += n;
+      capacity = std::max(capacity, batch_chunks);
+      if ((i + 1) % MaxSequences == 0) batch_chunks = 0;
+    }
+  }
   if (inverse_cache) {
     const auto& cache = *inverse_cache;
-    check(cache.device() == q.device() && cache.is_contiguous() &&
-              (cache.scalar_type() == at::kFloat ||
-               cache.scalar_type() == at::kHalf ||
-               cache.scalar_type() == at::kBFloat16) &&
-              cache.sizes() == at::IntArrayRef({chunks, heads, 128, 128}),
-          "inverse_cache must be contiguous FP32/FP16/BF16 [chunks,Hv,128,128] "
-          "on NPU");
+    check(
+        cache.device() == q.device() && cache.is_contiguous() &&
+            (cache.scalar_type() == at::kFloat ||
+             cache.scalar_type() == at::kHalf ||
+             cache.scalar_type() == at::kBFloat16) &&
+            cache.dim() == 4 && cache.size(0) >= chunks &&
+            cache.size(0) <= max_index && cache.size(1) == heads &&
+            cache.size(2) == 128 && cache.size(3) == 128,
+        "inverse_cache must be contiguous FP32/FP16/BF16 [capacity,Hv,128,128] "
+        "on NPU");
   }
   if (gate_cache) {
     check(gate_cache->size() == 3,
@@ -138,64 +160,66 @@ run_gdn_mega_bwd(const at::Tensor& q, const at::Tensor& k, const at::Tensor& v,
     }
   }
 
-  std::vector<Plan> plans;
-  int64_t chunk_base = 0, largest = 0;
-  for (int64_t first = 0; first < sequences; first += MaxSequences) {
-    Plan p{};
-    p.heads = heads;
-    p.key_heads = key_heads;
-    p.tokens = tokens;
-    p.scale = scale;
-    p.sequence_base = first;
-    p.sequences = std::min<int64_t>(MaxSequences, sequences - first);
-    for (int s = 0; s < p.sequences; ++s) {
-      p.start[s] = bounds[first + s];
-      p.length[s] = bounds[first + s + 1] - bounds[first + s];
-      // Widen before padding the length so INT_MAX cannot wrap.
-      p.offset[s + 1] = p.offset[s] + (int64_t(p.length[s]) + 127) / 128;
-    }
-    p.chunks = p.offset[p.sequences];
-    check(int64_t(p.chunks) * heads <= max_index &&
-              int64_t(p.sequences) * heads <= max_index,
-          "chunk/head task count exceeds int32 indexing");
-    largest = std::max(largest, int64_t(p.chunks));
-    for (int i = 0; i < 8; ++i) {
-      const auto& x = inputs[i];
-      p.input[i].dtype = x.defined() ? dtype(x) : 2;
-      if (!x.defined()) continue;
-      p.input[i].data = reinterpret_cast<uint64_t>(x.data_ptr());
-      std::copy(x.strides().begin(), x.strides().end(), p.input[i].stride);
-    }
-    p.inverse_dtype = inverse_cache ? dtype(*inverse_cache) : 2;
-    if (inverse_cache) {
-      p.inverse_cache =
-          reinterpret_cast<uint64_t>(inverse_cache->data_ptr()) +
-          chunk_base * heads * Matrix * (p.inverse_dtype == 2 ? 4 : 2);
-    }
-    if (gate_cache)
-      for (int i = 0; i < 3; ++i)
-        p.gate_cache[i] =
-            reinterpret_cast<uint64_t>((*gate_cache)[i].data_ptr());
-    chunk_base += p.chunks;
-    plans.push_back(p);
+  KernelArgs args{};
+  args.heads = heads;
+  args.key_heads = key_heads;
+  args.tokens = tokens;
+  args.scale = scale;
+  args.total_sequences = sequences;
+  if (device_bounds) {
+    args.cu_seqlens = reinterpret_cast<uint64_t>(cu_seqlens->data_ptr());
+    args.cu_stride = cu_seqlens->stride(0);
+    args.cu_bytes = cu_seqlens->element_size();
   }
+  for (int i = 0; i < 8; ++i) {
+    const auto& x = inputs[i];
+    args.input[i].dtype = x.defined() ? dtype(x) : 2;
+    if (!x.defined()) continue;
+    args.input[i].data = reinterpret_cast<uint64_t>(x.data_ptr());
+    std::copy(x.strides().begin(), x.strides().end(), args.input[i].stride);
+  }
+  args.inverse_dtype = inverse_cache ? dtype(*inverse_cache) : 2;
+  if (inverse_cache) {
+    args.inverse_cache = reinterpret_cast<uint64_t>(inverse_cache->data_ptr());
+    args.inverse_chunks = inverse_cache->size(0);
+  }
+  if (gate_cache)
+    for (int i = 0; i < 3; ++i)
+      args.gate_cache[i] =
+          reinterpret_cast<uint64_t>((*gate_cache)[i].data_ptr());
+
+  if (inverse_cache)
+    capacity = std::min(capacity, int64_t(args.inverse_chunks));
+  check(capacity * heads <= max_index &&
+            int64_t(std::min(sequences, MaxSequences)) * heads <= max_index,
+        "chunk/head task count exceeds int32 indexing");
+  args.capacity = capacity;
   const auto options = q.options().dtype(at::kFloat).requires_grad(false);
   std::array<at::Tensor, 6> outputs;
   for (int i = 0; i < 5; ++i)
     outputs[i] = at::empty(inputs[i].sizes(), options);
   outputs[5] = at::empty({sequences, heads, 128, 128}, options);
+  const int64_t metadata_offset =
+      capacity * heads * RecordSize + BlockCount * ScratchSize;
+  const int64_t batches =
+      (int64_t(sequences) + MaxSequences - 1) / MaxSequences;
+  const bool needs_metadata = device_bounds || sequences > 1;
   auto workspace = at::empty(
-      {largest * heads * RecordSize + BlockCount * ScratchSize}, options);
-  for (auto& p : plans) {
-    p.workspace = reinterpret_cast<uint64_t>(workspace.data_ptr());
-    for (int i = 0; i < 6; ++i)
-      p.output[i] = reinterpret_cast<uint64_t>(outputs[i].data_ptr());
-  }
+      {metadata_offset + (needs_metadata ? batches * MetadataWords : 0)},
+      options);
+  args.workspace = reinterpret_cast<uint64_t>(workspace.data_ptr());
+  if (needs_metadata)
+    args.metadata = args.workspace + metadata_offset * sizeof(float);
+  for (int i = 0; i < 6; ++i)
+    args.output[i] = reinterpret_cast<uint64_t>(outputs[i].data_ptr());
   // Retain tensors until the queued callback submits every stage, and record
   // the consuming stream so storage from other streams cannot be reused early.
-  std::vector<at::Tensor> retained(inputs.begin(), inputs.end());
+  std::vector<at::Tensor> retained;
+  retained.reserve(20);
+  retained.insert(retained.end(), inputs.begin(), inputs.end());
   retained.insert(retained.end(), outputs.begin(), outputs.end());
   retained.push_back(workspace);
+  if (device_bounds) retained.push_back(*cu_seqlens);
   if (inverse_cache) retained.push_back(*inverse_cache);
   if (gate_cache)
     retained.insert(retained.end(), gate_cache->begin(), gate_cache->end());
@@ -207,9 +231,10 @@ run_gdn_mega_bwd(const at::Tensor& q, const at::Tensor& k, const at::Tensor& v,
   void* stream = npu_stream.stream(false);
   at_npu::native::OpCommand::RunOpApi(
       "gdn_mega_bwd",
-      [plans = std::move(plans), retained = std::move(retained),
+      [args, bounds = std::move(bounds), retained = std::move(retained),
        stream]() -> int {
-        for (const auto& p : plans) pto_launch_gdn_mega_bwd(stream, p);
+        pto_launch_gdn_mega_bwd(stream, args,
+                                bounds.empty() ? nullptr : bounds.data());
         return 0;
       });
   return {outputs[0], outputs[1], outputs[2],

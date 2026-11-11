@@ -1,6 +1,8 @@
 // Copyright (c) 2026 Huawei Technologies Co., Ltd. See repository LICENSE.
 // Three sequence-wide stages; small grids and FP32 inputs retain output
 // assembly. Chunk traversal and all numerical work execute in PTO-ISA on NPU.
+#include <algorithm>
+
 #include "device_ops.h"
 #include "pipeline.h"
 
@@ -9,7 +11,7 @@
 // applies the existing rounded product directly to its consumer, avoiding a
 // full GM temporary and a separate vector-add phase.
 template <bool TA = false, bool TB = false, bool Add = false>
-AICORE inline void compensated_mm(const Plan& p, __gm__ float* a,
+AICORE inline void compensated_mm(const KernelArgs& p, __gm__ float* a,
                                   __gm__ float* b, __gm__ float* out,
                                   __gm__ float* base = nullptr,
                                   float sign = 1) {
@@ -20,12 +22,10 @@ AICORE inline void compensated_mm(const Plan& p, __gm__ float* a,
   join();
 }
 
-AICORE inline void accurate_prepare(const Plan& p, int c, int head) {
-  auto x = chunk(p, c, head);
-  int seq = sequence(p, c);
-  int first = p.start[seq] + (c - p.offset[seq]) * 128;
-  int length = min(128, p.start[seq] + p.length[seq] - first),
-      kh = head / (p.heads / p.key_heads);
+AICORE inline void accurate_prepare(const KernelArgs& p, const Batch& batch,
+                                    int c, int head, TokenRange tokens) {
+  auto x = chunk(p, batch, c, head);
+  int first = tokens.first, length = tokens.length, kh = head / p.head_group;
   auto a = scratch(p) + 2 * Matrix, kb = a + Matrix, vb = a + 2 * Matrix,
        qe = a + 3 * Matrix;
   auto hi = a + 4 * Matrix, lo = hi + 128;
@@ -48,7 +48,7 @@ AICORE inline void accurate_prepare(const Plan& p, int c, int head) {
   join();
   compensated_mm<false, true>(p, x.m(K).data, x.m(K).data, x.m(KK).data);
   if (p.inverse_cache) {
-    Input saved{(uint64_t)inverse_data(p, c, head),
+    Input saved{(uint64_t)inverse_data(p, batch, c, head),
                 {Matrix, 128, 0, 1},
                 p.inverse_dtype};
     native_pack(saved, 0, 0, 128, {a});
@@ -73,16 +73,17 @@ AICORE inline void accurate_prepare(const Plan& p, int c, int head) {
   compensated_mm<true>(p, qe, x.m(DO_DV).data, x.m(DH_DK).data);
 }
 
-AICORE inline void accurate_states(const Plan& p, int seq, int head) {
+AICORE inline void accurate_states(const KernelArgs& p, const Batch& batch,
+                                   int seq, int head) {
   auto weighted = scratch(p) + 2 * Matrix, base = weighted + Matrix;
-  int begin = p.offset[seq], end = p.offset[seq + 1];
+  int begin = batch.offset(seq), end = batch.offset(seq + 1);
   if (begin < end) {
-    native_pack(p.input[6], p.sequence_base + seq, head, 128,
-                chunk(p, begin, head).m(H), true);
+    native_pack(p.input[6], batch.sequence_base + seq, head, 128,
+                chunk(p, batch, begin, head).m(H), true);
     join();
   }
   for (int c = begin; c < end; ++c) {
-    auto x = chunk(p, c, head);
+    auto x = chunk(p, batch, c, head);
     compensated_mm<false, false, true>(p, x.m(W_DW).data, x.m(H).data,
                                        x.m(U_Z).data, x.m(U_Z).data, -1);
     if (c + 1 < end) {
@@ -90,14 +91,15 @@ AICORE inline void accurate_states(const Plan& p, int seq, int head) {
       matrix_op(x.m(H).data, x.v(EXP).data, base, 1, 3, 1);
       join();
       compensated_mm<true, false, true>(p, weighted, x.m(U_Z).data,
-                                        chunk(p, c + 1, head).m(H).data, base);
+                                        chunk(p, batch, c + 1, head).m(H).data,
+                                        base);
     }
   }
   auto dh = scratch(p), prev = dh + Matrix;
-  native_pack(p.input[7], p.sequence_base + seq, head, 128, {dh}, true);
+  native_pack(p.input[7], batch.sequence_base + seq, head, 128, {dh}, true);
   join();
   for (int c = end - 1; c >= begin; --c) {
-    auto x = chunk(p, c, head);
+    auto x = chunk(p, batch, c, head);
     matrix_op(x.m(K).data, x.v(RATIO).data, weighted, 1, 2, 1);
     matrix_op(dh, x.v(EXP).data, base, 1, 3, 1);
     matrix_op(base, x.m(DH_DK).data, base, 1, 0, 1);
@@ -112,13 +114,13 @@ AICORE inline void accurate_states(const Plan& p, int seq, int head) {
     prev = tmp;
   }
   native_copy({dh}, {(__gm__ float*)p.output[5] +
-                     ((p.sequence_base + seq) * p.heads + head) * Matrix});
+                     ((batch.sequence_base + seq) * p.heads + head) * Matrix});
   join();
 }
 
 // Eight local temporal windows avoid the dQ cancellation of a whole-chunk dot.
-AICORE inline void accurate_dq(const Plan& p, Chunk x, __gm__ float* score,
-                               __gm__ float* dq) {
+AICORE inline void accurate_dq(const KernelArgs& p, Chunk x,
+                               __gm__ float* score, __gm__ float* dq) {
   auto local = score + Matrix, state = score + 2 * Matrix,
        weighted = score + 3 * Matrix, base = score + 4 * Matrix;
   auto d = score + 10 * Matrix, k = d + 128, factor = k + 128;
@@ -142,8 +144,10 @@ AICORE inline void accurate_dq(const Plan& p, Chunk x, __gm__ float* score,
   }
 }
 
-AICORE inline void accurate_output_gradient(const Plan& p, int c, int head) {
-  auto x = chunk(p, c, head);
+AICORE inline void accurate_output_gradient(const KernelArgs& p,
+                                            const Batch& batch, int c,
+                                            int head) {
+  auto x = chunk(p, batch, c, head);
   auto s = scratch(p) + 2 * Matrix;
   auto dkr = s + 6 * Matrix, dq = s + 8 * Matrix, dk = s + 9 * Matrix,
        weighted = s + 4 * Matrix;
@@ -166,10 +170,10 @@ AICORE inline void accurate_output_gradient(const Plan& p, int c, int head) {
   join();
 }
 
-AICORE inline void accurate_wy_gradient(const Plan& p, int c, int head) {
-  auto x = chunk(p, c, head);
-  int seq = sequence(p, c), first = p.start[seq] + (c - p.offset[seq]) * 128;
-  int length = min(128, p.start[seq] + p.length[seq] - first);
+AICORE inline void accurate_wy_gradient(const KernelArgs& p, const Batch& batch,
+                                        int c, int head, TokenRange tokens) {
+  auto x = chunk(p, batch, c, head);
+  int first = tokens.first, length = tokens.length;
   auto kb = scratch(p) + 2 * Matrix, vb = kb + Matrix, da = kb + 2 * Matrix,
        dkb = kb + 3 * Matrix, dvb = kb + 4 * Matrix;
   auto dk = kb + 5 * Matrix, raw = kb + 6 * Matrix, dkk = kb + 7 * Matrix,
@@ -225,10 +229,10 @@ AICORE inline void scatter_matrix(Buffer x, __gm__ float* out, int length,
 #endif
 }
 
-AICORE inline void scatter_gates(const Plan& p, int c, int first_head,
-                                 int heads, bool accurate) {
-  int seq = sequence(p, c), first = p.start[seq] + (c - p.offset[seq]) * 128;
-  int length = min(128, p.start[seq] + p.length[seq] - first);
+AICORE inline void scatter_gates(const KernelArgs& p, const Batch& batch, int c,
+                                 int first_head, int heads, bool accurate,
+                                 TokenRange tokens) {
+  int first = tokens.first, length = tokens.length;
 #if defined(__DAV_VEC__)
   if (get_subblockid() == 0) {
     // Transpose eight complete head rows; no scalar GM gathers. Head groups
@@ -246,8 +250,9 @@ AICORE inline void scatter_gates(const Plan& p, int c, int first_head,
         for (int j = 0; j < n; ++j) {
           Row row;
           TASSIGN(row, j * 512);
-          load<1, 128>(row,
-                       chunk(p, c, h + j).v(which == 0 ? Q_ENERGY : DB).data);
+          load<1, 128>(
+              row,
+              chunk(p, batch, c, h + j).v(which == 0 ? Q_ENERGY : DB).data);
         }
         TTRANS(output, input, tmp);
         sync();
@@ -267,13 +272,12 @@ AICORE inline void scatter_gates(const Plan& p, int c, int first_head,
 #endif
 }
 
-AICORE inline void finish(const Plan& p, int c, int first_head, int heads,
-                          bool accurate) {
-  int seq = sequence(p, c), first = p.start[seq] + (c - p.offset[seq]) * 128;
-  int length = min(128, p.start[seq] + p.length[seq] - first),
-      group = p.heads / p.key_heads;
+AICORE inline void finish(const KernelArgs& p, const Batch& batch, int c,
+                          int first_head, int heads, bool accurate,
+                          TokenRange tokens) {
+  int first = tokens.first, length = tokens.length, group = p.head_group;
   for (int h = first_head; h < first_head + heads; ++h) {
-    auto x = chunk(p, c, h);
+    auto x = chunk(p, batch, c, h);
     if (accurate) {
       auto energy = scratch(p) + 2 * Matrix, dg = energy + 128;
       dot_rows(x.m(DO_DV).data, x.m(V).data, nullptr, energy);
@@ -302,7 +306,7 @@ AICORE inline void finish(const Plan& p, int c, int first_head, int heads,
   if (n)
     for (int kh = first_head / group; kh < (first_head + heads) / group; ++kh) {
       for (int j = 0; j < group; ++j) {
-        auto x = chunk(p, c, kh * group + j);
+        auto x = chunk(p, batch, c, kh * group + j);
         load<64, 128>(a, x.m(Q_DQ).data + stripe * 128);
         load<64, 128>(b, x.m(DH_DK).data + stripe * 128);
         TMULS(a, a, p.scale);
@@ -331,7 +335,7 @@ AICORE inline void finish(const Plan& p, int c, int first_head, int heads,
     }
 #endif
   if (accurate) join();
-  scatter_gates(p, c, first_head, heads, accurate);
+  scatter_gates(p, batch, c, first_head, heads, accurate, tokens);
   if (accurate)
     join();
   else
@@ -339,70 +343,177 @@ AICORE inline void finish(const Plan& p, int c, int first_head, int heads,
 }
 #endif
 
+// One metadata pass for all sequences. No model tensor arithmetic or host
+// reads.
+__global__ AICORE void gdn_bwd_metadata(const KernelArgs p) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY);
+#if defined(__DAV_VEC__)
+  Tile<TileType::Vec, int32_t, 1, MetadataWords> meta;
+  TASSIGN(meta, 0);
+  int64_t previous = p.cu_bytes == 4 ? ((__gm__ int32_t*)p.cu_seqlens)[0]
+                                     : ((__gm__ int64_t*)p.cu_seqlens)[0];
+  if (previous != 0) {
+    trap();
+    return;
+  }
+  int chunk_base = 0;
+  for (int64_t first = 0; first < p.total_sequences; first += MaxSequences) {
+    TEXPANDS(meta, 0);
+    sync();
+    meta.SetValue(ChunkBaseWord, chunk_base);
+    int count = min(int64_t(MaxSequences), p.total_sequences - first),
+        chunks = 0;
+    for (int s = 0; s < count; ++s) {
+      int64_t index = (first + s + 1) * p.cu_stride;
+      int64_t end = p.cu_bytes == 4 ? ((__gm__ int32_t*)p.cu_seqlens)[index]
+                                    : ((__gm__ int64_t*)p.cu_seqlens)[index];
+      if (end < previous || end > p.tokens) {
+        trap();
+        return;
+      }
+      meta.SetValue(s, int(previous));
+      meta.SetValue(MaxSequences + s, int(end - previous));
+      chunks += (end - previous + 127) / 128;
+      meta.SetValue(2 * MaxSequences + s + 1, chunks);
+      previous = end;
+    }
+    chunk_base += chunks;
+    if (chunks > p.capacity ||
+        (p.inverse_cache && chunk_base > p.inverse_chunks)) {
+      trap();
+      return;
+    }
+    sync();
+    GlobalTensor<int32_t, Shape<1, 1, 1, 1, MetadataWords>,
+                 pto::Stride<1, 1, 1, MetadataWords, 1>>
+        gm((__gm__ int32_t*)p.metadata + first / MaxSequences * MetadataWords);
+    TSTORE(gm, meta);
+    sync();
+  }
+  if (previous != p.tokens) trap();
+#endif
+}
+
+// CPU boundaries are captured by value; graph replay never borrows host
+// storage.
+__global__ AICORE void gdn_bwd_upload_metadata(uint64_t address,
+                                               SequenceMetadata data,
+                                               int count) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY);
+#if defined(__DAV_VEC__)
+  Tile<TileType::Vec, int32_t, 1, MetadataWords> meta;
+  TASSIGN(meta, 0);
+  TEXPANDS(meta, 0);
+  sync();
+  for (int s = 0; s < count; ++s) {
+    meta.SetValue(s, data.start[s]);
+    meta.SetValue(MaxSequences + s, data.length[s]);
+    meta.SetValue(2 * MaxSequences + s + 1, data.offset[s + 1]);
+  }
+  meta.SetValue(ChunkBaseWord, data.chunk_base);
+  sync();
+  GlobalTensor<int32_t, Shape<1, 1, 1, 1, MetadataWords>,
+               pto::Stride<1, 1, 1, MetadataWords, 1>>
+      gm((__gm__ int32_t*)address);
+  TSTORE(gm, meta);
+  sync();
+#endif
+}
+
 template <int Stage>
-__global__ AICORE void gdn_bwd_stage(Plan p) {
+__global__ AICORE void gdn_bwd_stage(const KernelArgs p, int first_sequence) {
   KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2);
 #if defined(__DAV_VEC__)
   set_mask_norm();
   set_vector_mask(-1, -1);
 #endif
 #ifdef __CCE_AICORE__
+  const Batch batch = sequence_batch(p, first_sequence);
   if constexpr (Stage == 0)
     if (!p.inverse_cache) inverse_indices();
   // Keep each shared-key group together for dQ/dK reduction. Split value
   // heads only at cache-line boundaries for the interleaved scalar outputs.
-  int group = p.heads / p.key_heads, fold = output_head_group(p);
+  int group = p.head_group, fold = p.output_group;
   int groups = p.heads / fold;
-  bool accurate =
-      p.input[0].dtype == 2 || p.input[1].dtype == 2 || p.input[2].dtype == 2;
-  bool emit = fused_output(p);
-  bool share = Stage == 0 && shared_grams(p);
-  int tasks = share                                  ? p.chunks * p.key_heads
-              : Stage == 1                           ? p.sequences * p.heads
-              : (Stage == 3 || (Stage == 2 && emit)) ? p.chunks * groups
-                                                     : p.chunks * p.heads;
+  bool accurate = p.accurate;
+  bool emit = p.fused_output;
+  bool share = Stage == 0 && batch.shared_grams;
+  int width = share                                  ? p.key_heads
+              : (Stage == 3 || (Stage == 2 && emit)) ? groups
+                                                     : p.heads;
+  int tasks = (Stage == 1 ? batch.sequences : batch.chunks) * width;
+  SequenceCursor cursor;
   for (int task = get_block_idx(); task < tasks; task += get_block_num()) {
-    int head = task % p.heads, index = task / p.heads;
+    int head = task % width, index = task / width;
+    TokenRange tokens{};
+    if constexpr (Stage != 1) tokens = cursor.locate(batch, index);
     if constexpr (Stage == 0) {
       if (!accurate) {
         int count = share ? group : 1;
-        head = share ? (task % p.key_heads) * group : head;
-        index = share ? task / p.key_heads : index;
+        if (share) head *= group;
         for (int j = 0; j < count; ++j) {
-          pipelined_prepare(p, index, head + j, head);
+          pipelined_prepare(p, batch, index, head + j, head, tokens);
         }
       } else
-        accurate_prepare(p, index, head);
+        accurate_prepare(p, batch, index, head, tokens);
     }
     if constexpr (Stage == 1) {
       if (accurate)
-        accurate_states(p, index, head);
+        accurate_states(p, batch, index, head);
       else
-        pipelined_states(p, index, head);
+        pipelined_states(p, batch, index, head);
     }
     if constexpr (Stage == 2) {
       if (accurate) {
-        accurate_output_gradient(p, index, head);
-        accurate_wy_gradient(p, index, head);
+        accurate_output_gradient(p, batch, index, head);
+        accurate_wy_gradient(p, batch, index, head, tokens);
       } else if (emit) {
-        int c = task / groups, first_head = (task % groups) * fold;
+        int first_head = head * fold;
         for (int h = first_head; h < first_head + fold; ++h) {
-          pipelined_gradients<true>(p, c, h);
+          pipelined_gradients<true>(p, batch, index, h, tokens);
         }
-        scatter_gates(p, c, first_head, fold, false);
+        scatter_gates(p, batch, index, first_head, fold, false, tokens);
         join();
       } else
-        pipelined_gradients(p, index, head);
+        pipelined_gradients(p, batch, index, head, tokens);
     }
     if constexpr (Stage == 3)
-      finish(p, task / groups, (task % groups) * fold, fold, accurate);
+      finish(p, batch, index, head * fold, fold, accurate, tokens);
   }
 #endif
 }
 
-extern "C" void pto_launch_gdn_mega_bwd(void* stream, Plan p) {
-  gdn_bwd_stage<0><<<BlockCount, nullptr, stream>>>(p);
-  gdn_bwd_stage<1><<<BlockCount, nullptr, stream>>>(p);
-  gdn_bwd_stage<2><<<BlockCount, nullptr, stream>>>(p);
-  if (!fused_output(p)) gdn_bwd_stage<3><<<BlockCount, nullptr, stream>>>(p);
+extern "C" void pto_launch_gdn_mega_bwd(void* stream, KernelArgs p,
+                                        const int64_t* cpu_bounds) {
+  p.head_group = p.heads / p.key_heads;
+  p.output_group = p.heads % 8 ? p.heads : 8;
+  while (p.output_group % p.head_group) p.output_group += 8;
+  p.accurate =
+      p.input[0].dtype == 2 || p.input[1].dtype == 2 || p.input[2].dtype == 2;
+  p.fused_output =
+      !p.accurate && p.capacity * (p.heads / p.output_group) >= 4 * BlockCount;
+  if (p.cu_seqlens) gdn_bwd_metadata<<<1, nullptr, stream>>>(p);
+  int chunk_base = 0;
+  for (int64_t first = 0; first < p.total_sequences; first += MaxSequences) {
+    if (cpu_bounds && p.metadata) {
+      SequenceMetadata data{};
+      data.chunk_base = chunk_base;
+      int count = std::min<int64_t>(MaxSequences, p.total_sequences - first);
+      for (int s = 0; s < count; ++s) {
+        data.start[s] = cpu_bounds[first + s];
+        data.length[s] = cpu_bounds[first + s + 1] - cpu_bounds[first + s];
+        data.offset[s + 1] =
+            data.offset[s] + (int64_t(data.length[s]) + 127) / 128;
+      }
+      chunk_base += data.offset[count];
+      gdn_bwd_upload_metadata<<<1, nullptr, stream>>>(
+          p.metadata + first / MaxSequences * MetadataWords * sizeof(int32_t),
+          data, count);
+    }
+    gdn_bwd_stage<0><<<BlockCount, nullptr, stream>>>(p, first);
+    gdn_bwd_stage<1><<<BlockCount, nullptr, stream>>>(p, first);
+    gdn_bwd_stage<2><<<BlockCount, nullptr, stream>>>(p, first);
+    if (!p.fused_output)
+      gdn_bwd_stage<3><<<BlockCount, nullptr, stream>>>(p, first);
+  }
 }
