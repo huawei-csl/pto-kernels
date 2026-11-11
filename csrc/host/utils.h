@@ -104,7 +104,9 @@ inline at::Tensor CopyScalarToDevice(const c10::Scalar& cpu_scalar,
  * @return void* Pointer of input tensor.
  */
 inline void* ConvertType(const at::Tensor& tensor) {
-  return const_cast<void*>(tensor.storage().data());
+  // Contiguous views may start inside their storage. The kernel must receive
+  // the first element of the tensor, not the base of its backing allocation.
+  return tensor.data_ptr();
 }
 
 /**
