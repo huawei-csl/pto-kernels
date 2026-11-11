@@ -7,39 +7,6 @@ using namespace pto;
 // supplies only the common PTO types and architecture synchronization utilities.
 namespace {
 
-#ifdef __CCE_AICORE__
-
-// Preserve the producer pipe on A2/A3. A5 intra-block events require
-// explicit completion ordering and a flag for each Vec sub-block.
-template <pipe_t Pipe>
-AICORE inline void block_fwd_signal(uint16_t flag) {
-#if __CCE_AICORE__ == 220
-  kernel_utils::SetCrossFlag<Pipe>(flag);
-#else
-  pipe_barrier(PIPE_ALL);
-#if defined(__DAV_CUBE__)
-  kernel_utils::SignalBothVecOnA5<PIPE_FIX>(flag);
-#elif defined(__DAV_VEC__)
-  set_intra_block(Pipe, flag);
-#endif
-#endif
-}
-
-AICORE inline void block_fwd_wait(uint16_t flag) {
-#if __CCE_AICORE__ == 220
-  wait_flag_dev(flag);
-#else
-#if defined(__DAV_CUBE__)
-  kernel_utils::WaitBothVecOnA5<PIPE_MTE2>(flag);
-#elif defined(__DAV_VEC__)
-  wait_intra_block(PIPE_MTE3, flag);
-#endif
-  pipe_barrier(PIPE_ALL);
-#endif
-}
-
-#endif
-
 // Four independent 16x16 unit-triangular solves share one vector instruction
 // stream. The gather repeats each block's elimination coefficient over that
 // block's columns. This is forward substitution, never an inverse power series.
@@ -145,21 +112,17 @@ AICORE inline void block_fwd_join_level(Mat& inverse, __gm__ float* scratch,
     TASSIGN(acc, group * B * B * sizeof(float));
     TEXTRACT(left, inverse, offset + B, offset + B);
     TEXTRACT(right, inverse, offset + B, offset);
-    set_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
-    wait_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+    kernel_utils::SetWaitFlag<PIPE_MTE1, PIPE_M>(EVENT_ID0);
     TMATMUL(acc, left, right);
-    set_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
-    wait_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
+    kernel_utils::SetWaitFlag<PIPE_M, PIPE_FIX>(EVENT_ID0);
     GlobalTensor<float, Shape<1, 1, 1, B, B>, pto::Stride<1, 1, 1, B, 1>> out(
         scratch + group * B * B);
     TSTORE(out, acc);
   }
-  set_flag(PIPE_FIX, PIPE_MTE2, EVENT_ID0);
-  wait_flag(PIPE_FIX, PIPE_MTE2, EVENT_ID0);
+  kernel_utils::SetWaitFlag<PIPE_FIX, PIPE_MTE2>(EVENT_ID0);
   if constexpr (!FirstOnly) {
     TLOAD(temporary, gm);
-    set_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID0);
-    wait_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID0);
+    kernel_utils::SetWaitFlag<PIPE_MTE2, PIPE_MTE1>(EVENT_ID0);
     for (int group = 0; group < Groups; ++group) {
       int offset = group * 2 * B;
       TASSIGN(left, group * B * B * sizeof(float));
@@ -167,11 +130,9 @@ AICORE inline void block_fwd_join_level(Mat& inverse, __gm__ float* scratch,
       TASSIGN(acc, group * B * B * sizeof(float));
       TEXTRACT(left, temporary, group * B, 0);
       TEXTRACT(right, inverse, offset, offset);
-      set_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
-      wait_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+      kernel_utils::SetWaitFlag<PIPE_MTE1, PIPE_M>(EVENT_ID0);
       TMATMUL(acc, left, right);
-      set_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
-      wait_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
+      kernel_utils::SetWaitFlag<PIPE_M, PIPE_FIX>(EVENT_ID0);
       GlobalTensor<float, Shape<1, 1, 1, B, B>, pto::Stride<1, 1, 1, B, 1>> out(
           scratch + group * B * B);
       TSTORE(out, acc);
@@ -183,8 +144,7 @@ AICORE inline void block_fwd_join_level(Mat& inverse, __gm__ float* scratch,
         TSTORE(result, acc);
       }
     }
-    set_flag(PIPE_FIX, PIPE_MTE2, EVENT_ID0);
-    wait_flag(PIPE_FIX, PIPE_MTE2, EVENT_ID0);
+    kernel_utils::SetWaitFlag<PIPE_FIX, PIPE_MTE2>(EVENT_ID0);
   }
   for (int group = 0; group < Groups; ++group) {
     int offset = group * 2 * B;
@@ -278,11 +238,23 @@ __global__ AICORE void tri_inv_block_fwd(
       pipe_barrier(PIPE_ALL);
       TSTORE(dst, packed);
     }
-    block_fwd_signal<PIPE_MTE3>(0);
-    block_fwd_wait(1);
+#if __CCE_AICORE__ == 220
+    kernel_utils::SetCrossFlag<PIPE_MTE3>(0);
+    wait_flag_dev(1);
+#else
+    pipe_barrier(PIPE_ALL);
+    set_intra_block(PIPE_MTE3, 0);
+    wait_intra_block(PIPE_MTE3, 1);
+    pipe_barrier(PIPE_ALL);
+#endif
 #endif
 #if defined(__DAV_CUBE__)
-    block_fwd_wait(0);
+#if __CCE_AICORE__ == 220
+    wait_flag_dev(0);
+#else
+    kernel_utils::WaitBothVecOnA5<PIPE_MTE2>(0);
+    pipe_barrier(PIPE_ALL);
+#endif
     Tile<TileType::Mat, float, C, C, BLayout::ColMajor, C, C,
          SLayout::RowMajor, 512> inverse;
     TASSIGN(inverse, 64 * 1024);
@@ -294,7 +266,12 @@ __global__ AICORE void tri_inv_block_fwd(
     block_fwd_join_level<32, C>(inverse, scratch, output + offset, stride);
     // Unlike the fused recurrence, return the fully materialized inverse.
     block_fwd_join_level<64, C>(inverse, scratch, output + offset, stride);
-    block_fwd_signal<PIPE_FIX>(1);
+#if __CCE_AICORE__ == 220
+    kernel_utils::SetCrossFlag<PIPE_FIX>(1);
+#else
+    pipe_barrier(PIPE_ALL);
+    kernel_utils::SignalBothVecOnA5<PIPE_FIX>(1);
+#endif
 #endif
   }
   pipe_barrier(PIPE_ALL);
