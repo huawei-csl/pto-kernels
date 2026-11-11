@@ -176,6 +176,7 @@ set(PTO_KERNEL_SOURCES
     csrc/kernel/kernel_gdn_chunk_o.cpp
     csrc/kernel/kernel_gdn_wy_fast.cpp
     csrc/kernel/gdn_mega/kernel_gdn_mega.cpp
+    csrc/kernel/gdn_mega_bwd/kernel.cpp
     csrc/kernel/kernel_scan_ul1.cpp
     csrc/kernel/kernel_simple_matmul.cpp
     csrc/kernel/kernel_cube_reduce.cpp

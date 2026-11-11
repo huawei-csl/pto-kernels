@@ -7,6 +7,7 @@ https://github.com/huawei-csl/pto-kernels/
 for the full License text.
 */
 #include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
 #include <torch/extension.h>
 
 #include "torch_abs.h"
@@ -18,6 +19,7 @@ for the full License text.
 #include "torch_gdn_chunk_h.h"
 #include "torch_gdn_chunk_o.h"
 #include "torch_gdn_mega.h"
+#include "torch_gdn_mega_bwd.h"
 #include "torch_gdn_scaled_dot_kkt.h"
 #include "torch_gdn_wy_fast.h"
 #include "torch_kda_chunk_h.h"
@@ -95,7 +97,14 @@ PYBIND11_MODULE(pto_kernels_ops, m) {
         py::arg("o_workspace_qk"), py::arg("o_workspace_qs"),
         py::arg("o_workspace_gated"), py::arg("block_dim"),
         py::arg("batch_size"), py::arg("seq_len"), py::arg("total_tokens"),
-        py::arg("num_matrices"));
+        py::arg("num_matrices"), py::arg("inverse_cache") = py::none());
+  m.def("pto_gdn_mega_bwd", &pto_isa_ops::run_gdn_mega_bwd, py::arg("q"),
+        py::arg("k"), py::arg("v"), py::arg("g"), py::arg("beta"),
+        py::arg("dout"), py::arg("initial_state") = py::none(),
+        py::arg("dfinal_state") = py::none(),
+        py::arg("cu_seqlens") = py::none(), py::kw_only(),
+        py::arg("scale") = 1.0, py::arg("inverse_cache") = py::none(),
+        py::arg("gate_cache") = py::none());
   m.def("pto_scan_ul1", &pto_isa_ops::run_scan_ul1);
   m.def("pto_simple_matmul", &pto_isa_ops::run_simple_matmul);
   m.def("pto_cube_reduce", &pto_isa_ops::run_cube_reduce, py::arg("x"));
