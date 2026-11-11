@@ -150,8 +150,8 @@ if __name__ == "__main__":
 
         block_dim = NUM_AI_CORES
 
-        # Per-core workspace (fp32): WS_Q, WS_K, WS_V, WS_S, WS_QK, WS_QS, WS_QKV.
-        ws_per_core = 5 * CHUNK * D + D * D + CHUNK * CHUNK
+        # Per-core workspace (fp32): WS_Q, WS_V, WS_S, WS_QK, WS_QS, WS_QKV.
+        ws_per_core = 4 * CHUNK * D + D * D + CHUNK * CHUNK
         workspace = torch.zeros(
             block_dim * ws_per_core, device=DEVICE, dtype=torch.float32
         )
