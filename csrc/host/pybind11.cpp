@@ -103,7 +103,8 @@ PYBIND11_MODULE(pto_kernels_ops, m) {
   m.def("pto_swiglu", &pto_isa_ops::run_swiglu, py::arg("x"),
         py::arg("dim") = -1);
   m.def("pto_tri_inv_block_fwd", &pto_isa_ops::run_tri_inv_block_fwd,
-        py::arg("x"), py::arg("is_bsnd_format") = false);
+        py::arg("x"), py::arg("is_bsnd_format") = false,
+        py::arg("output_fp32") = false);
   m.def("pto_tri_inv_trick", &pto_isa_ops::run_tri_inv_trick);
   m.def("pto_tri_inv_rec_unroll", &pto_isa_ops::run_tri_inv_rec_unroll,
         py::arg("M"), py::arg("cu_seqlens") = at::zeros({1}),
