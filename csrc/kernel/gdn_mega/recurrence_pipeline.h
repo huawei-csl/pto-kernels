@@ -31,11 +31,14 @@ AICORE inline void mega_input_pair_product(Acc& result, A& a, B& b) {
   TEXTRACT(left, a, 0, 0);
   TMOV(high, b.high);
   TMOV(low, b.low);
-  pipe_barrier(PIPE_ALL);
+  set_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+  wait_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
   TMATMUL(result, left, low);
   pipe_barrier(PIPE_M);
   TMATMUL_ACC(result, result, left, high);
-  pipe_barrier(PIPE_ALL);
+  // The caller may queue independent L1 loads while FIX awaits this result.
+  set_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
+  wait_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
 #endif
 }
 
@@ -142,16 +145,23 @@ AICORE inline void mega_combined_residual_products(Acc& result,
   TASSIGN(bottom, C * (C / 2) * sizeof(float));
   TASSIGN(right, 0);
   for (int part = 0; part < 2; ++part) {
+    if (part) {
+      // Retire the first product's L0A/B readers before overwriting them.
+      set_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);
+      wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);
+    }
     TEXTRACT(top, attention, 0, part * (C / 2));
     TEXTRACT(bottom, gamma, 0, part * (C / 2));
     TEXTRACT(right, residual, part * (C / 2), 0);
-    pipe_barrier(PIPE_ALL);
+    set_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+    wait_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
     if (part == 0)
       TMATMUL(result, left, right);
     else
       TMATMUL_ACC(result, result, left, right);
-    pipe_barrier(PIPE_ALL);
   }
+  set_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
+  wait_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
 #endif
 }
 
@@ -197,8 +207,11 @@ AICORE inline void mega_factored_solve(Mat& inverse, Rhs& rhs,
   set_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
   wait_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
   TMATMUL_ACC(acc1, acc1, left0, right0);
-  pipe_barrier(PIPE_ALL);
+  set_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
+  wait_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
   TSTORE(bottom, acc1);
-  pipe_barrier(PIPE_ALL);
+  // The caller reloads both solved panels through MTE2.
+  set_flag(PIPE_FIX, PIPE_MTE2, EVENT_ID0);
+  wait_flag(PIPE_FIX, PIPE_MTE2, EVENT_ID0);
 #endif
 }
