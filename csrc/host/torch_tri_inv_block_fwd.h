@@ -14,9 +14,13 @@ extern "C" void pto_launch_tri_inv_block_fwd_fp32_out(
     uint32_t tiles, uint32_t heads);
 
 namespace pto_isa_ops {
-// Native mega-GDN shape and precision. Each tile represents I + tril(x, -1).
-// BSND sequences must contain complete 128-row chunks; no varlen support.
-// output_fp32 stores FP32 results directly, avoiding final FP16 rounding.
+/**
+ * @brief Invert unit lower-triangular 128x128 matrices.
+ * @param x Contiguous FP16 input with an implicit unit diagonal.
+ * @param is_bsnd_format Use BSND with complete 128-row chunks.
+ * @param output_fp32 Return FP32 instead of FP16.
+ * @return Inverses with the input shape.
+ */
 at::Tensor run_tri_inv_block_fwd(const at::Tensor& x,
                                  bool is_bsnd_format = false,
                                  bool output_fp32 = false) {
