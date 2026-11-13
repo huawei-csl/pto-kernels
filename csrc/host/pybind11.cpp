@@ -28,6 +28,7 @@ for the full License text.
 #include "torch_scan_ul1.h"
 #include "torch_simple_matmul.h"
 #include "torch_swiglu.h"
+#include "torch_tri_inv_block_fwd.h"
 #include "torch_tri_inv_col_sweep.h"
 #include "torch_tri_inv_ns.h"
 #include "torch_tri_inv_rank_one.h"
@@ -101,6 +102,9 @@ PYBIND11_MODULE(pto_kernels_ops, m) {
   m.def("pto_cube_reduce", &pto_isa_ops::run_cube_reduce, py::arg("x"));
   m.def("pto_swiglu", &pto_isa_ops::run_swiglu, py::arg("x"),
         py::arg("dim") = -1);
+  m.def("pto_tri_inv_block_fwd", &pto_isa_ops::run_tri_inv_block_fwd,
+        py::arg("x"), py::arg("is_bsnd_format") = false,
+        py::arg("output_fp32") = false);
   m.def("pto_tri_inv_trick", &pto_isa_ops::run_tri_inv_trick);
   m.def("pto_tri_inv_rec_unroll", &pto_isa_ops::run_tri_inv_rec_unroll,
         py::arg("M"), py::arg("cu_seqlens") = at::zeros({1}),
