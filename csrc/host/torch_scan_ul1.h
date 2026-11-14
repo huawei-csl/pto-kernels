@@ -9,8 +9,10 @@ for the full License text.
 #pragma once
 
 #include <ATen/ATen.h>
+#include <c10/core/DeviceGuard.h>
 #include <torch/library.h>
 
+#include "torch_npu/csrc/core/npu/NPUFormat.h"
 #include "utils.h"
 
 extern "C" {
@@ -28,7 +30,8 @@ namespace pto_isa_ops {
 /**
  * @brief Single Cube scan
  *
- * @param [in] x Input vector
+ * @param [in] x Contiguous base-format input vector with resolved negative
+ *               bit and 256, 1024, 4096, 9216, or 16384 elements.
  * @return at::Tensor vector result of the scan operation.
  */
 at::Tensor run_scan_ul1(const at::Tensor& x) {
@@ -41,21 +44,33 @@ at::Tensor run_scan_ul1(const at::Tensor& x) {
   TORCH_CHECK(dtype == at::kHalf || dtype == at::kFloat,
               "scan_ul1: dtype must be fp16 or float32, got ", dtype);
 
-  const uint32_t scan_size = static_cast<uint32_t>(x.size(-1));
   TORCH_CHECK(x.dim() == 1, "scan_ul1: only 1D tensors are supported, got ",
               x.dim(), "D");
+  TORCH_CHECK(x.is_contiguous(), "scan_ul1: input must be contiguous");
+  TORCH_CHECK(
+      !x.is_neg(),
+      "scan_ul1: resolve negative views with resolve_neg() before calling");
+
+  const auto format = at_npu::native::get_npu_format(x);
+  TORCH_CHECK(format == ACL_FORMAT_ND || format == ACL_FORMAT_NCHW ||
+                  format == ACL_FORMAT_NHWC || format == ACL_FORMAT_NCDHW,
+              "scan_ul1: input must use a base NPU format; convert with "
+              "torch_npu.npu_format_cast(x, 2)");
+
+  const int64_t scan_size = x.numel();
+  const uint32_t matrix_size = sqrt(scan_size);
+  TORCH_CHECK(
+      (matrix_size == 16 || matrix_size == 32 || matrix_size == 64 ||
+       matrix_size == 96 || matrix_size == 128) &&
+          matrix_size * matrix_size == scan_size,
+      "scan_ul1: input size must be 256, 1024, 4096, 9216, or 16384, got ",
+      scan_size);
 
   constexpr uint32_t block_dim = 1;
+  const c10::DeviceGuard device_guard(device);
 
   const at::Tensor scan = at::zeros(
       {scan_size}, at::TensorOptions().dtype(dtype_out).device(device));
-
-  const uint32_t matrix_size = ceil(sqrt(scan_size));
-
-  // FIXME: pad to support other sizes
-  TORCH_CHECK(matrix_size % 16 == 0,
-              "scan_ul1: matrix size must be a multiple of 16, got ",
-              matrix_size);
 
   // FIXME: use vector or scalar cores to generate O, U and L directly on the
   // device
