@@ -9,6 +9,7 @@ for the full License text.
 #pragma once
 
 #include <ATen/ATen.h>
+#include <c10/core/DeviceGuard.h>
 #include <torch/library.h>
 
 #include "torch_npu/csrc/core/npu/NPUFormat.h"
@@ -66,6 +67,7 @@ at::Tensor run_scan_ul1(const at::Tensor& x) {
       scan_size);
 
   constexpr uint32_t block_dim = 1;
+  const c10::DeviceGuard device_guard(device);
 
   const at::Tensor scan = at::zeros(
       {scan_size}, at::TensorOptions().dtype(dtype_out).device(device));

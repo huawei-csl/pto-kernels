@@ -8,6 +8,7 @@
 
 """Run scan input rejection and recovery through the installed NPU operator."""
 
+import pytest
 import torch
 import torch_npu
 from pto_kernels import pto_scan_ul1
@@ -100,3 +101,33 @@ def test_scan_ul1_input_contract(npu_device):
             completed += 1
 
     print(f"rejected={rejected}, completed={completed}")
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.float32])
+def test_scan_uses_input_device(npu_device, dtype):
+    if torch.npu.device_count() < 2:
+        pytest.skip("requires two NPU devices")
+    original_device = torch.npu.current_device()
+    try:
+        for caller, target in ((0, 1), (1, 0)):
+            torch.npu.set_device(caller)
+            source = torch.ones(256, dtype=dtype, device=f"npu:{target}")
+            try:
+                pto_scan_ul1(source[:-1])
+            except RuntimeError as error:
+                if "input size" not in str(error):
+                    raise
+            else:
+                raise RuntimeError("scan accepted an unsupported size")
+            if torch.npu.current_device() != caller:
+                raise RuntimeError("scan changed the caller device after rejection")
+
+            output = pto_scan_ul1(source)
+            torch.npu.synchronize(target)
+            if torch.npu.current_device() != caller:
+                raise RuntimeError("scan did not restore the caller device")
+            expected = torch.arange(1, 257, dtype=torch.float32)
+            if output.device.index != target or not torch.equal(output.cpu(), expected):
+                raise RuntimeError("scan failed on a non-current input device")
+    finally:
+        torch.npu.set_device(original_device)
