@@ -163,7 +163,6 @@ message("* TORCH_NPU_PATH           : ${TORCH_NPU_PATH}")
 message("* TORCH_LIBRARIES          : ${TORCH_LIBRARIES}")
 message("***********************************************************")
 
-
 set(PTO_KERNEL_SOURCES
     csrc/kernel/kernel_tri_inv_rank_one.cpp
     csrc/kernel/kernel_tri_inv_col_sweep.cpp
