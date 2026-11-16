@@ -4,7 +4,7 @@ Requires the default GDN_H=16, GDN_C=128 build and an Ascend NPU.
 """
 
 import torch
-import torch_npu  # noqa: F401
+import torch_npu  # noqa: F401  # pylint: disable=unused-import
 
 from pto_kernels import pto_abs, pto_gdn_chunk_cumsum, pto_swiglu
 
