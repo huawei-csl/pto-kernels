@@ -57,8 +57,13 @@ at::Tensor run_cube_reduce(const at::Tensor& x) {
   const c10::DeviceGuard device_guard(x.device());
   const auto output_options =
       x.options().dtype(dtype == at::kChar ? at::kInt : at::kFloat);
-  const at::Tensor output = at::zeros({1}, output_options);
-  if (x.numel() == 0) return output;
+  // An empty input has no kernel launch to produce its sum, so that one case
+  // is zeroed on the host. Everywhere else the Vector stage writes this
+  // element unconditionally, so it does not need initializing -- and zeroing
+  // it would cost an extra kernel launch, which is a third of the floor on
+  // small inputs.
+  if (x.numel() == 0) return at::zeros({1}, output_options);
+  const at::Tensor output = at::empty({1}, output_options);
 
   const int64_t size =
       x.numel() >= 128 * 128 ? 128 : (x.numel() >= 64 * 64 ? 64 : 32);
