@@ -8,7 +8,9 @@
 
 """Exercise both operands through the installed matrix-multiplication operator."""
 
+import pytest
 import torch
+from torch import _neg_view  # Construct lazy views without materializing their storage.
 import torch_npu
 from pto_kernels import pto_simple_matmul
 
@@ -45,8 +47,8 @@ def test_simple_matmul_operand_contract(npu_device):
             check_matmul(a, b, expected)
             check_matmul(a, a, (a_cpu.double() @ a_cpu.double()).float())
             if size == 0:
-                check_matmul(torch._neg_view(a), b, expected)
-                check_matmul(a, torch._neg_view(b), expected)
+                check_matmul(_neg_view(a), b, expected)
+                check_matmul(a, _neg_view(b), expected)
 
         a_cpu = (torch.arange(256).remainder(7) - 3).to(dtype).reshape(16, 16)
         b_cpu = ((torch.arange(256) * 3).remainder(11) - 5).to(dtype).reshape(16, 16)
@@ -58,7 +60,7 @@ def test_simple_matmul_operand_contract(npu_device):
         a.copy_(a_cpu)
         b.copy_(b_cpu)
         check_matmul(a, b, expected)
-        negative_a, negative_b = torch._neg_view(a), torch._neg_view(b)
+        negative_a, negative_b = _neg_view(a), _neg_view(b)
         if not negative_a.is_neg() or not negative_b.is_neg():
             raise RuntimeError("failed to create lazy negative operand views")
         check_matmul(negative_a, negative_b, expected)
@@ -96,13 +98,8 @@ def test_simple_matmul_operand_contract(npu_device):
             (a, negative_b, "resolve_neg"),
         ]
         for left, right, diagnostic in invalid:
-            try:
+            with pytest.raises(RuntimeError, match=f"simple_matmul:.*{diagnostic}"):
                 pto_simple_matmul(left, right)
-            except RuntimeError as error:
-                if "simple_matmul:" not in str(error) or diagnostic not in str(error):
-                    raise
-            else:
-                raise RuntimeError(f"matmul accepted invalid operands for {diagnostic}")
             check_matmul(a, b, expected)
         check_matmul(negative_a.resolve_neg(), b, -expected)
         check_matmul(a, negative_b.resolve_neg(), -expected)
@@ -127,13 +124,8 @@ def test_simple_matmul_operand_contract(npu_device):
         finally:
             torch.npu.config.allow_internal_format = allow_internal_format
         for operands in ((blocked_left, right), (left, blocked_right)):
-            try:
+            with pytest.raises(RuntimeError, match="base NPU formats"):
                 pto_simple_matmul(*operands)
-            except RuntimeError as error:
-                if "base NPU formats" not in str(error):
-                    raise
-            else:
-                raise RuntimeError("matmul accepted an internal-format operand")
             check_matmul(left, right, product)
         check_matmul(
             torch_npu.npu_format_cast(blocked_left, 2),
@@ -151,13 +143,6 @@ def test_simple_matmul_operand_contract(npu_device):
                     (a.to(f"npu:{other_device}"), b),
                     (a, b.to(f"npu:{other_device}")),
                 ):
-                    try:
+                    with pytest.raises(RuntimeError, match="same NPU device"):
                         pto_simple_matmul(*operands)
-                    except RuntimeError as error:
-                        if "same NPU device" not in str(error):
-                            raise
-                    else:
-                        raise RuntimeError(
-                            "matmul accepted operands on different devices"
-                        )
                     check_matmul(a, b, expected)
