@@ -72,7 +72,7 @@ at::Tensor run_cube_norm(const at::Tensor& x) {
   const int64_t size =
       is_int8
           ? (x.numel() >= 128 * 128 ? 64 : 32)
-          : (x.numel() >= 128 * 128 ? 64 : (x.numel() >= 64 * 64 ? 32 : 16));
+          : (x.numel() >= 128 * 128 ? 128 : (x.numel() >= 64 * 64 ? 32 : 16));
   // Every block adds its tile into one shared int32 workspace, so each of its
   // entries carries the whole input's contribution. A diagonal entry is the
   // sum of the squares of one column of the input laid out as S columns:

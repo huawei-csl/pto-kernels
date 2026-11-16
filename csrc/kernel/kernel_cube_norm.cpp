@@ -15,6 +15,45 @@ using namespace pto;
 
 namespace {
 
+// The diagonal of a row-major S x S tile sits at {0, S + 1, 2S + 2, ...}:
+// one row and one column on at every step. The Vector stage gathers at
+// those offsets, and reading the progression from a constant table costs it
+// one DMA instead of the TCI + TMULS it would otherwise compute per launch.
+
+// clang-format off
+
+const static __gm__ int32_t INDICES_16[16] = {
+    0, 17, 34, 51, 68, 85, 102, 119, 136, 153, 170, 187, 204, 221, 238, 255};
+
+const static __gm__ int32_t INDICES_32[32] = {
+    0, 33, 66, 99, 132, 165, 198, 231, 264, 297, 330, 363, 396, 429, 462,
+    495, 528, 561, 594, 627, 660, 693, 726, 759, 792, 825, 858, 891, 924,
+    957, 990, 1023};
+
+const static __gm__ int32_t INDICES_64[64] = {
+    0, 65, 130, 195, 260, 325, 390, 455, 520, 585, 650, 715, 780, 845, 910,
+    975, 1040, 1105, 1170, 1235, 1300, 1365, 1430, 1495, 1560, 1625, 1690,
+    1755, 1820, 1885, 1950, 2015, 2080, 2145, 2210, 2275, 2340, 2405, 2470,
+    2535, 2600, 2665, 2730, 2795, 2860, 2925, 2990, 3055, 3120, 3185, 3250,
+    3315, 3380, 3445, 3510, 3575, 3640, 3705, 3770, 3835, 3900, 3965, 4030,
+    4095};
+
+const static __gm__ int32_t INDICES_128[128] = {
+    0, 129, 258, 387, 516, 645, 774, 903, 1032, 1161, 1290, 1419, 1548,
+    1677, 1806, 1935, 2064, 2193, 2322, 2451, 2580, 2709, 2838, 2967, 3096,
+    3225, 3354, 3483, 3612, 3741, 3870, 3999, 4128, 4257, 4386, 4515, 4644,
+    4773, 4902, 5031, 5160, 5289, 5418, 5547, 5676, 5805, 5934, 6063, 6192,
+    6321, 6450, 6579, 6708, 6837, 6966, 7095, 7224, 7353, 7482, 7611, 7740,
+    7869, 7998, 8127, 8256, 8385, 8514, 8643, 8772, 8901, 9030, 9159, 9288,
+    9417, 9546, 9675, 9804, 9933, 10062, 10191, 10320, 10449, 10578, 10707,
+    10836, 10965, 11094, 11223, 11352, 11481, 11610, 11739, 11868, 11997,
+    12126, 12255, 12384, 12513, 12642, 12771, 12900, 13029, 13158, 13287,
+    13416, 13545, 13674, 13803, 13932, 14061, 14190, 14319, 14448, 14577,
+    14706, 14835, 14964, 15093, 15222, 15351, 15480, 15609, 15738, 15867,
+    15996, 16125, 16254, 16383};
+
+// clang-format on
+
 // Accumulator the Cube unit writes for a given input type: int8 operands
 // multiply into an int32 L0C, every other supported input into an fp32 one.
 template <typename InputT>
@@ -132,9 +171,10 @@ AICORE void CubeNorm(__gm__ InputT* input, __gm__ AccT* partials,
 // reads. The grid has already summed itself into the one workspace tile, so a
 // single AIV traces it and the work here does not depend on the block count.
 template <typename InputT, typename AccT, uint32_t S>
-AICORE void CompleteCubeNorm(__gm__ InputT* input, __gm__ AccT* partials,
-                             __gm__ float* output, uint64_t tail_offset,
-                             uint32_t tail_len) {
+AICORE void CompleteCubeNorm(__gm__ InputT* input,
+                             const __gm__ int32_t* diag_indices,
+                             __gm__ AccT* partials, __gm__ float* output,
+                             uint64_t tail_offset, uint32_t tail_len) {
   // int8 reaches the Vector unit in two places that fp16 and fp32 do not: the
   // Cube stage's accumulator is int32 rather than fp32, and the tail has no
   // direct conversion to fp32 and goes via half (exact over int8's range).
@@ -148,6 +188,9 @@ AICORE void CompleteCubeNorm(__gm__ InputT* input, __gm__ AccT* partials,
   using AccRowTile = Tile<TileType::Vec, AccT, 1, S>;
   using RowTile = Tile<TileType::Vec, float, 1, S>;
   using IndexTile = Tile<TileType::Vec, int32_t, 1, S>;
+  using IndexGlobal =
+      GlobalTensor<int32_t, TileShape2D<int32_t, 1, S, Layout::ND>,
+                   BaseShape2D<int32_t, 1, S, Layout::ND>>;
   using ScalarTile = Tile<TileType::Vec, float, 1, 8, BLayout::RowMajor, 1, 1>;
 
   // AccT is four bytes wide either way, so one layout serves both.
@@ -211,13 +254,12 @@ AICORE void CompleteCubeNorm(__gm__ InputT* input, __gm__ AccT* partials,
   set_vector_mask(-1, -1);
 
   // Element i of a row-major S x S tile's diagonal sits at i * S + i, one row
-  // and one column on from element i - 1, so gathering at that stride reads
-  // the diagonal. TCI lays down the progression {0, 1, ..., S - 1} and one
-  // scale turns it into {i * S + i}.
-  TCI<IndexTile, int32_t, /*descending=*/0>(indices, 0);
-  kernel_utils::SetWaitFlag<PIPE_S, PIPE_V>(0);
-  TMULS(indices, indices, static_cast<int32_t>(S + 1));
-  kernel_utils::PipeBarrierVec();
+  // and one column on from element i - 1, so gathering at those offsets reads
+  // the diagonal. The progression is a constant of S, so it is read from the
+  // table rather than laid down and scaled on the Vector unit each launch.
+  IndexGlobal index_source(const_cast<__gm__ int32_t*>(diag_indices));
+  TLOAD(indices, index_source);
+  kernel_utils::SetWaitFlag<PIPE_MTE2, PIPE_V>(0);
 
   // Every block's F has already been added into this one tile, so a single
   // gather of its diagonal and one row reduction give the squared norm of
@@ -322,21 +364,21 @@ AICORE void CompleteCubeNormDispatch(__gm__ InputT* input,
   switch (size) {
     case 16:
       if constexpr (kSupportsSize16<InputT>) {
-        CompleteCubeNorm<InputT, AccT, 16>(input, partials, output, tail_offset,
-                                           tail_len);
+        CompleteCubeNorm<InputT, AccT, 16>(input, INDICES_16, partials, output,
+                                           tail_offset, tail_len);
       }
       break;
     case 32:
-      CompleteCubeNorm<InputT, AccT, 32>(input, partials, output, tail_offset,
-                                         tail_len);
+      CompleteCubeNorm<InputT, AccT, 32>(input, INDICES_32, partials, output,
+                                         tail_offset, tail_len);
       break;
     case 64:
-      CompleteCubeNorm<InputT, AccT, 64>(input, partials, output, tail_offset,
-                                         tail_len);
+      CompleteCubeNorm<InputT, AccT, 64>(input, INDICES_64, partials, output,
+                                         tail_offset, tail_len);
       break;
     case 128:
-      CompleteCubeNorm<InputT, AccT, 128>(input, partials, output, tail_offset,
-                                          tail_len);
+      CompleteCubeNorm<InputT, AccT, 128>(input, INDICES_128, partials, output,
+                                          tail_offset, tail_len);
       break;
   }
 }
