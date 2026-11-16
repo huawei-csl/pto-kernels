@@ -75,8 +75,9 @@ at::Tensor run_cube_reduce(const at::Tensor& x) {
 
   // Materialize strides and preserve storage offsets.
   const at::Tensor input = x.contiguous().reshape({-1});
+  // The Cube stage leaves one row of column sums per block.
   const at::Tensor partials =
-      at::empty({static_cast<int64_t>(block_dim), size, 16}, output_options);
+      at::empty({static_cast<int64_t>(block_dim), size}, output_options);
   if (dtype == at::kHalf) {
     EXEC_KERNEL_CMD(cube_reduce_fp16, block_dim, input, partials, output,
                     num_tiles, blocks, tail_offset, tail_len, matrix_size);
