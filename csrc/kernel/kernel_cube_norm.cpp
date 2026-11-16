@@ -254,6 +254,9 @@ template <typename InputT>
 AICORE void CubeNormDispatch(__gm__ InputT* input, __gm__ float* partials,
                              uint32_t num_tiles, uint32_t size) {
   switch (size) {
+    case 16:
+      CubeNorm<InputT, 16>(input, partials, num_tiles);
+      break;
     case 32:
       CubeNorm<InputT, 32>(input, partials, num_tiles);
       break;
@@ -272,6 +275,10 @@ AICORE void CompleteCubeNormDispatch(__gm__ InputT* input,
                                      __gm__ float* output, uint64_t tail_offset,
                                      uint32_t tail_len, uint32_t size) {
   switch (size) {
+    case 16:
+      CompleteCubeNorm<InputT, 16>(input, partials, output, tail_offset,
+                                   tail_len);
+      break;
     case 32:
       CompleteCubeNorm<InputT, 32>(input, partials, output, tail_offset,
                                    tail_len);

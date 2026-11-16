@@ -58,7 +58,7 @@ at::Tensor run_cube_norm(const at::Tensor& x) {
   // The largest tile the input fills, so that short inputs still reach the
   // Cube unit instead of being left entirely to the Vector stage.
   const int64_t size =
-      x.numel() >= 128 * 128 ? 128 : (x.numel() >= 64 * 64 ? 64 : 32);
+      x.numel() >= 128 * 128 ? 64 : (x.numel() >= 64 * 64 ? 32 : 16);
   const int64_t tile_elems = size * size;
   const uint32_t num_tiles = static_cast<uint32_t>(x.numel() / tile_elems);
   const uint64_t tail_offset = static_cast<uint64_t>(num_tiles) * tile_elems;
