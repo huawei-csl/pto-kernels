@@ -9,6 +9,11 @@ Example (with the extension built and installed):
 The default sweep covers 1,024 through 99,000,000 elements for FP16 and FP32.
 Use --sizes to select specific lengths, for example --sizes 99000000.
 
+int8 is also supported, but two things about its row differ. Its lengths stop
+at the 8,388,544 elements the kernel accepts before its int32 accumulator
+could wrap, and torch has no int8 vector_norm, so the baseline it is compared
+against is vector_norm of an fp32 copy and includes that cast.
+
 Both entry points read every element once and return a scalar, so the
 interesting column is GB/s: the kernel does S times more multiply-accumulates
 than a plain reduction (an S x S matrix product per S x S tile), which the Cube
@@ -34,7 +39,11 @@ from utils import do_bench
 DTYPES = {
     "float16": torch.float16,
     "float32": torch.float32,
+    "int8": torch.int8,
 }
+
+# Longest int8 input run_cube_norm accepts; see its int32 accumulator bound.
+INT8_MAX_NUMEL = 64 * ((2**31 - 1) // (128 * 128))
 
 
 def positive_int(value):
@@ -60,13 +69,26 @@ def bench(args):
     for dtype_name in args.dtypes:
         dtype = DTYPES[dtype_name]
         for numel in args.sizes:
+            if dtype == torch.int8 and numel > INT8_MAX_NUMEL:
+                continue  # past what the int32 accumulator can hold
             # Generate on CPU so correctness has an independent reference, and
             # keep the scale small so fp16 squares stay far from overflow.
-            host = (0.1 * torch.randn(numel)).to(dtype)
+            if dtype == torch.int8:
+                host = torch.randint(-128, 128, (numel,), dtype=torch.int8)
+            else:
+                host = (0.1 * torch.randn(numel)).to(dtype)
             x = host.to(args.device)
 
-            def torch_norm(x=x):
-                return torch.linalg.vector_norm(x)
+            if dtype == torch.int8:
+                # torch has no int8 vector_norm, so the baseline is the norm
+                # of an fp32 copy and is timed with that cast included.
+                def torch_norm(x=x):
+                    return torch.linalg.vector_norm(x.to(torch.float32))
+
+            else:
+
+                def torch_norm(x=x):
+                    return torch.linalg.vector_norm(x)
 
             def cube_norm(x=x):
                 return pto_cube_norm(x)

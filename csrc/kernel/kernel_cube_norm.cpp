@@ -15,18 +15,24 @@ using namespace pto;
 
 namespace {
 
+// Accumulator the Cube unit writes for a given input type: int8 operands
+// multiply into an int32 L0C, every other supported input into an fp32 one.
+template <typename InputT>
+using CubeAccT = typename std::conditional<std::is_same<InputT, int8_t>::value,
+                                           int32_t, float>::type;
+
 // The L2 norm of x is the Frobenius norm of any matrix holding its elements,
 // and ||A||_F^2 = trace(A^T A). So each block reads the flat input as S x S
 // tiles A_0, A_1, ..., accumulates F = sum_i A_i^T @ A_i in L0C, and adds
 // that into one S x S tile shared by the whole grid; the Vector stage adds up
 // the diagonal of that single tile.
-template <typename InputT, uint32_t S>
-AICORE void CubeNorm(__gm__ InputT* input, __gm__ float* partials,
+template <typename InputT, typename AccT, uint32_t S>
+AICORE void CubeNorm(__gm__ InputT* input, __gm__ AccT* partials,
                      uint32_t num_tiles) {
   using AGlobal = GlobalTensor<InputT, TileShape2D<InputT, S, S, Layout::ND>,
                                BaseShape2D<InputT, S, S, Layout::ND>>;
-  using CGlobal = GlobalTensor<float, TileShape2D<float, S, S, Layout::ND>,
-                               BaseShape2D<float, S, S, Layout::ND>>;
+  using CGlobal = GlobalTensor<AccT, TileShape2D<AccT, S, S, Layout::ND>,
+                               BaseShape2D<AccT, S, S, Layout::ND>>;
   using AMat = Tile<TileType::Mat, InputT, S, S, BLayout::ColMajor, S, S,
                     SLayout::RowMajor, 512>;
   // The transposed operand costs nothing: an NZ tile of A_i and a ZN tile of
@@ -48,7 +54,7 @@ AICORE void CubeNorm(__gm__ InputT* input, __gm__ float* partials,
   AMatTransposed at_l1_pong;
   TileLeft<InputT, S, S> at_l0;
   TileRight<InputT, S, S> a_l0;
-  TileAcc<float, S, S> f_l0;
+  TileAcc<AccT, S, S> f_l0;
   constexpr uint32_t kL1TileBytes = S * S * sizeof(InputT);
   TASSIGN(a_l1_ping, 0);
   TASSIGN(a_l1_pong, kL1TileBytes);
@@ -118,33 +124,40 @@ AICORE void CubeNorm(__gm__ InputT* input, __gm__ float* partials,
   // a single tile to trace. The host hands over a zeroed tile, which is what
   // makes the first of these adds land on zeros.
   CGlobal c_global(partials);
-  TSTORE<TileAcc<float, S, S>, CGlobal, AtomicType::AtomicAdd>(c_global, f_l0);
+  TSTORE<TileAcc<AccT, S, S>, CGlobal, AtomicType::AtomicAdd>(c_global, f_l0);
   pipe_barrier(PIPE_ALL);
 }
 
 // A separate launch on the same stream orders all Fixpipe stores before these
 // reads. The grid has already summed itself into the one workspace tile, so a
 // single AIV traces it and the work here does not depend on the block count.
-template <typename InputT, uint32_t S>
-AICORE void CompleteCubeNorm(__gm__ InputT* input, __gm__ float* partials,
+template <typename InputT, typename AccT, uint32_t S>
+AICORE void CompleteCubeNorm(__gm__ InputT* input, __gm__ AccT* partials,
                              __gm__ float* output, uint64_t tail_offset,
                              uint32_t tail_len) {
-  using PartialGlobal =
-      GlobalTensor<float, TileShape2D<float, S, S, Layout::ND>,
-                   BaseShape2D<float, S, S, Layout::ND>>;
+  // int8 reaches the Vector unit in two places that fp16 and fp32 do not: the
+  // Cube stage's accumulator is int32 rather than fp32, and the tail has no
+  // direct conversion to fp32 and goes via half (exact over int8's range).
+  constexpr bool kIsF32 = std::is_same<InputT, float>::value;
+  constexpr bool kIsI8 = std::is_same<InputT, int8_t>::value;
+  using PartialGlobal = GlobalTensor<AccT, TileShape2D<AccT, S, S, Layout::ND>,
+                                     BaseShape2D<AccT, S, S, Layout::ND>>;
   using OutputGlobal =
       GlobalTensor<float, Shape<1, 1, 1, 1, 1>, pto::Stride<1, 1, 1, 1, 1>>;
-  using SquareTile = Tile<TileType::Vec, float, S, S>;
+  using SquareTile = Tile<TileType::Vec, AccT, S, S>;
+  using AccRowTile = Tile<TileType::Vec, AccT, 1, S>;
   using RowTile = Tile<TileType::Vec, float, 1, S>;
   using IndexTile = Tile<TileType::Vec, int32_t, 1, S>;
   using ScalarTile = Tile<TileType::Vec, float, 1, 8, BLayout::RowMajor, 1, 1>;
 
-  constexpr uint32_t kTileBytes = S * S * sizeof(float);
+  // AccT is four bytes wide either way, so one layout serves both.
+  constexpr uint32_t kTileBytes = S * S * sizeof(AccT);
   constexpr uint32_t kRowBytes = S * sizeof(float);
   constexpr uint32_t kScalarBytes = 8 * sizeof(float);
   constexpr uint32_t kRowsBase = kTileBytes;
   SquareTile partial;
-  RowTile diagonal;
+  AccRowTile diagonal;
+  RowTile diagonal_f32;
   RowTile row_tmp;
   IndexTile indices;
   IndexTile gather_tmp;
@@ -155,8 +168,9 @@ AICORE void CompleteCubeNorm(__gm__ InputT* input, __gm__ float* partials,
   TASSIGN(row_tmp, kRowsBase + kRowBytes);
   TASSIGN(indices, kRowsBase + 2 * kRowBytes);
   TASSIGN(gather_tmp, kRowsBase + 3 * kRowBytes);
-  TASSIGN(total, kRowsBase + 4 * kRowBytes);
-  TASSIGN(result, kRowsBase + 4 * kRowBytes + kScalarBytes);
+  TASSIGN(diagonal_f32, kRowsBase + 4 * kRowBytes);
+  TASSIGN(total, kRowsBase + 5 * kRowBytes);
+  TASSIGN(result, kRowsBase + 5 * kRowBytes + kScalarBytes);
 
   // The Cube stage consumes only whole S x S tiles, so the last `tail_len`
   // elements (fewer than one tile) are squared and summed here instead of
@@ -165,18 +179,21 @@ AICORE void CompleteCubeNorm(__gm__ InputT* input, __gm__ float* partials,
   // loaded and reduced as it is.
   //
   // The tail is widened to fp32 before squaring: that keeps its arithmetic as
-  // wide as the fp32 L0C accumulation the Cube stage does, and keeps squares
-  // of large fp16 inputs from overflowing.
-  constexpr bool kIsF32 = std::is_same<InputT, float>::value;
+  // wide as the L0C accumulation the Cube stage does, and keeps squares of
+  // large fp16 inputs from overflowing.
   constexpr uint32_t kChunk = 256;
-  constexpr uint32_t kTailBase = kRowsBase + 4 * kRowBytes + 2 * kScalarBytes;
+  constexpr uint32_t kTailBase = kRowsBase + 5 * kRowBytes + 2 * kScalarBytes;
   constexpr uint32_t kInBytes = kChunk * sizeof(InputT);
-  constexpr uint32_t kF32Offset = kIsF32 ? 0 : kInBytes;
+  // int8 is widened in two steps, so its intermediate half tile needs room.
+  constexpr uint32_t kMidBytes = kIsI8 ? kChunk * sizeof(half) : 0;
+  constexpr uint32_t kF32Offset = kIsF32 ? 0 : kInBytes + kMidBytes;
   constexpr uint32_t kF32Bytes = kChunk * sizeof(float);
   using TailGlobal = GlobalTensor<InputT, Shape<1, 1, 1, 1, DYNAMIC>,
                                   pto::Stride<1, 1, 1, 1, 1>>;
   using TailIn =
       Tile<TileType::Vec, InputT, 1, kChunk, BLayout::RowMajor, 1, DYNAMIC>;
+  using TailMid =
+      Tile<TileType::Vec, half, 1, kChunk, BLayout::RowMajor, 1, DYNAMIC>;
   using TailF32 =
       Tile<TileType::Vec, float, 1, kChunk, BLayout::RowMajor, 1, DYNAMIC>;
   Tile<TileType::Vec, float, 1, kChunk> tail_squares;
@@ -211,7 +228,16 @@ AICORE void CompleteCubeNorm(__gm__ InputT* input, __gm__ float* partials,
   kernel_utils::SetWaitFlag<PIPE_MTE2, PIPE_V>(0);
   TGATHER(diagonal, partial, indices, gather_tmp);
   kernel_utils::PipeBarrierVec();
-  TROWSUM(total, diagonal, row_tmp);
+  if constexpr (kIsI8) {
+    // The diagonal of an int8 F is a sum of squares, so it is exact in int32
+    // as long as the host keeps the input short enough not to wrap it; the
+    // sum across the diagonal is taken in fp32, where it cannot.
+    TCVT(diagonal_f32, diagonal, RoundMode::CAST_NONE);
+    kernel_utils::PipeBarrierVec();
+    TROWSUM(total, diagonal_f32, row_tmp);
+  } else {
+    TROWSUM(total, diagonal, row_tmp);
+  }
   kernel_utils::PipeBarrierVec();
 
   TEXPANDS(tail_total, 0.0f);
@@ -226,7 +252,14 @@ AICORE void CompleteCubeNorm(__gm__ InputT* input, __gm__ float* partials,
     kernel_utils::SetWaitFlag<PIPE_MTE2, PIPE_V>(0);
     TailF32 tail_f32(n);
     TASSIGN(tail_f32, kTailBase + kF32Offset);
-    if constexpr (!kIsF32) {
+    if constexpr (kIsI8) {
+      TailMid tail_mid(n);
+      TASSIGN(tail_mid, kTailBase + kInBytes);
+      TCVT(tail_mid, tail_in, RoundMode::CAST_NONE);
+      kernel_utils::PipeBarrierVec();
+      TCVT(tail_f32, tail_mid, RoundMode::CAST_NONE);
+      kernel_utils::PipeBarrierVec();
+    } else if constexpr (!kIsF32) {
       TCVT(tail_f32, tail_in, RoundMode::CAST_NONE);
       kernel_utils::PipeBarrierVec();
     }
@@ -250,46 +283,60 @@ AICORE void CompleteCubeNorm(__gm__ InputT* input, __gm__ float* partials,
   pipe_barrier(PIPE_ALL);
 }
 
+// An int8 L1 tile is laid out in 16 x 32 boxes, so a 16 x 16 tile of it does
+// not exist and S = 16 must not even be instantiated for that input type.
+// The host never asks for it: an int8 input too short for a 32 x 32 tile is
+// left entirely to the Vector stage's tail path.
 template <typename InputT>
-AICORE void CubeNormDispatch(__gm__ InputT* input, __gm__ float* partials,
+constexpr bool kSupportsSize16 = !std::is_same<InputT, int8_t>::value;
+
+template <typename InputT>
+AICORE void CubeNormDispatch(__gm__ InputT* input,
+                             __gm__ CubeAccT<InputT>* partials,
                              uint32_t num_tiles, uint32_t size) {
+  using AccT = CubeAccT<InputT>;
   switch (size) {
     case 16:
-      CubeNorm<InputT, 16>(input, partials, num_tiles);
+      if constexpr (kSupportsSize16<InputT>) {
+        CubeNorm<InputT, AccT, 16>(input, partials, num_tiles);
+      }
       break;
     case 32:
-      CubeNorm<InputT, 32>(input, partials, num_tiles);
+      CubeNorm<InputT, AccT, 32>(input, partials, num_tiles);
       break;
     case 64:
-      CubeNorm<InputT, 64>(input, partials, num_tiles);
+      CubeNorm<InputT, AccT, 64>(input, partials, num_tiles);
       break;
     case 128:
-      CubeNorm<InputT, 128>(input, partials, num_tiles);
+      CubeNorm<InputT, AccT, 128>(input, partials, num_tiles);
       break;
   }
 }
 
 template <typename InputT>
 AICORE void CompleteCubeNormDispatch(__gm__ InputT* input,
-                                     __gm__ float* partials,
+                                     __gm__ CubeAccT<InputT>* partials,
                                      __gm__ float* output, uint64_t tail_offset,
                                      uint32_t tail_len, uint32_t size) {
+  using AccT = CubeAccT<InputT>;
   switch (size) {
     case 16:
-      CompleteCubeNorm<InputT, 16>(input, partials, output, tail_offset,
-                                   tail_len);
+      if constexpr (kSupportsSize16<InputT>) {
+        CompleteCubeNorm<InputT, AccT, 16>(input, partials, output, tail_offset,
+                                           tail_len);
+      }
       break;
     case 32:
-      CompleteCubeNorm<InputT, 32>(input, partials, output, tail_offset,
-                                   tail_len);
+      CompleteCubeNorm<InputT, AccT, 32>(input, partials, output, tail_offset,
+                                         tail_len);
       break;
     case 64:
-      CompleteCubeNorm<InputT, 64>(input, partials, output, tail_offset,
-                                   tail_len);
+      CompleteCubeNorm<InputT, AccT, 64>(input, partials, output, tail_offset,
+                                         tail_len);
       break;
     case 128:
-      CompleteCubeNorm<InputT, 128>(input, partials, output, tail_offset,
-                                    tail_len);
+      CompleteCubeNorm<InputT, AccT, 128>(input, partials, output, tail_offset,
+                                          tail_len);
       break;
   }
 }
@@ -356,5 +403,40 @@ extern "C" void pto_launch_cube_norm_fp32(uint32_t blockDim, void* stream,
       (__gm__ float*)input, (__gm__ float*)partials, num_tiles, size);
   complete_cube_norm_fp32<<<1, nullptr, stream>>>(
       (__gm__ float*)input, (__gm__ float*)partials, (__gm__ float*)output,
+      tail_offset, tail_len, size);
+}
+
+// int8 operands multiply into an int32 L0C, so this path carries an int32
+// workspace all the way to the Vector stage, which widens the diagonal to
+// fp32 before summing it. The result is still an fp32 norm.
+extern "C" __global__ AICORE void cube_norm_int8(__gm__ int8_t* input,
+                                                 __gm__ int32_t* partials,
+                                                 uint32_t num_tiles,
+                                                 uint32_t size) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIC_ONLY);
+#if defined(__DAV_CUBE__)
+  CubeNormDispatch<int8_t>(input, partials, num_tiles, size);
+#endif
+}
+
+extern "C" __global__ AICORE void complete_cube_norm_int8(
+    __gm__ int8_t* input, __gm__ int32_t* partials, __gm__ float* output,
+    uint64_t tail_offset, uint32_t tail_len, uint32_t size) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY);
+#if defined(__DAV_VEC__)
+  CompleteCubeNormDispatch<int8_t>(input, partials, output, tail_offset,
+                                   tail_len, size);
+#endif
+}
+
+extern "C" void pto_launch_cube_norm_int8(uint32_t blockDim, void* stream,
+                                          void* input, void* partials,
+                                          void* output, uint32_t num_tiles,
+                                          uint64_t tail_offset,
+                                          uint32_t tail_len, uint32_t size) {
+  cube_norm_int8<<<blockDim, nullptr, stream>>>(
+      (__gm__ int8_t*)input, (__gm__ int32_t*)partials, num_tiles, size);
+  complete_cube_norm_int8<<<1, nullptr, stream>>>(
+      (__gm__ int8_t*)input, (__gm__ int32_t*)partials, (__gm__ float*)output,
       tail_offset, tail_len, size);
 }
