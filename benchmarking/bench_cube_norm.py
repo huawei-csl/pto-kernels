@@ -6,8 +6,12 @@
 Example (with the extension built and installed):
     python benchmarking/bench_cube_norm.py --device npu:1
 
-The default sweep covers 1,024 through 99,000,000 elements for FP16 and FP32.
-Use --sizes to select specific lengths, for example --sizes 99000000.
+The default sweep covers 256 through 99,000,000 elements for FP16 and FP32.
+It brackets each length at which the host changes tile size (64 * 64 and
+128 * 128), the lengths that divide a tile exactly and the ones that leave the
+longest tail, and the point around which the grid runs out of tiles to hand
+its Cube cores. Use --sizes to select specific lengths, for example
+--sizes 99000000.
 
 int8 is also supported, but two things about its row differ. Its lengths stop
 at the 8,388,544 elements the kernel accepts before its int32 accumulator
@@ -151,21 +155,46 @@ def main():
         type=positive_int,
         nargs="+",
         default=[
+            # Below 64 * 64 the host picks size 16, so these are the shortest
+            # inputs that still reach the Cube unit at all.
+            256,
+            512,
             1024,
+            2048,
+            4095,  # 15 tiles of 16 x 16 and the longest tail that size takes
+            # 64 * 64 and up: size 32 for every dtype (size 64 for int8 only
+            # from 128 * 128 on).
             4096,
-            16384,
+            4097,  # one tile and a single tail element
+            8192,
+            16383,  # longest input still below the 128 * 128 cut
+            # 128 * 128 and up: size 128 for fp16 and fp32, size 64 for int8.
+            16384,  # exactly one size-128 tile, so a single block runs
+            16385,
+            32768,
             65536,
+            131072,
             262144,
             327681,
+            393216,  # 24 size-128 tiles, about one per Cube core
+            524288,
             1048576,
+            2097152,
+            4194303,  # 255 tiles and the longest tail size 128 takes
             4194304,
+            8388544,  # longest int8 input the int32 accumulator holds
+            8388608,
             16777216,
             16777217,
             33554432,
+            50000000,
             67108864,
             99000000,
         ],
-        help="input element counts (default: aligned and padded cases up to 99 million)",
+        help=(
+            "input element counts (default: a sweep from 256 to 99 million "
+            "covering each tile-size switch, aligned and padded cases)"
+        ),
     )
     parser.add_argument("--warmup", type=positive_int, default=10)
     parser.add_argument("--iters", type=positive_int, default=50)
