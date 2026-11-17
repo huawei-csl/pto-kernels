@@ -16,6 +16,9 @@ full text of the License.
 #include <torch/library.h>
 
 #include <cstdint>
+#include <map>
+#include <mutex>
+#include <utility>
 
 #include "torch_npu/csrc/core/npu/NPUStream.h"
 #include "torch_npu/csrc/framework/OpCommand.h"
@@ -25,49 +28,70 @@ namespace pto_isa_ops {
 #define DEVICE_TYPE c10::DeviceType::PrivateUse1
 
 /**
+ * @brief Queries an integer device attribute, caching the result.
+ *
+ * The core counts are fixed properties of the device, so the ACL query is done
+ * once per (device, attribute) pair and served from a cache afterwards. The
+ * cache is shared by all threads and guarded by a mutex.
+ *
+ * @param [in] device_id Device ID.
+ * @param [in] attr Device attribute to query.
+ * @param [in] what Name of the caller, used in error messages.
+ * @return uint32_t Value of the attribute on the specified device.
+ */
+inline uint32_t GetCachedDeviceInfo(int32_t device_id, aclrtDevAttr attr,
+                                    const char* what) {
+  // aclrtGetDevice overwrites device_id with the device bound to this thread;
+  // the cache is keyed on that resolved id, not on the argument.
+  auto ret = aclrtGetDevice(&device_id);
+  TORCH_CHECK(ret == ACL_SUCCESS, what, ": aclrtGetDevice failed, error ",
+              static_cast<int>(ret));
+
+  static std::mutex cache_mutex;
+  static std::map<std::pair<int32_t, int32_t>, uint32_t> cache;
+  const auto key = std::make_pair(device_id, static_cast<int32_t>(attr));
+
+  std::lock_guard<std::mutex> lock(cache_mutex);
+  auto it = cache.find(key);
+  if (it != cache.end()) {
+    return it->second;
+  }
+
+  int64_t value = 0;
+  ret = aclrtGetDeviceInfo(device_id, attr, &value);
+  TORCH_CHECK(ret == ACL_SUCCESS, what, ": aclrtGetDeviceInfo failed, error ",
+              static_cast<int>(ret));
+  const auto result = static_cast<uint32_t>(value);
+  cache.emplace(key, result);
+  return result;
+}
+
+/**
  * @brief Returns the number of Cube cores on the specified device.
  *
  * Important: aclInit() must be called before this function to initialize the
- * ACL runtime.
+ * ACL runtime. The result is cached per device after the first call.
  *
  * @param [in] device_id Device ID, default is 0.
  * @return uint32_t Number of Cube cores on the specified device.
  */
-uint32_t GetNumCubeCores(int32_t device_id = 0) {
-  int64_t aicoreNum64 = 0;
-  auto ret = aclrtGetDevice(&device_id);
-  TORCH_CHECK(ret == ACL_SUCCESS,
-              "GetNumCubeCores: aclrtGetDevice failed, error ",
-              static_cast<int>(ret));
-  ret =
-      aclrtGetDeviceInfo(device_id, ACL_DEV_ATTR_AICORE_CORE_NUM, &aicoreNum64);
-  TORCH_CHECK(ret == ACL_SUCCESS,
-              "GetNumCubeCores: aclrtGetDeviceInfo failed, error ",
-              static_cast<int>(ret));
-  return static_cast<uint32_t>(aicoreNum64);
+inline uint32_t GetNumCubeCores(int32_t device_id = 0) {
+  return GetCachedDeviceInfo(device_id, ACL_DEV_ATTR_AICORE_CORE_NUM,
+                             "GetNumCubeCores");
 }
 
 /**
  * @brief Get the number of vector Cores.
  *
  * Important: aclInit() must be called before this function to initialize the
- * ACL runtime.
+ * ACL runtime. The result is cached per device after the first call.
  *
  * @param [in] device_id Device ID, default is 0.
  * @return uint32_t Number of vector cores on the specified device.
  */
-uint32_t GetNumVectorCores(int32_t device_id = 0) {
-  int64_t numVectorCores = 0;
-  auto ret = aclrtGetDevice(&device_id);
-  TORCH_CHECK(ret == ACL_SUCCESS,
-              "GetNumVectorCores: aclrtGetDevice failed, error ",
-              static_cast<int>(ret));
-  ret = aclrtGetDeviceInfo(device_id, ACL_DEV_ATTR_VECTOR_CORE_NUM,
-                           &numVectorCores);
-  TORCH_CHECK(ret == ACL_SUCCESS,
-              "GetNumVectorCores: aclrtGetDeviceInfo failed, error ",
-              static_cast<int>(ret));
-  return static_cast<uint32_t>(numVectorCores);
+inline uint32_t GetNumVectorCores(int32_t device_id = 0) {
+  return GetCachedDeviceInfo(device_id, ACL_DEV_ATTR_VECTOR_CORE_NUM,
+                             "GetNumVectorCores");
 }
 
 /**
