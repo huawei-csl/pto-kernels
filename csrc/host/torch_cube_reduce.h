@@ -57,8 +57,13 @@ at::Tensor run_cube_reduce(const at::Tensor& x) {
   const c10::DeviceGuard device_guard(x.device());
   const auto output_options =
       x.options().dtype(dtype == at::kChar ? at::kInt : at::kFloat);
-  const at::Tensor output = at::zeros({1}, output_options);
-  if (x.numel() == 0) return output;
+  // An empty input has no kernel launch to produce its sum, so that one case
+  // is zeroed on the host. Everywhere else the Vector stage writes this
+  // element unconditionally, so it does not need initializing -- and zeroing
+  // it would cost an extra kernel launch, which is a third of the floor on
+  // small inputs.
+  if (x.numel() == 0) return at::zeros({1}, output_options);
+  const at::Tensor output = at::empty({1}, output_options);
 
   const int64_t size =
       x.numel() >= 128 * 128 ? 128 : (x.numel() >= 64 * 64 ? 64 : 32);
@@ -73,10 +78,14 @@ at::Tensor run_cube_reduce(const at::Tensor& x) {
   const uint32_t blocks = std::min(num_tiles, std::max(1u, GetNumCubeCores()));
   const uint32_t block_dim = std::max(1u, blocks);
 
-  // Materialize strides and preserve storage offsets.
-  const at::Tensor input = x.contiguous().reshape({-1});
+  // Materialize strides. The kernel is handed data_ptr() and takes its length
+  // from the scalars above, so it never reads the shape -- and data_ptr()
+  // already points past a view's storage offset. Flattening would only cost a
+  // view (about 1.2us of the host path) to produce the same pointer.
+  const at::Tensor input = x.contiguous();
+  // The Cube stage leaves one row of column sums per block.
   const at::Tensor partials =
-      at::empty({static_cast<int64_t>(block_dim), size, 16}, output_options);
+      at::empty({static_cast<int64_t>(block_dim), size}, output_options);
   if (dtype == at::kHalf) {
     EXEC_KERNEL_CMD(cube_reduce_fp16, block_dim, input, partials, output,
                     num_tiles, blocks, tail_offset, tail_len, matrix_size);
