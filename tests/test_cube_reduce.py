@@ -55,6 +55,11 @@ def make_input(shape, dtype, device):
         (16 * 1024 * 1024 + 7,),
         (7, 11, 13),
         (4, 5, 16384),
+        (17, 19, 23),
+        (3, 5, 7, 11, 13),
+        (2, 16383),
+        (65537,),
+        (1048573,),
     ],
 )
 def test_cube_reduce(shape, dtype, npu_device):
@@ -69,6 +74,49 @@ def test_cube_reduce_uneven_blocks(dtype, tiles, tail, npu_device):
     length = tiles * 128 * 128 + tail
     x = (torch.arange(length, dtype=torch.int32) // 16384 % 7 - 3).to(dtype)
     check_sum(x.to(npu_device), exact=True)
+
+
+def exact_pattern(length, dtype):
+    # Values vary along the input so a dropped or doubled range changes the sum.
+    # They stay in [-3, 3], exact in every supported dtype, and the running sum
+    # stays exact in fp32 for these lengths.
+    return (torch.arange(length, dtype=torch.int32) // 251 % 7 - 3).to(dtype)
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.float32, torch.int8])
+@pytest.mark.parametrize(
+    "length",
+    [
+        # The host picks a 32x32 tile below 4096 elements, 64x64 below 16384,
+        # and 128x128 above, so each regime has its own tile and tail sizes.
+        # The tail is folded in 256-element chunks.
+        # 32x32 tiles (1024 elements).
+        1279,  # one tile, tail one element short of a chunk
+        1280,  # one tile, tail exactly one chunk
+        1281,  # one tile, tail one chunk plus one
+        2816,  # two tiles, tail three whole chunks
+        3072,  # three whole tiles, no tail, odd partial count
+        4094,  # three tiles, tail one short of the maximum 1023
+        # 64x64 tiles (4096 elements).
+        4352,  # one tile, tail exactly one chunk
+        8191,  # one tile plus the largest possible tail
+        8192,  # two whole tiles
+        12288,  # three whole tiles
+        16382,  # three tiles, tail one short of the maximum 4095
+        # 128x128 tiles (16384 elements).
+        16639,  # one tile, tail one short of a chunk
+        16640,  # one tile, tail exactly one chunk
+        16641,  # one tile, tail one chunk plus one
+        32767,  # one tile plus the largest possible tail
+        32768,  # two whole tiles
+        49152,  # three whole tiles, fewer tiles than cores, odd partial count
+        81919,  # four tiles plus the largest possible tail
+        81920,  # five whole tiles
+        344063,  # twenty tiles plus the largest possible tail
+    ],
+)
+def test_cube_reduce_tile_and_tail_boundaries(dtype, length, npu_device):
+    check_sum(exact_pattern(length, dtype).to(npu_device), exact=True)
 
 
 @pytest.mark.parametrize("dtype", [torch.float16, torch.float32, torch.int8])
