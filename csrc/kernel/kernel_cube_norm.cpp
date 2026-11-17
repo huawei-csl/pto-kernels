@@ -224,13 +224,29 @@ AICORE void CompleteCubeNorm(__gm__ InputT* input,
   // The tail is widened to fp32 before squaring: that keeps its arithmetic as
   // wide as the L0C accumulation the Cube stage does, and keeps squares of
   // large fp16 inputs from overflowing.
-  constexpr uint32_t kChunk = 256;
+  // A tail is shorter than one tile, so S * S - 1 elements at the very most,
+  // and a chunk this size cuts the longest of them into four. Every chunk
+  // costs a GM round trip that only the next chunk's read can hide, so the
+  // chunk is made as large as the tiles below still fit UB for: at S = 128 the
+  // fp16 instance is the tightest, and the 64 KiB workspace tile plus the two
+  // 8 KiB staging tiles and four 16 KiB fp32 tiles leave it inside the 192 KiB.
+  constexpr uint32_t kChunk = 4096;
   constexpr uint32_t kTailBase = kRowsBase + 5 * kRowBytes + 2 * kScalarBytes;
-  constexpr uint32_t kInBytes = kChunk * sizeof(InputT);
+  constexpr uint32_t kStageBytes = kChunk * sizeof(InputT);
+  // Two staging tiles, so the load of the next chunk is issued before the
+  // current one is consumed. The Vector work over a chunk is shorter than the
+  // read that fetches it, so with a single tile every chunk but the first
+  // would pay its round trip in the open.
+  constexpr uint32_t kStage0 = kTailBase;
+  constexpr uint32_t kStage1 = kTailBase + kStageBytes;
   // int8 is widened in two steps, so its intermediate half tile needs room.
   constexpr uint32_t kMidBytes = kIsI8 ? kChunk * sizeof(half) : 0;
-  constexpr uint32_t kF32Offset = kIsF32 ? 0 : kInBytes + kMidBytes;
+  constexpr uint32_t kMidBase = kTailBase + 2 * kStageBytes;
   constexpr uint32_t kF32Bytes = kChunk * sizeof(float);
+  // fp32 needs no widening: the staging tile is already the tile that gets
+  // squared, so only the other input types carry a converted copy.
+  constexpr uint32_t kF32Base = kMidBase + kMidBytes;
+  constexpr uint32_t kWorkBase = kF32Base + (kIsF32 ? 0 : kF32Bytes);
   using TailGlobal = GlobalTensor<InputT, Shape<1, 1, 1, 1, DYNAMIC>,
                                   pto::Stride<1, 1, 1, 1, 1>>;
   using TailIn =
@@ -243,31 +259,50 @@ AICORE void CompleteCubeNorm(__gm__ InputT* input,
   Tile<TileType::Vec, float, 1, kChunk> tail_tmp;
   ScalarTile tail_sum;
   ScalarTile tail_total;
-  TASSIGN(tail_squares, kTailBase + kF32Offset + kF32Bytes);
-  TASSIGN(tail_tmp, kTailBase + kF32Offset + 2 * kF32Bytes);
-  TASSIGN(tail_sum, kTailBase + kF32Offset + 3 * kF32Bytes);
-  TASSIGN(tail_total, kTailBase + kF32Offset + 3 * kF32Bytes + kScalarBytes);
+  TASSIGN(tail_squares, kWorkBase);
+  TASSIGN(tail_tmp, kWorkBase + kF32Bytes);
+  TASSIGN(tail_sum, kWorkBase + 2 * kF32Bytes);
+  TASSIGN(tail_total, kWorkBase + 2 * kF32Bytes + kScalarBytes);
 
   // Dynamic-extent tiles are addressed per chunk, so put the vector unit in
   // the all-lanes mask mode they assume.
   set_mask_norm();
   set_vector_mask(-1, -1);
 
+  // Accumulates the tail's contribution across chunks. Raised here, ahead of
+  // the loads, so that the barrier the diagonal reduction already needs is the
+  // one that orders it against the first TADD further down.
+  TEXPANDS(tail_total, 0.0f);
+
   // Element i of a row-major S x S tile's diagonal sits at i * S + i, one row
   // and one column on from element i - 1, so gathering at those offsets reads
   // the diagonal. The progression is a constant of S, so it is read from the
   // table rather than laid down and scaled on the Vector unit each launch.
+  //
+  // Every block's F has already been added into the one workspace tile, so a
+  // single gather of its diagonal and one row reduction give the squared norm
+  // of everything the Cube stage saw. A grid that was given no whole tile
+  // stores nothing, and the zeroed workspace then contributes zero here.
+  //
+  // Both reads and the tail's first chunk are issued back-to-back: MTE2 runs
+  // them in order, so one flag after the pair the gather needs is enough, and
+  // a second after the chunk lets its transfer continue underneath the whole
+  // diagonal reduction instead of starting once that has finished.
   IndexGlobal index_source(const_cast<__gm__ int32_t*>(diag_indices));
   TLOAD(indices, index_source);
-  kernel_utils::SetWaitFlag<PIPE_MTE2, PIPE_V>(0);
-
-  // Every block's F has already been added into this one tile, so a single
-  // gather of its diagonal and one row reduction give the squared norm of
-  // everything the Cube stage saw. A grid that was given no whole tile stores
-  // nothing, and the zeroed workspace then contributes zero here.
   PartialGlobal source(partials);
   TLOAD(partial, source);
-  kernel_utils::SetWaitFlag<PIPE_MTE2, PIPE_V>(0);
+  set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+  if (tail_len > 0) {
+    const uint32_t n = min(kChunk, tail_len);
+    TailGlobal tail_global(input + tail_offset, {static_cast<int32_t>(n)});
+    TailIn tail_in(n);
+    TASSIGN(tail_in, kStage0);
+    TLOAD(tail_in, tail_global);
+    set_flag(PIPE_MTE2, PIPE_V, EVENT_ID1);
+  }
+
+  wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
   TGATHER(diagonal, partial, indices, gather_tmp);
   kernel_utils::PipeBarrierVec();
   if constexpr (kIsI8) {
@@ -282,38 +317,77 @@ AICORE void CompleteCubeNorm(__gm__ InputT* input,
   }
   kernel_utils::PipeBarrierVec();
 
-  TEXPANDS(tail_total, 0.0f);
-  kernel_utils::PipeBarrierVec();
+  // The chunk the loop is about to work on is already in flight, and the one
+  // after it is handed to MTE2 at the top of the iteration, before the Vector
+  // unit so much as waits for the chunk in hand. What decides the loop is how
+  // much of each read is left uncovered rather than how much work a chunk
+  // carries, so with the two staging tiles alternating a read runs under the
+  // Vector work instead of in front of it.
+  //
+  // `filled` reports a staging tile loaded, `consumed` reports one read for
+  // the last time and free to be overwritten -- raised right after the cast
+  // that leaves the staging tile, or after the squaring in the fp32 case,
+  // which has no cast and squares the staging tile directly.
   for (uint32_t offset = 0; offset < tail_len; offset += kChunk) {
     const uint32_t n = min(kChunk, tail_len - offset);
-    TailGlobal tail_global(input + tail_offset + offset,
-                           {static_cast<int32_t>(n)});
+    const bool ping = ((offset / kChunk) % 2 == 0);
+    const event_t filled = ping ? EVENT_ID1 : EVENT_ID2;
+    const event_t consumed = ping ? EVENT_ID0 : EVENT_ID1;
+    const event_t next_filled = ping ? EVENT_ID2 : EVENT_ID1;
+    const event_t next_consumed = ping ? EVENT_ID1 : EVENT_ID0;
+
     TailIn tail_in(n);
-    TASSIGN(tail_in, kTailBase);
-    TLOAD(tail_in, tail_global);
-    kernel_utils::SetWaitFlag<PIPE_MTE2, PIPE_V>(0);
+    TASSIGN(tail_in, ping ? kStage0 : kStage1);
     TailF32 tail_f32(n);
-    TASSIGN(tail_f32, kTailBase + kF32Offset);
+    // fp32 squares the staging tile where it landed; the others read their
+    // converted copy, which one iteration is done with before the next starts.
+    TASSIGN(tail_f32, kIsF32 ? (ping ? kStage0 : kStage1) : kF32Base);
+    TailF32 squares(n);
+    TASSIGN(squares, kWorkBase);
+
+    if (offset + kChunk < tail_len) {
+      const uint32_t next_n = min(kChunk, tail_len - (offset + kChunk));
+      // The tile being refilled last held the chunk two back, which released
+      // it on its way out; before that there is nothing to wait for.
+      if (offset >= kChunk) wait_flag(PIPE_V, PIPE_MTE2, next_consumed);
+      TailGlobal next_global(input + tail_offset + offset + kChunk,
+                             {static_cast<int32_t>(next_n)});
+      TailIn next_in(next_n);
+      TASSIGN(next_in, ping ? kStage1 : kStage0);
+      TLOAD(next_in, next_global);
+      set_flag(PIPE_MTE2, PIPE_V, next_filled);
+    }
+
+    wait_flag(PIPE_MTE2, PIPE_V, filled);
     if constexpr (kIsI8) {
       TailMid tail_mid(n);
-      TASSIGN(tail_mid, kTailBase + kInBytes);
+      TASSIGN(tail_mid, kMidBase);
       TCVT(tail_mid, tail_in, RoundMode::CAST_NONE);
+      if (offset + 2 * kChunk < tail_len) {
+        set_flag(PIPE_V, PIPE_MTE2, consumed);
+      }
       kernel_utils::PipeBarrierVec();
       TCVT(tail_f32, tail_mid, RoundMode::CAST_NONE);
       kernel_utils::PipeBarrierVec();
+      TMUL(squares, tail_f32, tail_f32);
     } else if constexpr (!kIsF32) {
       TCVT(tail_f32, tail_in, RoundMode::CAST_NONE);
+      if (offset + 2 * kChunk < tail_len) {
+        set_flag(PIPE_V, PIPE_MTE2, consumed);
+      }
       kernel_utils::PipeBarrierVec();
+      TMUL(squares, tail_f32, tail_f32);
+    } else {
+      TMUL(squares, tail_f32, tail_f32);
+      if (offset + 2 * kChunk < tail_len) {
+        set_flag(PIPE_V, PIPE_MTE2, consumed);
+      }
     }
-    TailF32 squares(n);
-    TASSIGN(squares, kTailBase + kF32Offset + kF32Bytes);
-    TMUL(squares, tail_f32, tail_f32);
     kernel_utils::PipeBarrierVec();
     TROWSUM(tail_sum, squares, tail_tmp);
     kernel_utils::PipeBarrierVec();
     TADD(tail_total, tail_total, tail_sum);
     kernel_utils::PipeBarrierVec();
-    kernel_utils::SetWaitFlag<PIPE_V, PIPE_MTE2>(0);
   }
 
   TADD(total, total, tail_total);
