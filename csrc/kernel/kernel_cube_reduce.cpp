@@ -14,41 +14,52 @@ for the full License text.
 using namespace pto;
 
 namespace {
-constexpr uint32_t kColumns = 16;
+// L0A and L0C are addressed in 16-row fractals whatever m the mad uses.
+constexpr uint32_t kFractalRows = 16;
 
-// Each block accumulates A[S,S] @ ones[S,16] in L0C. Any one
-// column of the resulting S x 16 matrix contains its row sums.
+// Each block reduces its S x S tiles through the cube unit's GEMV mode. A mad
+// issued with m == 1 takes its left operand as a single row rather than a
+// 16-row fractal, so an all-ones row costs one column of MACs per input
+// element. That puts the tile on the right:
+//
+//     ones[1, S] @ A[S, S] = the column sums of A, a 1 x S row.
+//
+// Each block therefore leaves the Vector stage S values to fold.
 template <typename InputT, typename OutputT, uint32_t S>
 AICORE void CubeReduce(__gm__ InputT* input, __gm__ OutputT* partials,
                        uint32_t num_tiles) {
   using AGlobal = GlobalTensor<InputT, TileShape2D<InputT, S, S, Layout::ND>,
                                BaseShape2D<InputT, S, S, Layout::ND>>;
-  using CGlobal =
-      GlobalTensor<OutputT, TileShape2D<OutputT, S, kColumns, Layout::ND>,
-                   BaseShape2D<OutputT, S, kColumns, Layout::ND>>;
+  using CGlobal = GlobalTensor<OutputT, TileShape2D<OutputT, 1, S, Layout::ND>,
+                               BaseShape2D<OutputT, 1, S, Layout::ND>>;
   using AMat = Tile<TileType::Mat, InputT, S, S, BLayout::ColMajor, S, S,
                     SLayout::RowMajor, 512>;
-  using BMat = Tile<TileType::Mat, InputT, S, kColumns, BLayout::RowMajor, S,
-                    kColumns, SLayout::ColMajor, 512>;
+  using OnesMat =
+      Tile<TileType::Mat, InputT, kFractalRows, S, BLayout::ColMajor,
+           kFractalRows, S, SLayout::RowMajor, 512>;
   // With nothing but a ragged tail the Vector stage does all the work and
   // never reads `partials`, so this stage has no result to produce.
   if (num_tiles == 0) return;
 
   AMat a_l1;
-  BMat b_l1;
-  TileLeft<InputT, S, S> a_l0;
-  TileRight<InputT, S, kColumns> b_l0;
-  TileAcc<OutputT, S, kColumns> c_l0;
+  OnesMat ones_l1;
+  // GEMV reads only row 0 of L0A, but L0A is still addressed in 16-row
+  // fractals, so the operand is declared full height and filled with ones
+  // throughout. L0C is addressed the same way: mad writes its block columns at
+  // a pitch of ceil16(m) == 16 rows, and only row 0 of each carries a result.
+  TileRight<InputT, S, S> a_l0;
+  TileLeft<InputT, kFractalRows, S> ones_l0;
+  TileAcc<OutputT, kFractalRows, S, 1, S> c_l0;
   TASSIGN(a_l1, 0);
-  TASSIGN(b_l1, S * S * sizeof(InputT));
+  TASSIGN(ones_l1, S * S * sizeof(InputT));
   TASSIGN(a_l0, 0);
-  TASSIGN(b_l0, 0);
+  TASSIGN(ones_l0, 0);
   TASSIGN(c_l0, 0);
 
-  // Balanced contiguous ranges ensure every launched block writes a result.
   const uint32_t id = get_block_idx();
   const uint32_t blocks = get_block_num();
   const uint32_t count = num_tiles / blocks + (id < num_tiles % blocks);
+  // Balanced contiguous ranges ensure every launched block writes a result.
   const uint32_t begin =
       id * (num_tiles / blocks) + min(id, num_tiles % blocks);
   // Build the all-ones operand on chip instead of copying it in from global
@@ -56,10 +67,10 @@ AICORE void CubeReduce(__gm__ InputT* input, __gm__ OutputT* partials,
   // L1 directly. Every element is one, so the fractal layout of the tile is
   // irrelevant and the flat fill is already the matrix we want. Like TLOAD it
   // issues on MTE2, so the MTE2 -> MTE1 flag below still orders it before the
-  // move into L0B.
-  TEXPANDS(b_l1, static_cast<InputT>(1));
+  // move into L0A.
+  TEXPANDS(ones_l1, static_cast<InputT>(1));
   kernel_utils::SetWaitFlag<PIPE_MTE2, PIPE_MTE1>(0);
-  TMOV(b_l0, b_l1);
+  TMOV(ones_l0, ones_l1);
   kernel_utils::SetWaitFlag<PIPE_MTE1, PIPE_M>(0);
 
   for (uint32_t i = 0; i < count; ++i) {
@@ -69,9 +80,9 @@ AICORE void CubeReduce(__gm__ InputT* input, __gm__ OutputT* partials,
     TMOV(a_l0, a_l1);
     kernel_utils::SetWaitFlag<PIPE_MTE1, PIPE_M>(0);
     if (i == 0) {
-      TMATMUL(c_l0, a_l0, b_l0);
+      TGEMV(c_l0, ones_l0, a_l0);
     } else {
-      TMATMUL_ACC(c_l0, c_l0, a_l0, b_l0);
+      TGEMV_ACC(c_l0, c_l0, ones_l0, a_l0);
     }
     // Complete the multiply before the next TMOV overwrites a_l0, and the
     // TMOV's read of a_l1 before the next TLOAD refills it.
@@ -79,7 +90,7 @@ AICORE void CubeReduce(__gm__ InputT* input, __gm__ OutputT* partials,
     kernel_utils::SetWaitFlag<PIPE_MTE1, PIPE_MTE2>(0);
   }
   kernel_utils::SetWaitFlag<PIPE_M, PIPE_FIX>(0);
-  CGlobal c_global(partials + id * S * kColumns);
+  CGlobal c_global(partials + id * S);
   TSTORE(c_global, c_l0);
   pipe_barrier(PIPE_ALL);
 }
@@ -92,37 +103,31 @@ template <typename InputT>
 using CubeOutT = typename std::conditional<std::is_same<InputT, int8_t>::value,
                                            int32_t, float>::type;
 
-template <typename InputT, typename T, uint32_t S>
-AICORE void CompleteCubeReduce(__gm__ InputT* input, __gm__ T* partials,
-                               __gm__ T* output, uint32_t blocks,
-                               uint64_t tail_offset, uint32_t tail_len) {
-  using InputGlobal = GlobalTensor<T, TileShape2D<T, S, kColumns, Layout::ND>,
-                                   BaseShape2D<T, S, kColumns, Layout::ND>>;
-  using OutputGlobal =
-      GlobalTensor<T, Shape<1, 1, 1, 1, 1>, pto::Stride<1, 1, 1, 1, 1>>;
-  using RowTile = Tile<TileType::Vec, T, 1, kColumns>;
-  constexpr uint32_t kTileBytes = S * kColumns * sizeof(T);
-  constexpr uint32_t kRowBytes = kColumns * sizeof(T);
-  Tile<TileType::Vec, T, S, kColumns> tile;
-  Tile<TileType::Vec, T, S, kColumns> reduce_tmp;
-  RowTile block_sums;
-  RowTile totals;
-  Tile<TileType::Vec, T, 1, 8, BLayout::RowMajor, 1, 1> result;
-
-  // The Cube stage consumes only whole S x S tiles, so the last `tail_len`
-  // elements (fewer than one tile) are reduced here instead of being padded up
-  // to a tile anywhere. A Vec tile carries a runtime valid-column count and
-  // TROWSUM honours it, so a short final chunk is loaded and summed as it is.
-  //
-  // TROWSUM on this part requires its accumulator and its source to have the
-  // same type, so every chunk is widened to fp32 first. That also keeps the
-  // tail's arithmetic as wide as the fp32 L0C accumulation the Cube stage
-  // does, rather than summing an fp16 tail in fp16. int8 has no direct
-  // conversion to fp32 and goes via half, which is exact for its range.
+// Sums the `tail_len` elements at `input + tail_offset` and returns the total.
+//
+// The Cube stage consumes only whole S x S tiles, so the last `tail_len`
+// elements (fewer than one tile) are reduced here instead of being padded up
+// to a tile anywhere. A Vec tile carries a runtime valid-column count and
+// TROWSUM honours it, so a short final chunk is loaded and summed as it is.
+//
+// TROWSUM on this part requires its accumulator and its source to have the
+// same type, so every chunk is widened to fp32 first. That also keeps the
+// tail's arithmetic as wide as the fp32 L0C accumulation the Cube stage
+// does, rather than summing an fp16 tail in fp16. int8 has no direct
+// conversion to fp32 and goes via half, which is exact for its range. The
+// tail is shorter than one tile, so even an int8 tail of extreme values stays
+// well inside the range fp32 represents exactly.
+//
+// `kUbBase` is the first UB byte this may use; it leaves everything below
+// untouched. The V -> S flag it ends on also orders the caller's own vector
+// accumulation before the caller reads it back, since that precedes the
+// vector work here.
+template <typename InputT, uint32_t kUbBase>
+AICORE float AccumulateTail(__gm__ InputT* input, uint64_t tail_offset,
+                            uint32_t tail_len) {
   constexpr bool kIsF32 = std::is_same<InputT, float>::value;
   constexpr bool kIsI8 = std::is_same<InputT, int8_t>::value;
   constexpr uint32_t kChunk = 256;
-  constexpr uint32_t kTailBase = 2 * kTileBytes + 2 * kRowBytes + 8 * sizeof(T);
   constexpr uint32_t kInBytes = kChunk * sizeof(InputT);
   constexpr uint32_t kMidBytes = kIsI8 ? kChunk * sizeof(half) : 0;
   constexpr uint32_t kF32Off = kIsF32 ? 0 : kInBytes + kMidBytes;
@@ -138,35 +143,10 @@ AICORE void CompleteCubeReduce(__gm__ InputT* input, __gm__ T* partials,
   Tile<TileType::Vec, float, 1, kChunk> tail_tmp;
   Tile<TileType::Vec, float, 1, 8, BLayout::RowMajor, 1, 1> tail_sum;
   Tile<TileType::Vec, float, 1, 8, BLayout::RowMajor, 1, 1> tail_acc;
-  TASSIGN(tail_tmp, kTailBase + kF32Off + kF32Bytes);
-  TASSIGN(tail_sum, kTailBase + kF32Off + 2 * kF32Bytes);
-  TASSIGN(tail_acc, kTailBase + kF32Off + 2 * kF32Bytes + 32);
+  TASSIGN(tail_tmp, kUbBase + kF32Off + kF32Bytes);
+  TASSIGN(tail_sum, kUbBase + kF32Off + 2 * kF32Bytes);
+  TASSIGN(tail_acc, kUbBase + kF32Off + 2 * kF32Bytes + 32);
 
-  // Dynamic-extent tiles are addressed per chunk, so put the vector unit in
-  // the all-lanes mask mode they assume.
-  set_mask_norm();
-  set_vector_mask(-1, -1);
-
-  TASSIGN(tile, 0);
-  TASSIGN(reduce_tmp, kTileBytes);
-  TASSIGN(block_sums, 2 * kTileBytes);
-  TASSIGN(totals, 2 * kTileBytes + kRowBytes);
-  TASSIGN(result, 2 * kTileBytes + 2 * kRowBytes);
-  TEXPANDS(totals, static_cast<T>(0));
-  for (uint32_t block = 0; block < blocks; ++block) {
-    InputGlobal source(partials + block * S * kColumns);
-    TLOAD(tile, source);
-    kernel_utils::SetWaitFlag<PIPE_MTE2, PIPE_V>(0);
-    // Every one of the 16 columns holds the same row sums, so reducing the
-    // block down its rows leaves this block's total in each lane. The pairwise
-    // tree TCOLSUM runs over the rows is both faster and, in fp32, more
-    // accurate than accumulating S values one at a time on the scalar pipe.
-    TCOLSUM(block_sums, tile, reduce_tmp, /*isBinary=*/true);
-    kernel_utils::PipeBarrierVec();
-    TADD(totals, totals, block_sums);
-    kernel_utils::PipeBarrierVec();
-    kernel_utils::SetWaitFlag<PIPE_V, PIPE_MTE2>(0);
-  }
   TEXPANDS(tail_acc, 0.0f);
   kernel_utils::PipeBarrierVec();
   for (uint32_t off = 0; off < tail_len; off += kChunk) {
@@ -174,14 +154,14 @@ AICORE void CompleteCubeReduce(__gm__ InputT* input, __gm__ T* partials,
     TailGlobal tail_global(input + tail_offset + off,
                            {static_cast<int32_t>(n)});
     TailIn tail_in(n);
-    TASSIGN(tail_in, kTailBase);
+    TASSIGN(tail_in, kUbBase);
     TLOAD(tail_in, tail_global);
     kernel_utils::SetWaitFlag<PIPE_MTE2, PIPE_V>(0);
     TailF32 tail_f32(n);
-    TASSIGN(tail_f32, kTailBase + kF32Off);
+    TASSIGN(tail_f32, kUbBase + kF32Off);
     if constexpr (kIsI8) {
       TailMid tail_mid(n);
-      TASSIGN(tail_mid, kTailBase + kInBytes);
+      TASSIGN(tail_mid, kUbBase + kInBytes);
       TCVT(tail_mid, tail_in, RoundMode::CAST_NONE);
       kernel_utils::PipeBarrierVec();
       TCVT(tail_f32, tail_mid, RoundMode::CAST_NONE);
@@ -198,9 +178,59 @@ AICORE void CompleteCubeReduce(__gm__ InputT* input, __gm__ T* partials,
   }
 
   // GetValue uses the scalar pipe, so the vector accumulation must be visible
-  // to it before the single remaining scalar read.
+  // to it before the scalar read.
   kernel_utils::SetWaitFlag<PIPE_V, PIPE_S>(0);
-  result.SetValue(0, totals.GetValue(0) + static_cast<T>(tail_acc.GetValue(0)));
+  return tail_acc.GetValue(0);
+}
+
+// The partials are one contiguous run of `blocks * S` values, folded as a flat
+// vector in chunks, the way the tail is. The accumulation stays in T: an int8
+// reduction can exceed what fp32 holds exactly, and the test for a full tensor
+// of -128 depends on it being exact.
+template <typename InputT, typename T, uint32_t S>
+AICORE void CompleteCubeReduce(__gm__ InputT* input, __gm__ T* partials,
+                               __gm__ T* output, uint32_t blocks,
+                               uint64_t tail_offset, uint32_t tail_len) {
+  using OutputGlobal =
+      GlobalTensor<T, Shape<1, 1, 1, 1, 1>, pto::Stride<1, 1, 1, 1, 1>>;
+  using PartGlobal =
+      GlobalTensor<T, Shape<1, 1, 1, 1, DYNAMIC>, pto::Stride<1, 1, 1, 1, 1>>;
+  constexpr uint32_t kChunk = 256;
+  constexpr uint32_t kChunkBytes = kChunk * sizeof(T);
+  using PartIn =
+      Tile<TileType::Vec, T, 1, kChunk, BLayout::RowMajor, 1, DYNAMIC>;
+  Tile<TileType::Vec, T, 1, kChunk> part_tmp;
+  Tile<TileType::Vec, T, 1, 8, BLayout::RowMajor, 1, 1> part_sum;
+  Tile<TileType::Vec, T, 1, 8, BLayout::RowMajor, 1, 1> totals;
+  Tile<TileType::Vec, T, 1, 8, BLayout::RowMajor, 1, 1> result;
+  constexpr uint32_t kTailBase = 2 * kChunkBytes + 3 * 32;
+
+  set_mask_norm();
+  set_vector_mask(-1, -1);
+
+  TASSIGN(part_tmp, kChunkBytes);
+  TASSIGN(part_sum, 2 * kChunkBytes);
+  TASSIGN(totals, 2 * kChunkBytes + 32);
+  TASSIGN(result, 2 * kChunkBytes + 64);
+  TEXPANDS(totals, static_cast<T>(0));
+  kernel_utils::PipeBarrierVec();
+  const uint32_t partial_len = blocks * S;
+  for (uint32_t off = 0; off < partial_len; off += kChunk) {
+    const uint32_t n = min(kChunk, partial_len - off);
+    PartGlobal source(partials + off, {static_cast<int32_t>(n)});
+    PartIn part_in(n);
+    TASSIGN(part_in, 0);
+    TLOAD(part_in, source);
+    kernel_utils::SetWaitFlag<PIPE_MTE2, PIPE_V>(0);
+    TROWSUM(part_sum, part_in, part_tmp);
+    kernel_utils::PipeBarrierVec();
+    TADD(totals, totals, part_sum);
+    kernel_utils::PipeBarrierVec();
+    kernel_utils::SetWaitFlag<PIPE_V, PIPE_MTE2>(0);
+  }
+  const float tail =
+      AccumulateTail<InputT, kTailBase>(input, tail_offset, tail_len);
+  result.SetValue(0, totals.GetValue(0) + static_cast<T>(tail));
   kernel_utils::SetWaitFlag<PIPE_S, PIPE_MTE3>(0);
   OutputGlobal destination(output);
   TSTORE(destination, result);
@@ -208,24 +238,22 @@ AICORE void CompleteCubeReduce(__gm__ InputT* input, __gm__ T* partials,
 }
 }  // namespace
 
-extern "C" __global__ AICORE void cube_reduce_fp16(__gm__ half* input,
-                                                   __gm__ float* partials,
-                                                   uint32_t num_tiles,
-                                                   uint32_t size) {
-  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIC_ONLY);
-#if defined(__DAV_CUBE__)
+template <typename InputT>
+AICORE void CubeReduceDispatch(__gm__ InputT* input,
+                               __gm__ CubeOutT<InputT>* partials,
+                               uint32_t num_tiles, uint32_t size) {
+  using OutputT = CubeOutT<InputT>;
   switch (size) {
     case 32:
-      CubeReduce<half, float, 32>(input, partials, num_tiles);
+      CubeReduce<InputT, OutputT, 32>(input, partials, num_tiles);
       break;
     case 64:
-      CubeReduce<half, float, 64>(input, partials, num_tiles);
+      CubeReduce<InputT, OutputT, 64>(input, partials, num_tiles);
       break;
     case 128:
-      CubeReduce<half, float, 128>(input, partials, num_tiles);
+      CubeReduce<InputT, OutputT, 128>(input, partials, num_tiles);
       break;
   }
-#endif
 }
 
 template <typename InputT>
@@ -251,6 +279,16 @@ AICORE void CompleteCubeReduceDispatch(__gm__ InputT* input,
   }
 }
 
+extern "C" __global__ AICORE void cube_reduce_fp16(__gm__ half* input,
+                                                   __gm__ float* partials,
+                                                   uint32_t num_tiles,
+                                                   uint32_t size) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIC_ONLY);
+#if defined(__DAV_CUBE__)
+  CubeReduceDispatch<half>(input, partials, num_tiles, size);
+#endif
+}
+
 extern "C" __global__ AICORE void complete_cube_reduce_fp16(
     __gm__ half* input, __gm__ float* partials, __gm__ float* output,
     uint32_t blocks, uint64_t tail_offset, uint32_t tail_len, uint32_t size) {
@@ -258,16 +296,6 @@ extern "C" __global__ AICORE void complete_cube_reduce_fp16(
 #if defined(__DAV_VEC__)
   CompleteCubeReduceDispatch<half>(input, partials, output, blocks, tail_offset,
                                    tail_len, size);
-#endif
-}
-
-extern "C" __global__ AICORE void complete_cube_reduce_fp32(
-    __gm__ float* input, __gm__ float* partials, __gm__ float* output,
-    uint32_t blocks, uint64_t tail_offset, uint32_t tail_len, uint32_t size) {
-  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY);
-#if defined(__DAV_VEC__)
-  CompleteCubeReduceDispatch<float>(input, partials, output, blocks,
-                                    tail_offset, tail_len, size);
 #endif
 }
 
@@ -290,17 +318,17 @@ extern "C" __global__ AICORE void cube_reduce_fp32(__gm__ float* input,
                                                    uint32_t size) {
   KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIC_ONLY);
 #if defined(__DAV_CUBE__)
-  switch (size) {
-    case 32:
-      CubeReduce<float, float, 32>(input, partials, num_tiles);
-      break;
-    case 64:
-      CubeReduce<float, float, 64>(input, partials, num_tiles);
-      break;
-    case 128:
-      CubeReduce<float, float, 128>(input, partials, num_tiles);
-      break;
-  }
+  CubeReduceDispatch<float>(input, partials, num_tiles, size);
+#endif
+}
+
+extern "C" __global__ AICORE void complete_cube_reduce_fp32(
+    __gm__ float* input, __gm__ float* partials, __gm__ float* output,
+    uint32_t blocks, uint64_t tail_offset, uint32_t tail_len, uint32_t size) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY);
+#if defined(__DAV_VEC__)
+  CompleteCubeReduceDispatch<float>(input, partials, output, blocks,
+                                    tail_offset, tail_len, size);
 #endif
 }
 
@@ -323,17 +351,7 @@ extern "C" __global__ AICORE void cube_reduce_int8(__gm__ int8_t* input,
                                                    uint32_t size) {
   KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIC_ONLY);
 #if defined(__DAV_CUBE__)
-  switch (size) {
-    case 32:
-      CubeReduce<int8_t, int32_t, 32>(input, partials, num_tiles);
-      break;
-    case 64:
-      CubeReduce<int8_t, int32_t, 64>(input, partials, num_tiles);
-      break;
-    case 128:
-      CubeReduce<int8_t, int32_t, 128>(input, partials, num_tiles);
-      break;
-  }
+  CubeReduceDispatch<int8_t>(input, partials, num_tiles, size);
 #endif
 }
 
