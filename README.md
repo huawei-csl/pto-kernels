@@ -70,30 +70,30 @@ pip install --force-reinstall pto_kernels-*.whl
 
 ### Choosing the target SoC
 
-Two build settings select the target hardware:
+`SOC_VERSION` is the only build setting that selects the target hardware:
 
 | Setting | Values | Meaning |
 | --- | --- | --- |
 | `SOC_VERSION` | `Ascend910B*`, `Ascend910_93*`, `Ascend950*`, `Ascend310P*` | Target SoC; mapped to the compiler's NPU arch (`dav-2201`, `dav-3510`, `dav-2002`) |
-| `BASE_MODE` | `MEMORY`, `REGISTER` | Base addressing mode (`-DMEMORY_BASE` / `-DREGISTER_BASE`) |
 
-Use `MEMORY` for A2-generation parts (`Ascend910B*`) and `REGISTER` for A5 (`Ascend950*`).
+The base addressing mode (`-DMEMORY_BASE` / `-DREGISTER_BASE`) is derived from it: `REGISTER` for A5
+(`Ascend950*`), `MEMORY` for the A2-generation parts (`Ascend910B*`, `Ascend910_93*`) and
+`Ascend310P*`.
 
 **Building for A5 (Ascend950):**
 
 ```bash
-# Wheel build — both settings are read from the environment
+# Wheel build — the SoC is read from the environment
 export SOC_VERSION=Ascend950
-export BASE_MODE=REGISTER
 make wheel
 pip install --force-reinstall pto_kernels-*.whl
 
-# In-tree CMake build — flags take precedence over the environment
-bash scripts/build.sh --soc-version Ascend950 --base-mode REGISTER
+# In-tree CMake build — the flag takes precedence over the environment
+bash scripts/build.sh --soc-version Ascend950
 ```
 
-A2 is the default when neither is set: `BASE_MODE=MEMORY` with `SOC_VERSION=Ascend910B4` for the
-wheel build and `Ascend910B2` for `scripts/build.sh`.
+Ascend950 is the default when `SOC_VERSION` is unset; build for A2 with
+`SOC_VERSION=Ascend910B2`.
 
 To compile a single kernel without building the whole package, `make compile_<name>` targets A2 and
 `make compile_a5_<name>` targets A5 (e.g. `make compile_a5_abs`).

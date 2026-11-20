@@ -36,11 +36,6 @@ option(PIP_INSTALL "True if building via pip" OFF)
 option(USE_ASC_LANGUAGE
        "Compile kernels with the ASC language toolchain (CANN >= 9.0)" ON)
 
-set(BASE_MODE
-    "MEMORY"
-    CACHE STRING "Base addressing mode: MEMORY or REGISTER")
-set_property(CACHE BASE_MODE PROPERTY STRINGS "MEMORY" "REGISTER")
-
 find_program(CCACHE_PROGRAM ccache)
 if(CCACHE_PROGRAM)
   set(CMAKE_C_COMPILER_LAUNCHER ${CCACHE_PROGRAM})
@@ -53,7 +48,7 @@ find_package(Torch REQUIRED)
 
 # user-defined configuration
 set(SOC_VERSION
-    "Ascend910b4"
+    "Ascend950"
     CACHE STRING "system on chip type")
 set(CMAKE_BUILD_TYPE
     "Debug"
@@ -70,15 +65,21 @@ elseif(DEFINED ENV{ASCEND_HOME_PATH})
 endif()
 
 # SOC_VERSION -> NPU_ARCH: the ASC compiler takes the target architecture
-# instead of SOC_VERSION.
+# instead of SOC_VERSION. The same mapping fixes BASE_MODE, the base addressing
+# mode the kernels are compiled with: A5 (Ascend950) uses register base, the
+# earlier parts memory base. SOC_VERSION is the only knob; BASE_MODE is derived
+# from it here and mirrored by scripts/ascend_env.sh for its build log.
 string(TOLOWER "${SOC_VERSION}" SOC_VERSION_LOWER)
 if(SOC_VERSION_LOWER MATCHES "^ascend910b" OR SOC_VERSION_LOWER MATCHES
                                               "^ascend910_93")
   set(NPU_ARCH "dav-2201")
+  set(BASE_MODE "MEMORY")
 elseif(SOC_VERSION_LOWER MATCHES "^ascend950")
   set(NPU_ARCH "dav-3510")
+  set(BASE_MODE "REGISTER")
 elseif(SOC_VERSION_LOWER MATCHES "^ascend310p")
   set(NPU_ARCH "dav-2002")
+  set(BASE_MODE "MEMORY")
 else()
   message(
     FATAL_ERROR
@@ -204,14 +205,11 @@ if(USE_ASC_LANGUAGE)
             $<$<COMPILE_LANGUAGE:ASC>:-UL2_CACHE_HINT>)
 endif()
 
+message(STATUS "BASE_MODE is ${BASE_MODE} (derived from ${SOC_VERSION})")
 if(BASE_MODE STREQUAL "MEMORY")
-  message(STATUS "BASE_MODE is MEMORY")
   ascendc_compile_definitions(no_workspace_kernel PRIVATE -DMEMORY_BASE)
-elseif(BASE_MODE STREQUAL "REGISTER")
-  message(STATUS "BASE_MODE is REGISTER")
-  ascendc_compile_definitions(no_workspace_kernel PRIVATE -DREGISTER_BASE)
 else()
-  message(FATAL_ERROR "BASE_MODE must be MEMORY or REGISTER, got: ${BASE_MODE}")
+  ascendc_compile_definitions(no_workspace_kernel PRIVATE -DREGISTER_BASE)
 endif()
 
 pybind11_add_module(pto_kernels_ops csrc/host/pybind11.cpp)
