@@ -48,7 +48,7 @@ find_package(Torch REQUIRED)
 
 # user-defined configuration
 set(SOC_VERSION
-    "Ascend950"
+    "Ascend910B"
     CACHE STRING "system on chip type")
 set(CMAKE_BUILD_TYPE
     "Debug"

@@ -13,7 +13,7 @@
 # It resolves the CANN installation, sources its setenv.bash (which puts the
 # bisheng/ccec compilers on PATH) and exports the build knobs:
 #
-#   SOC_VERSION              target SoC          (default Ascend950)
+#   SOC_VERSION              target SoC          (default Ascend910B)
 #   BASE_MODE                derived from SOC_VERSION (REGISTER on Ascend950,
 #                            MEMORY on Ascend910B/910_93/310P)
 #   ASCEND_CANN_PACKAGE_PATH resolved CANN root
@@ -23,7 +23,7 @@
 
 # Target SoC. The only input knob; overridable via the SOC_VERSION environment
 # variable.
-export SOC_VERSION="${SOC_VERSION:-Ascend950}"
+export SOC_VERSION="${SOC_VERSION:-Ascend910B}"
 
 # Base addressing mode, derived from the SoC: Ascend950 kernels use the
 # register-base addressing path, earlier SoCs the memory-base one.
