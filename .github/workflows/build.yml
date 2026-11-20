@@ -22,7 +22,7 @@ jobs:
       - name: Run shellcheck
         run: |
           find scripts/ -type f -name '*.sh' -print0 | \
-          xargs -0 shellcheck -x
+          xargs -0 shellcheck -x -P scripts
 
   black:
     name: Black

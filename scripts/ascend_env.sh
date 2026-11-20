@@ -38,6 +38,7 @@ ascend910b* | ascend910_93* | ascend310p*)
 *)
     echo "[ERROR] Unsupported SOC_VERSION: ${SOC_VERSION}"
     echo "[ERROR] Supported: Ascend950*, Ascend910B*, Ascend910_93*, Ascend310P*"
+    # shellcheck disable=SC2317
     return 1 2>/dev/null || exit 1
     ;;
 esac
@@ -57,6 +58,7 @@ fi
 if [ ! -f "$_ASCEND_INSTALL_PATH/bin/setenv.bash" ]; then
     echo "[ERROR] No CANN installation at ${_ASCEND_INSTALL_PATH}"
     echo "[ERROR] Set ASCEND_INSTALL_PATH (or ASCEND_HOME_PATH) to the CANN root."
+    # shellcheck disable=SC2317
     return 1 2>/dev/null || exit 1
 fi
 
