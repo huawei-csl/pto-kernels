@@ -31,10 +31,10 @@ done
 case "$PY_VER" in
     310) PYTHON_VERSION="py3.10" ;;
     311) PYTHON_VERSION="py3.11" ;;
-    *)   echo "Unsupported --py-ver '$PY_VER'. Use 310 or 311."; exit 1 ;;
+    *)   echo "Unsupported --py-ver '$PY_VER'. Use 310, 311 or 312."; exit 1 ;;
 esac
 
-IMAGE="quay.io/ascend/manylinux:9.0.0-910b-manylinux_2_28-${PYTHON_VERSION}"
+IMAGE="quay.io/ascend/manylinux:9.2.0-910b-manylinux_2_34-${PYTHON_VERSION}"
 
 echo "==> Building manylinux wheel"
 echo "    image      : ${IMAGE}"

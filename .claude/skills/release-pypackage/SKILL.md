@@ -35,8 +35,23 @@ pre-commit run --all-files                     # style gates CI enforces
 - **Hardware CI**: unit tests on both **910B4** and **910B2** live in the
   internal GitLab mirror pipeline, not GitHub. You cannot see it. Ask the user
   to confirm the mirror pipeline is green and record their answer.
-- **Local tests**: if an NPU is present, run `make test`; otherwise say so
-  explicitly rather than claiming it passed.
+- **Local tests**: if an NPU is present, build and test from a clean tree with
+
+  ```bash
+  source venv/bin/activate && make clean wheel install test
+  ```
+
+  If there is no `venv/` yet, create one following the "From source" setup in
+  `README.md` before running the line above:
+
+  ```bash
+  python3 -m venv venv
+  source venv/bin/activate
+  source /usr/local/Ascend/ascend-toolkit/set_env.sh
+  make setup_once                  # pip3 install -r requirements.txt
+  ```
+
+  If no NPU is present, say so explicitly rather than claiming the tests passed.
 
 ## 2. Version bump
 
