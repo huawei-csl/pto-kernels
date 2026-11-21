@@ -53,11 +53,11 @@ find_package(Torch REQUIRED)
 
 # user-defined configuration
 set(SOC_VERSION
-    "Ascend910b4"
+    "Ascend910B"
     CACHE STRING "system on chip type")
 set(CMAKE_BUILD_TYPE
-    "Debug"
-    CACHE STRING "Build type Release/Debug (default Debug)" FORCE)
+    "Release"
+    CACHE STRING "Build type Release/Debug (default Release)" FORCE)
 set(CMAKE_INSTALL_PREFIX
     "${CMAKE_CURRENT_LIST_DIR}/out"
     CACHE STRING "path for install()" FORCE)
@@ -214,6 +214,13 @@ elseif(BASE_MODE STREQUAL "REGISTER")
 else()
   message(FATAL_ERROR "BASE_MODE must be MEMORY or REGISTER, got: ${BASE_MODE}")
 endif()
+
+# pybind11_add_module links the module against pybind11::lto (adding -flto=auto)
+# unless CMAKE_INTERPROCEDURAL_OPTIMIZATION is already defined. With -flto
+# bisheng emits LLVM bitcode instead of ELF objects, and the link then fails
+# with "cce-ld: ... pybind11.cpp.o The file was not recognized as a valid object
+# file". Defining it here keeps LTO off whatever the build type.
+set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
 
 pybind11_add_module(pto_kernels_ops csrc/host/pybind11.cpp)
 # pybind11 does not work with C++20, so we set C++17 for the pybind11 module
