@@ -47,7 +47,7 @@ pip install pto-kernels
 Building from source is only needed for unreleased kernels or if you plan to contribute.
 
 **Prerequisites:**
-- A configured **torch-npu** environment
+- A configured **torch-npu** environment (`torch-npu==2.12.0.post3`, see [`requirements.txt`](requirements.txt))
 - Ascend toolkit installed at `/usr/local/Ascend/ascend-toolkit`
 
 ```bash
