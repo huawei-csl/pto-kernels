@@ -21,7 +21,7 @@ build: clean
 	bash scripts/build.sh
 
 wheel: clean
-	export CMAKE_GENERATOR="Unix Makefiles" && pip wheel -v . --extra-index-url https://download.pytorch.org/whl/cpu
+	bash scripts/build_wheel.sh
 
 
 # 'make compile_abs' compiles 'kernel_abs.cpp' into 'build/lib/libkernel_abs.so' without building the whole wheel package.
