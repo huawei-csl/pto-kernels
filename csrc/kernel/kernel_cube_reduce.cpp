@@ -236,6 +236,197 @@ AICORE void CompleteCubeReduce(__gm__ InputT* input, __gm__ T* partials,
   TSTORE(destination, result);
   pipe_barrier(PIPE_ALL);
 }
+
+// ---------------------------------------------------------------------------
+// Reduction over the last dimension of an ND contiguous tensor.
+//
+// A contiguous tensor of shape (d0, ..., dk, N) is exactly a (rows x N) matrix
+// with rows = d0 * ... * dk, so summing the last axis is one row sum per
+// matrix row. The full-tensor reduction above puts the data on the right of
+// the mad and an all-ones row on the left; a row sum is the mirror image:
+//
+//     A[M, K] @ ones[K, 1] = the row sums of A, an M x 1 column.
+//
+// A mad costs ceil(m/16) * ceil(k/16) * ceil(n/16) issues whatever n is, so
+// n == 1 reads M * K inputs for the same price as a 16-wide mad: the Cube unit
+// is left with far more throughput than HBM can feed it, which is what makes a
+// one-column GEMM a sensible reducer.
+// ---------------------------------------------------------------------------
+
+// L0B holds the ones operand as full 16-column fractals whatever n the mad
+// uses, mirroring the full-height L0A operand of the reduction above.
+constexpr uint32_t kFractalCols = 16;
+
+// Sums `cols` elements of each of `rows` contiguous rows into `dest`.
+//
+// `M` rows and `K` columns per tile, both template parameters so the tile
+// shapes stay compile-time constants. The mad's m and the L0C row pitch both
+// round up to 16, so a 16-row tile wastes no Cube cycles relative to a
+// 128-row one and only pays more Fixpipe stores; `K` trades the length of an
+// MTE2 burst against the padding the final column tile mads through. The host
+// picks the pair.
+//
+// Work is split into `row_tiles * splits` items: one per (row tile, column
+// range) pair. Splitting the column range matters when the input has fewer row
+// tiles than there are cores -- a few very long rows -- and `splits` is 1
+// otherwise, in which case `dest` is the final output rather than a partials
+// buffer and no Vector stage runs at all.
+template <typename InputT, typename OutputT, uint32_t M, uint32_t K>
+AICORE void CubeRowReduce(__gm__ InputT* input, __gm__ OutputT* dest,
+                          uint32_t rows, uint32_t cols, uint32_t splits) {
+  using AGlobal = GlobalTensor<InputT, Shape<1, 1, 1, DYNAMIC, DYNAMIC>,
+                               pto::Stride<1, 1, 1, DYNAMIC, 1>, Layout::ND>;
+  using CGlobal = GlobalTensor<OutputT, Shape<1, 1, 1, DYNAMIC, 1>,
+                               pto::Stride<1, 1, 1, 1, 1>, Layout::ND>;
+  // The staging tile for A is zN, the layout TLOAD converts ND global data
+  // into, and the one TMOV forwards to L0A without transposing.
+  using AMat = Tile<TileType::Mat, InputT, M, K, BLayout::ColMajor, DYNAMIC,
+                    DYNAMIC, SLayout::RowMajor, 512>;
+  using AMatWhole = Tile<TileType::Mat, InputT, M, K, BLayout::ColMajor, M, K,
+                         SLayout::RowMajor, 512>;
+  // The ones operand is staged nZ instead, which is the fractal layout L0B
+  // wants, so its TMOV does not transpose either.
+  using OnesMat =
+      Tile<TileType::Mat, InputT, K, kFractalCols, BLayout::RowMajor, K,
+           kFractalCols, SLayout::ColMajor, 512>;
+
+  constexpr uint32_t kTileBytes = M * K * sizeof(InputT);
+  const uint32_t row_tiles = kernel_utils::CeilDiv(rows, M);
+  const uint32_t col_tiles = kernel_utils::CeilDiv(cols, K);
+  const uint32_t items = row_tiles * splits;
+  const uint32_t id = get_block_idx();
+  const uint32_t blocks = get_block_num();
+  // The host caps the launch at `items`, so every block owns at least one.
+  if (id >= items) return;
+  const uint32_t count = items / blocks + (id < items % blocks);
+  const uint32_t begin = id * (items / blocks) + min(id, items % blocks);
+
+  // Two staging buffers rather than one: the last column tile of a row is
+  // short, and the columns past it must read as zero because the mad always
+  // runs the full width K. Giving the short tile its own buffer means zeroing
+  // it once here -- every later TLOAD into it rewrites the same leading
+  // columns and leaves the zeroed remainder alone.
+  AMatWhole tail_init;
+  OnesMat ones_l1;
+  TileLeft<InputT, M, K> a_l0;
+  TileRight<InputT, K, kFractalCols, K, 1> ones_l0;
+  TASSIGN(tail_init, kTileBytes);
+  TASSIGN(ones_l1, 2 * kTileBytes);
+  TASSIGN(a_l0, 0);
+  TASSIGN(ones_l0, 0);
+
+  // TEXPANDS on a Mat tile lowers to create_cbuf_matrix, which fills L1
+  // directly. It writes through a different tile object than the TLOADs that
+  // later refill the same buffer, so nothing but this barrier keeps the fill
+  // from landing on top of loaded data -- which it does, intermittently and
+  // one C0 block at a time, when a block's first column tile is the short
+  // one. The barrier costs one drain per kernel, before any real work.
+  TEXPANDS(ones_l1, static_cast<InputT>(1));
+  if (cols % K != 0) TEXPANDS(tail_init, static_cast<InputT>(0));
+  pipe_barrier(PIPE_ALL);
+  kernel_utils::SetWaitFlag<PIPE_MTE2, PIPE_MTE1>(0);
+  TMOV(ones_l0, ones_l1);
+  kernel_utils::SetWaitFlag<PIPE_MTE1, PIPE_M>(0);
+
+  for (uint32_t i = 0; i < count; ++i) {
+    const uint32_t item = begin + i;
+    const uint32_t row_begin = (item / splits) * M;
+    const uint32_t valid_rows = min(M, rows - row_begin);
+    const uint32_t split = item % splits;
+    // Balanced contiguous column-tile ranges, as for the item ranges above.
+    // The host keeps `splits` at or below `col_tiles`, so no split is empty
+    // and every (split, row tile) pair writes the partial it owns.
+    const uint32_t tile_begin =
+        split * (col_tiles / splits) + min(split, col_tiles % splits);
+    const uint32_t tile_count =
+        col_tiles / splits + (split < col_tiles % splits);
+
+    TileAcc<OutputT, M, kFractalCols, DYNAMIC, 1> c_l0(valid_rows);
+    TASSIGN(c_l0, 0);
+    for (uint32_t t = 0; t < tile_count; ++t) {
+      const uint32_t col_begin = (tile_begin + t) * K;
+      const uint32_t valid_cols = min(K, cols - col_begin);
+      AGlobal a_global(
+          input + static_cast<uint64_t>(row_begin) * cols + col_begin,
+          {static_cast<int64_t>(valid_rows), static_cast<int64_t>(valid_cols)},
+          {static_cast<int64_t>(cols)});
+      AMat a_l1(valid_rows, valid_cols);
+      TASSIGN(a_l1, valid_cols == K ? 0 : kTileBytes);
+      TLOAD(a_l1, a_global);
+      kernel_utils::SetWaitFlag<PIPE_MTE2, PIPE_MTE1>(0);
+      // Rows past `valid_rows` carry whatever L1 held; they produce their own
+      // junk row sums in L0C and are never stored. Only the column direction
+      // has to be clean, which is what the zeroed tail buffer is for.
+      TMOV(a_l0, a_l1);
+      kernel_utils::SetWaitFlag<PIPE_MTE1, PIPE_M>(0);
+      if (t == 0) {
+        TMATMUL(c_l0, a_l0, ones_l0);
+      } else {
+        TMATMUL_ACC(c_l0, c_l0, a_l0, ones_l0);
+      }
+      // Complete the multiply before the next TMOV overwrites a_l0, and the
+      // TMOV's read of a_l1 before the next TLOAD refills it.
+      kernel_utils::SetWaitFlag<PIPE_M, PIPE_MTE1>(0);
+      kernel_utils::SetWaitFlag<PIPE_MTE1, PIPE_MTE2>(0);
+    }
+    kernel_utils::SetWaitFlag<PIPE_M, PIPE_FIX>(0);
+    CGlobal c_global(dest + static_cast<uint64_t>(split) * rows + row_begin,
+                     {static_cast<int64_t>(valid_rows)});
+    TSTORE(c_global, c_l0);
+    // The next row tile's mad reuses this L0C tile.
+    kernel_utils::SetWaitFlag<PIPE_FIX, PIPE_M>(0);
+  }
+  pipe_barrier(PIPE_ALL);
+}
+
+// Folds the `splits` partial rows the Cube stage left into one row of `rows`
+// sums. A separate launch on the same stream orders all Fixpipe stores before
+// these reads. Only runs when the Cube stage was split along the columns.
+template <typename T>
+AICORE void CompleteCubeRowReduce(__gm__ T* partials, __gm__ T* output,
+                                  uint32_t rows, uint32_t splits) {
+  constexpr uint32_t kChunk = 512;
+  constexpr uint32_t kChunkBytes = kChunk * sizeof(T);
+  using RowGlobal =
+      GlobalTensor<T, Shape<1, 1, 1, 1, DYNAMIC>, pto::Stride<1, 1, 1, 1, 1>>;
+  using RowIn =
+      Tile<TileType::Vec, T, 1, kChunk, BLayout::RowMajor, 1, DYNAMIC>;
+
+  set_mask_norm();
+  set_vector_mask(-1, -1);
+
+  const uint32_t chunks = kernel_utils::CeilDiv(rows, kChunk);
+  const uint32_t id = get_block_idx();
+  const uint32_t blocks = get_block_num();
+  if (id >= chunks) return;
+  const uint32_t count = chunks / blocks + (id < chunks % blocks);
+  const uint32_t begin = id * (chunks / blocks) + min(id, chunks % blocks);
+
+  for (uint32_t c = 0; c < count; ++c) {
+    const uint32_t off = (begin + c) * kChunk;
+    const uint32_t n = min(kChunk, rows - off);
+    RowIn totals(n);
+    RowIn addend(n);
+    TASSIGN(totals, 0);
+    TASSIGN(addend, kChunkBytes);
+    RowGlobal first(partials + off, {static_cast<int32_t>(n)});
+    TLOAD(totals, first);
+    kernel_utils::SetWaitFlag<PIPE_MTE2, PIPE_V>(0);
+    for (uint32_t s = 1; s < splits; ++s) {
+      RowGlobal source(partials + static_cast<uint64_t>(s) * rows + off,
+                       {static_cast<int32_t>(n)});
+      TLOAD(addend, source);
+      kernel_utils::SetWaitFlag<PIPE_MTE2, PIPE_V>(0);
+      TADD(totals, totals, addend);
+      kernel_utils::SetWaitFlag<PIPE_V, PIPE_MTE2>(0);
+    }
+    kernel_utils::SetWaitFlag<PIPE_V, PIPE_MTE3>(0);
+    RowGlobal destination(output + off, {static_cast<int32_t>(n)});
+    TSTORE(destination, totals);
+    kernel_utils::SetWaitFlag<PIPE_MTE3, PIPE_MTE2>(0);
+  }
+  pipe_barrier(PIPE_ALL);
+}
 }  // namespace
 
 template <typename InputT>
@@ -376,4 +567,161 @@ extern "C" void pto_launch_cube_reduce_int8(uint32_t blockDim, void* stream,
   complete_cube_reduce_int8<<<1, nullptr, stream>>>(
       (__gm__ int8_t*)input, (__gm__ int32_t*)partials, (__gm__ int32_t*)output,
       blocks, tail_offset, tail_len, size);
+}
+
+// A (rows per tile, columns per tile) pair is only instantiated when its
+// operands fit L0A and L0B, both 64 KB. The host never asks for a pair that
+// does not fit, so the dropped cases are unreachable rather than silent
+// no-ops.
+template <typename InputT, uint32_t M, uint32_t K>
+AICORE inline void CubeRowReduceIfFits(__gm__ InputT* input,
+                                       __gm__ CubeOutT<InputT>* dest,
+                                       uint32_t rows, uint32_t cols,
+                                       uint32_t splits) {
+  if constexpr (M * K * sizeof(InputT) <= 65536 &&
+                K * kFractalCols * sizeof(InputT) <= 65536) {
+    CubeRowReduce<InputT, CubeOutT<InputT>, M, K>(input, dest, rows, cols,
+                                                  splits);
+  }
+}
+
+template <typename InputT>
+AICORE void CubeRowReduceDispatch(__gm__ InputT* input,
+                                  __gm__ CubeOutT<InputT>* dest, uint32_t rows,
+                                  uint32_t cols, uint32_t splits,
+                                  uint32_t row_tile, uint32_t col_tile) {
+  if (row_tile == 16) {
+    switch (col_tile) {
+      case 64:
+        CubeRowReduceIfFits<InputT, 16, 64>(input, dest, rows, cols, splits);
+        break;
+      case 128:
+        CubeRowReduceIfFits<InputT, 16, 128>(input, dest, rows, cols, splits);
+        break;
+      case 256:
+        CubeRowReduceIfFits<InputT, 16, 256>(input, dest, rows, cols, splits);
+        break;
+      case 512:
+        CubeRowReduceIfFits<InputT, 16, 512>(input, dest, rows, cols, splits);
+        break;
+      case 1024:
+        CubeRowReduceIfFits<InputT, 16, 1024>(input, dest, rows, cols, splits);
+        break;
+    }
+  } else {
+    switch (col_tile) {
+      case 64:
+        CubeRowReduceIfFits<InputT, 128, 64>(input, dest, rows, cols, splits);
+        break;
+      case 128:
+        CubeRowReduceIfFits<InputT, 128, 128>(input, dest, rows, cols, splits);
+        break;
+      case 256:
+        CubeRowReduceIfFits<InputT, 128, 256>(input, dest, rows, cols, splits);
+        break;
+      case 512:
+        CubeRowReduceIfFits<InputT, 128, 512>(input, dest, rows, cols, splits);
+        break;
+      case 1024:
+        CubeRowReduceIfFits<InputT, 128, 1024>(input, dest, rows, cols, splits);
+        break;
+    }
+  }
+}
+
+extern "C" __global__ AICORE void cube_row_reduce_fp16(
+    __gm__ half* input, __gm__ float* dest, uint32_t rows, uint32_t cols,
+    uint32_t splits, uint32_t row_tile, uint32_t col_tile) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIC_ONLY);
+#if defined(__DAV_CUBE__)
+  CubeRowReduceDispatch<half>(input, dest, rows, cols, splits, row_tile,
+                              col_tile);
+#endif
+}
+
+extern "C" __global__ AICORE void complete_cube_row_reduce_fp16(
+    __gm__ float* partials, __gm__ float* output, uint32_t rows,
+    uint32_t splits) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY);
+#if defined(__DAV_VEC__)
+  CompleteCubeRowReduce<float>(partials, output, rows, splits);
+#endif
+}
+
+extern "C" void pto_launch_cube_row_reduce_fp16(
+    uint32_t blockDim, void* stream, void* input, void* dest, void* output,
+    uint32_t rows, uint32_t cols, uint32_t splits, uint32_t row_tile,
+    uint32_t col_tile, uint32_t vector_blocks) {
+  cube_row_reduce_fp16<<<blockDim, nullptr, stream>>>(
+      (__gm__ half*)input, (__gm__ float*)dest, rows, cols, splits, row_tile,
+      col_tile);
+  // With a single column range the Cube stage already wrote the final sums.
+  if (splits > 1) {
+    complete_cube_row_reduce_fp16<<<vector_blocks, nullptr, stream>>>(
+        (__gm__ float*)dest, (__gm__ float*)output, rows, splits);
+  }
+}
+
+extern "C" __global__ AICORE void cube_row_reduce_fp32(
+    __gm__ float* input, __gm__ float* dest, uint32_t rows, uint32_t cols,
+    uint32_t splits, uint32_t row_tile, uint32_t col_tile) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIC_ONLY);
+#if defined(__DAV_CUBE__)
+  CubeRowReduceDispatch<float>(input, dest, rows, cols, splits, row_tile,
+                               col_tile);
+#endif
+}
+
+extern "C" __global__ AICORE void complete_cube_row_reduce_fp32(
+    __gm__ float* partials, __gm__ float* output, uint32_t rows,
+    uint32_t splits) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY);
+#if defined(__DAV_VEC__)
+  CompleteCubeRowReduce<float>(partials, output, rows, splits);
+#endif
+}
+
+extern "C" void pto_launch_cube_row_reduce_fp32(
+    uint32_t blockDim, void* stream, void* input, void* dest, void* output,
+    uint32_t rows, uint32_t cols, uint32_t splits, uint32_t row_tile,
+    uint32_t col_tile, uint32_t vector_blocks) {
+  cube_row_reduce_fp32<<<blockDim, nullptr, stream>>>(
+      (__gm__ float*)input, (__gm__ float*)dest, rows, cols, splits, row_tile,
+      col_tile);
+  if (splits > 1) {
+    complete_cube_row_reduce_fp32<<<vector_blocks, nullptr, stream>>>(
+        (__gm__ float*)dest, (__gm__ float*)output, rows, splits);
+  }
+}
+
+extern "C" __global__ AICORE void cube_row_reduce_int8(
+    __gm__ int8_t* input, __gm__ int32_t* dest, uint32_t rows, uint32_t cols,
+    uint32_t splits, uint32_t row_tile, uint32_t col_tile) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIC_ONLY);
+#if defined(__DAV_CUBE__)
+  CubeRowReduceDispatch<int8_t>(input, dest, rows, cols, splits, row_tile,
+                                col_tile);
+#endif
+}
+
+extern "C" __global__ AICORE void complete_cube_row_reduce_int8(
+    __gm__ int32_t* partials, __gm__ int32_t* output, uint32_t rows,
+    uint32_t splits) {
+  KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIV_ONLY);
+#if defined(__DAV_VEC__)
+  CompleteCubeRowReduce<int32_t>(partials, output, rows, splits);
+#endif
+}
+
+extern "C" void pto_launch_cube_row_reduce_int8(
+    uint32_t blockDim, void* stream, void* input, void* dest, void* output,
+    uint32_t rows, uint32_t cols, uint32_t splits, uint32_t row_tile,
+    uint32_t col_tile, uint32_t vector_blocks) {
+  cube_row_reduce_int8<<<blockDim, nullptr, stream>>>(
+      (__gm__ int8_t*)input, (__gm__ int32_t*)dest, rows, cols, splits,
+      row_tile, col_tile);
+  if (splits > 1) {
+    complete_cube_row_reduce_int8<<<vector_blocks, nullptr, stream>>>(
+        (__gm__ int32_t*)dest, (__gm__ int32_t*)output, rows, splits);
+  }
 }

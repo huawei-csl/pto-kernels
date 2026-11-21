@@ -290,3 +290,161 @@ def test_cube_reduce_fp32_cancellation(length, npu_device):
     x[1:-1:2] = -32
     x[-1] = 0.5000000596046448
     check_sum(x.to(npu_device), exact=True)
+
+
+def check_row_sum(x, *, exact=False):
+    dtype = torch.float32 if x.dtype != torch.int8 else torch.int32
+    reference_dtype = torch.float64 if x.dtype == torch.float32 else dtype
+    expected = x.cpu().sum(dim=-1, dtype=reference_dtype).to(dtype)
+    actual = pto_cube_reduce(x, dim=-1)
+    assert actual.shape == expected.shape
+    assert actual.dtype == dtype
+    assert actual.device == x.device
+    tolerance = 0.01 if dtype == torch.float32 and not exact else 0
+    torch.testing.assert_close(actual.cpu(), expected, atol=tolerance, rtol=tolerance)
+    # dim given as the positive last axis must behave the same way.
+    if x.dim() > 0:
+        alias = pto_cube_reduce(x, dim=x.dim() - 1)
+        torch.testing.assert_close(alias.cpu(), actual.cpu(), atol=0, rtol=0)
+    return actual
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.float32, torch.int8])
+@pytest.mark.parametrize(
+    "shape",
+    [
+        (),
+        (1,),
+        (13,),
+        (0,),
+        (0, 7),
+        (7, 0),
+        (2, 0, 3),
+        (1, 1),
+        (1, 4096),
+        (3, 5),
+        (16, 64),
+        (17, 63),
+        (128, 128),
+        (129, 1),
+        (1000, 7),
+        (4, 5, 16384),
+        (7, 11, 13),
+        (3, 5, 7, 11, 13),
+        (2, 3, 4, 5, 6, 7),
+        (20000, 11),
+        (31, 65535),
+        (1, 65535),
+    ],
+)
+def test_cube_reduce_last_dim(shape, dtype, npu_device):
+    check_row_sum(make_input(shape, dtype, npu_device))
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.float32, torch.int8])
+@pytest.mark.parametrize(
+    "cols",
+    # The host picks a 64-column tile below 256 columns, 256 below 1024 and
+    # 1024 above, so every regime gets an exact multiple and a ragged tail.
+    [1, 2, 15, 16, 17, 63, 64, 65, 255, 256, 257, 1023, 1024, 1025, 2047, 2048, 3000],
+)
+@pytest.mark.parametrize("rows", [1, 15, 16, 17, 127, 128, 129, 300])
+def test_cube_reduce_last_dim_tile_boundaries(rows, cols, dtype, npu_device):
+    # Values vary along each row and between rows, so a dropped or doubled
+    # tile, or a row written from the wrong tile, changes the result. They stay
+    # in [-3, 3] and every row sum is exact in all three dtypes.
+    x = ((torch.arange(rows * cols, dtype=torch.int32) % 7) - 3).reshape(rows, cols)
+    check_row_sum(x.to(dtype).to(npu_device), exact=True)
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.float32, torch.int8])
+@pytest.mark.parametrize("rows", [1, 2, 3, 24, 25, 48])
+def test_cube_reduce_last_dim_column_splits(rows, dtype, npu_device):
+    # Too few rows to fill the cores, so the kernel splits the column range
+    # across blocks and a Vector pass folds the partials back together.
+    cols = 20011
+    x = ((torch.arange(rows * cols, dtype=torch.int32) % 7) - 3).reshape(rows, cols)
+    check_row_sum(x.to(dtype).to(npu_device), exact=True)
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.float32, torch.int8])
+def test_cube_reduce_last_dim_one_hot_rows(dtype, npu_device):
+    # One nonzero per row at a different column makes every row sum distinct,
+    # exposing a tile read at the wrong column offset.
+    rows, cols = 200, 1500
+    x = torch.zeros(rows, cols, dtype=dtype)
+    for row in range(rows):
+        x[row, (row * 7) % cols] = 1
+    check_row_sum(x.to(npu_device), exact=True)
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.float32, torch.int8])
+def test_cube_reduce_last_dim_views(dtype, npu_device):
+    base = make_input((40, 1000), dtype, npu_device)
+    check_row_sum(base[1:, 3:997])  # non-contiguous in both axes
+    check_row_sum(base.t())  # permuted, so the reduced axis is the outer one
+    check_row_sum(base[::3, ::2])
+    check_row_sum(base[0, :1].expand(17, 23))
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.float32, torch.int8])
+def test_cube_reduce_last_dim_excludes_surrounding_storage(dtype, npu_device):
+    rows, cols = 50, 300
+    base = torch.full((rows * cols + 65,), 17, dtype=dtype, device=npu_device)
+    x = base[1 : rows * cols + 1].view(rows, cols)
+    x.fill_(1)
+    assert x.is_contiguous() and x.storage_offset() == 1
+    check_row_sum(x, exact=True)
+
+
+@pytest.mark.parametrize("length", [1025, 16385])
+def test_cube_reduce_last_dim_fp16_wide_accumulation(length, npu_device):
+    # A row may sum beyond fp16's range; accumulation must stay fp32.
+    x = torch.full((3, length), 32768, dtype=torch.float16, device=npu_device)
+    check_row_sum(x, exact=True)
+
+
+@pytest.mark.parametrize("value", [-128, 127])
+def test_cube_reduce_last_dim_int8_extremes(value, npu_device):
+    x = torch.full((70, 5000), value, dtype=torch.int8, device=npu_device)
+    check_row_sum(x, exact=True)
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.float32, torch.int8])
+def test_cube_reduce_last_dim_repeated_calls_preserve_input(dtype, npu_device):
+    x = torch.full((300, 700), 1, dtype=dtype, device=npu_device)
+    original = x.clone()
+    first = check_row_sum(x, exact=True)
+    check_row_sum(x, exact=True)
+    torch.testing.assert_close(x, original, atol=0, rtol=0)
+    assert first.cpu()[0].item() == 700
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.float32, torch.int8])
+def test_cube_reduce_last_dim_uses_current_stream(dtype, npu_device):
+    stream = torch.npu.Stream(device=npu_device)
+    with torch.npu.stream(stream):
+        x = torch.full((300, 700), 1, dtype=dtype, device=npu_device)
+        first = pto_cube_reduce(x, dim=-1)
+        x.fill_(2)
+        second = pto_cube_reduce(x, dim=-1)
+        combined = first + second
+    stream.synchronize()
+    assert first.cpu().sum().item() == 300 * 700
+    assert second.cpu().sum().item() == 2 * 300 * 700
+    assert combined.cpu().sum().item() == 3 * 300 * 700
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.float32, torch.int8])
+def test_cube_reduce_rejects_inner_dim(dtype, npu_device):
+    x = torch.ones((4, 5), dtype=dtype, device=npu_device)
+    for dim in (0, -2):
+        with pytest.raises(RuntimeError, match="only the last dimension"):
+            pto_cube_reduce(x, dim=dim)
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.float32, torch.int8])
+def test_cube_reduce_rejects_long_last_dim(dtype, npu_device):
+    x = torch.ones((2, 65536), dtype=dtype, device=npu_device)
+    with pytest.raises(RuntimeError, match="last dimension of at most"):
+        pto_cube_reduce(x, dim=-1)
