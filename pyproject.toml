@@ -8,7 +8,7 @@ requires = [
   "psutil==6.1.0",
   "PyYAML==6.0.2",
   "attrs==24.2.0",
-  "torch-npu==2.10.0",
+  "torch-npu==2.12.0.post3",
 ]
 build-backend = "scikit_build_core.build"
 
@@ -58,7 +58,7 @@ Changelog = "https://github.com/huawei-csl/pto-kernels/releases"
 
 [project.optional-dependencies]
 torch = [
-  "torch-npu==2.10.0",
+  "torch-npu==2.12.0.post3",
 ]
 
 [tool.scikit-build]
