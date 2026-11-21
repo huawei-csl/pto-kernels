@@ -71,7 +71,7 @@ AICORE inline void block_fwd_diagonal_inverses(Stripe& a, Identity& identity,
     TASSIGN(broadcast, Base + Bytes);
     TGATHER(coefficients, source, gather_indices, broadcast);
     TCOLEXPAND(broadcast, solved);
-    TMULADDDST(inverse, coefficients, broadcast);
+    TMULA(inverse, coefficients, broadcast);
 #endif
     kernel_utils::PipeBarrierVec();
   }
