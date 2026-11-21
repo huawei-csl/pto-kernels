@@ -1,54 +1,24 @@
-// ============================================================================
-// kda_chunk_o.cpp — Output stage for KDA (per-dim gate)
+// KDA output stage with per-dimension cumulative gates.
+// For each chunk, Vec computes
+//   q_eff[r,d] = q[r,d] * exp(g_cs[r,d])
+//   Aqk[r,c] = sum_d q[r,d] * k[c,d] * exp(g_cs[r,d] - g_cs[c,d])
+//              for r >= c, and zero otherwise.
+// Nonpositive gate differences keep the causal coefficients finite.
+// Cube computes O = q_eff @ S + Aqk @ V_corr, where S is the state entering
+// the chunk and V_corr contains the corrected values from kda_chunk_h.
 //
-// Math (per chunk, matches ref_kda_chunk_o in
-//   tests/test_kda_single_kernels.py:333-380):
-//   q_eff = q * exp(g_cs)              # [c_len, K]
-//   k_eff = k * exp(-g_cs)             # [c_len, K]
-//   inter = q_eff @ S                  # [c_len, V]
-//   Aqk   = tril(q_eff @ k_eff^T,      # [c_len, c_len], INCLUSIVE diagonal
-//                diagonal=0)
-//   o     = inter + Aqk @ v_corr       # [c_len, V]
+// Q, K: [HV, T, K] fp16, G_cs: [HV, T, K] fp32, head-major.
+// V_corr, O: [T, HV, V] fp16, S: [total_chunks, HV, K, V] fp16.
+// Mask: [C, C] fp32 inclusive lower-triangular mask.
 //
-// where S = s_snapshots[ci_base + ci, head] is the [K, V] state *entering*
-// this chunk (already computed by kda_chunk_h), and v_corr = u - w @ S is
-// the corrected values (also from kda_chunk_h).
-//
-// Differences from GDN chunk_o.cpp:
-//   - Gate is per-DIMENSION (g_cs has shape [HV, T, K] head-major).
-//   - Vec pre-scales Q and K element-wise (q*exp(g_cs), k*exp(-g_cs)) BEFORE
-//     Cube sees them.  Cube does pure matmuls; there is no per-element gating
-//     coefficient applied to QK on the Vec side.
-//   - Causal mask is INCLUSIVE of the diagonal (rows >= cols), so the mask
-//     tensor passed from Python differs from kkt_kda's strict-lower mask.
-//   - No GQA: Q, K, V_corr, O all use HV heads.
-//   - S is fp16 in GM (from kda_chunk_h's output) — Vec casts to fp32 into
-//     workspace so Cube has fp32 sources for all three GEMMs.
-//
-// Chunks within a (seq, head) work item are fully independent (each reads
-// its own s_snapshots entry).  Cube/Vec still process them sequentially per
-// work item to keep the per-core 4-flag protocol simple.
-//
-// Cross-core sync: same data-flow flags as kda_chunk_h (0-3).
-// Inputs:
-//   Q       [HV, T, K]               fp16  — queries (head-major)
-//   K       [HV, T, K]               fp16  — keys    (head-major)
-//   V_corr  [T, HV, V]               fp16  — corrected values from kda_chunk_h
-//   (BSND) S       [total_chunks, HV, K, V] fp16  — snapshots from kda_chunk_h
-//   G_cs    [HV, T, K]               fp32  — per-dim cumulative gate
-//   (head-major) Msk     [C, C]                   fp32  — inclusive lower-tri
-//   mask (rows >= cols) workspace [per-core scratch]     fp32  — 7 slots × K*V
-//   floats O       [T, HV, V]               fp16  — output (BSND)
-//
-// Workspace per AI core (7 slots, fp32; assumes K == V == HiddenSize):
-//   WS_Q   [C, K]   Vec writes q*exp(g_cs)  → Cube reads (GEMM1 A, GEMM2 A)
-//   WS_K   [C, K]   Vec writes k*exp(-g_cs) → Cube reads (GEMM1 B, transposed)
-//   WS_V   [C, V]   Vec writes V_corr fp32  → Cube reads (GEMM3 B)
-//   WS_S   [K, V]   Vec writes S fp32       → Cube reads (GEMM2 B)
-//   WS_QK  [C, C]   Cube writes QK fp32     → Vec masks  → Cube reads (GEMM3 A)
-//   WS_QS  [C, V]   Cube writes QS fp32     → Vec reads (final combine)
-//   WS_QKV [C, V]   Cube writes QKV fp32    → Vec reads (final combine)
-// ============================================================================
+// Per-core fp32 workspace (K == V == HiddenSize):
+//   WS_Q   [C, K]  Vec writes q_eff      -> Cube reads
+//   WS_V   [C, V]  Vec writes V_corr     -> Cube reads
+//   WS_S   [K, V]  Vec writes S          -> Cube reads
+//   WS_QK  [C, C]  Vec writes masked Aqk -> Cube reads
+//   WS_QS  [C, V]  Cube writes QS        -> Vec reads
+//   WS_QKV [C, V]  Cube writes QKV       -> Vec reads
+// Each chunk publishes its workspace before the consuming core proceeds.
 
 #include "kernel_utils.h"
 using namespace pto;
@@ -123,7 +93,7 @@ using TileUbDataND =
     pto::Tile<pto::TileType::Vec, T, Rows, Cols, pto::BLayout::RowMajor,
               RowValid, ColValid, pto::SLayout::NoneBox, 512, PadVal>;
 
-// Single-shot dense GEMM via L0A/L0B — all three GEMMs have inner-dim == 128.
+// Single-shot dense GEMM via L0A/L0B.
 template <typename T1, typename T2, int32_t M, int32_t N, int32_t K,
           bool transpose_B = false>
 AICORE PTO_INLINE void gemm_oneshot(
@@ -187,8 +157,7 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
 
   // ── Workspace slots (fp32 elements, per AI core) ─────────────────────────
   constexpr int32_t WS_Q = 0;
-  constexpr int32_t WS_K = WS_Q + C * K_DIM;
-  constexpr int32_t WS_V = WS_K + C * K_DIM;
+  constexpr int32_t WS_V = WS_Q + C * K_DIM;
   constexpr int32_t WS_S = WS_V + C * V_DIM;
   constexpr int32_t WS_QK = WS_S + KV;
   constexpr int32_t WS_QS = WS_QK + C * C;
@@ -202,11 +171,11 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
   TileMatL1<float, C, K_DIM, C, K_DIM> q_l1;
   TASSIGN(q_l1, 0);
   TileMatL1<float, K_DIM, V_DIM, K_DIM, V_DIM> s_l1;
-  TASSIGN(s_l1, (C * K_DIM + C * K_DIM) * sizeof(float));
+  TASSIGN(s_l1, C * K_DIM * sizeof(float));
   TileMatL1<float, C, C, C, C> qkm_l1;
-  TASSIGN(qkm_l1, (C * K_DIM + C * K_DIM + KV) * sizeof(float));
+  TASSIGN(qkm_l1, (C * K_DIM + KV) * sizeof(float));
   TileMatL1<float, C, V_DIM, C, V_DIM> v_l1;
-  TASSIGN(v_l1, (C * K_DIM + C * K_DIM + KV + C * C) * sizeof(float));
+  TASSIGN(v_l1, (C * K_DIM + KV + C * C) * sizeof(float));
 
   TileAcc<float, C, V_DIM, C, V_DIM> qkv_l0;
   TASSIGN(qkv_l0, 0);
@@ -256,7 +225,7 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
         GmTensor2D<float> s_global(workspace_handle + ws_base + WS_S, s_shape,
                                    s_stride);
         DynMatL1<float, K_DIM, V_DIM> s_l1_load(K_DIM, V_DIM);
-        TASSIGN(s_l1_load, (C * K_DIM + C * K_DIM) * sizeof(float));
+        TASSIGN(s_l1_load, C * K_DIM * sizeof(float));
         TLOAD(s_l1_load, s_global);
       }
       {
@@ -265,8 +234,7 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
         GmTensor2D<float> v_global(workspace_handle + ws_base + WS_V, v_shape,
                                    v_stride);
         DynMatL1<float, C, V_DIM> v_l1_load(C, V_DIM);
-        TASSIGN(v_l1_load,
-                (C * K_DIM + C * K_DIM + KV + C * C) * sizeof(float));
+        TASSIGN(v_l1_load, (C * K_DIM + KV + C * C) * sizeof(float));
         TLOAD(v_l1_load, v_global);
       }
       {
@@ -275,14 +243,14 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
         GmTensor2D<float> qkm_global(workspace_handle + ws_base + WS_QK,
                                      qkm_shape, qkm_stride);
         DynMatL1<float, C, C> qkm_l1_load(C, C);
-        TASSIGN(qkm_l1_load, (C * K_DIM + C * K_DIM + KV) * sizeof(float));
+        TASSIGN(qkm_l1_load, (C * K_DIM + KV) * sizeof(float));
         TLOAD(qkm_l1_load, qkm_global);
       }
 
       set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
       wait_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
 
-      // GEMM2: QS = q_eff @ S  [C, K] @ [K, V] → [C, V].
+      // QS = q_eff @ S  [C, K] @ [K, V] → [C, V].
       gemm_oneshot<float, float, C, V_DIM, K_DIM, /*transpose_B=*/false>(
           q_l1, s_l1, qs_l0);
 
@@ -299,7 +267,7 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
       set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
       wait_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
 
-      // GEMM3: QKV = Aqk_masked @ V_corr  [C, C] @ [C, V] → [C, V].
+      // QKV = Aqk_masked @ V_corr  [C, C] @ [C, V] → [C, V].
       gemm_oneshot<float, float, C, V_DIM, C, /*transpose_B=*/false>(
           qkm_l1, v_l1, qkv_l0);
 
@@ -378,7 +346,7 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
       if (valid_rows > HalfC) valid_rows = HalfC;
 
       // ====================================================================
-      // PHASE A — load Q, K, G_cs; pre-scale q_eff/k_eff; write V_corr, S.
+      // PHASE A — prepare q_eff, masked Aqk, V_corr and S for Cube.
       // ====================================================================
       int64_t hk_base =
           static_cast<int64_t>(head) * total_tokens * K_DIM +
@@ -487,7 +455,9 @@ AICORE void kda_chunk_o_kernel(__gm__ half* Q_handle, __gm__ half* K_handle,
           wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID0);
         }
 
-        for (int32_t c = 0; c < static_cast<int32_t>(valid); ++c) {
+        // Later columns are entirely above this row half's causal diagonal.
+        const int32_t col_end = valid_rows > 0 ? my_row_offset + valid_rows : 0;
+        for (int32_t c = 0; c < col_end; ++c) {
           int64_t col_base = static_cast<int64_t>(head) * total_tokens * K_DIM +
                              (chunk_start + static_cast<int64_t>(c)) * K_DIM;
           {
