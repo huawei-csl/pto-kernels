@@ -103,6 +103,27 @@ template <typename InputT>
 using CubeOutT = typename std::conditional<std::is_same<InputT, int8_t>::value,
                                            int32_t, float>::type;
 
+// How many elements the single Vector core folds per loop iteration, in both
+// the partials fold and the ragged tail.
+//
+// Each iteration is a fully serialized TLOAD -> TROWSUM -> TADD chain with a
+// flag round trip at either end, so this stage costs iteration count, not
+// element count. At 256 a worst-case tail of one element short of a full
+// 128x128 tile took 64 serialized iterations on one core while 24 Cube cores
+// stood idle, and even a tail-free reduction spent 12 on the `blocks * S`
+// partials. At 4096 those become 4 and 1.
+//
+// Measured on one 910B2, four values interleaved in a single process (A,B,C,
+// D,A,B,...), 3 repeats of 100 iterations: 4096 is 2.0-2.9x faster than 256
+// at the ragged sizes, 1.16-1.27x at the tail-free ones, and never slower at
+// any size or dtype. 8192 adds a further 3-5%, but only at the ragged sizes,
+// and doubles the footprint below; 4096 is the knee.
+//
+// UB cost is ~64 KB for an FP32 input and ~76 KB for int8, which widens via
+// half before reducing. Raising this is bounded by that budget, not by the
+// loop.
+constexpr uint32_t kFoldChunk = 4096;
+
 // Sums the `tail_len` elements at `input + tail_offset` and returns the total.
 //
 // The Cube stage consumes only whole S x S tiles, so the last `tail_len`
@@ -127,7 +148,7 @@ AICORE float AccumulateTail(__gm__ InputT* input, uint64_t tail_offset,
                             uint32_t tail_len) {
   constexpr bool kIsF32 = std::is_same<InputT, float>::value;
   constexpr bool kIsI8 = std::is_same<InputT, int8_t>::value;
-  constexpr uint32_t kChunk = 256;
+  constexpr uint32_t kChunk = kFoldChunk;
   constexpr uint32_t kInBytes = kChunk * sizeof(InputT);
   constexpr uint32_t kMidBytes = kIsI8 ? kChunk * sizeof(half) : 0;
   constexpr uint32_t kF32Off = kIsF32 ? 0 : kInBytes + kMidBytes;
@@ -195,7 +216,7 @@ AICORE void CompleteCubeReduce(__gm__ InputT* input, __gm__ T* partials,
       GlobalTensor<T, Shape<1, 1, 1, 1, 1>, pto::Stride<1, 1, 1, 1, 1>>;
   using PartGlobal =
       GlobalTensor<T, Shape<1, 1, 1, 1, DYNAMIC>, pto::Stride<1, 1, 1, 1, 1>>;
-  constexpr uint32_t kChunk = 256;
+  constexpr uint32_t kChunk = kFoldChunk;
   constexpr uint32_t kChunkBytes = kChunk * sizeof(T);
   using PartIn =
       Tile<TileType::Vec, T, 1, kChunk, BLayout::RowMajor, 1, DYNAMIC>;
