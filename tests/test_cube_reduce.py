@@ -89,25 +89,33 @@ def exact_pattern(length, dtype):
     [
         # The host picks a 32x32 tile below 4096 elements, 64x64 below 16384,
         # and 128x128 above, so each regime has its own tile and tail sizes.
-        # The tail is folded in 256-element chunks.
-        # 32x32 tiles (1024 elements).
-        1279,  # one tile, tail one element short of a chunk
-        1280,  # one tile, tail exactly one chunk
-        1281,  # one tile, tail one chunk plus one
-        2816,  # two tiles, tail three whole chunks
+        # The tail is folded in `kFoldChunk` (4096) element chunks, so only the
+        # 128x128 regime can produce a tail longer than one chunk: the other two
+        # cap their tails at 1023 and 4095. The lengths below therefore cover
+        # tail sizes generally in all three regimes, and chunk boundaries in the
+        # 128x128 block specifically.
+        # 32x32 tiles (1024 elements), tail at most 1023 -- one chunk.
+        1279,  # one tile, tail 255
+        1280,  # one tile, tail 256
+        1281,  # one tile, tail 257
+        2816,  # two tiles, tail 768
         3072,  # three whole tiles, no tail, odd partial count
         4094,  # three tiles, tail one short of the maximum 1023
-        # 64x64 tiles (4096 elements).
-        4352,  # one tile, tail exactly one chunk
+        # 64x64 tiles (4096 elements), tail at most 4095 -- one chunk.
+        4352,  # one tile, tail 256
         8191,  # one tile plus the largest possible tail
         8192,  # two whole tiles
         12288,  # three whole tiles
         16382,  # three tiles, tail one short of the maximum 4095
-        # 128x128 tiles (16384 elements).
-        16639,  # one tile, tail one short of a chunk
-        16640,  # one tile, tail exactly one chunk
-        16641,  # one tile, tail one chunk plus one
-        32767,  # one tile plus the largest possible tail
+        # 128x128 tiles (16384 elements), tail up to 16383 -- up to four chunks.
+        16639,  # one tile, tail 255
+        16640,  # one tile, tail 256
+        16641,  # one tile, tail 257
+        20479,  # one tile, tail one element short of a whole chunk
+        20480,  # one tile, tail exactly one chunk
+        20481,  # one tile, tail one chunk plus one
+        28672,  # one tile, tail exactly three whole chunks
+        32767,  # one tile plus the largest possible tail, four chunks
         32768,  # two whole tiles
         49152,  # three whole tiles, fewer tiles than cores, odd partial count
         81919,  # four tiles plus the largest possible tail
