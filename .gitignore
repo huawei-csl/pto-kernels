@@ -2,7 +2,7 @@ pto_kernels_*.so
 *.whl
 __pycache__/
 extra-info/
-lib*.so
+*.so
 dist/
 build
 *.egg-info/
