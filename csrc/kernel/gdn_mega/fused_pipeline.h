@@ -5,17 +5,19 @@
 
 // Public scratch allocations retain their original sizes. Paired operands use
 // separate existing half buffers; the recurrent FP32 state stays in vector UB.
-template <int R, int K, typename T, typename Full>
+// Async loads require an entry fence and a completion fence in the caller.
+// Only the full-tile path defers its fences; tails retain padding ordering.
+template <int R, int K, bool Async = false, typename T, typename Full>
 AICORE inline void mega_vector_load(Full& full, __gm__ T* pointer, int rows,
                                     int cols, int stride) {
 #if defined(__DAV_VEC__)
   using G = GlobalTensor<T, Shape<1, 1, 1, DYNAMIC, DYNAMIC>,
                          pto::Stride<1, 1, 1, DYNAMIC, 1>>;
-  pipe_barrier(PIPE_ALL);
+  if constexpr (!Async) pipe_barrier(PIPE_ALL);
   if (rows == R && cols == K) {
     G gm(pointer, {1, 1, 1, R, K}, {1, 1, 1, stride, 1});
     TLOAD(full, gm);
-    pipe_barrier(PIPE_ALL);
+    if constexpr (!Async) pipe_barrier(PIPE_ALL);
     return;
   }
   TEXPANDS(full, static_cast<T>(0));
@@ -163,9 +165,11 @@ AICORE inline void mega_prepare_weights(
   TASSIGN(lows, Gate + 512);
   TASSIGN(betas, Gate + 1024);
   TASSIGN(beta_h, Gate + 1536);
-  mega_vector_load<1, C>(gates, g + head * tokens + pos, 1, valid, C);
-  mega_vector_load<1, C>(lows, glow + head * tokens + pos, 1, valid, C);
-  mega_vector_load<1, C>(beta_h, beta + head * tokens + pos, 1, valid, C);
+  pipe_barrier(PIPE_ALL);
+  mega_vector_load<1, C, true>(gates, g + head * tokens + pos, 1, valid, C);
+  mega_vector_load<1, C, true>(lows, glow + head * tokens + pos, 1, valid, C);
+  mega_vector_load<1, C, true>(beta_h, beta + head * tokens + pos, 1, valid, C);
+  pipe_barrier(PIPE_ALL);
   TCVT(betas, beta_h, RoundMode::CAST_NONE);
   kernel_utils::PipeBarrierVec();
   M a, raw, mask;
@@ -250,8 +254,10 @@ AICORE inline void mega_finish_inverse(
   G gates, lows;
   TASSIGN(gates, Gate);
   TASSIGN(lows, Gate + 512);
-  mega_vector_load<1, C>(gates, g + head * tokens + pos, 1, valid, C);
-  mega_vector_load<1, C>(lows, glow + head * tokens + pos, 1, valid, C);
+  pipe_barrier(PIPE_ALL);
+  mega_vector_load<1, C, true>(gates, g + head * tokens + pos, 1, valid, C);
+  mega_vector_load<1, C, true>(lows, glow + head * tokens + pos, 1, valid, C);
+  pipe_barrier(PIPE_ALL);
   M raw, mask;
   TASSIGN(raw, 0);
   TASSIGN(mask, 128 * 1024);
@@ -375,9 +381,11 @@ AICORE inline float mega_prepare_rhs(__gm__ half* v, __gm__ float* g,
   TASSIGN(betas, Gate + 1536);
   TASSIGN(beta_h, Gate + 2048);
   TASSIGN(correction, Gate + 2560);
-  mega_vector_load<1, C>(gates, g + head * tokens + pos, 1, valid, C);
-  mega_vector_load<1, C>(lows, glow + head * tokens + pos, 1, valid, C);
-  mega_vector_load<1, C>(beta_h, beta + head * tokens + pos, 1, valid, C);
+  pipe_barrier(PIPE_ALL);
+  mega_vector_load<1, C, true>(gates, g + head * tokens + pos, 1, valid, C);
+  mega_vector_load<1, C, true>(lows, glow + head * tokens + pos, 1, valid, C);
+  mega_vector_load<1, C, true>(beta_h, beta + head * tokens + pos, 1, valid, C);
+  pipe_barrier(PIPE_ALL);
   TEXP(exponentials, gates);
   TCVT(betas, beta_h, RoundMode::CAST_NONE);
   kernel_utils::PipeBarrierVec();
@@ -600,22 +608,22 @@ AICORE inline void mega_fused_pipeline(
       InputG kgm(k + input_offset, {1, 1, 1, valid, D}, {1, 1, 1, kh * D, 1}),
           qgm(q + input_offset, {1, 1, 1, valid, D}, {1, 1, 1, kh * D, 1});
       TLOAD(ktail, kgm);
-      pipe_barrier(PIPE_ALL);
       // Pad the whole stacked tile before Q is loaded into its lower
       // half. This clears both tails without touching valid Q rows.
       if (valid != C) {
+        pipe_barrier(PIPE_ALL);
         TFILLPAD(ktail, ktail);
         pipe_barrier(PIPE_ALL);
       }
       TLOAD(qtail, qgm);
-      pipe_barrier(PIPE_ALL);
+      set_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID0);
+      wait_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID0);
       mega_input_pair_product<2 * C, D, D>(projections, inputs, state);
       GlobalTensor<float, Shape<1, 1, 1, C, D>, pto::Stride<1, 1, 1, D, 1>> ex(
           exchange),
           og(local_output);
-      TSTORE(ex, first_product);
-      TSTORE(og, second_product);
-      pipe_barrier(PIPE_ALL);
+      // L1 inverse slots are disjoint from projection operands. Queue DMA
+      // while M/FIX finish; the following fence publishes both to vector.
       Tile<TileType::Mat, float, C, C, BLayout::ColMajor, C / 2, C,
            SLayout::RowMajor, 512>
           first_half, second_half;
@@ -626,6 +634,8 @@ AICORE inline void mega_fused_pipeline(
           sg(reinterpret_cast<__gm__ float*>(second));
       TLOAD(first_half, fg);
       TLOAD(second_half, sg);
+      TSTORE(ex, first_product);
+      TSTORE(og, second_product);
       pipe_barrier(PIPE_ALL);
       mega_signal<PIPE_FIX>(5);
       mega_float_inverse<C>(inverse, solve_scratch);
@@ -653,8 +663,8 @@ AICORE inline void mega_fused_pipeline(
       TLOAD(native_rhs, bg);
       pipe_barrier(PIPE_ALL);
       mega_factored_solve<C, D>(inverse, native_rhs, exchange);
+      // Residual and Gamma occupy disjoint L1 slots; load them together.
       TLOAD(native_residual, ex);
-      pipe_barrier(PIPE_ALL);
       {
         auto storage = reinterpret_cast<__gm__ float*>(
             head < H / 2 ? weighted_first : weighted_second);
