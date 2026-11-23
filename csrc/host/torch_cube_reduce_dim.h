@@ -35,19 +35,21 @@ void pto_launch_cube_reduce_dim_int8(uint32_t blockDim, void* stream,
 
 namespace pto_isa_ops {
 
-// The GM -> L1 ND2NZ load carries the source row pitch in a 16-bit field, so
-// the axis a tile is cut across cannot be longer than this. Both reduction
-// modes read tiles out of a matrix whose row pitch is one of the input's own
-// extents, which is therefore what the limit applies to.
+/// The GM -> L1 ND2NZ load carries the source row pitch in a 16-bit field, so
+/// the axis a tile is cut across cannot be longer than this. Both reduction
+/// modes read tiles out of a matrix whose row pitch is one of the input's own
+/// extents, which is therefore what the limit applies to.
 constexpr int64_t kMaxRowPitch = 65535;
 
-// Elements in one input tile, which must match kTileElems in the kernel: the
-// host picks only the tile's width and the kernel derives its height as this
-// divided by that width. Holding the volume fixed means a wider tile is a
-// shorter one, and that the mad volume a choice costs is simply the tile count
-// times this.
+/// Elements in one input tile, which must match kTileElems in the kernel: the
+/// host picks only the tile's width and the kernel derives its height as this
+/// divided by that width. Holding the volume fixed means a wider tile is a
+/// shorter one, and that the mad volume a choice costs is simply the tile count
+/// times this.
 constexpr int64_t kTileElems = 16384;
+/// Smallest tile width supported by the kernel dispatch.
 constexpr int64_t kTileColsMin = 32;
+/// Largest tile width supported by the kernel dispatch.
 constexpr int64_t kTileColsMax = 512;
 
 // Ranks the host folds for the kernel. The fold itself is rank-agnostic, so
