@@ -89,33 +89,47 @@ def exact_pattern(length, dtype):
     [
         # The host picks a 32x32 tile below 4096 elements, 64x64 below 16384,
         # and 128x128 above, so each regime has its own tile and tail sizes.
-        # The tail is folded in `kFoldChunk` (4096) element chunks, so only the
-        # 128x128 regime can produce a tail longer than one chunk: the other two
-        # cap their tails at 1023 and 4095. The lengths below therefore cover
-        # tail sizes generally in all three regimes, and chunk boundaries in the
-        # 128x128 block specifically.
-        # 32x32 tiles (1024 elements), tail at most 1023 -- one chunk.
-        1279,  # one tile, tail 255
-        1280,  # one tile, tail 256
+        # The tail is split again: its whole rows of `size` elements go to the
+        # Cube stage as one extra, zero-padded work item, and only the final
+        # partial row -- fewer than `size` elements, so always a single fold
+        # chunk -- reaches the Vector stage. The boundaries that matter are
+        # therefore a tail of no whole rows, of exactly one row, of the maximum
+        # `size - 1` rows, and of a whole number of rows, where the Vector
+        # stage is handed nothing at all.
+        # 32x32 tiles (1024 elements), tail at most 1023, so at most 31 rows.
+        1055,  # one tile, tail 31: no whole row, Vector stage only
+        1056,  # one tile, tail 32: exactly one row, no Vector tail
+        1057,  # one tile, tail 33: one row plus one
+        1279,  # one tile, tail 255: seven rows plus 31
+        1280,  # one tile, tail 256: eight whole rows
         1281,  # one tile, tail 257
-        2816,  # two tiles, tail 768
+        2816,  # two tiles, tail 768: 24 whole rows
         3072,  # three whole tiles, no tail, odd partial count
+        4064,  # three tiles, tail 992: 31 rows, the maximum, no remainder
         4094,  # three tiles, tail one short of the maximum 1023
-        # 64x64 tiles (4096 elements), tail at most 4095 -- one chunk.
-        4352,  # one tile, tail 256
+        # 64x64 tiles (4096 elements), tail at most 4095, so at most 63 rows.
+        4159,  # one tile, tail 63: no whole row, Vector stage only
+        4160,  # one tile, tail 64: exactly one row, no Vector tail
+        4161,  # one tile, tail 65: one row plus one
+        4352,  # one tile, tail 256: four whole rows
+        8128,  # one tile, tail 4032: 63 rows, the maximum, no remainder
         8191,  # one tile plus the largest possible tail
         8192,  # two whole tiles
         12288,  # three whole tiles
         16382,  # three tiles, tail one short of the maximum 4095
-        # 128x128 tiles (16384 elements), tail up to 16383 -- up to four chunks.
-        16639,  # one tile, tail 255
-        16640,  # one tile, tail 256
+        # 128x128 tiles (16384 elements), tail at most 16383, at most 127 rows.
+        16511,  # one tile, tail 127: no whole row, Vector stage only
+        16512,  # one tile, tail 128: exactly one row, no Vector tail
+        16513,  # one tile, tail 129: one row plus one
+        16639,  # one tile, tail 255: one row plus 127, the largest remainder
+        16640,  # one tile, tail 256: two whole rows
         16641,  # one tile, tail 257
-        20479,  # one tile, tail one element short of a whole chunk
-        20480,  # one tile, tail exactly one chunk
-        20481,  # one tile, tail one chunk plus one
-        28672,  # one tile, tail exactly three whole chunks
-        32767,  # one tile plus the largest possible tail, four chunks
+        20479,  # one tile, tail 4095: 31 rows plus 127
+        20480,  # one tile, tail 4096: 32 whole rows
+        20481,  # one tile, tail 4097: 32 rows plus one
+        28672,  # one tile, tail 12288: 96 whole rows
+        32640,  # one tile, tail 16256: 127 rows, the maximum, no remainder
+        32767,  # one tile plus the largest possible tail: 127 rows plus 127
         32768,  # two whole tiles
         49152,  # three whole tiles, fewer tiles than cores, odd partial count
         81919,  # four tiles plus the largest possible tail
@@ -166,9 +180,14 @@ def test_cube_reduce_rejects_cpu(dtype, shape):
 
 
 @pytest.mark.parametrize("dtype", [torch.float16, torch.float32, torch.int8])
-@pytest.mark.parametrize("length", [1, 1023, 1024, 4095, 4096, 16383, 16384, 16385])
+@pytest.mark.parametrize(
+    "length",
+    [1, 1023, 1024, 1056, 4095, 4096, 4160, 16383, 16384, 16385, 16512, 32640],
+)
 def test_cube_reduce_offset_excludes_surrounding_storage(dtype, length, npu_device):
     # Poison both sides of a view, including where tail padding would be read.
+    # The lengths whose tail is a whole number of rows put a partly filled,
+    # zero-padded tile on the Cube stage, which is where an over-read would be.
     base = torch.full((length + 65,), 17, dtype=dtype, device=npu_device)
     x = base[1 : length + 1]
     x.fill_(1)
