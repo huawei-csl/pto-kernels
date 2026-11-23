@@ -74,7 +74,7 @@ jobs:
             soc_version: Ascend950
 
     container:
-      image: quay.io/ascend/cann:9.2.0-beta.1-${{ matrix.npu_device }}-ubuntu22.04-py${{ matrix.python_version }}
+      image: quay.io/ascend/cann:9.2.1-${{ matrix.npu_device }}-ubuntu22.04-py${{ matrix.python_version }}
     steps:
       - name: Show OS
         run: cat /etc/os-release
@@ -113,7 +113,7 @@ jobs:
             npu_device: 950
             soc_version: Ascend950
     container:
-      image: quay.io/ascend/cann:9.2.0-beta.1-${{ matrix.npu_device }}-ubuntu22.04-py${{ matrix.python_version }}
+      image: quay.io/ascend/cann:9.2.1-${{ matrix.npu_device }}-ubuntu22.04-py${{ matrix.python_version }}
     steps:
       - name: Show OS
         run: cat /etc/os-release
