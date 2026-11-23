@@ -1,0 +1,7 @@
+[
+  {"label": "smoke", "n_seq": 1, "l_seg": 128},
+  {"label": "tiny", "n_seq": 1, "l_seg": 512},
+  {"label": "small", "n_seq": 1, "l_seg": 1024},
+  {"label": "varlen_2x512", "n_seq": 2, "l_seg": 512},
+  {"label": "medium", "n_seq": 4, "l_seg": 1024}
+]
