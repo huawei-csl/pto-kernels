@@ -25,21 +25,45 @@ constexpr uint32_t kFractalRows = 16;
 //     ones[1, S] @ A[S, S] = the column sums of A, a 1 x S row.
 //
 // Each block therefore leaves the Vector stage S values to fold.
+//
+// `tail_rows` are the whole S-element rows of the ragged tail. They ride here
+// as one extra work item rather than going to the Vector stage: a mad over a
+// zero-padded tile costs this stage one more iteration on one block, while the
+// same elements cost the single Vector core a serialized load-and-reduce pass.
+// The Vector stage keeps only what is left, which is less than one row.
+//
+// Measured on one 910B2 with the tile count pinned at 64 and the tail length
+// the only variable, 6 repeats of 100 iterations: the tail costs 39 ns per row
+// on the Vector stage (R^2 = 0.998 across 16 tail lengths) and 0.8 ns per row
+// here, so a full 127-row tail goes from 5.03 us to 0.09 us. A length one
+// element short of a whole tile was ~5 us slower than its tile-aligned
+// neighbour at every size and dtype; it is now 0.2-0.45 us slower.
 template <typename InputT, typename OutputT, uint32_t S>
 AICORE void CubeReduce(__gm__ InputT* input, __gm__ OutputT* partials,
-                       uint32_t num_tiles) {
+                       uint32_t num_tiles, uint32_t tail_rows) {
   using AGlobal = GlobalTensor<InputT, TileShape2D<InputT, S, S, Layout::ND>,
                                BaseShape2D<InputT, S, S, Layout::ND>>;
   using CGlobal = GlobalTensor<OutputT, TileShape2D<OutputT, 1, S, Layout::ND>,
                                BaseShape2D<OutputT, 1, S, Layout::ND>>;
   using AMat = Tile<TileType::Mat, InputT, S, S, BLayout::ColMajor, S, S,
                     SLayout::RowMajor, 512>;
+  // The same L1 tile addressed with a runtime row count, so fewer than S rows
+  // can be loaded and the remainder zero-filled in place. TFILLPAD takes a Mat
+  // tile only in NZ layout, which is the ColMajor/RowMajor pair above.
+  using ATail = Tile<TileType::Mat, InputT, S, S, BLayout::ColMajor, DYNAMIC,
+                     DYNAMIC, SLayout::RowMajor, 512, PadValue::Zero>;
+  using TailGlobal = GlobalTensor<InputT, Shape<1, 1, 1, DYNAMIC, DYNAMIC>,
+                                  pto::Stride<1, 1, 1, DYNAMIC, 1>>;
   using OnesMat =
       Tile<TileType::Mat, InputT, kFractalRows, S, BLayout::ColMajor,
            kFractalRows, S, SLayout::RowMajor, 512>;
-  // With nothing but a ragged tail the Vector stage does all the work and
-  // never reads `partials`, so this stage has no result to produce.
-  if (num_tiles == 0) return;
+  // Whole tiles plus, when the tail has at least one whole row, one more item
+  // for it. Counting it as work spreads it with everything else, so it lands
+  // on a block that is one tile short rather than on top of a full share.
+  const uint32_t work = num_tiles + (tail_rows != 0 ? 1u : 0u);
+  // With nothing but a short tail the Vector stage does all the work and never
+  // reads `partials`, so this stage has no result to produce.
+  if (work == 0) return;
 
   AMat a_l1;
   OnesMat ones_l1;
@@ -58,10 +82,9 @@ AICORE void CubeReduce(__gm__ InputT* input, __gm__ OutputT* partials,
 
   const uint32_t id = get_block_idx();
   const uint32_t blocks = get_block_num();
-  const uint32_t count = num_tiles / blocks + (id < num_tiles % blocks);
+  const uint32_t count = work / blocks + (id < work % blocks);
   // Balanced contiguous ranges ensure every launched block writes a result.
-  const uint32_t begin =
-      id * (num_tiles / blocks) + min(id, num_tiles % blocks);
+  const uint32_t begin = id * (work / blocks) + min(id, work % blocks);
   // Build the all-ones operand on chip instead of copying it in from global
   // memory: on a Mat tile TEXPANDS lowers to create_cbuf_matrix, which fills
   // L1 directly. Every element is one, so the fractal layout of the tile is
@@ -74,8 +97,23 @@ AICORE void CubeReduce(__gm__ InputT* input, __gm__ OutputT* partials,
   kernel_utils::SetWaitFlag<PIPE_MTE1, PIPE_M>(0);
 
   for (uint32_t i = 0; i < count; ++i) {
-    AGlobal a_global(input + static_cast<uint64_t>(begin + i) * S * S);
-    TLOAD(a_l1, a_global);
+    const uint32_t item = begin + i;
+    if (item < num_tiles) {
+      AGlobal a_global(input + static_cast<uint64_t>(item) * S * S);
+      TLOAD(a_l1, a_global);
+    } else {
+      // The tail item. Load its whole rows and zero the rest of the tile, so
+      // the full-width mad below sums exactly the tail without the load ever
+      // reaching past the end of the input. TFILLPAD writes L1 through
+      // create_cbuf_matrix and so issues on MTE2, in order behind the TLOAD
+      // it completes and ahead of the flag that releases MTE1.
+      ATail a_tail(tail_rows, S);
+      TASSIGN(a_tail, 0);
+      TailGlobal tail_global(input + static_cast<uint64_t>(num_tiles) * S * S,
+                             {1, 1, 1, tail_rows, S}, {1, 1, 1, S, 1});
+      TLOAD(a_tail, tail_global);
+      TFILLPAD(a_tail, a_tail);
+    }
     kernel_utils::SetWaitFlag<PIPE_MTE2, PIPE_MTE1>(0);
     TMOV(a_l0, a_l1);
     kernel_utils::SetWaitFlag<PIPE_MTE1, PIPE_M>(0);
@@ -126,9 +164,9 @@ constexpr uint32_t kFoldChunk = 4096;
 
 // Sums the `tail_len` elements at `input + tail_offset` and returns the total.
 //
-// The Cube stage consumes only whole S x S tiles, so the last `tail_len`
-// elements (fewer than one tile) are reduced here instead of being padded up
-// to a tile anywhere. A Vec tile carries a runtime valid-column count and
+// The Cube stage consumes whole S x S tiles plus the tail's whole S-element
+// rows, so what is left here is the final partial row: fewer than S elements,
+// always one chunk. A Vec tile carries a runtime valid-column count and
 // TROWSUM honours it, so a short final chunk is loaded and summed as it is.
 //
 // TROWSUM on this part requires its accumulator and its source to have the
@@ -262,17 +300,18 @@ AICORE void CompleteCubeReduce(__gm__ InputT* input, __gm__ T* partials,
 template <typename InputT>
 AICORE void CubeReduceDispatch(__gm__ InputT* input,
                                __gm__ CubeOutT<InputT>* partials,
-                               uint32_t num_tiles, uint32_t size) {
+                               uint32_t num_tiles, uint32_t tail_rows,
+                               uint32_t size) {
   using OutputT = CubeOutT<InputT>;
   switch (size) {
     case 32:
-      CubeReduce<InputT, OutputT, 32>(input, partials, num_tiles);
+      CubeReduce<InputT, OutputT, 32>(input, partials, num_tiles, tail_rows);
       break;
     case 64:
-      CubeReduce<InputT, OutputT, 64>(input, partials, num_tiles);
+      CubeReduce<InputT, OutputT, 64>(input, partials, num_tiles, tail_rows);
       break;
     case 128:
-      CubeReduce<InputT, OutputT, 128>(input, partials, num_tiles);
+      CubeReduce<InputT, OutputT, 128>(input, partials, num_tiles, tail_rows);
       break;
   }
 }
@@ -303,10 +342,11 @@ AICORE void CompleteCubeReduceDispatch(__gm__ InputT* input,
 extern "C" __global__ AICORE void cube_reduce_fp16(__gm__ half* input,
                                                    __gm__ float* partials,
                                                    uint32_t num_tiles,
+                                                   uint32_t tail_rows,
                                                    uint32_t size) {
   KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIC_ONLY);
 #if defined(__DAV_CUBE__)
-  CubeReduceDispatch<half>(input, partials, num_tiles, size);
+  CubeReduceDispatch<half>(input, partials, num_tiles, tail_rows, size);
 #endif
 }
 
@@ -323,11 +363,15 @@ extern "C" __global__ AICORE void complete_cube_reduce_fp16(
 extern "C" void pto_launch_cube_reduce_fp16(uint32_t blockDim, void* stream,
                                             void* input, void* partials,
                                             void* output, uint32_t num_tiles,
-                                            uint32_t blocks,
+                                            uint32_t tail_rows, uint32_t blocks,
                                             uint64_t tail_offset,
                                             uint32_t tail_len, uint32_t size) {
-  cube_reduce_fp16<<<blockDim, nullptr, stream>>>(
-      (__gm__ half*)input, (__gm__ float*)partials, num_tiles, size);
+  // Nothing to reduce here below one tile; skip the dispatch.
+  if (num_tiles != 0 || tail_rows != 0) {
+    cube_reduce_fp16<<<blockDim, nullptr, stream>>>((__gm__ half*)input,
+                                                    (__gm__ float*)partials,
+                                                    num_tiles, tail_rows, size);
+  }
   complete_cube_reduce_fp16<<<1, nullptr, stream>>>(
       (__gm__ half*)input, (__gm__ float*)partials, (__gm__ float*)output,
       blocks, tail_offset, tail_len, size);
@@ -336,10 +380,11 @@ extern "C" void pto_launch_cube_reduce_fp16(uint32_t blockDim, void* stream,
 extern "C" __global__ AICORE void cube_reduce_fp32(__gm__ float* input,
                                                    __gm__ float* partials,
                                                    uint32_t num_tiles,
+                                                   uint32_t tail_rows,
                                                    uint32_t size) {
   KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIC_ONLY);
 #if defined(__DAV_CUBE__)
-  CubeReduceDispatch<float>(input, partials, num_tiles, size);
+  CubeReduceDispatch<float>(input, partials, num_tiles, tail_rows, size);
 #endif
 }
 
@@ -356,11 +401,15 @@ extern "C" __global__ AICORE void complete_cube_reduce_fp32(
 extern "C" void pto_launch_cube_reduce_fp32(uint32_t blockDim, void* stream,
                                             void* input, void* partials,
                                             void* output, uint32_t num_tiles,
-                                            uint32_t blocks,
+                                            uint32_t tail_rows, uint32_t blocks,
                                             uint64_t tail_offset,
                                             uint32_t tail_len, uint32_t size) {
-  cube_reduce_fp32<<<blockDim, nullptr, stream>>>(
-      (__gm__ float*)input, (__gm__ float*)partials, num_tiles, size);
+  // Nothing to reduce here below one tile; skip the dispatch.
+  if (num_tiles != 0 || tail_rows != 0) {
+    cube_reduce_fp32<<<blockDim, nullptr, stream>>>((__gm__ float*)input,
+                                                    (__gm__ float*)partials,
+                                                    num_tiles, tail_rows, size);
+  }
   complete_cube_reduce_fp32<<<1, nullptr, stream>>>(
       (__gm__ float*)input, (__gm__ float*)partials, (__gm__ float*)output,
       blocks, tail_offset, tail_len, size);
@@ -369,10 +418,11 @@ extern "C" void pto_launch_cube_reduce_fp32(uint32_t blockDim, void* stream,
 extern "C" __global__ AICORE void cube_reduce_int8(__gm__ int8_t* input,
                                                    __gm__ int32_t* partials,
                                                    uint32_t num_tiles,
+                                                   uint32_t tail_rows,
                                                    uint32_t size) {
   KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIC_ONLY);
 #if defined(__DAV_CUBE__)
-  CubeReduceDispatch<int8_t>(input, partials, num_tiles, size);
+  CubeReduceDispatch<int8_t>(input, partials, num_tiles, tail_rows, size);
 #endif
 }
 
@@ -389,11 +439,15 @@ extern "C" __global__ AICORE void complete_cube_reduce_int8(
 extern "C" void pto_launch_cube_reduce_int8(uint32_t blockDim, void* stream,
                                             void* input, void* partials,
                                             void* output, uint32_t num_tiles,
-                                            uint32_t blocks,
+                                            uint32_t tail_rows, uint32_t blocks,
                                             uint64_t tail_offset,
                                             uint32_t tail_len, uint32_t size) {
-  cube_reduce_int8<<<blockDim, nullptr, stream>>>(
-      (__gm__ int8_t*)input, (__gm__ int32_t*)partials, num_tiles, size);
+  // Nothing to reduce here below one tile; skip the dispatch.
+  if (num_tiles != 0 || tail_rows != 0) {
+    cube_reduce_int8<<<blockDim, nullptr, stream>>>((__gm__ int8_t*)input,
+                                                    (__gm__ int32_t*)partials,
+                                                    num_tiles, tail_rows, size);
+  }
   complete_cube_reduce_int8<<<1, nullptr, stream>>>(
       (__gm__ int8_t*)input, (__gm__ int32_t*)partials, (__gm__ int32_t*)output,
       blocks, tail_offset, tail_len, size);

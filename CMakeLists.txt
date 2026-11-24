@@ -181,6 +181,7 @@ set(PTO_KERNEL_SOURCES
     csrc/kernel/kernel_simple_matmul.cpp
     csrc/kernel/kernel_cube_reduce.cpp
     csrc/kernel/kernel_cube_norm.cpp
+    csrc/kernel/kernel_cube_reduce_dim.cpp
     csrc/kernel/kernel_batch_matrix_square.cpp
     csrc/kernel/kernel_tri_inv_ns.cpp
     csrc/kernel/kernel_tri_inv_rec_unroll.cpp
