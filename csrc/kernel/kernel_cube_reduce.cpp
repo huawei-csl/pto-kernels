@@ -366,8 +366,12 @@ extern "C" void pto_launch_cube_reduce_fp16(uint32_t blockDim, void* stream,
                                             uint32_t tail_rows, uint32_t blocks,
                                             uint64_t tail_offset,
                                             uint32_t tail_len, uint32_t size) {
-  cube_reduce_fp16<<<blockDim, nullptr, stream>>>(
-      (__gm__ half*)input, (__gm__ float*)partials, num_tiles, tail_rows, size);
+  // Nothing to reduce here below one tile; skip the dispatch.
+  if (num_tiles != 0 || tail_rows != 0) {
+    cube_reduce_fp16<<<blockDim, nullptr, stream>>>((__gm__ half*)input,
+                                                    (__gm__ float*)partials,
+                                                    num_tiles, tail_rows, size);
+  }
   complete_cube_reduce_fp16<<<1, nullptr, stream>>>(
       (__gm__ half*)input, (__gm__ float*)partials, (__gm__ float*)output,
       blocks, tail_offset, tail_len, size);
@@ -400,9 +404,12 @@ extern "C" void pto_launch_cube_reduce_fp32(uint32_t blockDim, void* stream,
                                             uint32_t tail_rows, uint32_t blocks,
                                             uint64_t tail_offset,
                                             uint32_t tail_len, uint32_t size) {
-  cube_reduce_fp32<<<blockDim, nullptr, stream>>>((__gm__ float*)input,
-                                                  (__gm__ float*)partials,
-                                                  num_tiles, tail_rows, size);
+  // Nothing to reduce here below one tile; skip the dispatch.
+  if (num_tiles != 0 || tail_rows != 0) {
+    cube_reduce_fp32<<<blockDim, nullptr, stream>>>((__gm__ float*)input,
+                                                    (__gm__ float*)partials,
+                                                    num_tiles, tail_rows, size);
+  }
   complete_cube_reduce_fp32<<<1, nullptr, stream>>>(
       (__gm__ float*)input, (__gm__ float*)partials, (__gm__ float*)output,
       blocks, tail_offset, tail_len, size);
@@ -435,9 +442,12 @@ extern "C" void pto_launch_cube_reduce_int8(uint32_t blockDim, void* stream,
                                             uint32_t tail_rows, uint32_t blocks,
                                             uint64_t tail_offset,
                                             uint32_t tail_len, uint32_t size) {
-  cube_reduce_int8<<<blockDim, nullptr, stream>>>((__gm__ int8_t*)input,
-                                                  (__gm__ int32_t*)partials,
-                                                  num_tiles, tail_rows, size);
+  // Nothing to reduce here below one tile; skip the dispatch.
+  if (num_tiles != 0 || tail_rows != 0) {
+    cube_reduce_int8<<<blockDim, nullptr, stream>>>((__gm__ int8_t*)input,
+                                                    (__gm__ int32_t*)partials,
+                                                    num_tiles, tail_rows, size);
+  }
   complete_cube_reduce_int8<<<1, nullptr, stream>>>(
       (__gm__ int8_t*)input, (__gm__ int32_t*)partials, (__gm__ int32_t*)output,
       blocks, tail_offset, tail_len, size);
