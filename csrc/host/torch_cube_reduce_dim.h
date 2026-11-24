@@ -52,8 +52,8 @@ constexpr int64_t kTileColsMin = 32;
 /// Largest tile width supported by the kernel dispatch.
 constexpr int64_t kTileColsMax = 512;
 
-// Ranks the host folds for the kernel. The fold itself is rank-agnostic, so
-// this bound only marks how far the contract is tested.
+/// Highest input rank the host folds for the kernel. The fold itself is
+/// rank-agnostic, so this bound only marks how far the contract is tested.
 constexpr int64_t kMaxRank = 5;
 
 /**
