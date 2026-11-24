@@ -37,7 +37,7 @@ option(USE_ASC_LANGUAGE
        "Compile kernels with the ASC language toolchain (CANN >= 9.0)" ON)
 
 set(BASE_MODE
-    "MEMORY"
+    "REGISTER"
     CACHE STRING "Base addressing mode: MEMORY or REGISTER")
 set_property(CACHE BASE_MODE PROPERTY STRINGS "MEMORY" "REGISTER")
 
@@ -53,7 +53,7 @@ find_package(Torch REQUIRED)
 
 # user-defined configuration
 set(SOC_VERSION
-    "Ascend910b4"
+    "Ascend950"
     CACHE STRING "system on chip type")
 set(CMAKE_BUILD_TYPE
     "Debug"

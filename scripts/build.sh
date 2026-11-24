@@ -10,10 +10,10 @@ OPTS=$(getopt -a --options $SHORT --longoptions $LONG -- "$@")
 eval set -- "$OPTS"
 # Target SoC. Overridable via the SOC_VERSION environment variable, or the
 # --soc-version flag which takes precedence.
-SOC_VERSION="${SOC_VERSION:-Ascend910B2}"
+SOC_VERSION="${SOC_VERSION:-Ascend950}"
 # Base addressing mode: MEMORY or REGISTER. Overridable via the BASE_MODE
 # environment variable, or the --base-mode flag which takes precedence.
-BASE_MODE="${BASE_MODE:-MEMORY}"
+BASE_MODE="${BASE_MODE:-REGISTER}"
 
 while :; do
     case "$1" in

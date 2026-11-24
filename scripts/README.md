@@ -9,12 +9,16 @@ Compiles the project locally using CMake against an Ascend CANN toolkit installa
 **Usage**
 
 ```bash
-./scripts/build.sh [--soc-version <version>]
+./scripts/build.sh [--soc-version <version>] [--base-mode <mode>]
 ```
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `-v`, `--soc-version` | `Ascend910B4` | Target SoC version passed to CMake as `-DSOC_VERSION` |
+| `-v`, `--soc-version` | `Ascend950` | Target SoC version passed to CMake as `-DSOC_VERSION` |
+| `-m`, `--base-mode` | `REGISTER` | Base addressing mode (`MEMORY` or `REGISTER`) passed to CMake as `-DBASE_MODE` |
+
+Both options fall back to the `SOC_VERSION` / `BASE_MODE` environment variables when the flag is
+omitted. For A2-generation parts use `--soc-version Ascend910B2 --base-mode MEMORY`.
 
 The script resolves the Ascend toolkit path from `$ASCEND_INSTALL_PATH`, `$ASCEND_HOME_PATH`, `~/Ascend/ascend-toolkit/latest`, or `/usr/local/Ascend/ascend-toolkit/latest` (in that order), sources its environment, then runs a clean CMake configure + build.
 
