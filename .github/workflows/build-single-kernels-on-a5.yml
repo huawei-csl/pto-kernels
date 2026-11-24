@@ -24,6 +24,7 @@ jobs:
         batch_matrix_square
         csr_gather
         cube_reduce
+        cube_reduce_dim
         flash_attention
         gdn_chunk_cumsum
         gdn_chunk_h
