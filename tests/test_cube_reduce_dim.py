@@ -335,13 +335,13 @@ def test_reduce_dim_matches_a_folded_three_dimensional_input(shape, dtype, npu_d
     # Folding the axes by hand must give the identical result, since that is
     # exactly what the host does before the kernel sees anything.
     x = exact_pattern(shape, dtype).to(npu_device)
-    for dim in range(len(shape)):
+    for dim, axis_size in enumerate(shape):
         outer, inner = 1, 1
         for size in shape[:dim]:
             outer *= size
         for size in shape[dim + 1 :]:
             inner *= size
-        folded = x.reshape(outer, shape[dim], inner)
+        folded = x.reshape(outer, axis_size, inner)
         if row_pitch(tuple(x.shape), dim) > MAX_ROW_PITCH:
             continue
         torch.testing.assert_close(
