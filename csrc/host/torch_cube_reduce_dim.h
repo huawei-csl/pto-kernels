@@ -50,17 +50,28 @@ constexpr int64_t kTileElems = 16384;
 constexpr int64_t kTileColsMin = 32;
 constexpr int64_t kTileColsMax = 512;
 
+// Ranks the host folds for the kernel. The fold itself is rank-agnostic, so
+// this bound only marks how far the contract is tested.
+constexpr int64_t kMaxRank = 5;
+
 /**
- * @brief Sums a contiguous 3D tensor along one axis, like torch.sum(x, dim).
+ * @brief Sums a contiguous tensor of rank 1 to 5 along one axis, like
+ * torch.sum(x, dim).
  *
  * The reduced axis is removed from the result, so a (D0, D1, D2) input reduces
- * to (D1, D2), (D0, D2) or (D0, D1) for dim 0, 1 and 2 respectively.
+ * to (D1, D2), (D0, D2) or (D0, D1) for dim 0, 1 and 2 respectively, and a 1D
+ * input reduces to a scalar tensor.
+ *
+ * Rank reaches the kernel only as the three extents the axes fold into, so
+ * every rank costs what its own (outer, mid, inner) view costs: reducing dim 1
+ * of (D0, D1, D2, D3) is the same work as reducing dim 1 of
+ * (D0, D1, D2 * D3).
  *
  * @param [in] x Input tensor on the NPU with dtype fp16, fp32 or int8. A
  * non-contiguous input is materialized first.
- * @param [in] dim Axis to reduce, in [-3, 2].
- * @return at::Tensor 2D tensor of the sums, fp32 for fp16 and fp32 input and
- * int32 for int8 input.
+ * @param [in] dim Axis to reduce, in [-rank, rank - 1].
+ * @return at::Tensor The sums with the reduced axis dropped, fp32 for fp16 and
+ * fp32 input and int32 for int8 input.
  */
 at::Tensor run_cube_reduce_dim(const at::Tensor& x, int64_t dim) {
   TORCH_CHECK(x.device().type() == DEVICE_TYPE,
@@ -71,19 +82,21 @@ at::Tensor run_cube_reduce_dim(const at::Tensor& x, int64_t dim) {
       "cube_reduce_dim: only float16, float32 and int8 inputs are supported, "
       "got ",
       dtype);
-  TORCH_CHECK(x.dim() == 3,
-              "cube_reduce_dim: expects a 3-dimensional input tensor, got ",
-              x.dim(), " dimensions");
+  TORCH_CHECK(x.dim() >= 1 && x.dim() <= kMaxRank,
+              "cube_reduce_dim: expects an input tensor of rank 1 to ",
+              kMaxRank, ", got ", x.dim(), " dimensions");
   const int64_t axis = dim < 0 ? dim + x.dim() : dim;
   TORCH_CHECK(axis >= 0 && axis < x.dim(),
-              "cube_reduce_dim: dim out of range, expected it to be in "
-              "[-3, 2], but got ",
-              dim);
+              "cube_reduce_dim: dim out of range, expected it to be in [",
+              -x.dim(), ", ", x.dim() - 1, "], but got ", dim);
 
   // Fold the axes around the reduced one into the (outer, mid, inner) view the
   // kernel reduces: element (o, i) of the result is the sum over m of
   // x[o, m, i]. Only the reduced extent and the two folds reach the kernel, so
-  // which axis was named stops mattering past this point.
+  // past this point neither the rank nor which axis was named still matters --
+  // a contiguous tensor's axes before the reduced one are one contiguous run
+  // of rows, and those after it one contiguous run of columns, whatever their
+  // number.
   int64_t outer = 1;
   int64_t inner = 1;
   for (int64_t index = 0; index < axis; ++index) outer *= x.sizes()[index];

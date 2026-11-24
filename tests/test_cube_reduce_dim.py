@@ -231,10 +231,10 @@ def test_reduce_dim_uses_current_stream(dtype, npu_device):
 
 
 @pytest.mark.parametrize("dtype", DTYPES)
-@pytest.mark.parametrize("shape", [(5,), (5, 7), (2, 3, 4, 5)])
-def test_reduce_dim_rejects_non_3d(dtype, shape, npu_device):
+@pytest.mark.parametrize("shape", [(2, 3, 4, 5, 6, 7), (2,) * 7, (1, 1, 1, 1, 1, 1)])
+def test_reduce_dim_rejects_rank_over_five(dtype, shape, npu_device):
     x = torch.ones(shape, dtype=dtype, device=npu_device)
-    with pytest.raises(RuntimeError, match="3-dimensional"):
+    with pytest.raises(RuntimeError, match="rank 1 to 5"):
         pto_cube_reduce_dim(x, 0)
 
 
@@ -294,3 +294,100 @@ def test_reduce_dim_accepts_pitch_at_the_limit(shape, dim, npu_device):
     x = torch.ones(shape, dtype=torch.float16, device=npu_device)
     assert row_pitch(shape, dim) <= MAX_ROW_PITCH
     check_sum(x, dim, exact=True)
+
+
+@pytest.mark.parametrize("dtype", DTYPES)
+@pytest.mark.parametrize(
+    "shape",
+    [
+        # Rank reaches the kernel only as the three folded extents, so these
+        # check that the fold itself is right at every rank: each shape is
+        # reduced along every one of its axes and compared with torch.sum.
+        (37,),
+        (1,),
+        (13, 17),
+        (1, 129),
+        (129, 1),
+        (5, 7, 11),
+        (3, 4, 5, 6),
+        (2, 3, 4, 5, 6),
+        (1, 3, 1, 5, 1),
+        (2, 1, 64, 1, 3),
+        (7, 1, 1, 1, 1),
+        (1, 1, 1, 1, 7),
+        (4, 4, 4, 4, 4),
+        (2, 2, 130, 2, 2),
+    ],
+)
+def test_reduce_dim_every_rank_and_axis(shape, dtype, npu_device):
+    for dim in range(len(shape)):
+        check_sum(exact_pattern(shape, dtype).to(npu_device), dim, exact=True)
+        check_sum(
+            exact_pattern(shape, dtype).to(npu_device),
+            dim - len(shape),
+            exact=True,
+        )
+
+
+@pytest.mark.parametrize("dtype", DTYPES)
+@pytest.mark.parametrize("shape", [(37,), (13, 17), (3, 4, 5, 6), (2, 3, 4, 5, 6)])
+def test_reduce_dim_matches_a_folded_three_dimensional_input(shape, dtype, npu_device):
+    # Folding the axes by hand must give the identical result, since that is
+    # exactly what the host does before the kernel sees anything.
+    x = exact_pattern(shape, dtype).to(npu_device)
+    for dim in range(len(shape)):
+        outer, inner = 1, 1
+        for size in shape[:dim]:
+            outer *= size
+        for size in shape[dim + 1 :]:
+            inner *= size
+        folded = x.reshape(outer, shape[dim], inner)
+        if row_pitch(tuple(x.shape), dim) > MAX_ROW_PITCH:
+            continue
+        torch.testing.assert_close(
+            pto_cube_reduce_dim(x, dim).reshape(outer, inner).cpu(),
+            pto_cube_reduce_dim(folded, 1).cpu(),
+            atol=0,
+            rtol=0,
+        )
+
+
+@pytest.mark.parametrize("dtype", DTYPES)
+@pytest.mark.parametrize("rank", [1, 2, 4, 5])
+def test_reduce_dim_empty_at_every_rank(rank, dtype, npu_device):
+    for zero_axis in range(rank):
+        shape = tuple(0 if i == zero_axis else 3 for i in range(rank))
+        for dim in range(rank):
+            check_sum(
+                torch.ones(shape, dtype=dtype, device=npu_device), dim, exact=True
+            )
+
+
+@pytest.mark.parametrize("dtype", DTYPES)
+def test_reduce_dim_rank_one_is_a_full_reduction(dtype, npu_device):
+    # A 1D input folds to outer = inner = 1, so the result is a scalar tensor
+    # and the whole reduction lands on one work item.
+    x = exact_pattern((4096,), dtype).to(npu_device)
+    actual = pto_cube_reduce_dim(x, 0)
+    assert actual.shape == ()
+    torch.testing.assert_close(
+        actual.cpu().reshape(1),
+        x.cpu().sum(dtype=out_dtype(dtype)).reshape(1),
+        atol=0,
+        rtol=0,
+    )
+
+
+@pytest.mark.parametrize("dtype", DTYPES)
+@pytest.mark.parametrize("rank", [4, 5])
+def test_reduce_dim_accepts_views_at_higher_rank(rank, dtype, npu_device):
+    shape = (6, 5, 4, 3, 2)[:rank]
+    base = make_input(shape, dtype, npu_device)
+    offset_view = base[1:5]
+    assert offset_view.is_contiguous() and offset_view.storage_offset() != 0
+    for dim in range(rank):
+        check_sum(offset_view, dim)
+    permuted = base.permute(*reversed(range(rank)))
+    assert not permuted.is_contiguous()
+    for dim in range(rank):
+        check_sum(permuted, dim)
