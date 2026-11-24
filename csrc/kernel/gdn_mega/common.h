@@ -14,33 +14,13 @@ for the full License text.
 // Synchronization and packed tile I/O for the fused pipeline.
 #ifdef __CCE_AICORE__
 
-// Preserve the producer pipe on A2/A3. A5 intra-block events require
-// explicit completion ordering and a flag for each Vec sub-block.
 template <pipe_t Pipe>
 AICORE inline void mega_signal(uint16_t flag) {
-#if __CCE_AICORE__ == 220
-  kernel_utils::SetCrossFlag<Pipe>(flag);
-#else
-  pipe_barrier(PIPE_ALL);
-#if defined(__DAV_CUBE__)
-  kernel_utils::SignalBothVecOnA5<PIPE_FIX>(flag);
-#elif defined(__DAV_VEC__)
-  set_intra_block(Pipe, flag);
-#endif
-#endif
+  kernel_utils::SetCubeVecFlag<Pipe>(flag);
 }
 
 AICORE inline void mega_wait(uint16_t flag) {
-#if __CCE_AICORE__ == 220
-  wait_flag_dev(flag);
-#else
-#if defined(__DAV_CUBE__)
-  kernel_utils::WaitBothVecOnA5<PIPE_MTE2>(flag);
-#elif defined(__DAV_VEC__)
-  wait_intra_block(PIPE_MTE3, flag);
-#endif
-  pipe_barrier(PIPE_ALL);
-#endif
+  kernel_utils::WaitCubeVecFlag(flag);
 }
 
 #endif

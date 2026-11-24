@@ -285,4 +285,33 @@ AICORE inline void WaitBothVecOnA5(uint16_t flag) {
   wait_intra_block(Pipe, flag + VEC_FLAG_OFFSET);
 }
 
+// Preserve the producer pipe on A2/A3. A5 intra-block events require
+// explicit completion ordering and a flag for each Vec sub-block.
+template <pipe_t Pipe>
+AICORE inline void SetCubeVecFlag(uint16_t flag) {
+#if __CCE_AICORE__ == 220
+  SetCrossFlag<Pipe>(flag);
+#else
+  pipe_barrier(PIPE_ALL);
+#if defined(__DAV_CUBE__)
+  SignalBothVecOnA5<PIPE_FIX>(flag);
+#elif defined(__DAV_VEC__)
+  set_intra_block(Pipe, flag);
+#endif
+#endif
+}
+
+AICORE inline void WaitCubeVecFlag(uint16_t flag) {
+#if __CCE_AICORE__ == 220
+  wait_flag_dev(flag);
+#else
+#if defined(__DAV_CUBE__)
+  WaitBothVecOnA5<PIPE_MTE2>(flag);
+#elif defined(__DAV_VEC__)
+  wait_intra_block(PIPE_MTE3, flag);
+#endif
+  pipe_barrier(PIPE_ALL);
+#endif
+}
+
 }  // namespace kernel_utils

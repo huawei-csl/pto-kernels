@@ -122,6 +122,16 @@ QUICK_CASES = (
 
 
 def build(source, destination, heads):
+    # Candidates replace only forward. Keep the other exports required by the
+    # normal pybind extension, without recompiling those kernels per candidate.
+    object_root = ROOT / "build/CMakeFiles/no_workspace_kernel.dir/csrc/kernel"
+    if not (object_root / "gdn_mega_bwd/kernel.cpp.o").is_file():
+        raise RuntimeError("Run cmake --build build --target pto_kernels_ops first")
+    base_objects = sorted(
+        p
+        for p in object_root.rglob("*.o")
+        if p != object_root / "gdn_mega/kernel_gdn_mega.cpp.o"
+    )
     destination.mkdir(parents=True, exist_ok=True)
     sources = sorted(p for p in source.iterdir() if p.suffix in (".h", ".hpp", ".cpp"))
     # Keep the shared helper in candidate snapshots and their fingerprints.
@@ -209,11 +219,15 @@ def build(source, destination, heads):
             str(library),
             str(destination / "launch.o"),
             *(str(destination / f"head_{h}.o") for h in heads),
+            *map(str, base_objects),
         ],
         check=True,
     )
     return {
         "source_sha256": hashes,
+        "base_object_sha256": {
+            str(p.relative_to(ROOT)): sha256(p) for p in base_objects
+        },
         "heads": heads,
         "library_sha256": sha256(library),
         "build_seconds": time.perf_counter() - started,
