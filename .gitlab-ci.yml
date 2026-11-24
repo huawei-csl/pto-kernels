@@ -67,6 +67,8 @@ build_and_test_aarch64_910B2_py3.12:
     - make setup_once
     - make wheel
     - pip install pto_kernels*.whl
+    - export PATH="$PATH:/var/lib/taskqueue/bin"
+    - export TASKQUEUE_CONF=/var/lib/taskqueue/taskqueue.conf
     - task-submit --device 7 --run "python3 -m pytest tests/"
   when: manual
   allow_failure: true
@@ -101,6 +103,8 @@ test_pypi_aarch64_910B2_py3.12:
   script:
     - make setup_once
     - pip install pto-kernels
+    - export PATH="$PATH:/var/lib/taskqueue/bin"
+    - export TASKQUEUE_CONF=/var/lib/taskqueue/taskqueue.conf
     - task-submit --device 7 --run "python3 -m pytest tests/"
   when: manual
   allow_failure: true

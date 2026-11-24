@@ -150,8 +150,13 @@ def test_cube_reduce_views(dtype, npu_device):
 
 
 @pytest.mark.parametrize("value", [-128, 127])
-def test_cube_reduce_int8_extremes(value, npu_device):
-    check_sum(torch.full((327681,), value, dtype=torch.int8, device=npu_device))
+# 327681 leaves 20 blocks of partials; 393216 is 24 whole tiles, which fills
+# every block and makes the partial count as large as it ever gets. Extreme
+# values there pin the int32 fold: the sums are far outside what fp32 holds
+# exactly, so any step that widened them would show up here.
+@pytest.mark.parametrize("length", [327681, 393216])
+def test_cube_reduce_int8_extremes(length, value, npu_device):
+    check_sum(torch.full((length,), value, dtype=torch.int8, device=npu_device))
 
 
 @pytest.mark.parametrize(
