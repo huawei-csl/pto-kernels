@@ -4,7 +4,7 @@
 """Compare torch.linalg.vector_norm(x) with run_cube_norm (Python: pto_cube_norm).
 
 Example (with the extension built and installed):
-    python benchmarking/bench_cube_norm.py --device npu:1
+    python benchmarking/bench_cube_norm.py --device npu:0
 
 The default sweep covers 256 through 99,000,000 elements for FP16 and FP32.
 It brackets each length at which the host changes tile size (64 * 64 and
@@ -148,7 +148,7 @@ def bench(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--device", default=os.environ.get("NPU_DEVICE", "npu:1"))
+    parser.add_argument("--device", default=os.environ.get("NPU_DEVICE", "npu:0"))
     parser.add_argument("--dtypes", nargs="+", choices=DTYPES, default=list(DTYPES))
     parser.add_argument(
         "--sizes",
