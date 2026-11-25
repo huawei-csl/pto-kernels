@@ -4,7 +4,7 @@
 """Compare torch.sum(x, dim) with run_cube_reduce_dim (Python: pto_cube_reduce_dim).
 
 Example (with the extension built and installed):
-    python benchmarking/bench_cube_reduce_dim.py --device npu:1
+    python benchmarking/bench_cube_reduce_dim.py --device npu:0
 
 The kernel folds the axes around the reduced one into an (outer, mid, inner)
 view that always reduces `mid`, and it tiles two of those extents, so what a
@@ -214,7 +214,7 @@ def bench(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--device", default=os.environ.get("NPU_DEVICE", "npu:1"))
+    parser.add_argument("--device", default=os.environ.get("NPU_DEVICE", "npu:0"))
     parser.add_argument("--dtypes", nargs="+", choices=DTYPES, default=list(DTYPES))
     parser.add_argument(
         "--groups",
