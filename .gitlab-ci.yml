@@ -4,7 +4,13 @@ default:
 stages:
    - build_in_docker
    - test
-   - test_aarch64_910B2
+   - bench
+
+# Global environment for the taskqueue client (task-submit).
+# Available to every job; invoke the client as ${TASKQUEUE_BIN}/task-submit.
+variables:
+  TASKQUEUE_BIN: /var/lib/taskqueue/bin
+  TASKQUEUE_CONF: /var/lib/taskqueue/taskqueue.conf
 
 
 # Define the workflow rules manually to make sure only a single pipeline
@@ -42,6 +48,7 @@ build_docker:
 
 build_and_test_x86_910B4:
   image: quay.io/ascend/cann:9.2.1-910b-ubuntu22.04-py3.12
+  stage: test
   tags:
     - docker_npu # Build and test on-device NPU (x86-64 / 910B4)
   before_script:
@@ -56,7 +63,7 @@ build_and_test_x86_910B4:
 
 build_and_test_aarch64_910B2_py3.12:
   image: quay.io/ascend/cann:9.2.1-910b-ubuntu22.04-py3.12
-  stage: test_aarch64_910B2
+  stage: test
   tags:
     - docker_npu_910B2 # Build and test on-device (aarch64 / 910B2)
   before_script:
@@ -67,9 +74,7 @@ build_and_test_aarch64_910B2_py3.12:
     - make setup_once
     - make wheel
     - pip install pto_kernels*.whl
-    - export PATH="$PATH:/var/lib/taskqueue/bin"
-    - export TASKQUEUE_CONF=/var/lib/taskqueue/taskqueue.conf
-    - task-submit --device 7 --run "python3 -m pytest tests/"
+    - ${TASKQUEUE_BIN}/task-submit --device auto --run "python3 -m pytest tests/"
   when: manual
   allow_failure: true
 
@@ -78,6 +83,7 @@ build_and_test_aarch64_910B2_py3.12:
 ###################################################
 test_pypi_x86_910B4:
   image: quay.io/ascend/cann:9.2.1-910b-ubuntu22.04-py3.12
+  stage: test
   tags:
     - docker_npu # Build and test on-device NPU (x86-64 / 910B4)
   before_script:
@@ -93,7 +99,7 @@ test_pypi_x86_910B4:
 
 test_pypi_aarch64_910B2_py3.12:
   image: quay.io/ascend/cann:9.2.1-910b-ubuntu22.04-py3.12
-  stage: test_aarch64_910B2
+  stage: test
   tags:
     - docker_npu_910B2 # Build and test on-device (aarch64 / 910B2)
   before_script:
@@ -103,9 +109,7 @@ test_pypi_aarch64_910B2_py3.12:
   script:
     - make setup_once
     - pip install pto-kernels
-    - export PATH="$PATH:/var/lib/taskqueue/bin"
-    - export TASKQUEUE_CONF=/var/lib/taskqueue/taskqueue.conf
-    - task-submit --device 7 --run "python3 -m pytest tests/"
+    - ${TASKQUEUE_BIN}/task-submit --device auto --timeout 1200 --run "python3 -m pytest tests/"
   when: manual
   allow_failure: true
 
@@ -129,3 +133,42 @@ test_examples_on_x86_910B4:
     - cd examples/jit_cpp/${EXAMPLE}
     - export PTO_LIB_PATH=${ASCEND_TOOLKIT_HOME}
     - python3 run_${EXAMPLE}.py
+
+##########################################################
+# On-device benchmarks (benchmarking/bench_*.py), manual #
+##########################################################
+benchmark_aarch64_910B2_py3.12:
+  image: quay.io/ascend/cann:9.2.1-910b-ubuntu22.04-py3.12
+  stage: bench
+  tags:
+    - docker_npu_910B2 # Benchmark on-device (aarch64 / 910B2)
+  parallel:
+    matrix:
+      - BENCH:
+          - bench_cube_norm
+          - bench_cube_reduce
+          - bench_cube_reduce_dim
+          - bench_tri_inv_accuracy_rec_unroll_vs_col_sweep
+          - bench_tri_inv_col_sweep
+          - bench_tri_inv_rank_one
+          - bench_tri_inv_rec_unroll
+          - bench_tri_inv_rec_unroll_bf16_vs_fp16
+          - bench_tri_inv_rec_unroll_vs_rank_one
+  before_script:
+    - source /usr/local/Ascend/ascend-toolkit/set_env.sh
+    - pip3 install pyyaml setuptools pytest packaging matplotlib
+    - pip3 install -r requirements.txt
+  script:
+    - echo "Benchmarking ${BENCH}"
+    - make setup_once
+    - make wheel
+    - pip install pto_kernels*.whl
+    - ${TASKQUEUE_BIN}/task-submit --device auto --timeout 600 --run "python3 benchmarking/${BENCH}.py"
+  artifacts:
+    when: always
+    expire_in: 1 week
+    paths:
+      - benchmark_data/*.png
+      - benchmark_data/*.csv
+  when: manual
+  allow_failure: true

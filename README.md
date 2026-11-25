@@ -14,7 +14,7 @@ PTO focuses on tile-level operations, enabling efficient, composable kernel deve
 
 - **Fast** — hand-tuned tile-level kernels for Ascend NPUs, benchmarked against `torch-npu` built-ins.
 - **Drop-in** — kernels are exposed as plain Python functions that operate on `torch_npu` tensors.
-- **Broad coverage** — everything from elementwise ops (`abs`, `swiglu`) to linear-algebra primitives (`tri_inv`, `matmul`) to gated-linear-attention building blocks (GDN, KDA chunked recurrence, WY representation, KKT).
+- **Broad coverage** — everything from elementwise ops (`abs`, `swiglu`) to linear-algebra primitives (`tri_inv`, `matmul`) to cube-based reductions (`cube_reduce`, `cube_norm`) to gated-linear-attention building blocks (GDN, KDA chunked recurrence, WY representation, KKT).
 - **Extensible** — built on [pto-isa](https://github.com/PTO-ISA/pto-isa), so new kernels can be written once at the tile level and reused across ops.
 
 ---
@@ -119,6 +119,7 @@ y = pto_swiglu(x)  # fused SwiGLU on Ascend NPU
 | Elementwise / activation | `pto_abs`, `pto_swiglu` |
 | Attention | `pto_flash_attention` |
 | Linear algebra | `pto_simple_matmul`, `pto_batch_matrix_square`, `pto_tri_inv_block_fwd`, `pto_tri_inv_col_sweep`, `pto_tri_inv_ns`, `pto_tri_inv_rank_one`, `pto_tri_inv_rec_unroll`, `pto_tri_inv_trick` |
+| Reduction | `pto_cube_reduce`, `pto_cube_reduce_dim`, `pto_cube_norm` — reductions driven by the cube (matmul) unit: full sum, single-axis sum over a 5D tensor, and L2 norm |
 | Scan / gather | `pto_scan_ul1`, `pto_csr_gather` |
 | GDN (Gated DeltaNet) | `pto_gdn_chunk_cumsum`, `pto_gdn_chunk_h`, `pto_gdn_chunk_o`, `pto_gdn_scaled_dot_kkt`, `pto_gdn_wy_fast` |
 | GDN fused | `pto_gdn_mega` — one launch, two phases: shared Gram/gate preparation and a persistent fused inverse/WY/state/output pipeline. [Benchmarks](docs/gdn_mega/heatmap.md), [accuracy](docs/gdn_mega/error_heatmap.md) |
