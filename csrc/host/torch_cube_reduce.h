@@ -100,9 +100,12 @@ at::Tensor run_cube_reduce(const at::Tensor& x) {
   // already points past a view's storage offset. Flattening would only cost a
   // view (about 1.2us of the host path) to produce the same pointer.
   const at::Tensor input = x.contiguous();
-  // The Cube stage leaves one row of column sums per block.
+  // The Cube stage leaves one row of column sums per block. With `blocks == 0`
+  // nothing writes or reads them, so `output` stands in as a valid pointer.
   const at::Tensor partials =
-      at::empty({static_cast<int64_t>(block_dim), size}, output_options);
+      blocks == 0
+          ? output
+          : at::empty({static_cast<int64_t>(block_dim), size}, output_options);
   if (dtype == at::kHalf) {
     EXEC_KERNEL_CMD(cube_reduce_fp16, block_dim, input, partials, output,
                     num_tiles, tail_rows, blocks, vec_tail_offset, vec_tail_len,
