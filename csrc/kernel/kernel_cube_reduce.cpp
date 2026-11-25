@@ -242,54 +242,165 @@ AICORE float AccumulateTail(__gm__ InputT* input, uint64_t tail_offset,
   return tail_acc.GetValue(0);
 }
 
-// The partials are one contiguous run of `blocks * S` values, folded as a flat
-// vector in chunks, the way the tail is. The accumulation stays in T: an int8
-// reduction can exceed what fp32 holds exactly, and the test for a full tensor
-// of -128 depends on it being exact.
+// Sums a row of W values into its first 8 lanes with log2(W/8) vector adds,
+// each one adding the upper half onto the lower half in place. The halves are
+// disjoint, so nothing has to be copied, and every add is a full-width vector
+// operation rather than an 8-element one.
+//
+// This stands in for TROWSUM on the integer path. TRowSum's integer path would
+// take W/8 adds with a pipe barrier between each, plus a PIPE_ALL drain: 16
+// adds and 17 barriers at S = 128, against 4 and 4 here. The 8 lanes left over
+// are folded by the scalar read at the end of CompleteCubeReduce, which is the
+// same scalar work TRowSum does internally, just done once.
+template <typename T, uint32_t W>
+AICORE void HalveRowTo8Lanes(uint32_t base) {
+  static_assert(W >= 8 && (W & (W - 1)) == 0,
+                "the row width must be a power of two of at least 8");
+  if constexpr (W > 8) {
+    constexpr uint32_t kHalf = W / 2;
+    Tile<TileType::Vec, T, 1, kHalf> lo;
+    Tile<TileType::Vec, T, 1, kHalf> hi;
+    TASSIGN(lo, base);
+    TASSIGN(hi, base + kHalf * sizeof(T));
+    TADD(lo, lo, hi);
+    kernel_utils::PipeBarrierVec();
+    HalveRowTo8Lanes<T, kHalf>(base);
+  }
+}
+
+// The partials are `blocks` rows of S values, one row per Cube block, and they
+// are laid out exactly that way in global memory. The accumulation stays in T:
+// an int8 reduction can exceed what fp32 holds exactly, and the test for a
+// full tensor of -128 depends on it being exact.
+//
+// Which way they are folded matters, because TROWSUM is two different
+// algorithms. For float it is a vcadd halving tree over whole 64-element
+// repeats. For int32 it takes a separate integer path that accumulates one
+// 8-element block per vadd with a pipe barrier inside the loop
+// (`pto/npu/a2a3/TRowSum.hpp`, unchanged in CANN 9.1.0 and 9.2.1), so a flat
+// fold of the maximum 3072 partials costs 384 serialized vector operations.
+// Measured on one 910B2, that fold is 4.25 us for int8 against 0.38 us for
+// the same count in float, and it grows with `blocks * S` rather than with
+// the input. The same split exists in TRowMax, TRowMin and TRowProd; no other
+// kernel here feeds an integer tile to a row reduction, so it is handled in
+// place rather than behind a shared helper.
+//
+// TCOLSUM has no such split: it masks to the full row width and, with the
+// binary tree enabled, halves the row count each step whatever the type. So
+// the int32 fold goes down the columns first, which leaves the row reduction
+// only S values -- 16 of those 8-element steps instead of 384. Integer
+// addition wraps and wrapping addition is associative, so regrouping the sum
+// this way is exact, not merely close.
+//
+// Float deliberately keeps the flat fold, for two reasons, neither of which
+// is correctness: its row reduction is already a tree so there is nothing to
+// win, and leaving the path alone keeps its generated code identical, which
+// bounds what this change can affect. Note for anyone tempted to unify them:
+// the suite would not stop you. Its exact float cases are built so that every
+// intermediate sum is representable, and the rest carry a 1e-2 tolerance, so
+// no test here pins the summation order -- but real inputs would see
+// different rounding, for no measured gain.
 template <typename InputT, typename T, uint32_t S>
 AICORE void CompleteCubeReduce(__gm__ InputT* input, __gm__ T* partials,
                                __gm__ T* output, uint32_t blocks,
                                uint64_t tail_offset, uint32_t tail_len) {
   using OutputGlobal =
       GlobalTensor<T, Shape<1, 1, 1, 1, 1>, pto::Stride<1, 1, 1, 1, 1>>;
-  using PartGlobal =
-      GlobalTensor<T, Shape<1, 1, 1, 1, DYNAMIC>, pto::Stride<1, 1, 1, 1, 1>>;
+  constexpr bool kIsInt = std::is_same<T, int32_t>::value;
   constexpr uint32_t kChunk = kFoldChunk;
   constexpr uint32_t kChunkBytes = kChunk * sizeof(T);
-  using PartIn =
-      Tile<TileType::Vec, T, 1, kChunk, BLayout::RowMajor, 1, DYNAMIC>;
-  Tile<TileType::Vec, T, 1, kChunk> part_tmp;
-  Tile<TileType::Vec, T, 1, 8, BLayout::RowMajor, 1, 1> part_sum;
-  Tile<TileType::Vec, T, 1, 8, BLayout::RowMajor, 1, 1> totals;
+  // Rows of S that fit one chunk buffer, so both folds use the same UB.
+  constexpr uint32_t kChunkRows = kChunk / S;
+  static_assert(kChunk % S == 0 && kChunkRows > 0,
+                "the chunk buffer must hold a whole number of partial rows");
+
+  // UB map. Both folds take the chunk buffer at 0 and their scratch at
+  // kChunkBytes. Only the column fold needs the two S-wide rows above that, so
+  // the float layout, and with it the float object code, is what it was before
+  // this path existed.
+  constexpr uint32_t kRowBytes = S * sizeof(T);
+  constexpr uint32_t kColSumBase = 2 * kChunkBytes;
+  constexpr uint32_t kLaneBytes = 8 * sizeof(T);  // one 8-lane scalar tile
+  constexpr uint32_t kScalarBase =
+      kIsInt ? kColSumBase + kRowBytes : kColSumBase;
+  constexpr uint32_t kTailBase = kScalarBase + 3 * kLaneBytes;
+
+  // The integer fold stops at 8 lanes and sums them in the scalar read below;
+  // the float fold's row reduction already produces a single value.
+  constexpr uint32_t kTotalLanes = kIsInt ? 8 : 1;
+  Tile<TileType::Vec, T, 1, 8, BLayout::RowMajor, 1, kTotalLanes> totals;
   Tile<TileType::Vec, T, 1, 8, BLayout::RowMajor, 1, 1> result;
-  constexpr uint32_t kTailBase = 2 * kChunkBytes + 3 * 32;
 
   set_mask_norm();
   set_vector_mask(-1, -1);
 
-  TASSIGN(part_tmp, kChunkBytes);
-  TASSIGN(part_sum, 2 * kChunkBytes);
-  TASSIGN(totals, 2 * kChunkBytes + 32);
-  TASSIGN(result, 2 * kChunkBytes + 64);
+  TASSIGN(totals, kScalarBase + kLaneBytes);
+  TASSIGN(result, kScalarBase + 2 * kLaneBytes);
   TEXPANDS(totals, static_cast<T>(0));
   kernel_utils::PipeBarrierVec();
-  const uint32_t partial_len = blocks * S;
-  for (uint32_t off = 0; off < partial_len; off += kChunk) {
-    const uint32_t n = min(kChunk, partial_len - off);
-    PartGlobal source(partials + off, {static_cast<int32_t>(n)});
-    PartIn part_in(n);
-    TASSIGN(part_in, 0);
-    TLOAD(part_in, source);
-    kernel_utils::SetWaitFlag<PIPE_MTE2, PIPE_V>(0);
-    TROWSUM(part_sum, part_in, part_tmp);
-    kernel_utils::PipeBarrierVec();
-    TADD(totals, totals, part_sum);
-    kernel_utils::PipeBarrierVec();
-    kernel_utils::SetWaitFlag<PIPE_V, PIPE_MTE2>(0);
+  if constexpr (kIsInt) {
+    using Part2DGlobal = GlobalTensor<T, Shape<1, 1, 1, DYNAMIC, DYNAMIC>,
+                                      pto::Stride<1, 1, 1, DYNAMIC, 1>>;
+    // Only the row count varies; S stays static so TLOAD and TCOLSUM read the
+    // column count as a constant rather than from the tile's runtime field.
+    using Part2D =
+        Tile<TileType::Vec, T, kChunkRows, S, BLayout::RowMajor, DYNAMIC, S>;
+    Tile<TileType::Vec, T, kChunkRows, S> col_tmp;
+    Tile<TileType::Vec, T, 1, S> col_sum;
+    Tile<TileType::Vec, T, 1, 8> col_lanes;  // the first 8 lanes of col_sum
+    TASSIGN(col_tmp, kChunkBytes);
+    TASSIGN(col_sum, kColSumBase);
+    TASSIGN(col_lanes, kColSumBase);
+    for (uint32_t first = 0; first < blocks; first += kChunkRows) {
+      const uint32_t row_count = min(kChunkRows, blocks - first);
+      Part2DGlobal source(partials + static_cast<uint64_t>(first) * S,
+                          {1, 1, 1, row_count, S}, {1, 1, 1, S, 1});
+      Part2D part_in(row_count);
+      TASSIGN(part_in, 0);
+      TLOAD(part_in, source);
+      kernel_utils::SetWaitFlag<PIPE_MTE2, PIPE_V>(0);
+      TCOLSUM(col_sum, part_in, col_tmp, true);
+      kernel_utils::PipeBarrierVec();
+      HalveRowTo8Lanes<T, S>(kColSumBase);
+      TADD(totals, totals, col_lanes);
+      kernel_utils::PipeBarrierVec();
+      kernel_utils::SetWaitFlag<PIPE_V, PIPE_MTE2>(0);
+    }
+  } else {
+    using PartGlobal =
+        GlobalTensor<T, Shape<1, 1, 1, 1, DYNAMIC>, pto::Stride<1, 1, 1, 1, 1>>;
+    using PartIn =
+        Tile<TileType::Vec, T, 1, kChunk, BLayout::RowMajor, 1, DYNAMIC>;
+    Tile<TileType::Vec, T, 1, 8, BLayout::RowMajor, 1, 1> part_sum;
+    Tile<TileType::Vec, T, 1, kChunk> part_tmp;
+    TASSIGN(part_sum, kScalarBase);
+    TASSIGN(part_tmp, kChunkBytes);
+    const uint32_t partial_len = blocks * S;
+    for (uint32_t off = 0; off < partial_len; off += kChunk) {
+      const uint32_t n = min(kChunk, partial_len - off);
+      PartGlobal source(partials + off, {static_cast<int32_t>(n)});
+      PartIn part_in(n);
+      TASSIGN(part_in, 0);
+      TLOAD(part_in, source);
+      kernel_utils::SetWaitFlag<PIPE_MTE2, PIPE_V>(0);
+      TROWSUM(part_sum, part_in, part_tmp);
+      kernel_utils::PipeBarrierVec();
+      TADD(totals, totals, part_sum);
+      kernel_utils::PipeBarrierVec();
+      kernel_utils::SetWaitFlag<PIPE_V, PIPE_MTE2>(0);
+    }
   }
+  // AccumulateTail ends on a V -> S flag, so the vector accumulation above is
+  // visible to these scalar reads.
   const float tail =
       AccumulateTail<InputT, kTailBase>(input, tail_offset, tail_len);
-  result.SetValue(0, totals.GetValue(0) + static_cast<T>(tail));
+  T total = totals.GetValue(0);
+  if constexpr (kIsInt) {
+    for (uint32_t lane = 1; lane < kTotalLanes; ++lane) {
+      total += totals.GetValue(lane);
+    }
+  }
+  result.SetValue(0, total + static_cast<T>(tail));
   kernel_utils::SetWaitFlag<PIPE_S, PIPE_MTE3>(0);
   OutputGlobal destination(output);
   TSTORE(destination, result);
@@ -366,8 +477,12 @@ extern "C" void pto_launch_cube_reduce_fp16(uint32_t blockDim, void* stream,
                                             uint32_t tail_rows, uint32_t blocks,
                                             uint64_t tail_offset,
                                             uint32_t tail_len, uint32_t size) {
-  cube_reduce_fp16<<<blockDim, nullptr, stream>>>(
-      (__gm__ half*)input, (__gm__ float*)partials, num_tiles, tail_rows, size);
+  // Nothing to reduce here below one tile; skip the dispatch.
+  if (num_tiles != 0 || tail_rows != 0) {
+    cube_reduce_fp16<<<blockDim, nullptr, stream>>>((__gm__ half*)input,
+                                                    (__gm__ float*)partials,
+                                                    num_tiles, tail_rows, size);
+  }
   complete_cube_reduce_fp16<<<1, nullptr, stream>>>(
       (__gm__ half*)input, (__gm__ float*)partials, (__gm__ float*)output,
       blocks, tail_offset, tail_len, size);
@@ -400,9 +515,12 @@ extern "C" void pto_launch_cube_reduce_fp32(uint32_t blockDim, void* stream,
                                             uint32_t tail_rows, uint32_t blocks,
                                             uint64_t tail_offset,
                                             uint32_t tail_len, uint32_t size) {
-  cube_reduce_fp32<<<blockDim, nullptr, stream>>>((__gm__ float*)input,
-                                                  (__gm__ float*)partials,
-                                                  num_tiles, tail_rows, size);
+  // Nothing to reduce here below one tile; skip the dispatch.
+  if (num_tiles != 0 || tail_rows != 0) {
+    cube_reduce_fp32<<<blockDim, nullptr, stream>>>((__gm__ float*)input,
+                                                    (__gm__ float*)partials,
+                                                    num_tiles, tail_rows, size);
+  }
   complete_cube_reduce_fp32<<<1, nullptr, stream>>>(
       (__gm__ float*)input, (__gm__ float*)partials, (__gm__ float*)output,
       blocks, tail_offset, tail_len, size);
@@ -435,9 +553,12 @@ extern "C" void pto_launch_cube_reduce_int8(uint32_t blockDim, void* stream,
                                             uint32_t tail_rows, uint32_t blocks,
                                             uint64_t tail_offset,
                                             uint32_t tail_len, uint32_t size) {
-  cube_reduce_int8<<<blockDim, nullptr, stream>>>((__gm__ int8_t*)input,
-                                                  (__gm__ int32_t*)partials,
-                                                  num_tiles, tail_rows, size);
+  // Nothing to reduce here below one tile; skip the dispatch.
+  if (num_tiles != 0 || tail_rows != 0) {
+    cube_reduce_int8<<<blockDim, nullptr, stream>>>((__gm__ int8_t*)input,
+                                                    (__gm__ int32_t*)partials,
+                                                    num_tiles, tail_rows, size);
+  }
   complete_cube_reduce_int8<<<1, nullptr, stream>>>(
       (__gm__ int8_t*)input, (__gm__ int32_t*)partials, (__gm__ int32_t*)output,
       blocks, tail_offset, tail_len, size);
