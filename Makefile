@@ -9,7 +9,7 @@ PTO_LIB_PATH    ?= $(ASCEND_TOOLKIT_HOME)
 CSRC_KERNEL_DIR := csrc/kernel
 KERNEL_SUBDIR   ?= .
 
-.PHONY: clean setup_once build wheel install docs test test_tri_inv
+.PHONY: clean setup_once build wheel build_wheel install docs test test_tri_inv
 
 clean:
 	rm -rf build/ dist/ extra-info/ *.egg-info/ kernel_meta/ pto_kernels-*.whl
@@ -21,7 +21,7 @@ build: clean
 	bash scripts/build.sh
 
 wheel: clean
-	export CMAKE_GENERATOR="Unix Makefiles" && pip wheel -v . --extra-index-url https://download.pytorch.org/whl/cpu
+	bash scripts/build-wheel.sh
 
 
 # 'make compile_abs' compiles 'kernel_abs.cpp' into 'build/lib/libkernel_abs.so' without building the whole wheel package.
@@ -71,7 +71,4 @@ docs:
 	doxygen doxygen/Doxyfile
 
 test:
-	pytest -v tests/
-
-test_tri_inv:
-	pytest tests/test_tri_inv_*.py
+	pytest tests/

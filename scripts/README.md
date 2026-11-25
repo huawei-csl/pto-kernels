@@ -24,6 +24,39 @@ A5 (`Ascend950*`), `MEMORY` otherwise. For A5 use `--soc-version Ascend950`.
 
 The script resolves the Ascend toolkit path from `$ASCEND_INSTALL_PATH`, `$ASCEND_HOME_PATH`, `~/Ascend/ascend-toolkit/latest`, or `/usr/local/Ascend/ascend-toolkit/latest` (in that order), sources its environment, then runs a clean CMake configure + build.
 
+## build-wheel.sh
+
+Builds a wheel natively on the current host (no Docker), i.e. the local counterpart of
+`gen-wheel.sh`. It resolves the SoC version and the Ascend toolkit path exactly like `build.sh`,
+exports `SOC_VERSION` / `ASCEND_CANN_PACKAGE_PATH`, and then runs `make clean wheel`.
+
+**Usage**
+
+```bash
+./scripts/build-wheel.sh [--soc-version <version>] [--install]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-v`, `--soc-version` | auto-detected | Target SoC version, exported as `SOC_VERSION` |
+| `--install` | off | Force-reinstall the built wheel (`make install`) after the build |
+
+**Examples**
+
+```bash
+# Auto-detected SoC
+./scripts/build-wheel.sh
+
+# A5, then install the wheel
+./scripts/build-wheel.sh --soc-version Ascend950 --install
+
+# Via the Makefile (SOC_VERSION is optional)
+make build_wheel
+make build_wheel SOC_VERSION=Ascend950
+```
+
+The wheel is written to `pto_kernels-X.Y.Z-*.whl` in the repository root.
+
 ## gen-wheel.sh
 
 Builds a `manylinux` Python wheel inside a Docker container, replicating the steps from `.github/workflows/python-packaging.yml`.

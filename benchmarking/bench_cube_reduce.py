@@ -4,7 +4,7 @@
 """Compare torch.sum(x) with run_cube_reduce (Python: pto_cube_reduce).
 
 Example (with the extension built and installed):
-    python benchmarking/bench_cube_reduce.py --device npu:1
+    python benchmarking/bench_cube_reduce.py --device npu:0
 
 The default sweep covers 1,024 through 99,000,000 elements for FP16, FP32 and
 INT8. Use --sizes to select specific lengths, for example --sizes 99000000.
@@ -128,7 +128,7 @@ def bench(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--device", default=os.environ.get("NPU_DEVICE", "npu:1"))
+    parser.add_argument("--device", default=os.environ.get("NPU_DEVICE", "npu:0"))
     parser.add_argument("--dtypes", nargs="+", choices=DTYPES, default=list(DTYPES))
     parser.add_argument(
         "--sizes",
