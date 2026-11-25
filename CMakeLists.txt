@@ -36,11 +36,6 @@ option(PIP_INSTALL "True if building via pip" OFF)
 option(USE_ASC_LANGUAGE
        "Compile kernels with the ASC language toolchain (CANN >= 9.0)" ON)
 
-set(BASE_MODE
-    "MEMORY"
-    CACHE STRING "Base addressing mode: MEMORY or REGISTER")
-set_property(CACHE BASE_MODE PROPERTY STRINGS "MEMORY" "REGISTER")
-
 find_program(CCACHE_PROGRAM ccache)
 if(CCACHE_PROGRAM)
   set(CMAKE_C_COMPILER_LAUNCHER ${CCACHE_PROGRAM})
@@ -49,11 +44,23 @@ endif()
 
 find_package(Python REQUIRED COMPONENTS Interpreter Development)
 find_package(pybind11 CONFIG REQUIRED)
+# TorchConfig.cmake unconditionally looks for a static libkineto.a, which the
+# PyTorch wheels do not ship (kineto is linked into libtorch_cpu.so), so it
+# warns "static library kineto_LIBRARY-NOTFOUND not found." on every configure.
+# Nothing is actually missing from TORCH_LIBRARIES, so drop that one warning.
+function(message)
+  if("${ARGV0}" STREQUAL "WARNING" AND "${ARGV1}" MATCHES
+                                       "kineto_LIBRARY-NOTFOUND")
+    return()
+  endif()
+  _message(${ARGV})
+endfunction()
+
 find_package(Torch REQUIRED)
 
 # user-defined configuration
 set(SOC_VERSION
-    "Ascend910b4"
+    "Ascend950"
     CACHE STRING "system on chip type")
 set(CMAKE_BUILD_TYPE
     "Debug"
@@ -69,16 +76,20 @@ elseif(DEFINED ENV{ASCEND_HOME_PATH})
       CACHE PATH "ASCEND CANN package installation directory" FORCE)
 endif()
 
-# SOC_VERSION -> NPU_ARCH: the ASC compiler takes the target architecture
-# instead of SOC_VERSION.
+# SOC_VERSION -> NPU_ARCH / BASE_MODE: the ASC compiler takes the target
+# architecture instead of SOC_VERSION, and the base addressing mode is fixed by
+# the SoC generation (A5 is register-based, earlier parts are memory-based).
 string(TOLOWER "${SOC_VERSION}" SOC_VERSION_LOWER)
 if(SOC_VERSION_LOWER MATCHES "^ascend910b" OR SOC_VERSION_LOWER MATCHES
                                               "^ascend910_93")
   set(NPU_ARCH "dav-2201")
+  set(BASE_MODE "MEMORY")
 elseif(SOC_VERSION_LOWER MATCHES "^ascend950")
   set(NPU_ARCH "dav-3510")
+  set(BASE_MODE "REGISTER")
 elseif(SOC_VERSION_LOWER MATCHES "^ascend310p")
   set(NPU_ARCH "dav-2002")
+  set(BASE_MODE "MEMORY")
 else()
   message(
     FATAL_ERROR
@@ -158,6 +169,7 @@ message("***********************************************************")
 message("* ASCEND_CANN_PACKAGE_PATH : ${ASCEND_CANN_PACKAGE_PATH}")
 message("* USE_ASC_LANGUAGE         : ${USE_ASC_LANGUAGE}")
 message("* SOC_VERSION / NPU_ARCH   : ${SOC_VERSION} / ${NPU_ARCH}")
+message("* BASE_MODE                : ${BASE_MODE}")
 message("* TORCH_INSTALL_PREFIX     : ${TORCH_INSTALL_PREFIX}")
 message("* TORCH_NPU_PATH           : ${TORCH_NPU_PATH}")
 message("* TORCH_LIBRARIES          : ${TORCH_LIBRARIES}")
@@ -207,15 +219,8 @@ if(USE_ASC_LANGUAGE)
             $<$<COMPILE_LANGUAGE:ASC>:-UL2_CACHE_HINT>)
 endif()
 
-if(BASE_MODE STREQUAL "MEMORY")
-  message(STATUS "BASE_MODE is MEMORY")
-  ascendc_compile_definitions(no_workspace_kernel PRIVATE -DMEMORY_BASE)
-elseif(BASE_MODE STREQUAL "REGISTER")
-  message(STATUS "BASE_MODE is REGISTER")
-  ascendc_compile_definitions(no_workspace_kernel PRIVATE -DREGISTER_BASE)
-else()
-  message(FATAL_ERROR "BASE_MODE must be MEMORY or REGISTER, got: ${BASE_MODE}")
-endif()
+message(STATUS "BASE_MODE is ${BASE_MODE} (derived from SOC_VERSION)")
+ascendc_compile_definitions(no_workspace_kernel PRIVATE -D${BASE_MODE}_BASE)
 
 pybind11_add_module(pto_kernels_ops csrc/host/pybind11.cpp)
 # pybind11 does not work with C++20, so we set C++17 for the pybind11 module
