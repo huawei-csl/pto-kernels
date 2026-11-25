@@ -70,29 +70,29 @@ pip install --force-reinstall pto_kernels-*.whl
 
 ### Choosing the target SoC
 
-Two build settings select the target hardware:
+`SOC_VERSION` selects the target hardware. CMake derives the compiler's NPU arch and the base
+addressing mode (`-DMEMORY_BASE` / `-DREGISTER_BASE`) from it:
 
-| Setting | Values | Meaning |
+| `SOC_VERSION` | NPU arch | Base mode |
 | --- | --- | --- |
-| `SOC_VERSION` | `Ascend910B*`, `Ascend910_93*`, `Ascend950*`, `Ascend310P*` | Target SoC; mapped to the compiler's NPU arch (`dav-2201`, `dav-3510`, `dav-2002`) |
-| `BASE_MODE` | `MEMORY`, `REGISTER` | Base addressing mode (`-DMEMORY_BASE` / `-DREGISTER_BASE`) |
+| `Ascend950*` (A5) | `dav-3510` | `REGISTER` |
+| `Ascend910B*`, `Ascend910_93*` (A2/A3) | `dav-2201` | `MEMORY` |
+| `Ascend310P*` | `dav-2002` | `MEMORY` |
 
-Use `REGISTER` for A5 (`Ascend950*`) and `MEMORY` for A2-generation parts (`Ascend910B*`).
-
-A5 is the default when neither is set: `SOC_VERSION=Ascend950` with `BASE_MODE=REGISTER`, for both
-the wheel build and `scripts/build.sh`.
+When `SOC_VERSION` is unset, the wheel build defaults to A5 (`Ascend950`). `scripts/build.sh`
+instead detects the chip name of the first NPU on the machine via `npu-smi`, and falls back to A2
+(`Ascend910B2`) only when no NPU can be queried.
 
 **Building for A2 (Ascend910B):**
 
 ```bash
-# Wheel build — both settings are read from the environment
+# Wheel build — SOC_VERSION is read from the environment
 export SOC_VERSION=Ascend910B2
-export BASE_MODE=MEMORY
 make wheel
 pip install --force-reinstall pto_kernels-*.whl
 
-# In-tree CMake build — flags take precedence over the environment
-bash scripts/build.sh --soc-version Ascend910B2 --base-mode MEMORY
+# In-tree CMake build — the flag takes precedence over the environment
+bash scripts/build.sh --soc-version Ascend910B2
 ```
 
 To compile a single kernel without building the whole package, `make compile_<name>` targets A5

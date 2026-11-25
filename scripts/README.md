@@ -9,16 +9,18 @@ Compiles the project locally using CMake against an Ascend CANN toolkit installa
 **Usage**
 
 ```bash
-./scripts/build.sh [--soc-version <version>] [--base-mode <mode>]
+./scripts/build.sh [--soc-version <version>]
 ```
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `-v`, `--soc-version` | `Ascend950` | Target SoC version passed to CMake as `-DSOC_VERSION` |
-| `-m`, `--base-mode` | `REGISTER` | Base addressing mode (`MEMORY` or `REGISTER`) passed to CMake as `-DBASE_MODE` |
+| `-v`, `--soc-version` | auto-detected | Target SoC version passed to CMake as `-DSOC_VERSION` |
 
-Both options fall back to the `SOC_VERSION` / `BASE_MODE` environment variables when the flag is
-omitted. For A2-generation parts use `--soc-version Ascend910B2 --base-mode MEMORY`.
+The option falls back to the `SOC_VERSION` environment variable when the flag is omitted, and then
+to the chip name of the first NPU reported by `npu-smi` (e.g. `Ascend950PR`, `Ascend910B2`). On a
+host with no queryable NPU the script falls back to `Ascend910B2`. The base
+addressing mode (`MEMORY_BASE` / `REGISTER_BASE`) is derived from the SoC by CMake: `REGISTER` for
+A5 (`Ascend950*`), `MEMORY` otherwise. For A5 use `--soc-version Ascend950`.
 
 The script resolves the Ascend toolkit path from `$ASCEND_INSTALL_PATH`, `$ASCEND_HOME_PATH`, `~/Ascend/ascend-toolkit/latest`, or `/usr/local/Ascend/ascend-toolkit/latest` (in that order), sources its environment, then runs a clean CMake configure + build.
 
