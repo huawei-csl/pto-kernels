@@ -10,7 +10,7 @@ import torch
 import pytest
 from pto_kernels import pto_scan_ul1
 
-size = [16, 32, 64, 128]
+size = [16, 32, 64, 96, 128]
 matrix_size = [s * s for s in size]
 
 
