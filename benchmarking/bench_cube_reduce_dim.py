@@ -15,6 +15,8 @@ element count:
   kept-inner  dim=1 with mid fixed, varying the kept contiguous extent.
   reduced     dim=1 with the kept extent fixed, varying the reduced extent.
   contiguous  dim=2, where the reduced axis is the contiguous one.
+  rank        every axis of a rank-4 and a rank-5 shape, each paired with the
+              3D shape its axes fold into.
   shapes      assorted whole shapes across all three dims.
 
 Both reductions output FP32 for FP16 and FP32 input, and INT32 for INT8 input.
@@ -59,6 +61,19 @@ def sweep_shapes():
     for mid in (8, 16, 32, 64, 128, 256, 512, 1024, 4096, 16384):
         outer = max(1, SWEEP_NUMEL // mid)
         cases.append(("contiguous", (outer, 1, mid), 2))
+    # Rank never reaches the kernel: the host folds the axes around the reduced
+    # one into (outer, mid, inner) before launching, so a rank-4 or rank-5
+    # reduction runs the same tiles as the 3D shape its axes fold into. What
+    # the fold does not absorb is the host's own work -- two more loop
+    # iterations, a longer output shape, a contiguity check over more strides --
+    # which is a real share of the latency on small inputs. Each case is
+    # therefore emitted next to its folded equivalent, so the pair can be read
+    # as two adjacent rows carrying identical extents: a gap between them is
+    # host-side, since the device work is identical by construction.
+    for shape in ((512, 64, 16, 8), (256, 32, 16, 8, 4)):
+        for dim in range(len(shape)):
+            cases.append(("rank", shape, dim))
+            cases.append(("rank", extents(shape, dim), 1))
     for shape in ((256, 256, 64), (8, 512, 512), (64, 128, 1024), (1024, 64, 64)):
         for dim in (0, 1, 2):
             cases.append(("shapes", shape, dim))
@@ -219,8 +234,8 @@ def main():
     parser.add_argument(
         "--groups",
         nargs="+",
-        choices=["kept-inner", "reduced", "contiguous", "shapes"],
-        default=["kept-inner", "reduced", "contiguous", "shapes"],
+        choices=["kept-inner", "reduced", "contiguous", "rank", "shapes"],
+        default=["kept-inner", "reduced", "contiguous", "rank", "shapes"],
         help="which sweeps to run (default: all)",
     )
     parser.add_argument("--warmup", type=positive_int, default=10)
