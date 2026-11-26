@@ -55,6 +55,11 @@ def make_input(shape, dtype, device):
         (16 * 1024 * 1024 + 7,),
         (7, 11, 13),
         (4, 5, 16384),
+        (17, 19, 23),
+        (3, 5, 7, 11, 13),
+        (2, 16383),
+        (65537,),
+        (1048573,),
     ],
 )
 def test_cube_reduce(shape, dtype, npu_device):
@@ -71,6 +76,71 @@ def test_cube_reduce_uneven_blocks(dtype, tiles, tail, npu_device):
     check_sum(x.to(npu_device), exact=True)
 
 
+def exact_pattern(length, dtype):
+    # Values vary along the input so a dropped or doubled range changes the sum.
+    # They stay in [-3, 3], exact in every supported dtype, and the running sum
+    # stays exact in fp32 for these lengths.
+    return (torch.arange(length, dtype=torch.int32) // 251 % 7 - 3).to(dtype)
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.float32, torch.int8])
+@pytest.mark.parametrize(
+    "length",
+    [
+        # The host picks a 32x32 tile below 4096 elements, 64x64 below 16384,
+        # and 128x128 above, so each regime has its own tile and tail sizes.
+        # The tail is split again: its whole rows of `size` elements go to the
+        # Cube stage as one extra, zero-padded work item, and only the final
+        # partial row -- fewer than `size` elements, so always a single fold
+        # chunk -- reaches the Vector stage. The boundaries that matter are
+        # therefore a tail of no whole rows, of exactly one row, of the maximum
+        # `size - 1` rows, and of a whole number of rows, where the Vector
+        # stage is handed nothing at all.
+        # 32x32 tiles (1024 elements), tail at most 1023, so at most 31 rows.
+        1055,  # one tile, tail 31: no whole row, Vector stage only
+        1056,  # one tile, tail 32: exactly one row, no Vector tail
+        1057,  # one tile, tail 33: one row plus one
+        1279,  # one tile, tail 255: seven rows plus 31
+        1280,  # one tile, tail 256: eight whole rows
+        1281,  # one tile, tail 257
+        2816,  # two tiles, tail 768: 24 whole rows
+        3072,  # three whole tiles, no tail, odd partial count
+        4064,  # three tiles, tail 992: 31 rows, the maximum, no remainder
+        4094,  # three tiles, tail one short of the maximum 1023
+        # 64x64 tiles (4096 elements), tail at most 4095, so at most 63 rows.
+        4159,  # one tile, tail 63: no whole row, Vector stage only
+        4160,  # one tile, tail 64: exactly one row, no Vector tail
+        4161,  # one tile, tail 65: one row plus one
+        4352,  # one tile, tail 256: four whole rows
+        8128,  # one tile, tail 4032: 63 rows, the maximum, no remainder
+        8191,  # one tile plus the largest possible tail
+        8192,  # two whole tiles
+        12288,  # three whole tiles
+        16382,  # three tiles, tail one short of the maximum 4095
+        # 128x128 tiles (16384 elements), tail at most 16383, at most 127 rows.
+        16511,  # one tile, tail 127: no whole row, Vector stage only
+        16512,  # one tile, tail 128: exactly one row, no Vector tail
+        16513,  # one tile, tail 129: one row plus one
+        16639,  # one tile, tail 255: one row plus 127, the largest remainder
+        16640,  # one tile, tail 256: two whole rows
+        16641,  # one tile, tail 257
+        20479,  # one tile, tail 4095: 31 rows plus 127
+        20480,  # one tile, tail 4096: 32 whole rows
+        20481,  # one tile, tail 4097: 32 rows plus one
+        28672,  # one tile, tail 12288: 96 whole rows
+        32640,  # one tile, tail 16256: 127 rows, the maximum, no remainder
+        32767,  # one tile plus the largest possible tail: 127 rows plus 127
+        32768,  # two whole tiles
+        49152,  # three whole tiles, fewer tiles than cores, odd partial count
+        81919,  # four tiles plus the largest possible tail
+        81920,  # five whole tiles
+        344063,  # twenty tiles plus the largest possible tail
+    ],
+)
+def test_cube_reduce_tile_and_tail_boundaries(dtype, length, npu_device):
+    check_sum(exact_pattern(length, dtype).to(npu_device), exact=True)
+
+
 @pytest.mark.parametrize("dtype", [torch.float16, torch.float32, torch.int8])
 def test_cube_reduce_views(dtype, npu_device):
     base = make_input((655362,), dtype, npu_device)
@@ -80,8 +150,13 @@ def test_cube_reduce_views(dtype, npu_device):
 
 
 @pytest.mark.parametrize("value", [-128, 127])
-def test_cube_reduce_int8_extremes(value, npu_device):
-    check_sum(torch.full((327681,), value, dtype=torch.int8, device=npu_device))
+# 327681 leaves 20 blocks of partials; 393216 is 24 whole tiles, which fills
+# every block and makes the partial count as large as it ever gets. Extreme
+# values there pin the int32 fold: the sums are far outside what fp32 holds
+# exactly, so any step that widened them would show up here.
+@pytest.mark.parametrize("length", [327681, 393216])
+def test_cube_reduce_int8_extremes(length, value, npu_device):
+    check_sum(torch.full((length,), value, dtype=torch.int8, device=npu_device))
 
 
 @pytest.mark.parametrize(
@@ -110,9 +185,14 @@ def test_cube_reduce_rejects_cpu(dtype, shape):
 
 
 @pytest.mark.parametrize("dtype", [torch.float16, torch.float32, torch.int8])
-@pytest.mark.parametrize("length", [1, 1023, 1024, 4095, 4096, 16383, 16384, 16385])
+@pytest.mark.parametrize(
+    "length",
+    [1, 1023, 1024, 1056, 4095, 4096, 4160, 16383, 16384, 16385, 16512, 32640],
+)
 def test_cube_reduce_offset_excludes_surrounding_storage(dtype, length, npu_device):
     # Poison both sides of a view, including where tail padding would be read.
+    # The lengths whose tail is a whole number of rows put a partly filled,
+    # zero-padded tile on the Cube stage, which is where an over-read would be.
     base = torch.full((length + 65,), 17, dtype=dtype, device=npu_device)
     x = base[1 : length + 1]
     x.fill_(1)

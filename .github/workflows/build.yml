@@ -68,15 +68,13 @@ jobs:
             python_version: 3.12
             npu_device: 910b
             soc_version: Ascend910B2
-            base_mode: MEMORY
           - arch: x86_64
             python_version: 3.12
             npu_device: 950
             soc_version: Ascend950
-            base_mode: REGISTER
 
     container:
-      image: quay.io/ascend/cann:9.2.0-beta.1-${{ matrix.npu_device }}-ubuntu22.04-py${{ matrix.python_version }}
+      image: quay.io/ascend/cann:9.2.1-${{ matrix.npu_device }}-ubuntu22.04-py${{ matrix.python_version }}
     steps:
       - name: Show OS
         run: cat /etc/os-release
@@ -88,7 +86,6 @@ jobs:
         shell: bash
         env:
           SOC_VERSION: ${{ matrix.soc_version }}
-          BASE_MODE: ${{ matrix.base_mode }}
         run: |
           apt-get update
           apt-get install -yq python-is-python3 python3-dev cmake
@@ -111,14 +108,12 @@ jobs:
             python_version: 3.12
             npu_device: 910b
             soc_version: Ascend910B2
-            base_mode: MEMORY
           - arch: x86_64
             python_version: 3.12
             npu_device: 950
             soc_version: Ascend950
-            base_mode: REGISTER
     container:
-      image: quay.io/ascend/cann:9.2.0-beta.1-${{ matrix.npu_device }}-ubuntu22.04-py${{ matrix.python_version }}
+      image: quay.io/ascend/cann:9.2.1-${{ matrix.npu_device }}-ubuntu22.04-py${{ matrix.python_version }}
     steps:
       - name: Show OS
         run: cat /etc/os-release
@@ -130,7 +125,6 @@ jobs:
         shell: bash
         env:
           SOC_VERSION: ${{ matrix.soc_version }}
-          BASE_MODE: ${{ matrix.base_mode }}
         run: |
           apt-get update
           apt-get install -yq python-is-python3 python3-dev cmake

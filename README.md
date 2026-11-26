@@ -14,7 +14,7 @@ PTO focuses on tile-level operations, enabling efficient, composable kernel deve
 
 - **Fast** — hand-tuned tile-level kernels for Ascend NPUs, benchmarked against `torch-npu` built-ins.
 - **Drop-in** — kernels are exposed as plain Python functions that operate on `torch_npu` tensors.
-- **Broad coverage** — everything from elementwise ops (`abs`, `swiglu`) to linear-algebra primitives (`tri_inv`, `matmul`) to gated-linear-attention building blocks (GDN, KDA chunked recurrence, WY representation, KKT).
+- **Broad coverage** — everything from elementwise ops (`abs`, `swiglu`) to linear-algebra primitives (`tri_inv`, `matmul`) to cube-based reductions (`cube_reduce`, `cube_norm`) to gated-linear-attention building blocks (GDN, KDA chunked recurrence, WY representation, KKT).
 - **Extensible** — built on [pto-isa](https://github.com/PTO-ISA/pto-isa), so new kernels can be written once at the tile level and reused across ops.
 
 ---
@@ -70,33 +70,34 @@ pip install --force-reinstall pto_kernels-*.whl
 
 ### Choosing the target SoC
 
-Two build settings select the target hardware:
+`SOC_VERSION` selects the target hardware. CMake derives the compiler's NPU arch and the base
+addressing mode (`-DMEMORY_BASE` / `-DREGISTER_BASE`) from it:
 
-| Setting | Values | Meaning |
+| `SOC_VERSION` | NPU arch | Base mode |
 | --- | --- | --- |
-| `SOC_VERSION` | `Ascend910B*`, `Ascend910_93*`, `Ascend950*`, `Ascend310P*` | Target SoC; mapped to the compiler's NPU arch (`dav-2201`, `dav-3510`, `dav-2002`) |
-| `BASE_MODE` | `MEMORY`, `REGISTER` | Base addressing mode (`-DMEMORY_BASE` / `-DREGISTER_BASE`) |
+| `Ascend950*` (A5) | `dav-3510` | `REGISTER` |
+| `Ascend910B*`, `Ascend910_93*` (A2/A3) | `dav-2201` | `MEMORY` |
+| `Ascend310P*` | `dav-2002` | `MEMORY` |
 
-Use `MEMORY` for A2-generation parts (`Ascend910B*`) and `REGISTER` for A5 (`Ascend950*`).
+When `SOC_VERSION` is unset, the wheel build defaults to A5 (`Ascend950`). `scripts/build.sh`
+instead detects the chip name of the first NPU on the machine via `npu-smi`, and falls back to A2
+(`Ascend910B2`) only when no NPU can be queried.
 
-**Building for A5 (Ascend950):**
+**Building for A2 (Ascend910B):**
 
 ```bash
-# Wheel build — both settings are read from the environment
-export SOC_VERSION=Ascend950
-export BASE_MODE=REGISTER
+# Wheel build — SOC_VERSION is read from the environment
+export SOC_VERSION=Ascend910B2
 make wheel
 pip install --force-reinstall pto_kernels-*.whl
 
-# In-tree CMake build — flags take precedence over the environment
-bash scripts/build.sh --soc-version Ascend950 --base-mode REGISTER
+# In-tree CMake build — the flag takes precedence over the environment
+bash scripts/build.sh --soc-version Ascend910B2
 ```
 
-A2 is the default when neither is set: `BASE_MODE=MEMORY` with `SOC_VERSION=Ascend910B4` for the
-wheel build and `Ascend910B2` for `scripts/build.sh`.
-
-To compile a single kernel without building the whole package, `make compile_<name>` targets A2 and
-`make compile_a5_<name>` targets A5 (e.g. `make compile_a5_abs`).
+To compile a single kernel without building the whole package, `make compile_<name>` targets A5
+(`make compile_a5_<name>` is an alias of it) and `make compile_a2_<name>` targets A2 (e.g.
+`make compile_a2_abs`).
 
 ---
 
@@ -117,7 +118,8 @@ y = pto_swiglu(x)  # fused SwiGLU on Ascend NPU
 | --- | --- |
 | Elementwise / activation | `pto_abs`, `pto_swiglu` |
 | Attention | `pto_flash_attention` |
-| Linear algebra | `pto_simple_matmul`, `pto_batch_matrix_square`, `pto_tri_inv_col_sweep`, `pto_tri_inv_ns`, `pto_tri_inv_rank_one`, `pto_tri_inv_rec_unroll`, `pto_tri_inv_trick` |
+| Linear algebra | `pto_simple_matmul`, `pto_batch_matrix_square`, `pto_tri_inv_block_fwd`, `pto_tri_inv_col_sweep`, `pto_tri_inv_ns`, `pto_tri_inv_rank_one`, `pto_tri_inv_rec_unroll`, `pto_tri_inv_trick` |
+| Reduction | `pto_cube_reduce`, `pto_cube_reduce_dim`, `pto_cube_norm` — reductions driven by the cube (matmul) unit: full sum, single-axis sum over a 5D tensor, and L2 norm |
 | Scan / gather | `pto_scan_ul1`, `pto_csr_gather` |
 | GDN (Gated DeltaNet) | `pto_gdn_chunk_cumsum`, `pto_gdn_chunk_h`, `pto_gdn_chunk_o`, `pto_gdn_scaled_dot_kkt`, `pto_gdn_wy_fast` |
 | GDN fused | `pto_gdn_mega` — one launch, two phases: shared Gram/gate preparation and a persistent fused inverse/WY/state/output pipeline. [Benchmarks](docs/gdn_mega/heatmap.md), [accuracy](docs/gdn_mega/error_heatmap.md) |

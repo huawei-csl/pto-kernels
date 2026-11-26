@@ -4,25 +4,42 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PARENT_DIR="$(dirname "$SCRIPT_DIR")"
 
-SHORT=v:,m:,
-LONG=soc-version:,base-mode:,
+SHORT=v:,
+LONG=soc-version:,
 OPTS=$(getopt -a --options $SHORT --longoptions $LONG -- "$@")
 eval set -- "$OPTS"
-# Target SoC. Overridable via the SOC_VERSION environment variable, or the
-# --soc-version flag which takes precedence.
-SOC_VERSION="${SOC_VERSION:-Ascend910B2}"
-# Base addressing mode: MEMORY or REGISTER. Overridable via the BASE_MODE
-# environment variable, or the --base-mode flag which takes precedence.
-BASE_MODE="${BASE_MODE:-MEMORY}"
+# Target SoC. Auto-detected from the NPUs installed on this machine, and
+# overridable via the SOC_VERSION environment variable or the --soc-version
+# flag (which takes precedence). FALLBACK_SOC_VERSION is used only when no NPU
+# can be queried, e.g. on a build-only host.
+FALLBACK_SOC_VERSION=Ascend910B2
+
+# Print the chip name of the first NPU reported by npu-smi, e.g. Ascend910B2.
+detect_soc_version() {
+    command -v npu-smi >/dev/null 2>&1 || return 1
+
+    local npu_id
+    npu_id=$(npu-smi info -l 2>/dev/null |
+        awk -F: '/NPU ID/ {gsub(/[[:space:]]/, "", $2); print $2; exit}')
+    [ -n "$npu_id" ] || npu_id=0
+
+    local chip_name
+    chip_name=$(npu-smi info -t board -i "$npu_id" 2>/dev/null |
+        awk -F: '/Chip Name/ {gsub(/[[:space:]]/, "", $2); print $2; exit}')
+    case "$chip_name" in
+    Ascend*)
+        printf '%s\n' "$chip_name"
+        ;;
+    *)
+        return 1
+        ;;
+    esac
+}
 
 while :; do
     case "$1" in
     -v | --soc-version)
         SOC_VERSION="$2"
-        shift 2
-        ;;
-    -m | --base-mode)
-        BASE_MODE="$2"
         shift 2
         ;;
     --)
@@ -36,10 +53,13 @@ while :; do
     esac
 done
 
-BASE_MODE="${BASE_MODE^^}"
-if [ "$BASE_MODE" != "MEMORY" ] && [ "$BASE_MODE" != "REGISTER" ]; then
-    echo "[ERROR] BASE_MODE must be MEMORY or REGISTER, got: ${BASE_MODE}"
-    exit 1
+if [ -z "$SOC_VERSION" ]; then
+    if SOC_VERSION=$(detect_soc_version); then
+        echo "[INFO] Detected SoC version from npu-smi: ${SOC_VERSION}"
+    else
+        SOC_VERSION="$FALLBACK_SOC_VERSION"
+        echo "[WARN] Could not detect the SoC version, falling back to ${SOC_VERSION}"
+    fi
 fi
 
 if [ -n "$ASCEND_INSTALL_PATH" ]; then
@@ -56,7 +76,6 @@ fi
 # shellcheck source=/dev/null
 source "$_ASCEND_INSTALL_PATH"/bin/setenv.bash
 echo "Current compile soc version is ${SOC_VERSION}"
-echo "Current base mode is ${BASE_MODE}"
 
 # See https://docs.pytorch.org/cppdocs/installing.html
 export TORCH_DEVICE_BACKEND_AUTOLOAD=0
@@ -73,7 +92,6 @@ mkdir -p build
 cmake -S "${PARENT_DIR}" \
       -B build \
       -DSOC_VERSION="${SOC_VERSION}" \
-      -DBASE_MODE="${BASE_MODE}" \
       -DCMAKE_PREFIX_PATH="${CMAKE_PREFIX_PATH}" \
       -DASCEND_CANN_PACKAGE_PATH="${_ASCEND_INSTALL_PATH}"
 
