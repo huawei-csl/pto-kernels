@@ -150,6 +150,8 @@ benchmark_aarch64_910B2_py3.12:
           - bench_cube_reduce_dim
           - bench_tri_inv_accuracy_rec_unroll_vs_col_sweep
           - bench_tri_inv_col_sweep
+          - bench_tri_inv_mix
+          - bench_tri_inv_mix_cube_fraction
           - bench_tri_inv_rank_one
           - bench_tri_inv_rec_unroll
           - bench_tri_inv_rec_unroll_bf16_vs_fp16
