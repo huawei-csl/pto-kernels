@@ -105,3 +105,19 @@ jobs:
           name: pto_kernels-${{ matrix.py_ver }}-${{ matrix.arch }}
           path: wheelhouse/pto_kernels*manylinux*.whl
           retention-days: 1
+
+  collect-wheels:
+    name: Collect all wheels into a single zip
+    needs: manylinux-wheels-build
+    if: always()
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Merge wheel artifacts
+        uses: actions/upload-artifact/merge@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: pto_kernels-all-wheels
+          pattern: pto_kernels-*
+          separate-directories: false
+          delete-merged: false
+          retention-days: 7
