@@ -20,17 +20,20 @@ for the full License text.
 
 extern "C" {
 void pto_launch_cube_reduce_dim_fp16(uint32_t blockDim, void* stream,
-                                     void* input, void* output, uint32_t outer,
-                                     uint32_t mid, uint32_t inner,
-                                     uint32_t tile_cols);
+                                     void* input, void* pattern, void* output,
+                                     uint32_t outer, uint32_t mid,
+                                     uint32_t inner, uint32_t tile_cols,
+                                     uint32_t mode);
 void pto_launch_cube_reduce_dim_fp32(uint32_t blockDim, void* stream,
-                                     void* input, void* output, uint32_t outer,
-                                     uint32_t mid, uint32_t inner,
-                                     uint32_t tile_cols);
+                                     void* input, void* pattern, void* output,
+                                     uint32_t outer, uint32_t mid,
+                                     uint32_t inner, uint32_t tile_cols,
+                                     uint32_t mode);
 void pto_launch_cube_reduce_dim_int8(uint32_t blockDim, void* stream,
-                                     void* input, void* output, uint32_t outer,
-                                     uint32_t mid, uint32_t inner,
-                                     uint32_t tile_cols);
+                                     void* input, void* pattern, void* output,
+                                     uint32_t outer, uint32_t mid,
+                                     uint32_t inner, uint32_t tile_cols,
+                                     uint32_t mode);
 }
 
 namespace pto_isa_ops {
@@ -48,6 +51,16 @@ constexpr int64_t kMaxRowPitch = 65535;
 /// times this.
 constexpr int64_t kTileElems = 16384;
 /// Smallest tile width supported by the kernel dispatch.
+/// The three decompositions, matching the kernel's own constants.
+constexpr uint32_t kModeStrided = 0;
+constexpr uint32_t kModeContiguous = 1;
+constexpr uint32_t kModeFolded = 2;
+/// Widest kept extent the folded mode will take. Its mad spends one column of
+/// n per kept element, so the arithmetic it wastes grows with this while the
+/// strided mode's shrinks; past a fractal the strided mode is the better tool.
+constexpr int64_t kMaxFoldedInner = 32;
+/// Declared width of the pattern operand, matching kFractalCols in the kernel.
+constexpr int64_t kFractalCols = 32;
 constexpr int64_t kTileColsMin = 32;
 /// Largest tile width supported by the kernel dispatch.
 constexpr int64_t kTileColsMax = 512;
@@ -179,6 +192,51 @@ at::Tensor run_cube_reduce_dim(const at::Tensor& x, int64_t dim) {
       work = items;
     }
   }
+  const int64_t strided_tile_cols = tile_cols;
+  const int64_t strided_work = work;
+  uint32_t mode = inner == 1 ? kModeContiguous : kModeStrided;
+
+  // A small kept extent is the strided mode's worst case: it pays one work
+  // item per output row and pads the mad out to a fractal in both directions,
+  // so the tiles end up tiny and numerous. The folded mode reads the same
+  // input as R whole slabs of a contiguous (outer, mid * inner) matrix and
+  // reduces them in one mad against the pattern, which costs `inner` columns
+  // of n per kept element instead. Take it when it saves enough to pay for
+  // the pattern, which costs a couple of launches to build.
+  const int64_t folded_width = mid * inner;
+  int64_t pattern_chunk = 0;
+  if (inner > 1 && inner <= kMaxFoldedInner && folded_width <= kMaxRowPitch) {
+    const int64_t strided_cost = work * static_cast<int64_t>(kTileElems);
+    int64_t best_folded = 0;
+    for (int64_t cols = kTileColsMin; cols <= kTileColsMax; cols *= 2) {
+      const int64_t rows = kTileElems / cols;
+      const int64_t chunk = (cols / inner) * inner;
+      if (chunk <= 0) continue;
+      const int64_t items = (outer + rows - 1) / rows;
+      if (items < cores && items < work) continue;
+      const int64_t tiles = items * ((folded_width + chunk - 1) / chunk);
+      const int64_t cost = tiles * kTileElems;
+      if (best_folded == 0 || cost < best_folded) {
+        best_folded = cost;
+        pattern_chunk = chunk;
+        tile_cols = cols;
+        work = items;
+      }
+    }
+    // Four times is where the saving clears the pattern's own cost at the
+    // sizes this mode is for; below it the two decompositions are close
+    // enough that the extra launches would eat the difference.
+    if (best_folded != 0 && best_folded * 4 <= strided_cost) {
+      mode = kModeFolded;
+    } else {
+      pattern_chunk = 0;
+    }
+  }
+  if (mode != kModeFolded) {
+    tile_cols = strided_tile_cols;
+    work = strided_work;
+  }
+
   const uint32_t block_dim =
       static_cast<uint32_t>(std::min<int64_t>(work, cores));
 
@@ -186,19 +244,32 @@ at::Tensor run_cube_reduce_dim(const at::Tensor& x, int64_t dim) {
   // from the scalars above, so it never reads the shape -- and data_ptr()
   // already points past a view's storage offset.
   const at::Tensor input = x.contiguous();
+  // P[j, i] is 1 when j % inner == i: identity matrices stacked vertically,
+  // which is what folds each column of the input onto its output slot. It
+  // depends only on `inner` and the chunk width, so it carries no input data
+  // and is the same for every tile. Built only for the mode that reads it.
+  // Padded out to the whole tile the kernel declares, so that its load is a
+  // full-tile one: a partly valid load into a tile taller than one fractal
+  // misplaces the rows past the first.
+  const at::Tensor pattern =
+      mode == kModeFolded
+          ? at::constant_pad_nd(
+                at::eye(inner, x.options()).repeat({pattern_chunk / inner, 1}),
+                {0, kFractalCols - inner, 0, tile_cols - pattern_chunk})
+          : input;
   const uint32_t outer_arg = static_cast<uint32_t>(outer);
   const uint32_t mid_arg = static_cast<uint32_t>(mid);
   const uint32_t inner_arg = static_cast<uint32_t>(inner);
   const uint32_t tile_cols_arg = static_cast<uint32_t>(tile_cols);
   if (dtype == at::kHalf) {
-    EXEC_KERNEL_CMD(cube_reduce_dim_fp16, block_dim, input, output, outer_arg,
-                    mid_arg, inner_arg, tile_cols_arg);
+    EXEC_KERNEL_CMD(cube_reduce_dim_fp16, block_dim, input, pattern, output,
+                    outer_arg, mid_arg, inner_arg, tile_cols_arg, mode);
   } else if (dtype == at::kFloat) {
-    EXEC_KERNEL_CMD(cube_reduce_dim_fp32, block_dim, input, output, outer_arg,
-                    mid_arg, inner_arg, tile_cols_arg);
+    EXEC_KERNEL_CMD(cube_reduce_dim_fp32, block_dim, input, pattern, output,
+                    outer_arg, mid_arg, inner_arg, tile_cols_arg, mode);
   } else {
-    EXEC_KERNEL_CMD(cube_reduce_dim_int8, block_dim, input, output, outer_arg,
-                    mid_arg, inner_arg, tile_cols_arg);
+    EXEC_KERNEL_CMD(cube_reduce_dim_int8, block_dim, input, pattern, output,
+                    outer_arg, mid_arg, inner_arg, tile_cols_arg, mode);
   }
   return output;
 }

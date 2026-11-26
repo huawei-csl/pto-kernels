@@ -391,3 +391,73 @@ def test_reduce_dim_accepts_views_at_higher_rank(rank, dtype, npu_device):
     assert not permuted.is_contiguous()
     for dim in range(rank):
         check_sum(permuted, dim)
+
+
+# Shapes whose kept extent is small and whose outer extent is large, which is
+# where the host switches to the folded decomposition: the input is read as
+# whole slabs of a contiguous (outer, mid * inner) matrix and reduced against a
+# pattern operand rather than one output row at a time. The boundaries that
+# matter are a reduced slab narrower than a fractal, one exactly a fractal, one
+# wider, a kept extent that does not divide the tile width, and a kept extent
+# at the mode's limit.
+FOLDED_SHAPES = [
+    (131072, 2, 4),
+    (65536, 4, 4),
+    (32768, 8, 4),
+    (16384, 16, 4),
+    (8192, 32, 4),
+    (4096, 64, 4),
+    (32768, 4, 8),
+    (16384, 8, 8),
+    (8192, 16, 8),
+    (32768, 2, 16),
+    (16384, 4, 16),
+    (4096, 16, 16),
+    (16384, 2, 32),
+    (8192, 4, 32),
+    (2048, 16, 32),
+    (69905, 3, 5),
+    (24966, 7, 6),
+    (12336, 5, 17),
+    (3758, 9, 31),
+    (40000, 3, 7),
+    (9999, 11, 9),
+]
+
+
+@pytest.mark.parametrize("dtype", DTYPES)
+@pytest.mark.parametrize("shape", FOLDED_SHAPES)
+def test_reduce_dim_small_kept_extent(shape, dtype, npu_device):
+    check_sum(exact_pattern(shape, dtype).to(npu_device), 1, exact=True)
+
+
+@pytest.mark.parametrize("dtype", DTYPES)
+@pytest.mark.parametrize("shape", FOLDED_SHAPES[:8])
+def test_reduce_dim_small_kept_extent_impulses(shape, dtype, npu_device):
+    # One nonzero per position in the first and last slab: the pattern operand
+    # folds a column onto an output slot by its position, so an off-by-one in
+    # it moves a value to the wrong column rather than losing it.
+    outer, mid, inner = shape
+    x = torch.zeros(shape, dtype=dtype)
+    for m in range(mid):
+        for i in range(inner):
+            x[0, m, i] = (m * inner + i) % 7 - 3
+            x[outer - 1, m, i] = (m + i) % 5 - 2
+    x[outer // 2, mid // 2, inner // 2] = 3
+    check_sum(x.to(npu_device), 1, exact=True)
+
+
+@pytest.mark.parametrize("dtype", DTYPES)
+def test_reduce_dim_small_kept_extent_matches_other_modes(dtype, npu_device):
+    # The same reduction expressed so the host must pick a different
+    # decomposition: reducing the folded 2D form along dim 0 keeps outer = 1,
+    # which the folded mode never takes. Both must agree exactly.
+    for outer, mid, inner in ((8192, 8, 4), (4096, 16, 8), (2048, 4, 16)):
+        x = exact_pattern((outer, mid, inner), dtype).to(npu_device)
+        folded = pto_cube_reduce_dim(x, 1)
+        rows = [
+            pto_cube_reduce_dim(x[index : index + 1], 1)
+            for index in range(0, outer, outer // 4)
+        ]
+        for count, index in enumerate(range(0, outer, outer // 4)):
+            torch.testing.assert_close(folded[index], rows[count][0], atol=0, rtol=0)

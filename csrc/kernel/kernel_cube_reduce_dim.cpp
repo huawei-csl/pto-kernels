@@ -34,6 +34,13 @@ constexpr uint32_t kFractalCols = 32;
 // direction.
 constexpr uint32_t kTileElems = 16384;
 
+// Which of the three decompositions the host picked. Each is a different way
+// of cutting the same (outer, mid, inner) view into tiles, and the host weighs
+// them against each other before launching.
+constexpr uint32_t kModeStrided = 0;
+constexpr uint32_t kModeContiguous = 1;
+constexpr uint32_t kModeFolded = 2;
+
 // Accumulator type the Cube stage writes for a given input type.
 template <typename InputT>
 using ReduceOutT =
@@ -255,15 +262,126 @@ AICORE void ReduceContiguousAxis(__gm__ InputT* input, __gm__ OutputT* output,
   pipe_barrier(PIPE_ALL);
 }
 
+// `inner` is small and larger than one: the reduced axis is strided, but its
+// stride is short enough that a whole mid x inner slab is a brief run of
+// memory, so R consecutive slabs are one contiguous block. Read as R rows of
+// the (outer, mid * inner) matrix the input already is, the reduction becomes
+// a plain matmul:
+//
+//     Y[R, mid * inner] @ P[mid * inner, inner] = R rows of `inner` sums,
+//
+// where P[j, i] is 1 when j % inner == i -- identity matrices stacked
+// vertically, folding every column of Y onto the output slot its position
+// implies. One tile therefore reduces R whole slabs at once where the strided
+// mode reduces part of one, and reads them as a single contiguous run instead
+// of R short strided ones. That is what makes a small kept extent cheap: the
+// strided mode pays one work item per output row and pads the mad out to a
+// fractal in both directions, so reducing dim 3 of (256, 32, 16, 8, 4) costs
+// it 131072 tiles and 2.1G MACs against this mode's 256 and 16.8M.
+//
+// P cannot be built on chip -- TEXPANDS fills a constant and TTRI a triangle,
+// and no instruction fills a pattern -- so the host passes it. It depends only
+// on `inner` and the chunk width, never on the input, and is read once here.
+template <typename InputT, typename OutputT, uint32_t C>
+AICORE void ReduceFoldedAxis(__gm__ InputT* input, __gm__ InputT* pattern,
+                             __gm__ OutputT* output, uint32_t outer,
+                             uint32_t mid, uint32_t inner) {
+  constexpr uint32_t R = kTileElems / C;
+  // Columns per chunk, cut to a whole number of slabs' worth of residues so
+  // that every chunk starts on a multiple of `inner` and P is the same for all
+  // of them. The columns between this and C stay zero in both operands.
+  const uint32_t chunk = (C / inner) * inner;
+  // One row of Y, which is also the pitch the tile load carries.
+  const uint32_t width = mid * inner;
+  // The mad runs at the pattern's full width; the columns past `inner` are
+  // zero there, so they produce zero sums and the store simply stops at
+  // `inner`. Paying that is what keeps the pattern a full, statically shaped
+  // tile, and the mad is not this mode's cost.
+
+  using AGlobal = GlobalTensor<InputT, Shape<1, 1, 1, DYNAMIC, DYNAMIC>,
+                               pto::Stride<1, 1, 1, DYNAMIC, 1>>;
+  using CGlobal = GlobalTensor<OutputT, Shape<1, 1, 1, DYNAMIC, DYNAMIC>,
+                               pto::Stride<1, 1, 1, DYNAMIC, 1>>;
+  using AMat = Tile<TileType::Mat, InputT, R, C, BLayout::ColMajor, DYNAMIC,
+                    DYNAMIC, SLayout::RowMajor, 512, PadValue::Zero>;
+  // The pattern arrives already padded to the whole tile -- its rows past the
+  // chunk and its columns past `inner` are zero -- so this is a full-tile load
+  // like the all-ones operands above. A partly valid ND2NZ load into a tile
+  // taller than one fractal places its rows wrong, which cost exactly the
+  // second half of every reduction wider than 16.
+  using PMat = Tile<TileType::Mat, InputT, C, kFractalCols, BLayout::ColMajor,
+                    C, kFractalCols, SLayout::RowMajor, 512>;
+  using PGlobal = GlobalTensor<InputT, Shape<1, 1, 1, C, kFractalCols>,
+                               pto::Stride<1, 1, 1, kFractalCols, 1>>;
+  using CAcc = TileAcc<OutputT, R, kFractalCols, DYNAMIC, DYNAMIC>;
+
+  const uint32_t work = kernel_utils::CeilDiv(outer, R);
+  if (work == 0) return;
+
+  PMat p_l1;
+  TileRight<InputT, C, kFractalCols> p_l0;
+  TileLeft<InputT, R, C> a_l0;
+  TASSIGN(p_l1, R * C * sizeof(InputT));
+  TASSIGN(p_l0, 0);
+  TASSIGN(a_l0, 0);
+  PGlobal p_global(pattern);
+  TLOAD(p_l1, p_global);
+  kernel_utils::SetWaitFlag<PIPE_MTE2, PIPE_MTE1>(0);
+  TMOV(p_l0, p_l1);
+  kernel_utils::SetWaitFlag<PIPE_MTE1, PIPE_M>(0);
+
+  const uint32_t id = get_block_idx();
+  const uint32_t blocks = get_block_num();
+  const uint32_t count = work / blocks + (id < work % blocks);
+  const uint32_t begin = id * (work / blocks) + min(id, work % blocks);
+
+  for (uint32_t item = 0; item < count; ++item) {
+    const uint32_t o0 = (begin + item) * R;
+    const uint32_t rows = min(R, outer - o0);
+    CAcc c_l0(rows, inner);
+    TASSIGN(c_l0, 0);
+    const uint64_t slab = static_cast<uint64_t>(o0) * width;
+    for (uint32_t j0 = 0; j0 < width; j0 += chunk) {
+      const uint32_t cols = min(chunk, width - j0);
+      AMat a_l1(rows, cols);
+      TASSIGN(a_l1, 0);
+      AGlobal a_global(input + slab + j0, {1, 1, 1, rows, cols},
+                       {1, 1, 1, width, 1});
+      TLOAD(a_l1, a_global);
+      if (rows < R || cols < C) TFILLPAD(a_l1, a_l1);
+      kernel_utils::SetWaitFlag<PIPE_MTE2, PIPE_MTE1>(0);
+      TMOV(a_l0, a_l1);
+      kernel_utils::SetWaitFlag<PIPE_MTE1, PIPE_M>(0);
+      if (j0 == 0) {
+        TMATMUL(c_l0, a_l0, p_l0);
+      } else {
+        TMATMUL_ACC(c_l0, c_l0, a_l0, p_l0);
+      }
+      kernel_utils::SetWaitFlag<PIPE_M, PIPE_MTE1>(0);
+      kernel_utils::SetWaitFlag<PIPE_MTE1, PIPE_MTE2>(0);
+    }
+    kernel_utils::SetWaitFlag<PIPE_M, PIPE_FIX>(0);
+    CGlobal c_global(output + static_cast<uint64_t>(o0) * inner,
+                     {1, 1, 1, rows, inner}, {1, 1, 1, inner, 1});
+    TSTORE(c_global, c_l0);
+    kernel_utils::SetWaitFlag<PIPE_FIX, PIPE_M>(0);
+  }
+  pipe_barrier(PIPE_ALL);
+}
+
 // The tile width is one of 32 through 512, chosen by the host: the mad runs at
 // a fixed R x C whatever the tile holds, so each direction pays for the rows or
 // columns the padding adds, and the host weighs that against how many tiles the
 // shape then splits into.
 template <typename InputT, typename OutputT, uint32_t C>
-AICORE void ReduceDim(__gm__ InputT* input, __gm__ OutputT* output,
-                      uint32_t outer, uint32_t mid, uint32_t inner) {
-  if (inner == 1) {
+AICORE void ReduceDim(__gm__ InputT* input, __gm__ InputT* pattern,
+                      __gm__ OutputT* output, uint32_t outer, uint32_t mid,
+                      uint32_t inner, uint32_t mode) {
+  if (mode == kModeContiguous) {
     ReduceContiguousAxis<InputT, OutputT, C>(input, output, outer, mid);
+  } else if (mode == kModeFolded) {
+    ReduceFoldedAxis<InputT, OutputT, C>(input, pattern, output, outer, mid,
+                                         inner);
   } else {
     ReduceStridedAxis<InputT, OutputT, C>(input, output, outer, mid, inner);
   }
@@ -271,82 +389,97 @@ AICORE void ReduceDim(__gm__ InputT* input, __gm__ OutputT* output,
 }  // namespace
 
 template <typename InputT>
-AICORE void ReduceDimDispatch(__gm__ InputT* input,
+AICORE void ReduceDimDispatch(__gm__ InputT* input, __gm__ InputT* pattern,
                               __gm__ ReduceOutT<InputT>* output, uint32_t outer,
-                              uint32_t mid, uint32_t inner,
-                              uint32_t tile_cols) {
+                              uint32_t mid, uint32_t inner, uint32_t tile_cols,
+                              uint32_t mode) {
   using OutputT = ReduceOutT<InputT>;
   switch (tile_cols) {
     case 32:
-      ReduceDim<InputT, OutputT, 32>(input, output, outer, mid, inner);
+      ReduceDim<InputT, OutputT, 32>(input, pattern, output, outer, mid, inner,
+                                     mode);
       break;
     case 64:
-      ReduceDim<InputT, OutputT, 64>(input, output, outer, mid, inner);
+      ReduceDim<InputT, OutputT, 64>(input, pattern, output, outer, mid, inner,
+                                     mode);
       break;
     case 128:
-      ReduceDim<InputT, OutputT, 128>(input, output, outer, mid, inner);
+      ReduceDim<InputT, OutputT, 128>(input, pattern, output, outer, mid, inner,
+                                      mode);
       break;
     case 256:
-      ReduceDim<InputT, OutputT, 256>(input, output, outer, mid, inner);
+      ReduceDim<InputT, OutputT, 256>(input, pattern, output, outer, mid, inner,
+                                      mode);
       break;
     case 512:
-      ReduceDim<InputT, OutputT, 512>(input, output, outer, mid, inner);
+      ReduceDim<InputT, OutputT, 512>(input, pattern, output, outer, mid, inner,
+                                      mode);
       break;
   }
 }
 
 extern "C" __global__ AICORE void cube_reduce_dim_fp16(
-    __gm__ half* input, __gm__ float* output, uint32_t outer, uint32_t mid,
-    uint32_t inner, uint32_t tile_cols) {
+    __gm__ half* input, __gm__ half* pattern, __gm__ float* output,
+    uint32_t outer, uint32_t mid, uint32_t inner, uint32_t tile_cols,
+    uint32_t mode) {
   KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIC_ONLY);
 #if defined(__DAV_CUBE__)
-  ReduceDimDispatch<half>(input, output, outer, mid, inner, tile_cols);
+  ReduceDimDispatch<half>(input, pattern, output, outer, mid, inner, tile_cols,
+                          mode);
 #endif
 }
 
 extern "C" void pto_launch_cube_reduce_dim_fp16(uint32_t blockDim, void* stream,
-                                                void* input, void* output,
-                                                uint32_t outer, uint32_t mid,
-                                                uint32_t inner,
-                                                uint32_t tile_cols) {
+                                                void* input, void* pattern,
+                                                void* output, uint32_t outer,
+                                                uint32_t mid, uint32_t inner,
+                                                uint32_t tile_cols,
+                                                uint32_t mode) {
   cube_reduce_dim_fp16<<<blockDim, nullptr, stream>>>(
-      (__gm__ half*)input, (__gm__ float*)output, outer, mid, inner, tile_cols);
+      (__gm__ half*)input, (__gm__ half*)pattern, (__gm__ float*)output, outer,
+      mid, inner, tile_cols, mode);
 }
 
 extern "C" __global__ AICORE void cube_reduce_dim_fp32(
-    __gm__ float* input, __gm__ float* output, uint32_t outer, uint32_t mid,
-    uint32_t inner, uint32_t tile_cols) {
+    __gm__ float* input, __gm__ float* pattern, __gm__ float* output,
+    uint32_t outer, uint32_t mid, uint32_t inner, uint32_t tile_cols,
+    uint32_t mode) {
   KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIC_ONLY);
 #if defined(__DAV_CUBE__)
-  ReduceDimDispatch<float>(input, output, outer, mid, inner, tile_cols);
+  ReduceDimDispatch<float>(input, pattern, output, outer, mid, inner, tile_cols,
+                           mode);
 #endif
 }
 
 extern "C" void pto_launch_cube_reduce_dim_fp32(uint32_t blockDim, void* stream,
-                                                void* input, void* output,
-                                                uint32_t outer, uint32_t mid,
-                                                uint32_t inner,
-                                                uint32_t tile_cols) {
+                                                void* input, void* pattern,
+                                                void* output, uint32_t outer,
+                                                uint32_t mid, uint32_t inner,
+                                                uint32_t tile_cols,
+                                                uint32_t mode) {
   cube_reduce_dim_fp32<<<blockDim, nullptr, stream>>>(
-      (__gm__ float*)input, (__gm__ float*)output, outer, mid, inner,
-      tile_cols);
+      (__gm__ float*)input, (__gm__ float*)pattern, (__gm__ float*)output,
+      outer, mid, inner, tile_cols, mode);
 }
 
 extern "C" __global__ AICORE void cube_reduce_dim_int8(
-    __gm__ int8_t* input, __gm__ int32_t* output, uint32_t outer, uint32_t mid,
-    uint32_t inner, uint32_t tile_cols) {
+    __gm__ int8_t* input, __gm__ int8_t* pattern, __gm__ int32_t* output,
+    uint32_t outer, uint32_t mid, uint32_t inner, uint32_t tile_cols,
+    uint32_t mode) {
   KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIC_ONLY);
 #if defined(__DAV_CUBE__)
-  ReduceDimDispatch<int8_t>(input, output, outer, mid, inner, tile_cols);
+  ReduceDimDispatch<int8_t>(input, pattern, output, outer, mid, inner,
+                            tile_cols, mode);
 #endif
 }
 
 extern "C" void pto_launch_cube_reduce_dim_int8(uint32_t blockDim, void* stream,
-                                                void* input, void* output,
-                                                uint32_t outer, uint32_t mid,
-                                                uint32_t inner,
-                                                uint32_t tile_cols) {
+                                                void* input, void* pattern,
+                                                void* output, uint32_t outer,
+                                                uint32_t mid, uint32_t inner,
+                                                uint32_t tile_cols,
+                                                uint32_t mode) {
   cube_reduce_dim_int8<<<blockDim, nullptr, stream>>>(
-      (__gm__ int8_t*)input, (__gm__ int32_t*)output, outer, mid, inner,
-      tile_cols);
+      (__gm__ int8_t*)input, (__gm__ int8_t*)pattern, (__gm__ int32_t*)output,
+      outer, mid, inner, tile_cols, mode);
 }
