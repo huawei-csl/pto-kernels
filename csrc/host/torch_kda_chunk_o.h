@@ -30,8 +30,8 @@ namespace pto_isa_ops {
  *
  * Computes per chunk:
  *   q_eff = Q * exp(g_cs)
- *   k_eff = K * exp(-g_cs)
- *   Aqk   = tril(q_eff @ k_eff^T, diagonal=0)   (inclusive causal mask)
+ *   Aqk[r,c] = sum_d Q[r,d] * K[c,d] * exp(g_cs[r,d] - g_cs[c,d])
+ *              for r >= c, and zero otherwise (inclusive causal mask)
  *   O     = q_eff @ S + Aqk @ V_corr
  *
  * Requires the kernel to be compiled with -DGDN_H, -DGDN_D, -DGDN_C.
@@ -98,10 +98,8 @@ at::Tensor run_kda_chunk_o(const at::Tensor& Q, const at::Tensor& K,
   const at::Tensor O = at::zeros({total_tokens, HV, D}, half_opts);
 
   const uint32_t block_dim = GetNumCubeCores();
-  // Per-core workspace (fp32): 7 slots — WS_Q, WS_K, WS_V, WS_S, WS_QK, WS_QS,
-  // WS_QKV. Total = 2*C*D + C*D + D*D + C*C + 2*C*D = 5*C*D + D*D + C*C fp32
-  // elements.
-  const int64_t ws_per_core = 5 * C * D + D * D + C * C;
+  // Per-core workspace (fp32): WS_Q, WS_V, WS_S, WS_QK, WS_QS, WS_QKV.
+  const int64_t ws_per_core = 4 * C * D + D * D + C * C;
   const at::TensorOptions float_opts = G.options();
   const at::Tensor workspace =
       at::zeros({static_cast<int64_t>(block_dim) * ws_per_core}, float_opts);
