@@ -24,10 +24,10 @@ than a plain reduction (an S x S matrix product per S x S tile), which the Cube
 unit has to absorb without falling behind HBM.
 
 Timings use NPU events and include all device work in each public call,
-including the partials allocation and the second launch that finishes the
-reduction. The L2 cache is flushed before every timed iteration, so the numbers
-are cold-cache. Bandwidth counts input bytes only, rather than internal
-temporary traffic.
+including the partials allocation and the one mixed launch whose Cube half
+squares the input and whose Vector half finishes the reduction. The L2 cache
+is flushed before every timed iteration, so the numbers are cold-cache.
+Bandwidth counts input bytes only, rather than internal temporary traffic.
 """
 
 import argparse
